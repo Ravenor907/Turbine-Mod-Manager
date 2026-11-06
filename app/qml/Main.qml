@@ -112,8 +112,8 @@ Window {
                     : { checked: true, result: { found: true, name: "Google Chrome", how: "flatpak" } }
                 app.bridge = { running: true, port: 47701, paired: true, connected: page === "browser" ? 1 : 0, ext: "iniglfblobfbekihldmgekchfehncbeb", error: "" }
                 app.openSection("Accounts")
-                else if (page === "helper") { app.helperFolder = "/home/deck/Downloads/Turbine browser helper"; app.infoIndex = 0; app.sheet = "helper" }
-                else app.noBrowser()
+                if (page === "helper") { app.helperFolder = "/home/deck/Downloads/Turbine browser helper"; app.infoIndex = 0; app.sheet = "helper" }
+                else if (page === "nobrowser") app.noBrowser()
             }
             else if (page === "overlay" || page === "overlaygm") {
                 app.status = { active: true, text: "Added to Cyberpunk 2077", level: "ok", progress: -1, game: "Cyberpunk 2077",
