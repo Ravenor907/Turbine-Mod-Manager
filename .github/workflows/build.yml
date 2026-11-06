@@ -224,6 +224,13 @@ jobs:
               shoot "$page-$size" "$size" $page "$PWD/lhome" --game=$skyrim
             done
             shoot "versions-$size" "$size" versions "$PWD/home" --game=$lethal
+            # Nexus: requirements ("Have it" from a mod recorded as Address Library), other files, a free account, a link.
+            have="--selftest-import=$dl/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:32444:1|1.0"
+            shoot "nexusdetails-$size" "$size" nexusdetails "$PWD/home" --game=$skyrim "$have"
+            shoot "nexusversions-$size" "$size" nexusversions "$PWD/home" --game=$skyrim
+            shoot "nexusfree-$size" "$size" nexusfree "$PWD/home" --game=$skyrim "$have"
+            shoot "nxm-$size" "$size" nxm "$PWD/home" --game=$skyrim \
+              "nxm://skyrimspecialedition/mods/12604/files/200?key=abc123&expires=4102444800&user_id=1234567"
             shoot "code-$size" "$size" code "$PWD/home" --game=$lethal \
               "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
           done

@@ -18,7 +18,21 @@ Item {
     readonly property var extra: install.filter(x => !x.main)
     readonly property real total: install.reduce((a, x) => a + (x.size || 0), 0)
     readonly property int otherCount: info && info.versions ? info.versions.length : 0
-    readonly property bool canInstall: !loading && !info.error && install.length > 0 && info.premium !== false
+    readonly property bool canInstall: !loading && !info.error && install.length > 0
+    // Free Nexus accounts: A opens the mod's page instead of installing.
+    readonly property bool openInstead: !loading && !!info && info.premium === false && !!info.page
+    // Nexus requirements: {missing, installed, unchecked, steps}.
+    readonly property var needs: info && info.needs ? info.needs : null
+    function stepFor(name) { return needs ? (needs.steps || []).find(x => x.name === name) : undefined }
+    readonly property var needRows: !needs ? [] :
+        (needs.missing || []).map(r => {
+            const st = stepFor(r.name)
+            return { tag: "Missing", lvl: "warn", name: r.name,
+                     words: st && st.action === "download" ? "Turbine installs it with this mod" : "open its page to get it (A)" }
+        })
+        .concat((needs.installed || []).map(r => ({ tag: "Have it", lvl: "ok", name: r.name, words: "already installed" })))
+        .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", name: r.name,
+                                                    words: r.isDlc ? "part of the game; make sure you have it" : "from another site; get it there" })))
     function size(b) {
         if (!b) return "Not listed"
         if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"
@@ -184,6 +198,38 @@ Item {
                     }
                 }
             }
+            // Nexus requirements: "Also needs", with have-it and missing states.
+            Column {
+                visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
+                width: parent.width
+                spacing: md.ui.px(6)
+                Text {
+                    text: "Also needs"
+                    color: md.ui.c.accentText
+                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.bold: true
+                }
+                Text {
+                    visible: !!md.info && !!md.info.needsNote
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: md.info && md.info.needsNote ? md.info.needsNote : ""
+                    color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                }
+                Repeater {
+                    model: md.needRows
+                    Row {
+                        required property var modelData
+                        spacing: md.ui.px(8)
+                        width: right.width
+                        Rectangle {
+                            width: Math.max(md.ui.px(84), ntg.implicitWidth + md.ui.px(14)); height: md.ui.px(26); radius: md.ui.px(5)
+                            color: md.ui.c.raised
+                            Text { id: ntg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
+                        }
+                        Text { width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: parent.width * 0.4; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+                    }
+                }
+            }
             Row {
                 spacing: md.ui.px(12)
                 Rectangle {
@@ -205,13 +251,13 @@ Item {
                             color: Qt.rgba(0, 0, 0, 0.18)
                             Text { anchors.centerIn: parent; text: "A"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
                         }
-                        Text { text: md.install.some(x => x.upgrade && x.main) ? "Update" : "Install"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(17); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: md.openInstead ? "Open on Nexus" : md.install.some(x => x.upgrade && x.main) ? "Update" : "Install"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(17); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }
                     TapHandler { onTapped: md.installClicked() }
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: right.width - (md.canInstall ? md.ui.px(160) : 0) - (md.otherCount > 0 ? otherRow.width + md.ui.px(12) : 0)
+                    width: right.width - (md.canInstall ? md.ui.px(md.openInstead ? 220 : 160) : 0) - (md.otherCount > 0 ? otherRow.width + md.ui.px(12) : 0)
                     wrapMode: Text.WordWrap
                     text: md.installNote !== "" ? md.installNote : md.installWords
                     color: md.info && md.info.message ? md.ui.c.warn : md.ui.c.soft

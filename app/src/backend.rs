@@ -41,6 +41,7 @@ pub mod qobject {
         #[qproperty(QString, account_json, cxx_name = "accountJson")]
         #[qproperty(QString, self_json, cxx_name = "selfJson")]
         #[qproperty(QString, code_json, cxx_name = "codeJson")]
+        #[qproperty(QString, handler_json, cxx_name = "handlerJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -178,6 +179,32 @@ pub mod qobject {
         #[cxx_name = "setSampleData"]
         fn set_sample_data(self: Pin<&mut Self>, dir: &QString);
 
+        /// The screenshot checks: the sample Nexus account is a free one.
+        #[qinvokable]
+        #[cxx_name = "setSampleFree"]
+        fn set_sample_free(self: Pin<&mut Self>);
+
+        /// The next Nexus link that arrived (from the command line or a later launch), or "" when none waits.
+        #[qinvokable]
+        #[cxx_name = "takeLink"]
+        fn take_link(self: &Self) -> QString;
+        /// Reads a Nexus link: {"game": game id or "", "name": the game's name, "error": "" or why it can't be used}.
+        #[qinvokable]
+        #[cxx_name = "openLink"]
+        fn open_link(self: &Self, link: &QString) -> QString;
+        /// Downloads what a Nexus link points at and adds it to that game.
+        #[qinvokable]
+        #[cxx_name = "nxmDownload"]
+        fn nxm_download(self: Pin<&mut Self>, link: &QString, game_id: &QString);
+        /// Is Turbine the program for Nexus's Mod Manager Download links? The answer arrives in `handlerJson`.
+        #[qinvokable]
+        #[cxx_name = "handlerStatus"]
+        fn handler_status(self: Pin<&mut Self>);
+        /// Makes Turbine that program.
+        #[qinvokable]
+        #[cxx_name = "handlerSet"]
+        fn handler_set(self: Pin<&mut Self>);
+
         /// Get Mods: source "thunderstore" or "nexus"; sort "downloads", "rating", "updated" or "name".
         #[qinvokable]
         fn browse(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString);
@@ -306,6 +333,10 @@ pub mod qobject {
         #[qsignal]
         fn checked(self: Pin<&mut Self>, json: QString);
 
+        /// Pages to open in the browser (free accounts): title, then JSON [{"name","url"}].
+        #[qsignal]
+        fn pages(self: Pin<&mut Self>, title: QString, json: QString);
+
         /// Open this link to start the game (steam://... or Heroic's link).
         #[qsignal]
         fn launch(self: Pin<&mut Self>, url: QString);
@@ -381,6 +412,7 @@ pub struct TurbineRust {
     pub(crate) account_json: QString,
     pub(crate) self_json: QString,
     pub(crate) code_json: QString,
+    pub(crate) handler_json: QString,
     /// The download lane (started the first time it's needed).
     pub(crate) net: Option<Sender<crate::actions::NetTask>>,
     /// What the download lane needs to know about the game on screen (kept up to date by the worker).
@@ -426,6 +458,7 @@ impl Default for TurbineRust {
             account_json: QString::from("{\"state\":\"none\"}"),
             self_json: QString::from("{\"state\":\"idle\"}"),
             code_json: QString::default(),
+            handler_json: QString::from("{\"state\":\"unknown\"}"),
             net: None,
             game_info: crate::online::GameInfo::default(),
         }

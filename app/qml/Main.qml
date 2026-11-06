@@ -68,7 +68,8 @@ Window {
         readonly property string page: arg("page")
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
         readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
-                                      "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code"].indexOf(page) >= 0
+                                      "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
+                                      "nexusdetails", "nexusversions", "nexusfree", "nxm"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         function start() {
@@ -86,6 +87,10 @@ Window {
                 app.openSection("Labs"); app.setRow = 5
             }
             else if (page === "browse" || page === "moddetails" || page === "versions") { app.tab = 1; app.zone = "main" }
+            else if (page === "nexusdetails" || page === "nexusversions" || page === "nexusfree") {
+                if (page === "nexusfree") Turbine.setSampleFree()
+                app.tab = 1; app.zone = "main"
+            }
             else if (page === "loadorder" || page === "lootsort" || page === "lootnotes") { app.tab = 2; app.zone = "main" }
             else if (page === "accounts") app.openSection("Accounts")
             else if (page === "updates") { app.openSection("Updates"); Turbine.selfCheck(false, false) }
@@ -102,6 +107,7 @@ Window {
             else if (shot.page === "moddetails" && app.browseData && app.browseData.items && app.browseData.items.length > 0) app.openDetails(app.browseData.items[0])
             else if (shot.page === "versions" && app.browseData && app.browseData.items && app.browseData.items.length > 0)
                 app.openDetails(app.browseData.items.find(x => x.id === "x753-More_Suits") || app.browseData.items[0])
+            else if ((shot.page === "nexusdetails" || shot.page === "nexusversions" || shot.page === "nexusfree") && app.getItems.length > 0) app.openDetails(app.getItems[0])
             else if (shot.page === "code") { app.openProfiles(); Turbine.profileCode("Default"); app.sheet = "code" }
             else if (shot.page === "profiles") app.openProfiles()
             else if (shot.page === "lootsort" || shot.page === "lootnotes") { app.orderIndex = -1; Turbine.orderSort() }
@@ -132,7 +138,10 @@ Window {
         else if (tab === 2) { orderIndex = 0; Turbine.loadOrder() }
     }
     onZoneChanged: note("page", "Focus zone " + zone)
-    onSetSectionChanged: note("page", "Settings section " + (settingsSections[setSection] || setSection))
+    onSetSectionChanged: {
+        note("page", "Settings section " + (settingsSections[setSection] || setSection))
+        if (settingsSections[setSection] === "Accounts") Turbine.handlerStatus()
+    }
     onWidthChanged: sizeNote.restart()
     onHeightChanged: sizeNote.restart()
     Timer { id: sizeNote; interval: 500; onTriggered: app.note("window", "Window " + app.width + " x " + app.height + ", scale " + app.s.toFixed(2)) }
@@ -255,6 +264,8 @@ Window {
         function onMessage(text, level) { app.say(text, level) }
         function onChecked(json) { app.checked(app.parse(json, [])) }
         function onLaunch(url) { if (!shot.on) Qt.openUrlExternally(url) }
+        function onPages(title, json) { app.openPages(title, app.parse(json, [])) }
+        function onHandlerJsonChanged() { app.handler = app.parse(Turbine.handlerJson, { state: "unknown" }) }
         function onPad(button, pressed) { pressed ? app.press(button) : app.release(button) }
         // 0.3
         function onBrowseJsonChanged() {
@@ -266,7 +277,7 @@ Window {
         }
         function onDetailsJsonChanged() {
             app.detailsData = app.parse(Turbine.detailsJson, null)
-            if (shot.page === "versions" && app.otherVersions.length > 0) app.openVersions()
+            if ((shot.page === "versions" || shot.page === "nexusversions") && app.otherVersions.length > 0) app.openVersions()
         }
         function onDownloadJsonChanged() { app.dl = app.parse(Turbine.downloadJson, { active: false }) }
         function onFomodJsonChanged() {
@@ -282,6 +293,7 @@ Window {
             app.orderError = v.error || ""
             app.orderMessages = v.messages || {}
             if (v.note) app.orderNote = v.note
+            if (shot.page === "lootsort" && v.sortedBy === "loot") app.orderIndex = app.order.length - 1
             if (shot.page === "lootnotes" && v.sortedBy === "loot") {
                 const i = app.order.findIndex(x => (app.orderMessages[x.name.toLowerCase()] || []).length > 1)
                 if (i >= 0) { app.orderIndex = i; app.sheet = "plugin" }
@@ -722,6 +734,11 @@ Window {
             else if (b === "a" && loaderIndex === 0 && loaderCanGet) { sheet = ""; note("action", "Install the loader"); Turbine.installLoader() }
             else if (b === "a" && loaderIndex === 0 && !loaderSourceShown) loaderSourceShown = true
             else if (b === "a" || b === "b") sheet = ""
+        } else if (sheet === "pages") {
+            if (b === "up") pagesIndex = Math.max(0, pagesIndex - 1)
+            else if (b === "down") pagesIndex = Math.min(pagesList.length - 1, pagesIndex + 1)
+            else if (b === "a") openPage(pagesIndex)
+            else if (b === "b") sheet = ""
         } else if (sheet === "versions") {
             if (b === "up") versionIndex = Math.max(0, versionIndex - 1)
             else if (b === "down") versionIndex = Math.min(otherVersions.length - 1, versionIndex + 1)
@@ -911,13 +928,60 @@ Window {
         modPage = true
         Turbine.details(item.id, srcNow)
     }
+    // Pages a free account opens instead of downloading: the mod itself, then what it needs.
+    function needPages() {
+        const n = detailsData && detailsData.needs ? detailsData.needs : null
+        return !n ? [] : (n.steps || []).filter(x => x.action === "open")
+            .map(x => ({ name: x.name, url: x.url, note: "Needed by " + detailsData.name }))
+    }
     function installFromDetails() {
         if (!detailsData || detailsData.loading || detailsData.error) return
+        if (detailsData.premium === false && detailsData.page) {
+            note("action", "Open on Nexus: " + detailsData.name)
+            openPages(detailsData.name + " is on Nexus Mods", [{ name: detailsData.name, url: detailsData.page, note: "The mod's files" }].concat(needPages()))
+            return
+        }
         if (detailsData.premium === false) { toast.showPlain(detailsData.message); return }
         note("action", "Install " + detailsData.name + " from " + srcNow)
+        const later = needPages()
         Turbine.install(detailsData.id, srcNow)
         edited()
         modPage = false
+        if (later.length > 0) openPages("It also needs these", later)
+    }
+
+    // Pages to open on Nexus Mods (free accounts, SKSE, a profile's Nexus mods).
+    property string pagesTitle: ""
+    property var pagesList: []
+    property int pagesIndex: 0
+    function openPages(title, list) {
+        if (!list || list.length === 0) return
+        pagesTitle = title; pagesList = list; pagesIndex = 0
+        Turbine.handlerStatus()
+        sheet = "pages"
+    }
+    function openPage(i) {
+        const p = pagesList[i]
+        if (!p) return
+        note("action", "Open page: " + p.name)
+        if (!shot.on) Qt.openUrlExternally(p.url)
+        toast.showPlain("Opened " + p.name + " in the browser. Press Mod Manager Download there.")
+    }
+
+    // Nexus links (Mod Manager Download): from the command line, or from a later launch through the running Turbine.
+    property var handler: ({ state: "unknown" })
+    Timer { interval: 300; running: true; repeat: true; onTriggered: { const l = Turbine.takeLink(); if (l !== "") app.linkArrived(l) } }
+    function linkArrived(link) {
+        const r = parse(Turbine.openLink(link), { error: "That Nexus link can't be read." })
+        if (!shot.on) { app.raise(); app.requestActivate() }
+        if (r.error) { note("nxm", "Link refused: " + r.error); say(r.error, "error"); return }
+        const i = games.findIndex(g => g.id === r.game)
+        if (i >= 0 && i !== current) current = i
+        page = "game"; zone = "main"; tab = 0; modPage = false
+        if (sheet !== "fomod") sheet = ""
+        note("nxm", "Link for " + r.name)
+        Turbine.nxmDownload(link, r.game)
+        edited()
     }
 
     // Other versions of the mod on the details page (X).
@@ -932,6 +996,10 @@ Window {
     function installVersion(i) {
         const v = otherVersions[i]
         if (!v || v.installed) return
+        if (detailsData.premium === false && detailsData.page) {
+            openPages(detailsData.name + " " + (v.version || v.name), [{ name: v.name + (v.version ? " " + v.version : ""), url: detailsData.page + "&file_id=" + v.id, note: v.group }])
+            return
+        }
         note("action", "Install version " + (v.version || v.name) + " of " + detailsData.name)
         sheet = ""
         Turbine.installVersion(detailsData.id, detailsData.source || srcNow, v.id)
@@ -1002,7 +1070,13 @@ Window {
     function openProfiles() { profIndex = 0; importData = null; Turbine.profiles(); sheet = "profiles" }
     function profileRun(i) {
         if (importData) {
-            if (i === 0 && !importData.error) { note("action", "Import profile: get them"); Turbine.profileImportGo(); sheet = "" }
+            if (i === 0 && !importData.error) {
+                note("action", "Import profile: get them")
+                Turbine.profileImportGo(); sheet = ""
+                const steps = account.premium ? (importData.nexusPremium || []) : (importData.nexusFree || [])
+                const open = steps.filter(x => x.action === "open").map(x => ({ name: x.mod.name, url: x.url, note: "From the shared profile" }))
+                if (open.length > 0) { importData = null; openPages("Open these pages for the profile", open); return }
+            }
             importData = null
             if (sheet === "profiles") profIndex = 0
             return
@@ -1080,12 +1154,18 @@ Window {
     // change it), item (a Labs checklist item), info (words only).
     readonly property var rowsNow: sec === "Accounts" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : []
     readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
-        : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: downloads work right here" : " · Free account: browse here, download in Desktop Mode")
+        : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: downloads work right here" : " · Free account: Open on Nexus, then Mod Manager Download")
         : account.state === "error" ? account.message
         : account.message ? account.message : "Not signed in. Add your personal API key to browse Nexus Mods."
     readonly property var accountRows: [
         { kind: "action", key: "nexusKey", title: "Nexus Mods", how: accountWords, action: account.hasKey ? "Change key" : "Add key" }
-    ].concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
+    ].concat([
+        { kind: "action", key: "nxmHandler", title: "Use Turbine for Nexus downloads",
+          how: handler.state === "yes" ? "Turbine gets Mod Manager Download links from the browser. Works with free accounts."
+             : handler.state === "no" ? "Mod Manager Download links now go to " + (handler.current || "another program") + ". A makes Turbine get them."
+             : "Makes the browser's Mod Manager Download button send files to Turbine" + (handler.message ? " (" + handler.message + ")" : ""),
+          action: handler.state === "yes" ? "Set again" : "Use Turbine" }
+    ]).concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
         { kind: "info", key: "help", title: "Where the key comes from", how: "In Desktop Mode, sign in at nexusmods.com, open Site preferences, API Keys, and copy your Personal API Key. Then paste it here." },
         { kind: "info", key: "ts", title: "Thunderstore", how: "No account needed. Valheim, Lethal Company and Risk of Rain 2 mods come from there." }
     ])
@@ -1118,6 +1198,7 @@ Window {
         else if (r.key === "perf") openPerf()
         else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", "Paste or type your Personal API Key from nexusmods.com (Site preferences, API Keys). It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
         else if (r.key === "signOut") Turbine.nexusSignOut()
+        else if (r.key === "nxmHandler") Turbine.handlerSet()
         else if (r.key === "checkNow") Turbine.selfCheck(labsOn && updates.prerelease, false)
         else if (r.key === "install") Turbine.selfInstall()
         else if (r.key === "restart") { Turbine.finish(); Turbine.restart(); Qt.quit() }
@@ -1175,6 +1256,14 @@ Window {
           expect: "A code shows big and is copied; importing it on another device (or Profiles, Import a Thunderstore profile code) gets the same mods." },
         { id: "other-versions", title: "Other versions", how: "Get Mods, a mod's details, X Other versions, then A on an older version.",
           expect: "That version downloads and takes the installed one's place, same spot and on or off." },
+        { id: "nxm-handler", title: "Mod Manager Download", how: "Settings, Accounts: Use Turbine for Nexus downloads. Then in Desktop Mode press Mod Manager Download on a Nexus mod's Files tab, with Turbine open and with it closed.",
+          expect: "Turbine comes to the front on that game, the download shows on the status line, and the mod is added (with installer choices when it has them)." },
+        { id: "nexus-free", title: "Free Nexus account", how: "With a free account: a Nexus mod's details, A Open on Nexus; also SKSE's Install in Skyrim.",
+          expect: "The page opens in the browser; Mod Manager Download there sends the file to Turbine. In Game Mode Turbine says it works best in Desktop Mode." },
+        { id: "nexus-requirements", title: "Nexus requirements", how: "Skyrim: details of a Nexus mod that needs others (like SkyUI needs SKSE).",
+          expect: "Also needs lists them as Have it, Missing, Game DLC or Outside Nexus; Premium installs the missing ones with the mod, free accounts get their pages." },
+        { id: "profile-nexus", title: "Profile import with Nexus mods", how: "Import a share file that has Nexus mods.",
+          expect: "Premium: Turbine downloads them too. Free: it lists the pages to open, and the profile is made with what's there." },
         { id: "loot-sort", title: "LOOT sorting", how: "Skyrim with a few plugin mods, online: Load order tab, A on Sort automatically, then X on a plugin with a badge.",
           expect: "The line at the top says Sorted with LOOT's masterlist; the game starts with that order; badges like Dirty show LOOT's notes, and X lists them." },
         { id: "nexus-key", title: "Nexus Mods key", how: "Settings, Accounts: add your personal API key with Steam's keyboard.",
@@ -2393,6 +2482,17 @@ Window {
         onActivated: (i) => { app.versionIndex = i; app.installVersion(i) }
         onClosed: app.act("b")
     }
+    PagesSheet {
+        ui: kit
+        visible: app.sheet === "pages"
+        title: app.pagesTitle
+        pages: app.pagesList
+        focusIndex: app.pagesIndex
+        gameMode: Turbine.gamemode
+        handlerSet: app.handler.state !== "no"
+        onActivated: (i) => { app.pagesIndex = i; app.openPage(i) }
+        onClosed: app.act("b")
+    }
     CodeSheet {
         ui: kit
         visible: app.sheet === "code"
@@ -2417,6 +2517,7 @@ Window {
         active: app.profileData ? app.profileData.active : ""
         actions: app.profileActions
         plan: app.importData
+        premium: app.account.premium === true
         focusIndex: app.profIndex
         onActivated: (i) => { app.profIndex = i; app.profileRun(i) }
         onClosed: app.act("b")
@@ -2483,7 +2584,9 @@ Window {
             Hint { visible: app.moving; k: "a"; label: "Done" }
             // Sheets
             Hint { visible: ["modmenu", "gamemenu", "add", "fomod", "profiles", "shares", "versions"].indexOf(app.sheet) >= 0; k: "▲▼"; label: "Choose" }
-            Hint { visible: app.sheet === "versions"; k: "a"; label: "Install" }
+            Hint { visible: app.sheet === "versions"; k: "a"; label: app.detailsData && app.detailsData.premium === false ? "Open on Nexus" : "Install" }
+            Hint { visible: app.sheet === "pages"; k: "▲▼"; label: "Choose" }
+            Hint { visible: app.sheet === "pages"; k: "a"; label: "Open on Nexus" }
             Hint { visible: app.sheet === "code" && !!app.codeData && app.codeData.state === "ready"; k: "a"; label: "Copy" }
             Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
@@ -2492,7 +2595,7 @@ Window {
             Hint { visible: app.sheet === "ask"; k: "a"; label: "Done" }
             Hint { visible: app.sheet === "ask"; k: "b"; label: "Cancel" }
             // Get Mods, details, load order
-            Hint { visible: legend.gamePage && app.modPage; k: "a"; label: "Install" }
+            Hint { visible: legend.gamePage && app.modPage; k: "a"; label: app.detailsData && app.detailsData.premium === false && app.detailsData.page ? "Open on Nexus" : "Install" }
             Hint { visible: legend.gamePage && app.modPage && app.otherVersions.length > 0; k: "x"; label: "Other versions" }
             Hint { visible: legend.gamePage && app.modPage; k: "b"; label: "Back to the list" }
             Hint { visible: legend.gamePage && !app.modPage && app.tab === 1 && app.sources.length > 0; k: "a"; label: app.getArea === "grid" ? "Details" : "Choose" }

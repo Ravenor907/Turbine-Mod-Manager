@@ -96,6 +96,32 @@ fn err(e: NetError) -> String {
     e.to_string()
 }
 
+/// Marks `Fetched::replaces` as "whichever installed mod came from this Nexus mod" ("nexus-mod:<domain>:<mod id>");
+/// the mod worker looks it up when the file is added.
+pub const NEXUS_MOD: &str = "nexus-mod:";
+
+/// Said instead of Install for free accounts.
+pub const FREE_WORDS: &str =
+    "Nexus only lets Premium members download inside apps. A opens its page: press Mod Manager Download there and it comes to Turbine.";
+
+/// "2026-11-06" from seconds since 1970 (UTC).
+pub fn date_of(secs: u64) -> String {
+    if secs == 0 {
+        return String::new();
+    }
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 /// A short date from Thunderstore's "2024-05-01T12:00:00Z".
 fn day(s: &str) -> String {
     s.get(..10).unwrap_or(s).to_string()
@@ -479,9 +505,14 @@ impl Net {
     }
 
     /// For the screenshot checks: signed in with the sample account.
-    pub fn sample_sign_in(&mut self) {
+    pub fn sample_sign_in(&mut self, free: bool) {
         if let Some(Ok(t)) = self.sample_text("nexus_validate.json") {
             self.account = nexus::parse_validate(&t).ok();
+            if free {
+                if let Some(a) = self.account.as_mut() {
+                    a.is_premium = false;
+                }
+            }
             self.key = Some("sample-key-for-screenshots".into());
         }
     }
@@ -527,10 +558,29 @@ impl Net {
     }
 
     fn nexus_files(&self, domain: &str, mod_id: u64) -> Result<nexus::FileList, String> {
-        if let Some(t) = self.sample_text("nexus_files.json") {
+        if let Some(t) = self.sample_text("nexus_files_all.json").filter(|t| t.is_ok()).or_else(|| self.sample_text("nexus_files.json")) {
             return nexus::parse_files(&t?);
         }
         self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.files(domain, mod_id).map_err(err)
+    }
+
+    /// What a Nexus mod needs (other Nexus mods, outside downloads, DLC), checked against the game's mods.
+    fn nexus_requirements(&self, game: &GameInfo, domain: &str, mod_id: u64) -> Result<nexus::RequirementCheck, String> {
+        let reqs = if let Some(t) = self.sample_text("nexus_graphql_requirements.json") {
+            nexus::parse_requirements(&t?, domain)?
+        } else {
+            self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.requirements(domain, mod_id).map_err(err)?
+        };
+        let installed: Vec<(String, SourceInfo)> = game.have.iter().map(|h| (h.mod_id.clone(), h.source.clone())).collect();
+        Ok(nexus::check_requirements(&reqs, &installed))
+    }
+
+    /// The installed file of a Nexus mod in this game, if any.
+    fn installed_file(game: &GameInfo, domain: &str, mod_id: u64) -> Option<u64> {
+        game.have.iter().find_map(|h| {
+            nexus::source_mod(&h.source).filter(|(d, m)| *m == mod_id && (d.is_empty() || d == domain))?;
+            nexus::parse_source_id(&h.source.id).map(|(_, _, f)| f)
+        })
     }
 
     pub fn details_nexus(&mut self, game: &GameInfo, mod_id: u64) -> Result<String, String> {
@@ -556,8 +606,36 @@ impl Net {
                 )
             })
             .unwrap_or_default();
+        // Requirements: a failure only means the page shows none (the note says why).
+        let (needs, needs_note) = match self.nexus_requirements(game, &domain, mod_id) {
+            Ok(c) => (nexus::requirements_json(&c, premium), String::new()),
+            Err(e) => {
+                crate::log::line("net", &format!("Requirements of {domain} {mod_id}: {e}"));
+                ("null".to_string(), format!("Turbine couldn't check what it needs ({e})"))
+            }
+        };
+        // Other versions: every file but the installed one (or the main file Install gets).
+        let have = Self::installed_file(game, &domain, mod_id);
+        let skip = have.or(main.as_ref().map(|f| f.file_id)).unwrap_or(0);
+        let mut others: Vec<String> = Vec::new();
+        for g in files.other_versions(skip) {
+            for f in &g.files {
+                let first_line = f.description.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").to_string();
+                others.push(format!(
+                    "{{\"id\":{},\"version\":{},\"name\":{},\"size\":{},\"date\":{},\"downloads\":0,\"installed\":false,\"group\":{},\"note\":{}}}",
+                    quote(&f.file_id.to_string()),
+                    quote(&f.version),
+                    quote(&f.name),
+                    f.size_bytes,
+                    quote(&date_of(f.uploaded_timestamp)),
+                    quote(g.label),
+                    quote(&first_line.chars().take(120).collect::<String>())
+                ));
+            }
+        }
+        let page = nexus::files_page_url(&domain, mod_id);
         Ok(format!(
-            "{{\"source\":\"nexus\",\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"icon\":{},\"code\":false,\"version\":{},\"size\":{},\"updated\":\"\",\"downloads\":{},\"rating\":{},\"categories\":[],\"deprecated\":{},\"install\":[{}],\"already\":[],\"missing\":[],\"skippedLoaders\":[],\"premium\":{},\"message\":{}}}",
+            "{{\"source\":\"nexus\",\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"icon\":{},\"code\":false,\"version\":{},\"size\":{},\"updated\":\"\",\"downloads\":{},\"rating\":{},\"categories\":[],\"deprecated\":{},\"install\":[{}],\"already\":[],\"missing\":[],\"skippedLoaders\":[],\"premium\":{},\"message\":{},\"page\":{},\"needs\":{},\"needsNote\":{},\"versions\":[{}],\"installedVersion\":{},\"versionsNote\":{}}}",
             quote(&mod_id.to_string()),
             quote(&info.name),
             quote(&info.author),
@@ -570,8 +648,105 @@ impl Net {
             !info.available,
             pick,
             premium,
-            quote(if premium { "" } else { nexus::FREE_ACCOUNT_MESSAGE })
+            quote(if premium { "" } else { FREE_WORDS }),
+            quote(&page),
+            needs,
+            quote(&needs_note),
+            others.join(","),
+            quote(&have.and_then(|f| files.file(f)).map(|f| f.version.clone()).unwrap_or_default()),
+            quote(if premium { "" } else { "Free accounts: A opens that file's page on Nexus. Press Mod Manager Download there and it comes to Turbine." })
         ))
+    }
+
+    /// Downloads the requirements Turbine can fetch for a Premium account (the Download steps), each handed to
+    /// `each`. Returns the names of the ones that need a page opened instead.
+    pub fn install_requirements(
+        &mut self,
+        game: &GameInfo,
+        mod_id: u64,
+        each: &mut dyn FnMut(Fetched),
+        progress: &mut dyn FnMut(&str, u64, Option<u64>),
+    ) -> Result<Vec<String>, String> {
+        let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
+        let check = self.nexus_requirements(game, &domain, mod_id)?;
+        let account = self.account()?;
+        let mut pages = Vec::new();
+        for step in nexus::requirement_steps(&check.missing, account.is_premium) {
+            match step {
+                nexus::RequirementStep::Download { name, domain, mod_id } => {
+                    self.no_downloads()?;
+                    let f = self.fetch_by_id(&domain, mod_id, None, &name, progress)?;
+                    each(f);
+                }
+                nexus::RequirementStep::OpenPage { name, .. } => pages.push(name),
+            }
+        }
+        Ok(pages)
+    }
+
+    /// One Nexus mod by its IDs (Premium): that file, or the newest replacing it, or the main file.
+    pub fn fetch_by_id(
+        &mut self,
+        domain: &str,
+        mod_id: u64,
+        file_id: Option<u64>,
+        name: &str,
+        progress: &mut dyn FnMut(&str, u64, Option<u64>),
+    ) -> Result<Fetched, String> {
+        self.no_downloads()?;
+        let account = self.account()?;
+        let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
+        let label = name.to_string();
+        CANCEL.store(false, Ordering::SeqCst);
+        let mut cb = |got: u64, total: Option<u64>| {
+            progress(&label, got, total);
+            !CANCEL.load(Ordering::SeqCst)
+        };
+        if !account.is_premium {
+            return Err(nexus::FREE_ACCOUNT_MESSAGE.into());
+        }
+        // The same choice download_by_id makes, read here so the file keeps its kind (zip, 7z or rar).
+        let files = nx.files(domain, mod_id).map_err(err)?;
+        let file = files.pick(file_id).cloned().ok_or("This mod has no file on Nexus that can be downloaded.")?;
+        let (d, source) = nx.download(&account, domain, mod_id, &file, Some(&mut cb)).map_err(err)?;
+        let full = format!("{} {}", name, file.version).trim().to_string();
+        let path = rename(&d, &full, &ext_of(&file.file_name));
+        Ok(Fetched { path, source, label: full, replaces: Some(format!("{NEXUS_MOD}{domain}:{mod_id}")) })
+    }
+
+    /// Downloads what an nxm link (Mod Manager Download on the site) points at. Works for free accounts.
+    pub fn fetch_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
+        if self.sample.is_some() {
+            return self.pretend_nxm(link, progress);
+        }
+        let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.")?;
+        let file = nx.file_info(&link.domain, link.mod_id, link.file_id).map_err(err)?;
+        let label = format!("{} {}", file.name, file.version).trim().to_string();
+        CANCEL.store(false, Ordering::SeqCst);
+        let mut cb = |got: u64, total: Option<u64>| {
+            progress(&label, got, total);
+            !CANCEL.load(Ordering::SeqCst)
+        };
+        let (d, source) = nx.download_from_nxm(link, Some(&mut cb)).map_err(err)?;
+        let path = rename(&d, &label, &ext_of(&file.file_name));
+        Ok(Fetched { path, source, label, replaces: Some(format!("{NEXUS_MOD}{}:{}", link.domain, link.mod_id)) })
+    }
+
+    /// The screenshot checks have no internet: a link shows its progress from the recorded file details, then stops.
+    fn pretend_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
+        let file = nexus::parse_file(&self.sample_text("nexus_file.json").ok_or("The sample file details are missing.")??)?;
+        let label = format!("{} {}", file.name, file.version).trim().to_string();
+        let total = file.size_bytes.max(1);
+        CANCEL.store(false, Ordering::SeqCst);
+        crate::log::line("nxm", &format!("Test run: pretending to download {}", link.redacted()));
+        for i in 0..=200u64 {
+            if CANCEL.load(Ordering::SeqCst) {
+                break;
+            }
+            progress(&label, total * i.min(16) * 4 / 100, Some(total));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Err("Downloads are off in this test run.".into())
     }
 
     /// Downloads a Nexus file (Premium only). `file_id` 0 means the main file.
@@ -906,7 +1081,7 @@ mod tests {
         println!("{:?}", r.map(|r| r.version));
         let u = n.check_updates(&game()).unwrap();
         assert!(json::parse(&u).is_ok());
-        n.sample_sign_in();
+        n.sample_sign_in(false);
         assert!(n.account_json("ok", "").contains("\"hasKey\":true"));
     }
 }

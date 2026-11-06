@@ -16,6 +16,7 @@ Item {
     property var actions: []              // [{key, label, detail}]
     property var plan: null               // a share being imported: {profile, plan:{automatic,nexus,byHand,installed}, error}
     property int focusIndex: 0
+    property bool premium: false          // the Nexus account can download inside Turbine
 
     signal activated(int index)
     signal closed()
@@ -49,7 +50,7 @@ Item {
             Repeater {
                 model: !ps.plan || !ps.plan.plan ? [] : [
                     ["Turbine gets these for you", ps.plan.plan.automatic, "ok"],
-                    ["From Nexus Mods: download them in Desktop Mode, then add them from Downloads", ps.plan.plan.nexus, "warn"],
+                    [ps.premium ? "From Nexus Mods: Turbine gets these too (Premium)" : "From Nexus Mods: Turbine lists their pages to open after this", ps.plan.plan.nexus, ps.premium ? "ok" : "warn"],
                     ["Added from files: add them by hand", ps.plan.plan.byHand, "warn"],
                     ["You have these already", ps.plan.plan.installed, ""]
                 ].filter(x => x[1].length > 0)

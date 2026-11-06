@@ -73,6 +73,49 @@ pub fn game_running(dir: &std::path::Path) -> Option<bool> {
     }
 }
 
+/// The desktop file Turbine is installed with (it says it opens nxm:// links).
+pub const DESKTOP_FILE: &str = "io.github.ravenor907.TurbineModManager.desktop";
+const NXM_TYPE: &str = "x-scheme-handler/nxm";
+
+/// xdg-mime on the host (the Flatpak can't change the host's defaults by itself), with fixed arguments.
+fn xdg_mime(args: &[&str]) -> Result<String, String> {
+    use std::process::{Command, Stdio};
+    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg("xdg-mime");
+        c
+    } else {
+        Command::new("xdg-mime")
+    };
+    let out = cmd.args(args).stdin(Stdio::null()).output().map_err(|e| format!("xdg-mime couldn't start: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if err.is_empty() { "xdg-mime stopped with an error".into() } else { err });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Settings > Accounts: {"state": "yes" | "no" | "unknown", "current": the program now used for Nexus links,
+/// "message"}.
+pub fn nxm_handler_json() -> String {
+    use turbine_engine::json::quote;
+    match xdg_mime(&["query", "default", NXM_TYPE]) {
+        Ok(now) => {
+            let yes = now.eq_ignore_ascii_case(DESKTOP_FILE);
+            let shown = now.trim_end_matches(".desktop").rsplit('.').next().unwrap_or(&now).to_string();
+            format!("{{\"state\":{},\"current\":{},\"message\":\"\"}}", quote(if yes { "yes" } else { "no" }), quote(&shown))
+        }
+        Err(e) => format!("{{\"state\":\"unknown\",\"current\":\"\",\"message\":{}}}", quote(&e)),
+    }
+}
+
+/// Makes Turbine the program for Nexus's Mod Manager Download links.
+pub fn set_nxm_handler() -> Result<(), String> {
+    let r = xdg_mime(&["default", DESKTOP_FILE, NXM_TYPE]).map(|_| ());
+    crate::log::line("nxm", &format!("Set as the Nexus link handler: {}", match &r { Ok(()) => "done".to_string(), Err(e) => e.clone() }));
+    r
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

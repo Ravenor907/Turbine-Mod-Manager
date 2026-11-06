@@ -365,11 +365,15 @@ fn post_profiles(w: &mut Worker, game: &Game) {
 fn plan_share(w: &mut Worker, game: &Game, share: Share) {
     let json = match w.slot(game).and_then(|s| profiles::plan_import(&share, &s.store)) {
         Ok(plan) => {
+            // Nexus entries: what Premium fetches, and the pages a free account opens.
+            let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
             let j = format!(
-                "{{\"game\":{},\"profile\":{},\"plan\":{},\"error\":\"\"}}",
+                "{{\"game\":{},\"profile\":{},\"plan\":{},\"nexusPremium\":{},\"nexusFree\":{},\"error\":\"\"}}",
                 quote(&game.id()),
                 quote(&share.profile),
-                profiles::plan_json(&plan)
+                profiles::plan_json(&plan),
+                profiles::nexus_steps_json(&profiles::nexus_steps(&plan, domain, true)),
+                profiles::nexus_steps_json(&profiles::nexus_steps(&plan, domain, false))
             );
             w.share = Some((game.id(), share));
             j
@@ -541,7 +545,20 @@ impl qobject::Turbine {
             &name,
             true,
             Box::new(move |w: &mut Worker| {
-                add_archive(w, &game, &f.path, f.source, f.replaces, &f.label);
+                // "Whichever mod came from this Nexus mod": a newer file from the site takes the old one's place.
+                let replaces = match f.replaces.as_deref().and_then(|r| r.strip_prefix(online::NEXUS_MOD)) {
+                    Some(key) => {
+                        let (d, m) = key.split_once(':').unwrap_or(("", key));
+                        let m: u64 = m.parse().unwrap_or(0);
+                        w.slot(&game).ok().and_then(|s| {
+                            s.store.installed_sources().into_iter().find_map(|(id, src)| {
+                                turbine_engine::nexus::source_mod(&src).filter(|(sd, sm)| *sm == m && (sd.is_empty() || sd == d)).map(|_| id)
+                            })
+                        })
+                    }
+                    None => f.replaces,
+                };
+                add_archive(w, &game, &f.path, f.source, replaces, &f.label);
                 remove_download(&f.path);
             }),
         );
@@ -583,7 +600,7 @@ impl qobject::Turbine {
             "Use recorded samples",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 net.use_samples(&dir);
-                net.sample_sign_in();
+                net.sample_sign_in(false);
                 let j = net.account_json("ok", "");
                 set(qt, move |t| t.set_account_json(QString::from(j.as_str())));
             }),
@@ -638,9 +655,17 @@ impl qobject::Turbine {
                 let mut each = hand_over(qt, &game);
                 let mut prog = progress(qt);
                 let r = if source == "nexus" {
-                    id.parse::<u64>()
-                        .map_err(|_| "That mod can't be read.".to_string())
-                        .and_then(|m| net.install_nexus(&info, m, 0, None, &mut each, &mut prog))
+                    id.parse::<u64>().map_err(|_| "That mod can't be read.".to_string()).and_then(|m| {
+                        // What it needs comes first (Premium downloads them; anything else is a page to open).
+                        match net.install_requirements(&info, m, &mut each, &mut prog) {
+                            Ok(pages) if !pages.is_empty() => {
+                                say(qt, format!("It also needs {}, which Turbine can't download. Its details page has the links.", pages.join(", ")), "warn")
+                            }
+                            Ok(_) => {}
+                            Err(e) => crate::log::line("net", &format!("Requirements not installed: {e}")),
+                        }
+                        net.install_nexus(&info, m, 0, None, &mut each, &mut prog)
+                    })
                 } else {
                     net.install_ts(&info, &[id.clone()], false, &mut each, &mut prog)
                 };
@@ -661,6 +686,13 @@ impl qobject::Turbine {
                 let mut prog = progress(qt);
                 match net.fetch_loader(&info, &mut prog) {
                     Ok(f) => hand_over(qt, &game)(f),
+                    // SKSE for Steam is only on Nexus: free accounts get its page to open.
+                    Err(e) if info.kind == "bethesda" && e.contains("30379") => {
+                        let page = turbine_engine::nexus::files_page_url(turbine_engine::loaders::SKSE_NEXUS_DOMAIN, turbine_engine::loaders::SKSE_NEXUS_MOD);
+                        let j = format!("[{{\"name\":\"SKSE (Skyrim Script Extender)\",\"url\":{}}}]", quote(&page));
+                        crate::log::line("net", &e);
+                        post(qt, move |t| t.pages(QString::from("SKSE is on Nexus Mods"), QString::from(j.as_str())));
+                    }
                     Err(e) => say(qt, e, "error"),
                 }
             }),
@@ -982,6 +1014,94 @@ impl qobject::Turbine {
         );
     }
 
+    pub fn set_sample_free(self: Pin<&mut Self>) {
+        self.net_send(
+            "Use the free sample account",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                net.sample_sign_in(true);
+                let j = net.account_json("ok", "");
+                set(qt, move |t| t.set_account_json(QString::from(j.as_str())));
+            }),
+        );
+    }
+
+    // ------------------------------------------------------------------------------------------------ Nexus links
+
+    pub fn take_link(&self) -> QString {
+        QString::from(crate::single::take().unwrap_or_default().as_str())
+    }
+
+    pub fn open_link(&self, link: &QString) -> QString {
+        let out = |game: &str, name: &str, error: &str| {
+            QString::from(format!("{{\"game\":{},\"name\":{},\"error\":{}}}", quote(game), quote(name), quote(error)).as_str())
+        };
+        let l = match turbine_engine::nxm::parse(&link.to_string()) {
+            Ok(l) => l,
+            Err(e) => return out("", "", &e),
+        };
+        crate::log::line("nxm", &format!("Opening {}", l.redacted()));
+        let Some(name) = l.game_name() else {
+            return out("", "", &format!("That Nexus link is for a game Turbine doesn't support ({}).", l.domain));
+        };
+        if l.expired_at(turbine_engine::nxm::now()) {
+            return out("", name, turbine_engine::nxm::EXPIRED_MESSAGE);
+        }
+        let ids = l.store_ids();
+        // The game on screen first when it matches (Stardew Valley can be both Steam and GOG).
+        let found = self
+            .current_game()
+            .filter(|g| ids.contains(&g.store_id.as_str()))
+            .or_else(|| self.rust().found.iter().find(|g| ids.contains(&g.store_id.as_str())).cloned());
+        match found {
+            Some(g) => out(&g.id(), name, ""),
+            None => out("", name, &format!("{name} isn't installed here, so Turbine has nowhere to put this mod.")),
+        }
+    }
+
+    pub fn nxm_download(mut self: Pin<&mut Self>, link: &QString, game_id: &QString) {
+        let Some(game) = self.find(&game_id.to_string()) else { return };
+        let link = match turbine_engine::nxm::parse(&link.to_string()) {
+            Ok(l) => l,
+            Err(e) => return self.as_mut().say(&e, "error"),
+        };
+        self.as_mut().say("Getting the file from Nexus Mods...", "work");
+        self.net_send(
+            &format!("Nexus link {}", link.redacted()),
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let mut prog = progress(qt);
+                match net.fetch_nxm(&link, &mut prog) {
+                    Ok(f) => hand_over(qt, &game)(f),
+                    Err(e) => say(qt, e, "error"),
+                }
+            }),
+        );
+    }
+
+    pub fn handler_status(self: Pin<&mut Self>) {
+        self.net_send(
+            "Check the Nexus link handler",
+            Box::new(move |_: &mut Net, qt: &Qt| {
+                let j = crate::system::nxm_handler_json();
+                set(qt, move |t| t.set_handler_json(QString::from(j.as_str())));
+            }),
+        );
+    }
+
+    pub fn handler_set(self: Pin<&mut Self>) {
+        crate::log::line("action", "Use Turbine for Nexus downloads");
+        self.net_send(
+            "Make Turbine the Nexus link handler",
+            Box::new(move |_: &mut Net, qt: &Qt| {
+                let r = crate::system::set_nxm_handler();
+                let j = crate::system::nxm_handler_json();
+                if let Err(e) = r {
+                    say(qt, format!("Turbine couldn't be set for Nexus downloads ({e})."), "error");
+                }
+                set(qt, move |t| t.set_handler_json(QString::from(j.as_str())));
+            }),
+        );
+    }
+
     pub fn list_shares(mut self: Pin<&mut Self>) {
         let dir = turbine_engine::home_dir().join("Downloads");
         let mut found: Vec<(std::time::SystemTime, String, String)> = std::fs::read_dir(&dir)
@@ -1049,7 +1169,16 @@ impl qobject::Turbine {
                     .filter(|m| m.kind == "thunderstore")
                     .map(|m| m.version.as_ref().map(|v| format!("{}-{v}", m.id)).unwrap_or_else(|| m.id.clone()))
                     .collect();
-                if wanted.is_empty() {
+                // Nexus mods Turbine can fetch for a Premium account (free accounts get their pages instead).
+                let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
+                let fetch: Vec<(String, u64, Option<u64>, String)> = profiles::nexus_steps(&plan, domain, true)
+                    .into_iter()
+                    .filter_map(|st| match st.action {
+                        profiles::NexusAction::Fetch { domain, mod_id, file_id } => Some((domain, mod_id, file_id, st.entry.name)),
+                        _ => None,
+                    })
+                    .collect();
+                if wanted.is_empty() && fetch.is_empty() {
                     finish_share(w, &game);
                     return;
                 }
@@ -1061,8 +1190,22 @@ impl qobject::Turbine {
                         Box::new(move |net: &mut Net, qt: &Qt| {
                             let mut each = hand_over(qt, &g);
                             let mut prog = progress(qt);
-                            if let Err(e) = net.install_ts(&info, &wanted, false, &mut each, &mut prog) {
-                                say(qt, e, "error");
+                            if !wanted.is_empty() {
+                                if let Err(e) = net.install_ts(&info, &wanted, false, &mut each, &mut prog) {
+                                    say(qt, e, "error");
+                                }
+                            }
+                            let premium = !fetch.is_empty() && net.account().map(|a| a.is_premium).unwrap_or(false);
+                            if premium {
+                                for (domain, mod_id, file_id, name) in &fetch {
+                                    match net.fetch_by_id(domain, *mod_id, *file_id, name, &mut prog) {
+                                        Ok(mut f) => {
+                                            f.replaces = None;
+                                            each(f)
+                                        }
+                                        Err(e) => say(qt, format!("{name}: {e}"), "error"),
+                                    }
+                                }
                             }
                             // Queued after every download's import, so the profile sees all of them.
                             let g2 = g.clone();

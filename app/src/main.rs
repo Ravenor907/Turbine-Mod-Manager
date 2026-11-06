@@ -5,6 +5,7 @@ mod log;
 mod loot;
 mod online;
 mod pad;
+mod single;
 mod system;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QString, QUrl};
@@ -22,11 +23,36 @@ extern "C" {
 
 fn main() {
     let _ = labs::started();
+    // One Turbine at a time: a Nexus link given to a second launch goes to the running one, and this one ends before
+    // it touches the logs (screenshot runs skip this).
+    let link = single::link_from_args().filter(|l| single::plausible_link(l));
+    let screenshot = std::env::args().any(|a| a.starts_with("--screenshot="));
+    let start = if screenshot { None } else { Some(single::start(link.as_deref())) };
+    if matches!(start, Some(single::Start::Forwarded)) {
+        return;
+    }
     log::start(log::folder(&backend::data_home()));
     log::line("app", &format!("Turbine Mod Manager {VERSION} (build {}) starting", labs::COMMIT));
     log::line("app", &format!("Device {}; {}", labs::device(), labs::system()));
     // SAFETY: the sink is a plain function that lives for the whole run.
     unsafe { turbine_install_qt_handler(log::qt_message) };
+    let redacted = |l: &str| turbine_engine::nxm::parse(l).map(|x| x.redacted()).unwrap_or_default();
+    let mut listening = false;
+    match start {
+        Some(single::Start::First(listener)) => {
+            listening = true;
+            single::listen(listener, move |l| {
+                log::line("nxm", &format!("Link from another launch: {}", redacted(&l)));
+                single::push(l)
+            });
+        }
+        Some(single::Start::Alone(why)) => log::line("nxm", &format!("Not listening for Nexus links: {why}")),
+        _ => {}
+    }
+    if let Some(l) = link {
+        log::line("nxm", &format!("Started with a Nexus link: {}", redacted(&l)));
+        single::push(l);
+    }
     let mut app = QGuiApplication::new();
     if let Some(mut a) = app.as_mut() {
         a.as_mut().set_organization_name(&QString::from("Turbine Mod Manager"));
@@ -38,6 +64,9 @@ fn main() {
     }
     if let Some(app) = app.as_mut() {
         app.exec();
+    }
+    if listening {
+        single::stop();
     }
     log::clean_exit();
 }

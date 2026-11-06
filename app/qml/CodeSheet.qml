@@ -53,7 +53,10 @@ Item {
                     anchors.centerIn: parent
                     width: parent.width - cs.ui.px(24)
                     horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WrapAnywhere
+                    // One line, as big as fits (up to 30 design px): codes are read off the screen.
+                    wrapMode: Text.NoWrap
+                    fontSizeMode: Text.HorizontalFit
+                    minimumPixelSize: cs.ui.px(14)
                     textFormat: Text.PlainText
                     text: cs.state_ === "ready" ? cs.info.code : cs.state_ === "working" ? "Uploading..." : "No code"
                     color: cs.state_ === "ready" ? cs.ui.c.accentText : cs.ui.c.muted
