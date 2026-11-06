@@ -2612,7 +2612,7 @@ Window {
             Hint { visible: app.sheet === "" && app.page === "settings" && (app.sec === "Look" || (!!app.rowsNow[app.setRow] && ["choice", "toggle"].indexOf(app.rowsNow[app.setRow].kind) >= 0)); k: "◀▶"; label: "Change" }
             Hint { visible: app.sheet === "" && app.page === "settings" && !!app.rowsNow[app.setRow] && app.rowsNow[app.setRow].kind === "item"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "" && app.page !== "game"; k: "b"; label: "Back" }
-            Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail" && !(app.page === "game" && app.modPage); k: "◀"; label: "Games" }
+            Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail" && !(app.page === "game" && (app.modPage || app.tab === 2)); k: "◀"; label: "Games" }
         }
         Label {
             anchors.right: parent.right

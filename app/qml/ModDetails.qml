@@ -225,34 +225,33 @@ Item {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: right.width - (md.canInstall ? md.ui.px(md.openInstead ? 220 : 160) : 0) - (md.otherCount > 0 ? otherRow.width + md.ui.px(12) : 0)
+                    width: right.width - (md.canInstall ? md.ui.px(md.openInstead ? 220 : 160) : 0)
                     wrapMode: Text.WordWrap
                     text: md.installNote !== "" ? md.installNote : md.installWords
                     color: md.info && md.info.message ? md.ui.c.warn : md.ui.c.soft
                     font.family: md.ui.bodyFont
                     font.pixelSize: md.ui.px(15)
                 }
-                // X: Other versions (older Thunderstore versions, or a Nexus mod's other files).
-                Rectangle {
-                    id: otherRow
-                    visible: md.otherCount > 0
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: otherWords.implicitWidth + md.ui.px(48); height: md.ui.px(40); radius: md.ui.px(8)
-                    color: md.ui.c.card
-                    border.color: md.ui.c.line
-                    Row {
-                        id: otherWords
-                        anchors.centerIn: parent
-                        spacing: md.ui.px(8)
-                        Rectangle {
-                            width: md.ui.px(24); height: width; radius: width / 2; color: md.ui.c.raised; border.color: md.ui.c.accentLo
-                            anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: "X"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
-                        }
-                        Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            }
+            // X: Other versions (older Thunderstore versions, or a Nexus mod's other files).
+            Rectangle {
+                id: otherRow
+                visible: md.otherCount > 0
+                width: otherWords.implicitWidth + md.ui.px(48); height: md.ui.px(40); radius: md.ui.px(8)
+                color: md.ui.c.card
+                border.color: md.ui.c.line
+                Row {
+                    id: otherWords
+                    anchors.centerIn: parent
+                    spacing: md.ui.px(8)
+                    Rectangle {
+                        width: md.ui.px(24); height: width; radius: width / 2; color: md.ui.c.raised; border.color: md.ui.c.accentLo
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { anchors.centerIn: parent; text: "X"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
                     }
-                    TapHandler { onTapped: md.versionsClicked() }
+                    Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
+                TapHandler { onTapped: md.versionsClicked() }
             }
             // Nexus requirements: "Also needs", with have-it and missing states.
             Column {
