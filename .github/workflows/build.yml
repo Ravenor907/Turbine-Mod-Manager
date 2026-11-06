@@ -73,9 +73,11 @@ jobs:
       - name: Test and lint the engine
         shell: bash
         run: |
+          # A pinned toolchain, so a newer runner (with new lints) can't break the build by itself.
+          rustup toolchain install 1.97.0 --profile minimal --component clippy
           cd engine
-          cargo test
-          cargo clippy --all-targets -- -D warnings
+          cargo +1.97.0 test
+          cargo +1.97.0 clippy --all-targets -- -D warnings
 
   vendor:
     name: Rust crates for the offline Flatpak build
