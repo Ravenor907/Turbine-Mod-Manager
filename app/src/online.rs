@@ -279,8 +279,27 @@ impl Net {
             .collect();
         let list = |v: &[String]| v.iter().map(|s| quote(s)).collect::<Vec<_>>().join(",");
         let v = p.latest();
-        Ok(format!(
-            "{{\"source\":\"thunderstore\",\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"icon\":{},\"code\":{},\"version\":{},\"size\":{},\"updated\":{},\"downloads\":{},\"rating\":{},\"categories\":[{}],\"deprecated\":{},\"install\":[{}],\"already\":[{}],\"missing\":[{}],\"skippedLoaders\":[{}],\"premium\":true,\"message\":\"\"}}",
+        let have = game.installed_ts().into_iter().find(|(n, _)| n.eq_ignore_ascii_case(&p.full_name)).map(|(_, v)| v);
+        // Every version but the newest, newest first: "Other versions" on the details page.
+        let others: Vec<String> = p
+            .versions
+            .iter()
+            .skip(1)
+            .map(|x| {
+                format!(
+                    "{{\"id\":{},\"version\":{},\"name\":{},\"size\":{},\"date\":{},\"downloads\":{},\"installed\":{},\"group\":\"Older versions\",\"note\":\"\"}}",
+                    quote(&format!("{}-{}", p.full_name, x.number)),
+                    quote(&x.number),
+                    quote(&format!("{} {}", p.display_name(), x.number)),
+                    x.file_size,
+                    quote(&day(&x.date_created)),
+                    x.downloads,
+                    have.as_deref() == Some(x.number.as_str())
+                )
+            })
+            .collect();
+        let main = format!(
+            "{{\"source\":\"thunderstore\",\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"icon\":{},\"code\":{},\"version\":{},\"size\":{},\"updated\":{},\"downloads\":{},\"rating\":{},\"categories\":[{}],\"deprecated\":{},\"install\":[{}],\"already\":[{}],\"missing\":[{}],\"skippedLoaders\":[{}],\"premium\":true,\"message\":\"\"",
             quote(&p.full_name),
             quote(&p.display_name()),
             quote(&p.owner),
@@ -298,7 +317,8 @@ impl Net {
             list(&plan.already),
             list(&plan.missing),
             list(&plan.skipped_loaders)
-        ))
+        );
+        Ok(format!("{main},\"versions\":[{}],\"installedVersion\":{}}}", others.join(","), quote(have.as_deref().unwrap_or(""))))
     }
 
     /// Downloads a package and everything it needs. `each` gets every file as it arrives (for the mod worker);
@@ -334,6 +354,64 @@ impl Net {
             n += 1;
         }
         Ok(n)
+    }
+
+    /// Installs one version ("Owner-Name-1.2.3"), older or newer than the one installed; it takes the installed one's
+    /// place (same spot, on or off).
+    pub fn install_ts_version(
+        &mut self,
+        game: &GameInfo,
+        versioned: &str,
+        each: &mut dyn FnMut(Fetched),
+        progress: &mut dyn FnMut(&str, u64, Option<u64>),
+    ) -> Result<usize, String> {
+        let dep = thunderstore::parse_dep(versioned).filter(|d| d.version.is_some()).ok_or("That version can't be read.")?;
+        let full = dep.full_name();
+        let replaces = game.mod_for("thunderstore", &full);
+        // Without the installed copy in the list, the chosen version is planned even when it's older.
+        let mut g = game.clone();
+        g.have.retain(|h| !(h.source.kind == "thunderstore" && h.source.id.eq_ignore_ascii_case(&full)));
+        let mut wrap = |mut f: Fetched| {
+            if f.source.id.eq_ignore_ascii_case(&full) {
+                f.replaces = replaces.clone();
+            }
+            each(f)
+        };
+        self.install_ts(&g, &[versioned.to_string()], false, &mut wrap, progress)
+    }
+
+    /// Uploads a profile to Thunderstore and returns its code. `mods`: ("Owner-Name", version if known, on).
+    pub fn export_code(
+        &mut self,
+        game: &GameInfo,
+        name: &str,
+        mods: &[(String, Option<String>, bool)],
+        configs: &[(String, Vec<u8>)],
+    ) -> Result<String, String> {
+        if let Some(t) = self.sample_text("thunderstore_profile_create.json") {
+            return thunderstore::parse_create_answer(&t?);
+        }
+        let community = game.community.clone().ok_or("This game isn't on Thunderstore.")?;
+        let needs_index = mods.iter().any(|(_, v, _)| v.as_deref().unwrap_or("").is_empty());
+        let index = if needs_index { Some(self.index(&community, false)?.0) } else { None };
+        let list = mods
+            .iter()
+            .map(|(full, v, on)| {
+                let version = match v.as_deref().filter(|v| !v.is_empty()) {
+                    Some(v) => v.to_string(),
+                    None => index
+                        .as_ref()
+                        .and_then(|i| thunderstore::find(i, full))
+                        .and_then(|p| p.latest())
+                        .map(|x| x.number.clone())
+                        .unwrap_or_default(),
+                };
+                thunderstore::ProfileMod { full_name: full.clone(), version, enabled: *on }
+            })
+            .filter(|m| !m.version.is_empty())
+            .collect();
+        let profile = thunderstore::SharedProfile { name: name.to_string(), mods: list, files: Vec::new() };
+        thunderstore::export_code(&self.client, &profile, configs).map_err(err)
     }
 
     // ------------------------------------------------------------------------------------------------ Nexus
@@ -527,6 +605,24 @@ impl Net {
         let path = rename(&d, &label, &ext_of(&file.file_name));
         each(Fetched { path, source, label, replaces });
         Ok(1)
+    }
+
+    // ------------------------------------------------------------------------------------------------ LOOT
+
+    /// LOOT's masterlist for Skyrim Special Edition: the copy on this device, refreshed at most once a day (or the
+    /// recorded sample in the screenshot checks). The note says what went wrong, if anything.
+    pub fn loot_lists(&self, force: bool) -> (Option<crate::loot::Lists>, String) {
+        if let Some(dir) = &self.sample {
+            return match crate::loot::samples(dir) {
+                Some(l) => (Some(l), String::new()),
+                None => (None, "LOOT's masterlist isn't in the samples.".into()),
+            };
+        }
+        let dir = crate::loot::folder(&self.cache);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            return (crate::loot::on_device(&dir), format!("LOOT's masterlist folder couldn't be made ({e})."));
+        }
+        crate::loot::lists(&self.client, &dir, force)
     }
 
     // ------------------------------------------------------------------------------------------------ loaders

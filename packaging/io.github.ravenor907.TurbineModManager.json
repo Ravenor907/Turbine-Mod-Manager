@@ -37,6 +37,7 @@
                 "install -Dm755 target/release/turbine-mod-manager /app/bin/turbine-mod-manager",
                 "install -Dm644 -t /app/share/turbine-mod-manager/fonts fonts/*.ttf",
                 "install -Dm644 -t /app/share/turbine-mod-manager/licenses fonts/OFL-*.txt LICENSE",
+                "for d in vendor/libloot vendor/libloot-*; do if [ -f \"$d/LICENSE\" ]; then install -Dm644 \"$d/LICENSE\" /app/share/turbine-mod-manager/licenses/libloot-LICENSE.txt; fi; done",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.desktop /app/share/applications/io.github.ravenor907.TurbineModManager.desktop",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineModManager.metainfo.xml",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager-small.png /app/share/turbine-mod-manager/icon-small.png",

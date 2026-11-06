@@ -222,11 +222,131 @@ pub(crate) fn sync_order(w: &mut Worker, game: &Game) {
     }
 }
 
-fn order_json(game: &Game, lo: Result<plugins::LoadOrder, String>) -> String {
+/// The Load order tab's data: the plugins, LOOT's messages for them, and which sort ran last (with its note).
+fn order_json(w: &Worker, game: &Game, lo: Result<plugins::LoadOrder, String>, sorted_by: &str, note: &str) -> String {
+    let msgs = w.loot.get(&game.id()).map(|(_, m)| crate::loot::messages_json(m)).unwrap_or_else(|| "{}".into());
     match lo {
-        Ok(lo) => format!("{{\"game\":{},\"plugins\":{},\"error\":\"\"}}", quote(&game.id()), lo.to_json()),
-        Err(e) => format!("{{\"game\":{},\"plugins\":[],\"error\":{}}}", quote(&game.id()), quote(&e)),
+        Ok(lo) => format!(
+            "{{\"game\":{},\"plugins\":{},\"messages\":{},\"sortedBy\":{},\"note\":{},\"error\":\"\"}}",
+            quote(&game.id()),
+            lo.to_json(),
+            msgs,
+            quote(sorted_by),
+            quote(note)
+        ),
+        Err(e) => format!(
+            "{{\"game\":{},\"plugins\":[],\"messages\":{{}},\"sortedBy\":\"\",\"note\":\"\",\"error\":{}}}",
+            quote(&game.id()),
+            quote(&e)
+        ),
     }
+}
+
+fn post_order(w: &Worker, game: &Game, lo: Result<plugins::LoadOrder, String>, sorted_by: &str, note: &str) {
+    let j = order_json(w, game, lo, sorted_by, note);
+    w.post(move |t| t.set_order_json(QString::from(j.as_str())));
+}
+
+/// What the plugins look like (names, sizes, times, on or off) and which masterlist: LOOT's messages are read again
+/// only when this changes.
+fn loot_key(lo: &plugins::LoadOrder, lists: &crate::loot::Lists) -> String {
+    let stamp = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()
+            .map(|m| format!("{}:{:?}", m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs())))
+            .unwrap_or_default()
+    };
+    let mut key = format!("{}|{}", stamp(&lists.masterlist), stamp(&lists.prelude));
+    for p in lo.plugins() {
+        key.push_str(&format!("|{}{}{}", if p.active { "*" } else { "" }, p.name, stamp(&lo.files().data.join(&p.name))));
+    }
+    key
+}
+
+/// Reads LOOT's messages for the game's plugins when they changed since the last time, then shows the load order.
+fn loot_messages(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>) {
+    let lo = plugins::LoadOrder::read(game);
+    if let (Ok(lo), Some(l)) = (&lo, &lists) {
+        let key = loot_key(lo, l);
+        if w.loot.get(&game.id()).map(|(k, _)| k != &key).unwrap_or(true) {
+            let at = Instant::now();
+            match crate::loot::messages(game, lo, l) {
+                Ok(m) => {
+                    crate::log::line("loot", &format!("Messages for {} plugins in {} ms", m.len(), at.elapsed().as_millis()));
+                    w.loot.insert(game.id(), (key, m));
+                }
+                Err(e) => crate::log::line("loot", &format!("No messages: {e}")),
+            }
+        }
+    }
+    post_order(w, game, lo.map_err(|e| format!("The load order couldn't be read ({e}).")), "", "");
+}
+
+/// Sorts with LOOT when its masterlist is here, otherwise with the engine's own sort (masters first, each plugin
+/// after its masters), and says which one it used.
+fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, why: String) {
+    let mut lo = match plugins::LoadOrder::read(game) {
+        Ok(lo) => lo,
+        Err(e) => {
+            w.say(format!("The load order couldn't be read ({e})."), "warn");
+            return post_order(w, game, Err(e.to_string()), "", "");
+        }
+    };
+    let mut note = why;
+    let mut by = "masters";
+    let mut general = 0;
+    if let Some(l) = &lists {
+        w.say("Sorting with LOOT...", "work");
+        match crate::loot::sort(game, &lo, l) {
+            Ok(s) => {
+                crate::loot::apply(&mut lo, &s);
+                for g in &s.general {
+                    crate::log::line("loot", &format!("General message [{}]: {}", g.level, g.text));
+                }
+                general = s.general.iter().filter(|g| g.level != "say").count();
+                let key = loot_key(&lo, l);
+                w.loot.insert(game.id(), (key, s.messages));
+                by = "loot";
+            }
+            Err(e) => {
+                crate::log::line("loot", &format!("LOOT sort failed: {e}"));
+                note = format!("LOOT couldn't sort: {e}.");
+            }
+        }
+    }
+    if by != "loot" {
+        lo.sort();
+    }
+    let saved = lo.save();
+    let words = match (&saved, by) {
+        (Err(e), _) => {
+            w.say(format!("The load order couldn't be saved ({e}). Start the game once from Steam so it makes its settings folder."), "warn");
+            String::new()
+        }
+        (Ok(()), "loot") => {
+            let n = w.loot.get(&game.id()).map(|(_, m)| m.len()).unwrap_or(0);
+            let mut s = String::from("Sorted with LOOT's masterlist");
+            if n > 0 {
+                s.push_str(&format!(". LOOT has notes on {}", if n == 1 { "1 plugin".to_string() } else { format!("{n} plugins") }));
+            }
+            if general > 0 {
+                s.push_str(&format!(" and {general} general {}; they're in the activity log", if general == 1 { "warning" } else { "warnings" }));
+            }
+            w.say(s.clone(), "ok");
+            s
+        }
+        (Ok(()), _) => {
+            let s = if note.is_empty() {
+                "Sorted by masters only (LOOT's masterlist isn't here)".to_string()
+            } else {
+                format!("Sorted by masters only. {note}")
+            };
+            w.say(s.clone(), if note.is_empty() { "ok" } else { "warn" });
+            s
+        }
+    };
+    let now = plugins::LoadOrder::read(game).map_err(|e| e.to_string());
+    post_order(w, game, now, by, &words);
 }
 
 fn profiles_json(w: &mut Worker, game: &Game) -> String {
@@ -299,6 +419,68 @@ fn finish_share(w: &mut Worker, game: &Game) {
     w.post(move |t| t.set_import_json(QString::from(empty.as_str())));
     post_profiles(w, game);
     w.show(game, false);
+}
+
+/// Profiles > Create a Thunderstore code: {"state": "working" | "ready" | "error", "profile", "code", "left" (mods a
+/// code can't hold), "files" (settings files included), "message"}.
+fn code_json(state: &str, profile: &str, code: &str, left: usize, files: usize, message: &str) -> String {
+    format!(
+        "{{\"state\":{},\"profile\":{},\"code\":{},\"left\":{},\"files\":{},\"message\":{}}}",
+        quote(state),
+        quote(profile),
+        quote(code),
+        left,
+        files,
+        quote(message)
+    )
+}
+
+/// The game's BepInEx settings files (BepInEx/config/*.cfg), which a Thunderstore code carries along. Only plain
+/// files, each under 1 MB, 8 MB in all; they're read, never changed.
+fn config_files(game: &Game) -> Vec<(String, Vec<u8>)> {
+    let Some(dir) = turbine_engine::rules::find_ci(&game.install_dir, "BepInEx/config") else { return Vec::new() };
+    let mut names: Vec<(String, PathBuf)> = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    let m = std::fs::symlink_metadata(e.path()).ok()?;
+                    (m.is_file() && m.len() <= 1 << 20 && n.to_ascii_lowercase().ends_with(".cfg")).then(|| (n, e.path()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    let mut total = 0usize;
+    let mut out = Vec::new();
+    for (n, p) in names {
+        let Ok(bytes) = std::fs::read(&p) else { continue };
+        total += bytes.len();
+        if total > 8 << 20 {
+            break;
+        }
+        out.push((format!("BepInEx/config/{n}"), bytes));
+    }
+    out
+}
+
+/// One Nexus file (from Other versions) in place of the mod's installed file.
+fn install_nexus_version(
+    net: &mut Net,
+    info: &GameInfo,
+    id: &str,
+    file: &str,
+    each: &mut dyn FnMut(Fetched),
+    prog: &mut dyn FnMut(&str, u64, Option<u64>),
+) -> Result<usize, String> {
+    let mod_id: u64 = id.parse().map_err(|_| "That mod can't be read.".to_string())?;
+    let file_id: u64 = file.parse().map_err(|_| "That file can't be read.".to_string())?;
+    let replaces = info
+        .have
+        .iter()
+        .find(|h| h.source.kind == "nexus" && turbine_engine::nexus::parse_source_id(&h.source.id).is_some_and(|(_, m, _)| m == mod_id))
+        .map(|h| h.mod_id.clone());
+    net.install_nexus(info, mod_id, file_id, replaces, each, prog)
 }
 
 // ---------------------------------------------------------------------------------------------------- the object
@@ -586,21 +768,39 @@ impl qobject::Turbine {
                 if let Err(e) = &r {
                     w.say(e.clone(), "warn");
                 }
-                let j = order_json(&game, plugins::LoadOrder::read(&game).map_err(|e| e.to_string()));
-                w.post(move |t| t.set_order_json(QString::from(j.as_str())));
+                let lo = plugins::LoadOrder::read(&game).map_err(|e| e.to_string());
+                post_order(w, &game, lo, "", "");
             }),
         );
     }
 
-    pub fn load_order(self: Pin<&mut Self>) {
+    pub fn load_order(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
-        self.send(
+        let gid = game.id();
+        let g = game.clone();
+        self.as_mut().send(
             Some(game.id()),
             "Read the load order",
             false,
             Box::new(move |w: &mut Worker| {
-                let j = order_json(&game, plugins::sync(&game).map_err(|e| format!("The load order couldn't be read ({e}).")));
-                w.post(move |t| t.set_order_json(QString::from(j.as_str())));
+                let lo = plugins::sync(&g).map_err(|e| format!("The load order couldn't be read ({e})."));
+                post_order(w, &g, lo, "", "");
+            }),
+        );
+        // Then LOOT's notes on the plugins, with its masterlist (downloaded at most once a day).
+        self.net_send(
+            "LOOT's masterlist",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let (lists, note) = net.loot_lists(false);
+                if !note.is_empty() {
+                    crate::log::line("loot", &note);
+                }
+                if lists.is_none() {
+                    return;
+                }
+                post(qt, move |t| {
+                    t.send(Some(gid), "LOOT's notes on the plugins", false, Box::new(move |w: &mut Worker| loot_messages(w, &game, lists)))
+                });
             }),
         );
     }
@@ -617,12 +817,20 @@ impl qobject::Turbine {
         self.order_job("Turn a plugin on or off", move |lo| lo.set_active(&name, on));
     }
 
-    pub fn order_sort(self: Pin<&mut Self>) {
+    /// Sort automatically: with LOOT when its masterlist can be had, otherwise by masters only.
+    pub fn order_sort(mut self: Pin<&mut Self>) {
         crate::log::line("action", "Load order: sort automatically");
-        self.order_job("Sort the load order", move |lo| {
-            lo.sort();
-            Ok(())
-        });
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().say("Getting LOOT's masterlist...", "work");
+        self.net_send(
+            "LOOT's masterlist for sorting",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let (lists, note) = net.loot_lists(false);
+                post(qt, move |t| {
+                    t.send(Some(game.id()), "Sort the load order", true, Box::new(move |w: &mut Worker| sort_order(w, &game, lists, note)))
+                });
+            }),
+        );
     }
 
     // ------------------------------------------------------------------------------------------------ profiles
@@ -695,6 +903,83 @@ impl qobject::Turbine {
                 Err(e) => w.say(e, "error"),
             }
         });
+    }
+
+    pub fn profile_code(mut self: Pin<&mut Self>, name: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let name = name.to_string();
+        crate::log::line("action", &format!("Create a Thunderstore code for profile {name}"));
+        let working = format!("{{\"state\":\"working\",\"profile\":{},\"code\":\"\",\"left\":0,\"files\":0,\"message\":\"\"}}", quote(&name));
+        self.as_mut().set_code_json(QString::from(working.as_str()));
+        self.send(
+            Some(game.id()),
+            "Read a profile for its code",
+            false,
+            Box::new(move |w: &mut Worker| {
+                let r = w.slot(&game).and_then(|s| {
+                    let p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                    let order = p.order_of(&s.store, &name).ok_or_else(|| format!("The profile {name} isn't there any more."))?;
+                    Ok(profiles::share_mods(&s.store, &order))
+                });
+                let mods = match r {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let j = code_json("error", &name, "", 0, 0, &e);
+                        return w.post(move |t| t.set_code_json(QString::from(j.as_str())));
+                    }
+                };
+                let ts: Vec<(String, Option<String>, bool)> = mods
+                    .iter()
+                    .filter(|m| m.kind == "thunderstore" && !m.id.is_empty())
+                    .map(|m| (m.id.clone(), m.version.clone(), m.enabled))
+                    .collect();
+                let left = mods.iter().filter(|m| m.kind != "thunderstore" && m.kind != "loader").count();
+                if ts.is_empty() {
+                    let j = code_json("error", &name, "", left, 0, "This profile has no mods from Thunderstore, so there is nothing a code can hold.");
+                    return w.post(move |t| t.set_code_json(QString::from(j.as_str())));
+                }
+                let configs = config_files(&game);
+                w.post(move |t| {
+                    let info = t.info();
+                    t.net_send(
+                        "Upload a profile to Thunderstore",
+                        Box::new(move |net: &mut Net, qt: &Qt| {
+                            let j = match net.export_code(&info, &name, &ts, &configs) {
+                                Ok(code) => {
+                                    crate::log::line("net", &format!("Profile code made for {name}: {} mods, {} settings files", ts.len(), configs.len()));
+                                    code_json("ready", &name, &code, left, configs.len(), "")
+                                }
+                                Err(e) => code_json("error", &name, "", left, 0, &e),
+                            };
+                            set(qt, move |t| t.set_code_json(QString::from(j.as_str())));
+                        }),
+                    );
+                });
+            }),
+        );
+    }
+
+    pub fn install_version(mut self: Pin<&mut Self>, id: &QString, source: &QString, version: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let info = self.info();
+        let (id, source, version) = (id.to_string(), source.to_string(), version.to_string());
+        crate::log::line("action", &format!("Install version {version} of {id} from {source}"));
+        self.as_mut().say("Getting that version ready to download...", "work");
+        self.net_send(
+            &format!("Install {version} of {id}"),
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let mut each = hand_over(qt, &game);
+                let mut prog = progress(qt);
+                let r = if source == "nexus" {
+                    install_nexus_version(net, &info, &id, &version, &mut each, &mut prog)
+                } else {
+                    net.install_ts_version(&info, &version, &mut each, &mut prog)
+                };
+                if let Err(e) = r {
+                    say(qt, e, "error");
+                }
+            }),
+        );
     }
 
     pub fn list_shares(mut self: Pin<&mut Self>) {

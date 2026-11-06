@@ -1,0 +1,5 @@
+# A small prelude in LOOT's metadata format, written for Turbine's screenshot checks (not LOOT's own prelude).
+common:
+  - &sampleNote
+    type: say
+    content: 'This note comes from the recorded sample masterlist used for {0}.'

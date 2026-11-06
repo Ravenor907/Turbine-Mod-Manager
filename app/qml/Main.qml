@@ -68,12 +68,16 @@ Window {
         readonly property string page: arg("page")
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
         readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
-                                      "loadorder", "profiles", "accounts", "updates"].indexOf(page) >= 0
+                                      "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         function start() {
             const files = arg("selftest-import")
-            if (files !== "") for (const f of files.split(",")) Turbine.importZip(f)
+            // "file|thunderstore|Owner-Name|1.0.3" adds a zip as if it came from Thunderstore.
+            if (files !== "") for (const f of files.split(",")) {
+                const p = f.split("|")
+                if (p.length === 4) Turbine.selftestImport(p[0], p[1], p[2], p[3]); else Turbine.importZip(f)
+            }
             if (page === "gamemenu") app.sheet = "gamemenu"
             else if (page === "add") { app.tab = 1; app.openAdd() }
             else if (page === "about") app.openSection("About")
@@ -81,8 +85,8 @@ Window {
                 app.labsAnswers = { "pad-quiet": "works", "proton-bepinex": "problem" }
                 app.openSection("Labs"); app.setRow = 5
             }
-            else if (page === "browse" || page === "moddetails") { app.tab = 1; app.zone = "main" }
-            else if (page === "loadorder") { app.tab = 2; app.zone = "main" }
+            else if (page === "browse" || page === "moddetails" || page === "versions") { app.tab = 1; app.zone = "main" }
+            else if (page === "loadorder" || page === "lootsort" || page === "lootnotes") { app.tab = 2; app.zone = "main" }
             else if (page === "accounts") app.openSection("Accounts")
             else if (page === "updates") { app.openSection("Updates"); Turbine.selfCheck(false, false) }
             else if (page === "perfcheck") app.openPerf()
@@ -96,14 +100,18 @@ Window {
             if (shot.page === "menu" && app.menuMod) app.sheet = "modmenu"
             else if (shot.page === "check") app.startPlay()
             else if (shot.page === "moddetails" && app.browseData && app.browseData.items && app.browseData.items.length > 0) app.openDetails(app.browseData.items[0])
+            else if (shot.page === "versions" && app.browseData && app.browseData.items && app.browseData.items.length > 0)
+                app.openDetails(app.browseData.items.find(x => x.id === "x753-More_Suits") || app.browseData.items[0])
+            else if (shot.page === "code") { app.openProfiles(); Turbine.profileCode("Default"); app.sheet = "code" }
             else if (shot.page === "profiles") app.openProfiles()
+            else if (shot.page === "lootsort" || shot.page === "lootnotes") { app.orderIndex = -1; Turbine.orderSort() }
             // After the first frames, so the screenshot inside the report has something in it.
             else if (shot.page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
         }
     }
     Timer {
         running: shot.on
-        interval: shot.slow ? 4500 : 1500
+        interval: shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 ? 6500 : shot.slow ? 4500 : 1500
         onTriggered: app.contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
 
@@ -256,7 +264,10 @@ Window {
             app.browseLoading = false
             if (app.getArea === "grid") app.getIndex = Math.max(0, Math.min(app.getIndex, (v.items || []).length - 1))
         }
-        function onDetailsJsonChanged() { app.detailsData = app.parse(Turbine.detailsJson, null) }
+        function onDetailsJsonChanged() {
+            app.detailsData = app.parse(Turbine.detailsJson, null)
+            if (shot.page === "versions" && app.otherVersions.length > 0) app.openVersions()
+        }
         function onDownloadJsonChanged() { app.dl = app.parse(Turbine.downloadJson, { active: false }) }
         function onFomodJsonChanged() {
             app.fomod = app.parse(Turbine.fomodJson, null)
@@ -269,6 +280,12 @@ Window {
             if (app.orderMoving) return
             app.order = v.plugins || []
             app.orderError = v.error || ""
+            app.orderMessages = v.messages || {}
+            if (v.note) app.orderNote = v.note
+            if (shot.page === "lootnotes" && v.sortedBy === "loot") {
+                const i = app.order.findIndex(x => (app.orderMessages[x.name.toLowerCase()] || []).length > 1)
+                if (i >= 0) { app.orderIndex = i; app.sheet = "plugin" }
+            }
             app.orderIndex = Math.max(-1, Math.min(app.orderIndex, app.order.length - 1))
         }
         function onProfilesJsonChanged() {
@@ -285,6 +302,10 @@ Window {
         }
         function onUpdatesJsonChanged() { app.updatesData = app.parse(Turbine.updatesJson, null) }
         function onAccountJsonChanged() { app.account = app.parse(Turbine.accountJson, { state: "none" }) }
+        function onCodeJsonChanged() {
+            app.codeData = app.parse(Turbine.codeJson, null)
+            if (app.codeData && app.codeData.state === "ready") Turbine.copyText(app.codeData.code)
+        }
         function onSelfJsonChanged() {
             app.selfUpd = app.parse(Turbine.selfJson, { state: "idle" })
             if (app.selfUpd.state === "available" && app.selfAuto) {
@@ -303,7 +324,7 @@ Window {
         modPage = false
         browseData = null
         getArea = "bar"; getIndex = 0; getText = ""; getCategory = ""
-        order = []; orderIndex = 0
+        order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
         Turbine.select(game.id)
         if (tab === 1) Qt.callLater(browseNow)
@@ -701,6 +722,16 @@ Window {
             else if (b === "a" && loaderIndex === 0 && loaderCanGet) { sheet = ""; note("action", "Install the loader"); Turbine.installLoader() }
             else if (b === "a" && loaderIndex === 0 && !loaderSourceShown) loaderSourceShown = true
             else if (b === "a" || b === "b") sheet = ""
+        } else if (sheet === "versions") {
+            if (b === "up") versionIndex = Math.max(0, versionIndex - 1)
+            else if (b === "down") versionIndex = Math.min(otherVersions.length - 1, versionIndex + 1)
+            else if (b === "a") installVersion(versionIndex)
+            else if (b === "b" || b === "x") sheet = ""
+        } else if (sheet === "code") {
+            if (b === "a" && codeData && codeData.state === "ready") { Turbine.copyText(codeData.code); toast.showPlain("Code copied.") }
+            else if (b === "b") sheet = "profiles"
+        } else if (sheet === "plugin") {
+            if (b === "b" || b === "x" || b === "a") sheet = ""
         } else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "ask") askView.handleButton(b)
         else if (sheet === "profiles") {
@@ -741,6 +772,7 @@ Window {
         if (page === "game" && modPage) {
             if (b === "b") modPage = false
             else if (b === "a") installFromDetails()
+            else if (b === "x") openVersions()
             else if (b === "left") { zone = "rail"; railIndex = current }
             else if (b === "lt") tab = Math.max(0, tab - 1)
             else if (b === "rt") tab = Math.min(tabs.length - 1, tab + 1)
@@ -748,7 +780,7 @@ Window {
             return
         }
         if (page === "game" && tab === 1 && game && sources.length > 0 && ["up", "down", "left", "right", "a"].indexOf(b) >= 0) { getAct(b); return }
-        if (page === "game" && tab === 2 && game && ["up", "down", "left", "a", "y"].indexOf(b) >= 0) { orderAct(b); return }
+        if (page === "game" && tab === 2 && game && ["up", "down", "left", "a", "x", "y"].indexOf(b) >= 0) { orderAct(b); return }
         if (page === "game") {
             if (b === "left") { zone = "rail"; railIndex = current }
             else if (b === "lt") tab = Math.max(0, tab - 1)
@@ -888,6 +920,28 @@ Window {
         modPage = false
     }
 
+    // Other versions of the mod on the details page (X).
+    property int versionIndex: 0
+    readonly property var otherVersions: detailsData && detailsData.versions ? detailsData.versions : []
+    function openVersions() {
+        if (otherVersions.length === 0) return
+        note("action", "Other versions of " + detailsData.name)
+        versionIndex = 0
+        sheet = "versions"
+    }
+    function installVersion(i) {
+        const v = otherVersions[i]
+        if (!v || v.installed) return
+        note("action", "Install version " + (v.version || v.name) + " of " + detailsData.name)
+        sheet = ""
+        Turbine.installVersion(detailsData.id, detailsData.source || srcNow, v.id)
+        edited()
+        modPage = false
+    }
+
+    // Profiles > Create a Thunderstore code.
+    property var codeData: null
+
     // Downloads: the status line and the rail's Downloads ring.
     property var dl: ({ active: false })
     readonly property real dlPart: dl.active && dl.total > 0 ? Math.min(1, dl.got / dl.total) : -1
@@ -898,6 +952,9 @@ Window {
     // Load order (Skyrim).
     property var order: []
     property string orderError: ""
+    property var orderMessages: ({})      // LOOT's notes: plugin name lowercased -> [{level, text}]
+    property string orderNote: ""         // what the last Sort automatically did
+    readonly property var orderPlugin: orderIndex >= 0 && orderIndex < order.length ? order[orderIndex] : null
     property int orderIndex: 0
     property bool orderMoving: false
     property int orderFrom: -1
@@ -923,6 +980,7 @@ Window {
             Turbine.orderToggle(p.name, !p.active)
         }
         else if (b === "y" && p && !p.fixed) { orderMoving = true; orderFrom = orderIndex }
+        else if (b === "x" && p) { note("action", "Plugin details: " + p.name); sheet = "plugin" }
         else if (b === "left") { zone = "rail"; railIndex = current }
     }
 
@@ -937,7 +995,10 @@ Window {
         { key: "new", label: "New profile", detail: "From the mods as they are now" },
         { key: "export", label: "Export to a share file", detail: "Saves \"" + (profileData ? profileData.active : "") + "\" to Downloads, to share" },
         { key: "importFile", label: "Import a share file", detail: "A Turbine profile file in Downloads" }
-    ].concat(rules && rules.community ? [{ key: "importCode", label: "Import a Thunderstore profile code", detail: "A code someone shared with you" }] : [])
+    ].concat(rules && rules.community ? [
+        { key: "code", label: "Create a Thunderstore code", detail: "Uploads \"" + (profileData ? profileData.active : "") + "\" to Thunderstore and shows a code to share" },
+        { key: "importCode", label: "Import a Thunderstore profile code", detail: "A code someone shared with you" }
+    ] : [])
     function openProfiles() { profIndex = 0; importData = null; Turbine.profiles(); sheet = "profiles" }
     function profileRun(i) {
         if (importData) {
@@ -959,6 +1020,7 @@ Window {
         note("action", "Profiles: " + a.label)
         if (a.key === "new") openAsk("newProfile", "New profile", "A name for the mods as they are now.", "", "Profile name", 60, false, "Make it")
         else if (a.key === "export" && profileData) Turbine.profileExport(profileData.active)
+        else if (a.key === "code" && profileData) { Turbine.profileCode(profileData.active); sheet = "code" }
         else if (a.key === "importFile") { Turbine.listShares(); shareIndex = 0; sheet = "shares" }
         else if (a.key === "importCode") openAsk("code", "Thunderstore profile code", "The code looks like 0190a2b4-7c1d-4e8f-9a0b-1c2d3e4f5a6b.", "", "Profile code", 40, false, "Read it")
     }
@@ -1109,6 +1171,12 @@ Window {
           expect: "One question per page with pictures; B goes back; the files of the chosen options go in." },
         { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one with Y, then Sort automatically.",
           expect: "The game loads plugins in that order; masters stay first; missing masters are named." },
+        { id: "ts-code", title: "Thunderstore code", how: "Lethal Company or another Thunderstore game, online: game menu (View), Profiles, Create a Thunderstore code.",
+          expect: "A code shows big and is copied; importing it on another device (or Profiles, Import a Thunderstore profile code) gets the same mods." },
+        { id: "other-versions", title: "Other versions", how: "Get Mods, a mod's details, X Other versions, then A on an older version.",
+          expect: "That version downloads and takes the installed one's place, same spot and on or off." },
+        { id: "loot-sort", title: "LOOT sorting", how: "Skyrim with a few plugin mods, online: Load order tab, A on Sort automatically, then X on a plugin with a badge.",
+          expect: "The line at the top says Sorted with LOOT's masterlist; the game starts with that order; badges like Dirty show LOOT's notes, and X lists them." },
         { id: "nexus-key", title: "Nexus Mods key", how: "Settings, Accounts: add your personal API key with Steam's keyboard.",
           expect: "It says your name and Premium or Free; Nexus Mods browsing works; Sign out removes the key." },
         { id: "mod-updates", title: "Mod updates", how: "Have an older Thunderstore or Nexus mod, open its game.",
@@ -1849,6 +1917,7 @@ Window {
                         info: app.detailsData
                         focused: app.zone === "main"
                         onInstallClicked: app.installFromDetails()
+                        onVersionsClicked: app.openVersions()
                     }
                     // Load order tab (Skyrim)
                     LoadOrderList {
@@ -1858,6 +1927,8 @@ Window {
                         visible: app.page === "game" && app.game !== null && app.tab === 2
                         plugins: app.order
                         error: app.orderError
+                        messages: app.orderMessages
+                        note: app.orderNote
                         focusIndex: app.orderIndex
                         moving: app.orderMoving
                         active: app.zone === "main" && app.sheet === ""
@@ -2312,6 +2383,31 @@ Window {
         onBack: { app.note("action", "Installer: back a step"); Turbine.fomodBack() }
         onStop: { app.note("action", "Installer: stopped"); Turbine.fomodCancel() }
     }
+    VersionsSheet {
+        ui: kit
+        visible: app.sheet === "versions"
+        modName: app.detailsData && app.detailsData.name ? app.detailsData.name : ""
+        versions: app.otherVersions
+        focusIndex: app.versionIndex
+        note: app.detailsData && app.detailsData.versionsNote ? app.detailsData.versionsNote : ""
+        onActivated: (i) => { app.versionIndex = i; app.installVersion(i) }
+        onClosed: app.act("b")
+    }
+    CodeSheet {
+        ui: kit
+        visible: app.sheet === "code"
+        info: app.codeData
+        onCopyClicked: app.act("a")
+        onClosed: app.act("b")
+    }
+    PluginSheet {
+        ui: kit
+        visible: app.sheet === "plugin" && app.orderPlugin !== null
+        plugin: app.orderPlugin
+        position: app.orderIndex + 1
+        notes: app.orderPlugin ? (app.orderMessages[app.orderPlugin.name.toLowerCase()] || []) : []
+        onClosed: app.act("b")
+    }
     ProfilesSheet {
         id: profilesView
         ui: kit
@@ -2386,7 +2482,9 @@ Window {
             Hint { visible: app.moving; k: "▲▼"; label: "Move" }
             Hint { visible: app.moving; k: "a"; label: "Done" }
             // Sheets
-            Hint { visible: ["modmenu", "gamemenu", "add", "fomod", "profiles", "shares"].indexOf(app.sheet) >= 0; k: "▲▼"; label: "Choose" }
+            Hint { visible: ["modmenu", "gamemenu", "add", "fomod", "profiles", "shares", "versions"].indexOf(app.sheet) >= 0; k: "▲▼"; label: "Choose" }
+            Hint { visible: app.sheet === "versions"; k: "a"; label: "Install" }
+            Hint { visible: app.sheet === "code" && !!app.codeData && app.codeData.state === "ready"; k: "a"; label: "Copy" }
             Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
             Hint { visible: app.sheet === "report" && reportView.editing; k: "b"; label: "Done typing" }
@@ -2395,10 +2493,12 @@ Window {
             Hint { visible: app.sheet === "ask"; k: "b"; label: "Cancel" }
             // Get Mods, details, load order
             Hint { visible: legend.gamePage && app.modPage; k: "a"; label: "Install" }
+            Hint { visible: legend.gamePage && app.modPage && app.otherVersions.length > 0; k: "x"; label: "Other versions" }
             Hint { visible: legend.gamePage && app.modPage; k: "b"; label: "Back to the list" }
             Hint { visible: legend.gamePage && !app.modPage && app.tab === 1 && app.sources.length > 0; k: "a"; label: app.getArea === "grid" ? "Details" : "Choose" }
             Hint { visible: legend.gamePage && app.tab === 2 && !app.orderMoving; k: "a"; label: app.orderIndex < 0 ? "Sort" : "Turn on or off" }
             Hint { visible: legend.gamePage && app.tab === 2 && !app.orderMoving && app.orderIndex >= 0; k: "y"; label: "Move" }
+            Hint { visible: legend.gamePage && app.tab === 2 && !app.orderMoving && app.orderIndex >= 0; k: "x"; label: "Details" }
             Hint { visible: app.orderMoving; k: "▲▼"; label: "Move" }
             Hint { visible: app.orderMoving; k: "a"; label: "Done" }
             // Game page

@@ -40,6 +40,7 @@ pub mod qobject {
         #[qproperty(QString, updates_json, cxx_name = "updatesJson")]
         #[qproperty(QString, account_json, cxx_name = "accountJson")]
         #[qproperty(QString, self_json, cxx_name = "selfJson")]
+        #[qproperty(QString, code_json, cxx_name = "codeJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -62,6 +63,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "importZip"]
         fn import_zip(self: Pin<&mut Self>, path: &QString);
+
+        /// For the build's screenshot checks: adds a zip as if it came from `kind` (e.g. "thunderstore") as `id` at
+        /// `version`.
+        #[qinvokable]
+        #[cxx_name = "selftestImport"]
+        fn selftest_import(self: Pin<&mut Self>, path: &QString, kind: &QString, id: &QString, version: &QString);
 
         #[qinvokable]
         #[cxx_name = "setEnabled"]
@@ -240,6 +247,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "profileImportCode"]
         fn profile_import_code(self: Pin<&mut Self>, code: &QString);
+        /// Uploads a profile's Thunderstore mods (and its BepInEx settings) and makes a code to share, into `codeJson`.
+        #[qinvokable]
+        #[cxx_name = "profileCode"]
+        fn profile_code(self: Pin<&mut Self>, name: &QString);
+        /// Installs one version of a mod ("Owner-Name-1.2.3" on Thunderstore; a file ID on Nexus Mods).
+        #[qinvokable]
+        #[cxx_name = "installVersion"]
+        fn install_version(self: Pin<&mut Self>, id: &QString, source: &QString, version: &QString);
         /// Gets the mods of the share being imported and makes its profile.
         #[qinvokable]
         #[cxx_name = "profileImportGo"]
@@ -365,6 +380,7 @@ pub struct TurbineRust {
     pub(crate) updates_json: QString,
     pub(crate) account_json: QString,
     pub(crate) self_json: QString,
+    pub(crate) code_json: QString,
     /// The download lane (started the first time it's needed).
     pub(crate) net: Option<Sender<crate::actions::NetTask>>,
     /// What the download lane needs to know about the game on screen (kept up to date by the worker).
@@ -409,6 +425,7 @@ impl Default for TurbineRust {
             updates_json: QString::default(),
             account_json: QString::from("{\"state\":\"none\"}"),
             self_json: QString::from("{\"state\":\"idle\"}"),
+            code_json: QString::default(),
             net: None,
             game_info: crate::online::GameInfo::default(),
         }
@@ -431,6 +448,8 @@ pub(crate) struct Worker {
     pub(crate) pending: std::collections::VecDeque<(String, store::Pending)>,
     /// A profile share being imported (game id, share).
     pub(crate) share: Option<(String, turbine_engine::profiles::Share)>,
+    /// LOOT's messages per game: (what the plugins looked like when they were read, plugin name lowercased: messages).
+    pub(crate) loot: HashMap<String, (String, HashMap<String, Vec<crate::loot::Msg>>)>,
 }
 
 pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
@@ -766,6 +785,7 @@ impl qobject::Turbine {
                     qt,
                     pending: std::collections::VecDeque::new(),
                     share: None,
+                    loot: HashMap::new(),
                 };
                 while let Ok(task) = rx.recv() {
                     let long = task.long;
@@ -882,6 +902,25 @@ impl qobject::Turbine {
                 let source = turbine_engine::net::SourceInfo { kind: "zip".into(), ..Default::default() };
                 crate::actions::add_archive(w, &game, &path, source, None, &file);
             }),
+        );
+    }
+
+    pub fn selftest_import(mut self: Pin<&mut Self>, path: &QString, kind: &QString, id: &QString, version: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let path = PathBuf::from(path.to_string());
+        let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let source = turbine_engine::net::SourceInfo {
+            kind: kind.to_string(),
+            id: id.to_string(),
+            version: Some(version.to_string()).filter(|v| !v.is_empty()),
+            ..Default::default()
+        };
+        self.as_mut().edited();
+        self.send(
+            Some(game.id()),
+            &format!("Add {file} (test)"),
+            true,
+            Box::new(move |w: &mut Worker| crate::actions::add_archive(w, &game, &path, source, None, &file)),
         );
     }
 

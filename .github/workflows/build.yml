@@ -218,6 +218,14 @@ jobs:
             shoot "profiles-$size" "$size" profiles "$PWD/home" --game=$skyrim
             shoot "accounts-$size" "$size" accounts "$PWD/home"
             shoot "updates-$size" "$size" updates "$PWD/home"
+            # LOOT sorting with the recorded sample masterlist (on a copy of the home, since sorting writes plugins.txt).
+            for page in lootsort lootnotes; do
+              rm -rf "$PWD/lhome" && cp -a "$PWD/home" "$PWD/lhome"
+              shoot "$page-$size" "$size" $page "$PWD/lhome" --game=$skyrim
+            done
+            shoot "versions-$size" "$size" versions "$PWD/home" --game=$lethal
+            shoot "code-$size" "$size" code "$PWD/home" --game=$lethal \
+              "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
           done
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.

@@ -11,11 +11,13 @@ Item {
     property string installNote: ""       // e.g. "Downloading..." while it runs
 
     signal installClicked()
+    signal versionsClicked()
 
     readonly property bool loading: !info || info.loading === true
     readonly property var install: info && info.install ? info.install : []
     readonly property var extra: install.filter(x => !x.main)
     readonly property real total: install.reduce((a, x) => a + (x.size || 0), 0)
+    readonly property int otherCount: info && info.versions ? info.versions.length : 0
     readonly property bool canInstall: !loading && !info.error && install.length > 0 && info.premium !== false
     function size(b) {
         if (!b) return "Not listed"
@@ -209,12 +211,33 @@ Item {
                 }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
-                    width: right.width - (md.canInstall ? md.ui.px(160) : 0)
+                    width: right.width - (md.canInstall ? md.ui.px(160) : 0) - (md.otherCount > 0 ? otherRow.width + md.ui.px(12) : 0)
                     wrapMode: Text.WordWrap
                     text: md.installNote !== "" ? md.installNote : md.installWords
                     color: md.info && md.info.message ? md.ui.c.warn : md.ui.c.soft
                     font.family: md.ui.bodyFont
                     font.pixelSize: md.ui.px(15)
+                }
+                // X: Other versions (older Thunderstore versions, or a Nexus mod's other files).
+                Rectangle {
+                    id: otherRow
+                    visible: md.otherCount > 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: otherWords.implicitWidth + md.ui.px(48); height: md.ui.px(40); radius: md.ui.px(8)
+                    color: md.ui.c.card
+                    border.color: md.ui.c.line
+                    Row {
+                        id: otherWords
+                        anchors.centerIn: parent
+                        spacing: md.ui.px(8)
+                        Rectangle {
+                            width: md.ui.px(24); height: width; radius: width / 2; color: md.ui.c.raised; border.color: md.ui.c.accentLo
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text { anchors.centerIn: parent; text: "X"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
+                        }
+                        Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    TapHandler { onTapped: md.versionsClicked() }
                 }
             }
         }

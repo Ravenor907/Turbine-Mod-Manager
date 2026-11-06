@@ -1,0 +1,32 @@
+# A small masterlist in LOOT's metadata format, written for Turbine's screenshot checks. The plugins are the made-up
+# ones tools/fake-home.py puts in the test Skyrim's Data folder; the CRCs are theirs.
+prelude:
+  common: []
+
+globals:
+  - type: say
+    content: 'Recorded sample masterlist: nothing here is about real mods.'
+
+plugins:
+  - name: 'Unofficial Skyrim Patch.esp'
+    msg:
+      - <<: *sampleNote
+        subs: [ 'the screenshot checks' ]
+
+  - name: 'Quiet Roads.esp'
+    after: [ 'Lantern Paths.esp' ]
+    msg:
+      - type: warn
+        content: 'Lowers the volume of carts and horses on roads. Turn off any other road sound mod.'
+    dirty:
+      - crc: 0x7501DA2D
+        util: '[SSEEdit v4.1.5](https://www.nexusmods.com/skyrimspecialedition/mods/164)'
+        itm: 3
+        udr: 1
+
+  - name: 'Lantern Paths.esp'
+    req:
+      - name: 'Lanterns Of Skyrim.esm'
+        display: 'Lanterns of Skyrim'
+    inc:
+      - 'Quiet Roads.esp'

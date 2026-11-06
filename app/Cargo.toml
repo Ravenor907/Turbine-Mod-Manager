@@ -16,6 +16,8 @@ cxx = "1.0.176"
 cxx-qt = "0.10"
 cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
 sdl2 = { version = "0.37", default-features = false }
+# LOOT's library (GPL-3.0-or-later): load order sorting and the masterlist's notes for Skyrim Special Edition.
+libloot = "=0.29.7"
 
 [build-dependencies]
 cxx-qt-build = "0.10"

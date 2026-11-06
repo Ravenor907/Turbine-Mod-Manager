@@ -1,0 +1,126 @@
+import QtQuick
+
+// "Other versions" from a mod's details (X): older Thunderstore versions, or a Nexus mod's other files (old
+// versions, optional files, updates) in their groups. A installs the focused one in place of the installed copy;
+// B closes. Main.qml handles the keys.
+Item {
+    id: vs
+    required property var ui
+    anchors.fill: parent
+
+    property string modName: ""
+    property var versions: []             // [{id, version, name, size, date, downloads, installed, group, note}]
+    property int focusIndex: 0
+    property string note: ""              // a line under the title (e.g. Premium is needed)
+
+    signal activated(int index)
+    signal closed()
+
+    onFocusIndexChanged: list.positionViewAtIndex(focusIndex, ListView.Contain)
+    function size(b) {
+        if (!b) return ""
+        if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"
+        if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB"
+        if (b >= 1024) return Math.round(b / 1024) + " KB"
+        return b + " bytes"
+    }
+
+    Rectangle { anchors.fill: parent; color: "#B0000000" }
+    MouseArea { anchors.fill: parent; onClicked: vs.closed() }
+    Rectangle {
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: vs.ui.px(56)
+        width: Math.min(parent.width * 0.6, vs.ui.px(560))
+        color: vs.ui.c.panel
+        border.color: vs.ui.c.line
+        MouseArea { anchors.fill: parent }
+        Column {
+            id: head
+            x: vs.ui.px(18); y: vs.ui.px(18)
+            width: parent.width - vs.ui.px(36)
+            spacing: vs.ui.px(6)
+            Text { text: "OTHER VERSIONS"; color: vs.ui.c.text; font.family: vs.ui.titleFont; font.pixelSize: vs.ui.px(18); font.bold: true; font.letterSpacing: vs.ui.px(1.5) }
+            Text {
+                width: parent.width; wrapMode: Text.WordWrap
+                text: vs.note !== "" ? vs.note : vs.modName + ": A installs the chosen one in place of the one you have, in the same spot and on or off."
+                color: vs.note !== "" ? vs.ui.c.warn : vs.ui.c.soft
+                font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(15)
+            }
+        }
+        ListView {
+            id: list
+            anchors.top: head.bottom
+            anchors.topMargin: vs.ui.px(10)
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: vs.ui.px(12)
+            x: vs.ui.px(18)
+            width: parent.width - vs.ui.px(36)
+            clip: true
+            spacing: vs.ui.px(4)
+            model: vs.versions
+            delegate: Item {
+                id: row
+                required property int index
+                required property var modelData
+                readonly property bool foc: vs.focusIndex === index
+                readonly property bool newGroup: index === 0 || vs.versions[index - 1].group !== modelData.group
+                width: list.width
+                height: box.height + (newGroup ? groupHead.height : 0)
+                Text {
+                    id: groupHead
+                    visible: row.newGroup
+                    height: visible ? vs.ui.px(28) : 0
+                    verticalAlignment: Text.AlignBottom
+                    bottomPadding: vs.ui.px(4)
+                    text: (row.modelData.group || "").toUpperCase()
+                    color: vs.ui.c.muted
+                    font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13); font.bold: true; font.letterSpacing: vs.ui.px(1)
+                }
+                Rectangle {
+                    id: box
+                    y: groupHead.height
+                    width: parent.width
+                    height: vs.ui.px(row.modelData.note ? 66 : 52)
+                    radius: vs.ui.px(6)
+                    color: row.foc ? vs.ui.c.focusFill : vs.ui.c.card
+                    border.color: vs.ui.c.accent
+                    border.width: row.foc ? vs.ui.px(2) : 0
+                    Column {
+                        x: vs.ui.px(14)
+                        width: parent.width - vs.ui.px(120)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: vs.ui.px(2)
+                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(16); font.bold: true }
+                        Text {
+                            width: parent.width; elide: Text.ElideRight
+                            text: [row.modelData.version ? "Version " + row.modelData.version : "", row.modelData.date || "", vs.size(row.modelData.size)].filter(s => s !== "").join(" · ")
+                            color: vs.ui.c.soft; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(14)
+                        }
+                        Text { visible: !!row.modelData.note; width: parent.width; elide: Text.ElideRight; text: row.modelData.note || ""; color: vs.ui.c.muted; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13) }
+                    }
+                    Rectangle {
+                        visible: row.modelData.installed === true
+                        anchors.right: parent.right; anchors.rightMargin: vs.ui.px(12); anchors.verticalCenter: parent.verticalCenter
+                        width: have.implicitWidth + vs.ui.px(14); height: vs.ui.px(24); radius: vs.ui.px(5)
+                        color: vs.ui.c.raised
+                        Text { id: have; anchors.centerIn: parent; text: "You have this"; color: vs.ui.c.ok; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13); font.bold: true }
+                    }
+                    Row {
+                        visible: row.foc && row.modelData.installed !== true
+                        anchors.right: parent.right; anchors.rightMargin: vs.ui.px(12); anchors.verticalCenter: parent.verticalCenter
+                        spacing: vs.ui.px(6)
+                        Rectangle {
+                            width: vs.ui.px(24); height: width; radius: width / 2; color: vs.ui.c.raised; border.color: vs.ui.c.accentLo
+                            anchors.verticalCenter: parent.verticalCenter
+                            Text { anchors.centerIn: parent; text: "A"; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13); font.bold: true }
+                        }
+                        Text { text: "Install"; color: vs.ui.c.soft; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    TapHandler { onTapped: vs.activated(row.index) }
+                }
+            }
+        }
+    }
+}
