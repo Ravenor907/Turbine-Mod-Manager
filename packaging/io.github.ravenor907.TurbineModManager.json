@@ -36,7 +36,7 @@
                 "install -Dm644 -t /app/share/turbine-mod-manager/licenses fonts/OFL-*.txt LICENSE",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.desktop /app/share/applications/io.github.ravenor907.TurbineModManager.desktop",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineModManager.metainfo.xml",
-                "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.svg /app/share/icons/hicolor/scalable/apps/io.github.ravenor907.TurbineModManager.svg"
+                "for n in 128 256 512; do install -Dm644 packaging/io.github.ravenor907.TurbineModManager-$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineModManager.png; done"
             ],
             "sources": [
                 { "type": "dir", "path": ".." }

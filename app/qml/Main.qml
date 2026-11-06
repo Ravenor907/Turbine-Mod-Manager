@@ -343,8 +343,19 @@ Window {
                 anchors.topMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: app.px(10)
-                // Placeholder logo until the owner's icon is ready.
+                // The app icon; a plain "T" if it can't be loaded.
+                Image {
+                    id: logo
+                    width: app.px(44); height: app.px(44)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    source: "file:///app/share/icons/hicolor/128x128/apps/io.github.ravenor907.TurbineModManager.png"
+                    sourceSize.width: app.px(88)
+                    smooth: true
+                    mipmap: true
+                    visible: status === Image.Ready
+                }
                 Rectangle {
+                    visible: logo.status !== Image.Ready
                     width: app.px(44); height: app.px(44); radius: width / 2
                     anchors.horizontalCenter: parent.horizontalCenter
                     gradient: Gradient {
