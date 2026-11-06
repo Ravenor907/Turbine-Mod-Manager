@@ -5,7 +5,9 @@ pub mod games;
 pub mod heroic;
 pub mod inflate;
 pub mod json;
+pub mod rules;
 pub mod steam;
+pub mod store;
 pub mod vdf;
 pub mod zip;
 
