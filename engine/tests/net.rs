@@ -168,6 +168,14 @@ fn only_https_from_known_hosts() {
         "https://skse.silverlock.org/beta/x.7z",
         "https://api.github.com/repos/a/b",
         "https://objects.githubusercontent.com/x",
+        "https://release-assets.githubusercontent.com/github-production-release-asset/1/2",
+        "https://raw.githubusercontent.com/loot/skyrimse/v0.21/masterlist.yaml",
+        "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/v0.3/x.flatpak",
+        "https://codeload.github.com/a/b/zip/refs/heads/main",
+        "https://cf-files.nexusmods.com/cdn/1704/12604/x.7z?md5=a&expires=1&user_id=1",
+        "https://premium-files.nexus-cdn.com/1704/12604/x.7z",
+        "https://supporter-files.nexus-cdn.com/1704/x.7z",
+        "https://www.nexusmods.com/skyrimspecialedition/mods/12604",
         "HTTPS://Thunderstore.IO/x",
         "https://thunderstore.io:443/x",
     ] {
@@ -184,10 +192,27 @@ fn only_https_from_known_hosts() {
         "https://",
         "ftp://thunderstore.io/",
         "https://thunder store.io/",
+        "https://evil.githubusercontent.com/x",
+        "https://someone.github.io/x",
+        "https://githubusercontent.com/x",
+        "https://nexusmods.com.evil.com/x",
+        "https://evilnexusmods.com/x",
+        "https://nexus-cdn.com.evil.org/x",
+        "https://evil-github.com/x",
     ] {
         assert!(!net::allowed_url(bad), "{bad}");
     }
     assert_eq!(net::https_host("https://user@api.github.com:8443/x?y").as_deref(), Some("api.github.com"));
+    // A whole-domain entry is never put on a domain where anyone can have a subdomain, and every entry is lowercase.
+    for a in net::ALLOWED_HOSTS {
+        assert_eq!(*a, a.to_ascii_lowercase());
+        if let Some(base) = a.strip_prefix('.') {
+            assert!(base.contains('.'), "{a} is a whole top-level domain");
+            for shared in net::SHARED_DOMAINS {
+                assert!(base != *shared && !shared.ends_with(&format!(".{base}")), "{a} would let in {shared}");
+            }
+        }
+    }
     assert_eq!(net::url_encode("a b/c&d"), "a%20b%2Fc%26d");
 }
 

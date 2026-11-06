@@ -84,20 +84,27 @@ pub fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Hosts Turbine may talk to (plan: downloads only from an allowed list). A leading dot allows subdomains.
+/// Hosts Turbine may talk to (plan: downloads only from an allowed list). A leading dot allows every subdomain of a
+/// site's own domain (Thunderstore's CDNs, Nexus's API and its download servers such as cf-files.nexusmods.com or
+/// supporter-files.nexus-cdn.com, GitHub's API and codeload). A leading dot is never put on a domain where anyone
+/// can have a subdomain (githubusercontent.com and github.io are such domains), so those hosts are listed one by
+/// one: raw files (the LOOT masterlist) and the two hosts GitHub sends release downloads to.
 pub const ALLOWED_HOSTS: &[&str] = &[
     "thunderstore.io",
     ".thunderstore.io",
-    "api.nexusmods.com",
-    ".nexus-cdn.com",
     ".nexusmods.com",
+    ".nexus-cdn.com",
     "skse.silverlock.org",
     "github.com",
-    "api.github.com",
+    ".github.com",
+    "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
-    "codeload.github.com",
 ];
+
+/// Domains where anyone can get a subdomain of their own, so a leading-dot entry for them would let in sites run by
+/// anyone. `ALLOWED_HOSTS` may name single hosts under them but never the whole domain (checked by the tests).
+pub const SHARED_DOMAINS: &[&str] = &["githubusercontent.com", "github.io", "githubpreview.dev", "pages.dev", "workers.dev", "netlify.app", "vercel.app", "web.app", "firebaseapp.com", "appspot.com", "herokuapp.com", "cloudfront.net", "amazonaws.com", "blogspot.com", "r2.dev", "b-cdn.net"];
 
 /// The host part of an https URL, lowercased, without port or user info. None if it isn't https.
 pub fn https_host(url: &str) -> Option<String> {

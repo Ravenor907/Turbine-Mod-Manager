@@ -1,0 +1,10 @@
+{"data": {"legacyModsByDomain": {"nodes": [{"modId": 12604, "name": "SkyUI", "game": {"id": 1704, "domainName": "skyrimspecialedition"}, "modRequirements": {
+"nexusRequirements": {"totalCount": 5, "nodes": [
+{"id": "88001", "modId": "0", "modName": "Skyrim Script Extender (SKSE64)", "gameId": "1704", "url": "https://skse.silverlock.org/", "notes": "Use the build that matches your game version.", "externalRequirement": true},
+{"id": "88002", "modId": "32444", "modName": "Address Library for SKSE Plugins", "gameId": "1704", "url": "https://www.nexusmods.com/skyrimspecialedition/mods/32444", "notes": null, "externalRequirement": false},
+{"id": "88003", "modId": "17230", "modName": "Unofficial Skyrim Special Edition Patch", "gameId": "1704", "url": "", "notes": "Recommended\u0007 load order: before SkyUI", "externalRequirement": false},
+{"id": "88004", "modId": "3863", "modName": "Some Tool", "gameId": "2295", "url": "https://www.nexusmods.com/site/mods/3863?tab=files", "notes": "", "externalRequirement": false},
+{"id": "88005", "modId": "0", "modName": "Sketchy page", "gameId": "1704", "url": "javascript:alert(1)", "notes": "", "externalRequirement": true}
+]},
+"dlcRequirements": [{"notes": "", "gameExpansion": {"id": "1", "gameId": "1704", "name": "Dawnguard"}}]
+}}]}}}

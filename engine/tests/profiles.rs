@@ -142,3 +142,86 @@ fn bad_share_files() {
     assert_eq!(s.mods.len(), 1);
     assert_eq!(s.mods[0].kind, "zip");
 }
+
+fn nexus_entry(name: &str, id: &str, url: Option<&str>) -> profiles::ShareMod {
+    profiles::ShareMod {
+        name: name.into(),
+        enabled: true,
+        kind: "nexus".into(),
+        id: id.into(),
+        version: Some("1.0".into()),
+        url: url.map(String::from),
+        note: None,
+    }
+}
+
+#[test]
+fn nexus_entries_become_downloads_or_pages() {
+    use profiles::{NexusAction, NexusStep};
+    let plan = profiles::ImportPlan {
+        nexus: vec![
+            nexus_entry("Full", "lethalcompany:1:20", None),
+            nexus_entry("Mod only", "lethalcompany:2", None),
+            nexus_entry("Old record", "4242", None),
+            nexus_entry("Other site", "site:9:10", None),
+            nexus_entry("Address only", "", Some("https://www.nexusmods.com/lethalcompany/mods/77")),
+            nexus_entry("Nothing", "x:y:z", Some("https://evil.example.com/")),
+        ],
+        ..Default::default()
+    };
+    let premium = profiles::nexus_steps(&plan, Some("lethalcompany"), true);
+    let acts: Vec<&NexusAction> = premium.iter().map(|s| &s.action).collect();
+    assert_eq!(
+        acts,
+        vec![
+            &NexusAction::Fetch { domain: "lethalcompany".into(), mod_id: 1, file_id: Some(20) },
+            &NexusAction::Fetch { domain: "lethalcompany".into(), mod_id: 2, file_id: None },
+            &NexusAction::Fetch { domain: "lethalcompany".into(), mod_id: 4242, file_id: None },
+            &NexusAction::OpenPage { url: "https://www.nexusmods.com/site/mods/9?tab=files&file_id=10".into() },
+            &NexusAction::OpenPage { url: "https://www.nexusmods.com/lethalcompany/mods/77?tab=files".into() },
+            &NexusAction::ByHand,
+        ]
+    );
+    let free = profiles::nexus_steps(&plan, Some("lethalcompany"), false);
+    assert_eq!(
+        free[0],
+        NexusStep {
+            entry: plan.nexus[0].clone(),
+            action: NexusAction::OpenPage { url: "https://www.nexusmods.com/lethalcompany/mods/1?tab=files&file_id=20".into() }
+        }
+    );
+    assert_eq!(free[2].action, NexusAction::OpenPage { url: "https://www.nexusmods.com/lethalcompany/mods/4242?tab=files".into() });
+    // Without the game's domain, a bare mod ID can't be placed.
+    assert_eq!(profiles::nexus_steps(&plan, None, true)[2].action, NexusAction::ByHand);
+    let j = turbine_engine::json::parse(&profiles::nexus_steps_json(&premium)).unwrap();
+    let first = &j.as_array()[0];
+    assert_eq!(first.str_at("action"), Some("fetch"));
+    assert_eq!(first.get("fileId"), Some(&turbine_engine::json::Json::Num(20.0)));
+    assert_eq!(first.get("mod").unwrap().str_at("name"), Some("Full"));
+    assert_eq!(j.as_array()[1].get("fileId"), Some(&turbine_engine::json::Json::Null));
+}
+
+#[test]
+fn a_newer_nexus_file_of_the_same_mod_counts_as_installed() {
+    let t = TempDir::new("profiles-nexus");
+    let dir = t.path("lib/Game");
+    fs::create_dir_all(&dir).unwrap();
+    let g = game(Launcher::Steam, "1966720", "Lethal Company", &dir, None);
+    let mut store = Store::open_with(&g, &t.path("data"), Box::new(Plain)).unwrap();
+    let p = t.path("dl/N.zip");
+    write_zip(&p, &[("n.txt", b"x")]);
+    let src = SourceInfo { kind: "nexus".into(), id: "lethalcompany:5:60".into(), ..SourceInfo::default() };
+    let Import::Added(_) = store.import_archive(&p, src).unwrap() else { panic!() };
+    let share = profiles::Share {
+        game_name: "Lethal Company".into(),
+        game_store: "steam".into(),
+        game_id: "1966720".into(),
+        profile: "P".into(),
+        mods: vec![nexus_entry("N", "lethalcompany:5:50", None), nexus_entry("M", "lethalcompany:6:61", None)],
+    };
+    let plan = profiles::plan_import(&share, &store).unwrap();
+    assert_eq!(plan.installed.len(), 1);
+    assert_eq!(plan.nexus.len(), 1);
+    assert_eq!(plan.nexus[0].name, "M");
+    assert_eq!(profiles::share_order(&share, &store).len(), 1);
+}

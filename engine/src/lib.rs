@@ -14,6 +14,7 @@ pub mod json;
 pub mod loaders;
 pub mod net;
 pub mod nexus;
+pub mod nxm;
 pub mod plugins;
 pub mod profiles;
 pub mod proton;

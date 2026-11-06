@@ -1,0 +1,16 @@
+{"files": [
+{"file_id": 10, "name": "SkyUI", "version": "5.0", "category_id": 4, "category_name": "OLD_VERSION", "is_primary": false, "size_kb": 2600, "size_in_bytes": 2662400, "file_name": "SkyUI_5_0.7z", "uploaded_timestamp": 1500000000, "mod_version": "5.0", "description": ""},
+{"file_id": 100, "name": "SkyUI", "version": "5.1SE", "category_id": 4, "category_name": "OLD_VERSION", "is_primary": false, "size_kb": 2700, "size_in_bytes": null, "file_name": "SkyUI_5_1_SE.7z", "uploaded_timestamp": 1508000000, "mod_version": "5.1SE", "description": ""},
+{"file_id": 200, "name": "SkyUI", "version": "5.2SE", "category_id": 1, "category_name": "MAIN", "is_primary": true, "size_kb": 2751, "size_in_bytes": 2816572, "file_name": "SkyUI_5_2_SE.7z", "uploaded_timestamp": 1600000000, "mod_version": "5.2SE", "description": "Main file"},
+{"file_id": 210, "name": "SkyUI hotfix", "version": "5.2.1SE", "category_id": 2, "category_name": "UPDATE", "is_primary": false, "size_kb": 12, "size_in_bytes": 12288, "file_name": "hotfix.7z", "uploaded_timestamp": 1600100000, "mod_version": "5.2SE", "description": ""},
+{"file_id": 300, "name": "SkyUI Extra Icons", "version": "1.0", "category_id": 3, "category_name": "OPTIONAL", "is_primary": false, "size_kb": 10, "size_in_bytes": 10240, "file_name": "icons.zip", "uploaded_timestamp": 1600000001, "mod_version": "5.2SE", "description": ""},
+{"file_id": 310, "name": "SkyUI Extra Icons 2", "version": "2.0", "category_id": 3, "category_name": "OPTIONAL", "is_primary": false, "size_kb": 10, "size_in_bytes": 10240, "file_name": "icons2.zip", "uploaded_timestamp": 1600000500, "mod_version": "5.2SE", "description": ""},
+{"file_id": 400, "name": "Readme", "version": "", "category_id": 5, "category_name": "MISCELLANEOUS", "is_primary": false, "size_kb": 1, "size_in_bytes": 1024, "file_name": "readme.zip", "uploaded_timestamp": 1600000002, "mod_version": "5.2SE", "description": ""},
+{"file_id": 500, "name": "SkyUI beta", "version": "4.9", "category_id": 7, "category_name": "ARCHIVED", "is_primary": false, "size_kb": 2500, "size_in_bytes": 2560000, "file_name": "beta.7z", "uploaded_timestamp": 1400000000, "mod_version": "4.9", "description": ""},
+{"file_id": 600, "name": "Pulled", "version": "5.3", "category_id": 6, "category_name": null, "is_primary": false, "size_kb": 1, "size_in_bytes": 1024, "file_name": "pulled.7z", "uploaded_timestamp": 1600200000, "mod_version": "5.3", "description": ""}
+],
+"file_updates": [
+{"old_file_id": 10, "new_file_id": 100, "uploaded_timestamp": 1508000000},
+{"old_file_id": 100, "new_file_id": 200, "uploaded_timestamp": 1600000000},
+{"old_file_id": 200, "new_file_id": 600, "uploaded_timestamp": 1600200000}
+]}

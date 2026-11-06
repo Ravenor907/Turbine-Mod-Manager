@@ -1180,8 +1180,12 @@ pub fn parse_create_answer(text: &str) -> Result<String, String> {
 pub const MAX_SHARE_BYTES: usize = 20 << 20;
 
 /// Uploads a profile and returns its share code. `config_files` are (path inside the share, contents), such as
-/// "BepInEx/config/x.cfg". Not yet checked against the live service: written from Thunderstore's documented
-/// endpoint and the published share format.
+/// "BepInEx/config/x.cfg".
+///
+/// Checked against Thunderstore's server code (the legacy profile create view): a POST with the share text as the
+/// raw body (any content type; its tests send application/octet-stream), no account needed, answered with 200 and
+/// {"key": "<uuid>"}. An empty body or a full server is refused with 400, and each address may upload only 6
+/// times a minute (429). The server stores the bytes as they are and gives the same code for the same bytes.
 pub fn export_code(client: &Client, profile: &SharedProfile, config_files: &[(String, Vec<u8>)]) -> Result<String, NetError> {
     let mut files = vec![("export.r2x".to_string(), build_export_r2x(profile).into_bytes())];
     files.extend(config_files.iter().cloned());
@@ -1201,6 +1205,13 @@ pub fn export_code(client: &Client, profile: &SharedProfile, config_files: &[(St
         None,
     );
     let _ = fs::remove_file(&body);
-    let text = sent?.take_text()?;
+    let text = sent.map_err(|e| match e {
+        NetError::RateLimited => {
+            NetError::Failed("Thunderstore only takes a few profile uploads a minute. Wait a minute and try again.".into())
+        }
+        NetError::Http(400) => NetError::Failed("Thunderstore didn't accept the profile upload. Try again later.".into()),
+        e => e,
+    })?
+    .take_text()?;
     parse_create_answer(&text).map_err(|e| NetError::Failed(format!("{e}.")))
 }

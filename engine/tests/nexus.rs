@@ -1,12 +1,16 @@
 //! Nexus Mods, offline. The samples in tests/data/nexus_*.json follow Nexus's documented v1 response types and the
-//! v2 GraphQL schema; they are not recorded live answers (api.nexusmods.com can't be reached from the build machine).
+//! v2 GraphQL schema (the requirements sample uses the ModRequirements, ModRequirement and ModRequirementsDlc types
+//! of the published schema); they are not recorded live answers (api.nexusmods.com can't be reached from the build
+//! machine).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use turbine_engine::json;
 use turbine_engine::net::{Client, NetError};
-use turbine_engine::nexus::{self, Account, Nexus, RateLimit, SearchSort};
+use turbine_engine::net::SourceInfo;
+use turbine_engine::nexus::{self, Account, Nexus, RateLimit, Requirement, RequirementStep, SearchSort};
+use turbine_engine::nxm;
 
 fn data(name: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
@@ -280,4 +284,243 @@ fn search_posts_the_query() {
     assert_eq!(j.get("variables").unwrap().get("sort").unwrap().as_array()[0].get("downloads").unwrap().str_at("direction"), Some("DESC"));
     let sent = fs::read_to_string(f.dir.join("served/sent_headers")).unwrap();
     assert!(sent.contains("Content-Type: application/json"));
+}
+
+// ---- Other versions ----
+
+#[test]
+fn files_are_grouped_for_other_versions() {
+    let list = nexus::parse_files(&data("nexus_files_all.json")).unwrap();
+    assert_eq!(list.files.len(), 9);
+    assert_eq!(list.files[8].category, "DELETED", "a null category name falls back to the category number");
+    let groups = list.groups();
+    let shape: Vec<(&str, &str, Vec<u64>)> =
+        groups.iter().map(|g| (g.category.as_str(), g.label, g.files.iter().map(|f| f.file_id).collect())).collect();
+    assert_eq!(
+        shape,
+        vec![
+            ("MAIN", "Main files", vec![200]),
+            ("UPDATE", "Updates", vec![210]),
+            ("OPTIONAL", "Optional files", vec![310, 300]),
+            ("MISCELLANEOUS", "Other files", vec![400]),
+            ("OLD_VERSION", "Old versions", vec![100, 10]),
+            ("ARCHIVED", "Archived", vec![500]),
+        ],
+        "removed files are left out, newest first in each group"
+    );
+    let other = list.other_versions(200);
+    assert_eq!(other[0].category, "UPDATE", "the installed file's group is gone when it was the only one");
+    assert_eq!(other.iter().map(|g| g.files.len()).sum::<usize>(), 7);
+    let j = json::parse(&nexus::file_groups_json(&groups)).unwrap();
+    let first = &j.as_array()[0];
+    assert_eq!(first.str_at("label"), Some("Main files"));
+    assert_eq!(first.get("files").unwrap().as_array()[0].get("fileId"), Some(&json::Json::Num(200.0)));
+    assert_eq!(first.get("files").unwrap().as_array()[0].get("size"), Some(&json::Json::Num(2816572.0)));
+
+    // Picking a file: the wanted one while it can be downloaded, else what replaced it, else the main file.
+    assert_eq!(list.pick(Some(100)).unwrap().file_id, 100, "old versions can still be downloaded");
+    assert_eq!(list.pick(Some(600)).unwrap().file_id, 200, "a removed file falls back to the main file");
+    assert_eq!(list.pick(Some(999)).unwrap().file_id, 200);
+    assert_eq!(list.pick(None).unwrap().file_id, 200);
+    let gone = nexus::parse_files("{\"files\":[{\"file_id\":1,\"category_id\":1,\"is_primary\":false,\"uploaded_timestamp\":1}],\"file_updates\":[{\"old_file_id\":5,\"new_file_id\":1,\"uploaded_timestamp\":2}]}").unwrap();
+    assert_eq!(gone.pick(Some(5)).unwrap().file_id, 1, "a file missing from the list follows its replacement");
+
+    let one = nexus::parse_file(&data("nexus_file.json")).unwrap();
+    assert_eq!((one.file_id, one.size_bytes, one.category_label()), (200, 2816572, "Main files"));
+    assert!(nexus::parse_file("{}").is_err());
+    assert_eq!(nexus::files_page_url("valheim", 7), "https://www.nexusmods.com/valheim/mods/7?tab=files");
+    assert_eq!(nexus::file_page_url("valheim", 7, 9), "https://www.nexusmods.com/valheim/mods/7?tab=files&file_id=9");
+}
+
+// ---- Requirements ----
+
+fn req(name: &str, mod_id: u64, domain: &str) -> Requirement {
+    Requirement {
+        name: name.into(),
+        mod_id,
+        domain: domain.into(),
+        url: if domain.is_empty() { String::new() } else { nexus::mod_page_url(domain, mod_id) },
+        notes: String::new(),
+        is_dlc: false,
+        external: false,
+    }
+}
+
+#[test]
+fn reads_requirements() {
+    let body = json::parse(&nexus::requirements_body("skyrimspecialedition", 12604)).unwrap();
+    let q = body.str_at("query").unwrap();
+    for field in ["legacyModsByDomain(ids: $ids)", "modRequirements", "nexusRequirements(count: 100)", "dlcRequirements", "gameExpansion", "externalRequirement"] {
+        assert!(q.contains(field), "{field}");
+    }
+    let id = &body.get("variables").unwrap().get("ids").unwrap().as_array()[0];
+    assert_eq!(id.str_at("gameDomain"), Some("skyrimspecialedition"));
+    assert_eq!(id.get("modId"), Some(&json::Json::Num(12604.0)));
+
+    let r = nexus::parse_requirements(&data("nexus_graphql_requirements.json"), "skyrimspecialedition").unwrap();
+    assert_eq!(r.len(), 6);
+    assert!(r[0].external && r[0].mod_id == 0 && r[0].url == "https://skse.silverlock.org/");
+    assert_eq!(r[0].notes, "Use the build that matches your game version.");
+    assert_eq!(r[1], Requirement { notes: String::new(), ..req("Address Library for SKSE Plugins", 32444, "skyrimspecialedition") });
+    // No address: the same game as the mod. Control characters are dropped from notes.
+    assert_eq!((r[2].domain.as_str(), r[2].mod_id), ("skyrimspecialedition", 17230));
+    assert_eq!(r[2].url, "https://www.nexusmods.com/skyrimspecialedition/mods/17230");
+    assert_eq!(r[2].notes, "Recommended load order: before SkyUI");
+    // Another Nexus section, read from its address.
+    assert_eq!((r[3].domain.as_str(), r[3].mod_id, r[3].url.as_str()), ("site", 3863, "https://www.nexusmods.com/site/mods/3863"));
+    // An address that isn't http(s) is never handed to the browser.
+    assert!(r[4].external && r[4].url.is_empty());
+    assert!(r[5].is_dlc && r[5].name == "Dawnguard" && r[5].url.is_empty());
+
+    assert_eq!(
+        nexus::parse_requirements(&data("nexus_graphql_requirements_none.json"), "valheim").unwrap_err(),
+        "Nexus doesn't know that mod"
+    );
+    assert_eq!(
+        nexus::parse_requirements(&data("nexus_graphql_error.json"), "valheim").unwrap_err(),
+        "Nexus couldn't list the requirements (Argument 'filter' has an invalid value)"
+    );
+    let empty = "{\"data\":{\"legacyModsByDomain\":{\"nodes\":[{\"modId\":1,\"modRequirements\":{\"nexusRequirements\":{\"nodes\":[]},\"dlcRequirements\":[]}}]}}}";
+    assert!(nexus::parse_requirements(empty, "valheim").unwrap().is_empty());
+}
+
+#[test]
+fn resolves_missing_requirements() {
+    let r = nexus::parse_requirements(&data("nexus_graphql_requirements.json"), "skyrimspecialedition").unwrap();
+    let src = |id: &str| SourceInfo { kind: "nexus".into(), id: id.into(), ..SourceInfo::default() };
+    let installed = vec![
+        ("address-library".to_string(), src("skyrimspecialedition:32444:9001")),
+        ("zip-mod".to_string(), SourceInfo { kind: "zip".into(), ..SourceInfo::default() }),
+        // An old record with only the mod ID still counts.
+        ("ussep".to_string(), src("17230")),
+        // Same mod ID in another game doesn't.
+        ("tool".to_string(), src("valheim:3863:1")),
+    ];
+    let c = nexus::check_requirements(&r, &installed);
+    assert_eq!(c.installed.iter().map(|x| x.mod_id).collect::<Vec<_>>(), vec![32444, 17230]);
+    assert_eq!(c.missing.iter().map(|x| x.mod_id).collect::<Vec<_>>(), vec![3863]);
+    assert_eq!(c.unchecked.len(), 3, "outside downloads and DLC can't be checked");
+
+    let mut missing = c.missing.clone();
+    missing.push(req("Address Library for SKSE Plugins", 32444, "skyrimspecialedition"));
+    // Premium: Turbine downloads mods of supported games; others stay pages.
+    assert_eq!(
+        nexus::requirement_steps(&missing, true),
+        vec![
+            RequirementStep::OpenPage { name: "Some Tool".into(), url: "https://www.nexusmods.com/site/mods/3863?tab=files".into() },
+            RequirementStep::Download { name: "Address Library for SKSE Plugins".into(), domain: "skyrimspecialedition".into(), mod_id: 32444 },
+        ]
+    );
+    // Free accounts: pages to open, on the Files tab.
+    assert_eq!(
+        nexus::requirement_steps(&missing, false)[1],
+        RequirementStep::OpenPage {
+            name: "Address Library for SKSE Plugins".into(),
+            url: "https://www.nexusmods.com/skyrimspecialedition/mods/32444?tab=files".into()
+        }
+    );
+    let j = json::parse(&nexus::requirements_json(&c, false)).unwrap();
+    assert_eq!(j.get("missing").unwrap().as_array().len(), 1);
+    assert_eq!(j.get("unchecked").unwrap().as_array()[2].get("isDlc"), Some(&json::Json::Bool(true)));
+    assert_eq!(j.get("steps").unwrap().as_array()[0].str_at("action"), Some("open"));
+}
+
+#[test]
+fn mod_page_addresses() {
+    assert_eq!(nexus::parse_mod_page_url("https://www.nexusmods.com/valheim/mods/387"), Some(("valheim".into(), 387)));
+    assert_eq!(nexus::parse_mod_page_url("https://nexusmods.com/valheim/mods/387?tab=files"), Some(("valheim".into(), 387)));
+    assert_eq!(nexus::parse_mod_page_url("https://www.nexusmods.com/valheim/mods/387/"), Some(("valheim".into(), 387)));
+    for bad in [
+        "https://evil.com/valheim/mods/387",
+        "https://www.nexusmods.com.evil.com/valheim/mods/387",
+        "https://www.nexusmods.com/valheim/collections/387",
+        "https://www.nexusmods.com/Val-heim/mods/387",
+        "https://www.nexusmods.com/valheim/mods/0",
+        "https://www.nexusmods.com/valheim/mods/+3",
+        "https://www.nexusmods.com/valheim/mods",
+        "ftp://www.nexusmods.com/valheim/mods/3",
+    ] {
+        assert_eq!(nexus::parse_mod_page_url(bad), None, "{bad}");
+    }
+    assert_eq!(nexus::store_ids_for_domain("stardewvalley"), vec!["413150", "1453375253"]);
+    assert_eq!(nexus::game_name_for_domain("valheim"), Some("Valheim"));
+    assert!(nexus::supported_domain("riskofrain2") && !nexus::supported_domain("site"));
+}
+
+#[test]
+fn requirements_through_graphql() {
+    let f = Fake::new("reqs");
+    f.serve(nexus::GRAPHQL, data("nexus_graphql_requirements.json").as_bytes());
+    let r = f.nx.requirements("skyrimspecialedition", 12604).unwrap();
+    assert_eq!(r.len(), 6);
+    let posted = json::parse(&fs::read_to_string(f.dir.join("served/last_post")).unwrap()).unwrap();
+    assert!(posted.str_at("query").unwrap().contains("nexusRequirements"));
+    assert!(f.nx.requirements("fallout4", 1).unwrap_err().to_string().contains("doesn't support"));
+}
+
+// ---- nxm downloads ----
+
+const LINK: &str = "nxm://skyrimspecialedition/mods/12604/files/200?key=iL0D8DbD1OBn9-iW0n3nJw&expires=1762444800&user_id=1";
+
+#[test]
+fn nxm_download_works_for_free_accounts() {
+    let f = Fake::new("nxm");
+    let link = nxm::parse(LINK).unwrap();
+    f.serve("https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files/200.json", data("nexus_file.json").as_bytes());
+    let dl = "https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files/200/download_link.json?key=iL0D8DbD1OBn9-iW0n3nJw&expires=1762444800";
+    f.serve(dl, data("nexus_download_link.json").as_bytes());
+    let cdn = "https://supporter-files.nexus-cdn.com/1704/12604/SkyUI_5_2_SE-12604-5-2SE.7z?md5=abc&expires=1700000000&user_id=1";
+    f.serve(cdn, &vec![3u8; 2816572]);
+    let (d, info) = f.nx.download_from_nxm_at(&link, 1762444000, None).unwrap();
+    assert_eq!(d.size, 2816572);
+    assert_eq!(info.id, "skyrimspecialedition:12604:200");
+    assert_eq!(info.version.as_deref(), Some("5.2SE"));
+    assert_eq!(info.sha256.as_deref(), Some(d.sha256.as_str()));
+    assert!(fs::read_to_string(f.dir.join("served/requests.log")).unwrap().contains("download_link.json?key="));
+
+    // Expired by the clock: no request at all.
+    let before = f.requests();
+    let e = f.nx.download_from_nxm_at(&link, 1762444800, None).unwrap_err();
+    assert_eq!(e.to_string(), nxm::EXPIRED_MESSAGE);
+    assert_eq!(f.requests(), before);
+    // Nexus says the key is gone (410, or 404 for the link after the file was found).
+    f.status(dl, 410);
+    assert_eq!(f.nx.download_from_nxm_at(&link, 1762444000, None).unwrap_err().to_string(), nxm::EXPIRED_MESSAGE);
+    // A key for another account is refused with words that say what to do.
+    f.status(dl, 403);
+    let e = f.nx.download_from_nxm_at(&link, 1762444000, None).unwrap_err().to_string();
+    assert!(e.starts_with("Nexus didn't accept this download link.") && e.ends_with("Press Mod Manager Download on the Nexus page again."));
+    // A short download is caught.
+    f.status(dl, 200);
+    f.serve(cdn, b"tiny");
+    assert!(matches!(f.nx.download_from_nxm_at(&link, 1762444000, None), Err(NetError::Mismatch(_))));
+    // Games Turbine doesn't support are refused before any request.
+    let other = nxm::parse("nxm://fallout4/mods/1/files/2?key=a&expires=1762444800").unwrap();
+    let before = f.requests();
+    assert!(f.nx.download_from_nxm_at(&other, 1, None).unwrap_err().to_string().contains("doesn't support Nexus mods for fallout4"));
+    assert_eq!(f.requests(), before);
+}
+
+#[test]
+fn premium_downloads_by_id() {
+    let f = Fake::new("byid");
+    let premium = Account { user_id: 1, name: "x".into(), is_premium: true, is_supporter: false };
+    let free = Account { is_premium: false, ..premium.clone() };
+    f.serve("https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files.json", data("nexus_files_all.json").as_bytes());
+    let link = "https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files/200/download_link.json";
+    f.serve(link, data("nexus_download_link.json").as_bytes());
+    let cdn = "https://supporter-files.nexus-cdn.com/1704/12604/SkyUI_5_2_SE-12604-5-2SE.7z?md5=abc&expires=1700000000&user_id=1";
+    f.serve(cdn, &vec![1u8; 2816572]);
+    // The removed file 600 falls back to the main file.
+    let (_, info) = f.nx.download_by_id(&premium, "skyrimspecialedition", 12604, Some(600), None).unwrap();
+    assert_eq!(info.id, "skyrimspecialedition:12604:200");
+    let (_, info) = f.nx.download_by_id(&premium, "skyrimspecialedition", 12604, None, None).unwrap();
+    assert_eq!(info.id, "skyrimspecialedition:12604:200");
+    let before = f.requests();
+    assert_eq!(f.nx.download_by_id(&free, "skyrimspecialedition", 12604, None, None).unwrap_err().to_string(), nexus::FREE_ACCOUNT_MESSAGE);
+    assert_eq!(f.requests(), before);
+    let groups = f.nx.file_groups("skyrimspecialedition", 12604).unwrap();
+    assert_eq!(groups.len(), 6);
+    f.serve("https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files/200.json", data("nexus_file.json").as_bytes());
+    assert_eq!(f.nx.file_info("skyrimspecialedition", 12604, 200).unwrap().version, "5.2SE");
 }

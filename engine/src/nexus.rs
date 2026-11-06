@@ -5,6 +5,7 @@
 
 use crate::json::{self, quote, Json};
 use crate::net::{self, Client, Download, Expect, NetError, Progress, Request, Response, SourceInfo};
+use crate::nxm::{self, NxmLink};
 use std::cell::Cell;
 use std::fs;
 use std::path::Path;
@@ -27,8 +28,23 @@ pub fn domain_for_store_id(store_id: &str) -> Option<&'static str> {
     GAMES.iter().find(|(id, _, _)| *id == store_id).map(|(_, d, _)| *d)
 }
 
+/// Store IDs of the Turbine games that use this Nexus domain (the reverse of `domain_for_store_id`).
+pub fn store_ids_for_domain(domain: &str) -> Vec<&'static str> {
+    GAMES.iter().filter(|(_, d, _)| *d == domain).map(|(id, _, _)| *id).collect()
+}
+
+/// The game's name for a Nexus domain Turbine supports.
+pub fn game_name_for_domain(domain: &str) -> Option<&'static str> {
+    GAMES.iter().find(|(_, d, _)| *d == domain).map(|(_, _, n)| *n)
+}
+
 fn known_domain(domain: &str) -> bool {
     GAMES.iter().any(|(_, d, _)| *d == domain)
+}
+
+/// Does Turbine support this Nexus game domain?
+pub fn supported_domain(domain: &str) -> bool {
+    known_domain(domain)
 }
 
 /// The message free accounts get instead of a download (Nexus only gives download links to apps for Premium).
@@ -221,9 +237,45 @@ pub struct FileInfo {
 impl FileInfo {
     /// Files a player would normally pick (not old, archived or deleted).
     pub fn is_current(&self) -> bool {
-        !matches!(self.category.as_str(), "OLD_VERSION" | "ARCHIVED" | "DELETED")
+        !matches!(self.category.as_str(), "OLD_VERSION" | "ARCHIVED" | "DELETED" | "REMOVED")
+    }
+
+    /// Removed by the author: listed by Nexus but not downloadable.
+    pub fn is_removed(&self) -> bool {
+        matches!(self.category.as_str(), "DELETED" | "REMOVED")
+    }
+
+    /// The plain heading for the file's category, as the details page shows it.
+    pub fn category_label(&self) -> &'static str {
+        category_label(&self.category)
     }
 }
+
+/// Plain headings for Nexus's file categories.
+pub fn category_label(category: &str) -> &'static str {
+    match category {
+        "MAIN" => "Main files",
+        "UPDATE" => "Updates",
+        "OPTIONAL" => "Optional files",
+        "MISCELLANEOUS" => "Other files",
+        "OLD_VERSION" => "Old versions",
+        "ARCHIVED" => "Archived",
+        "DELETED" | "REMOVED" => "Removed",
+        _ => "Other files",
+    }
+}
+
+/// One heading of the "Other versions" list and its files, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileGroup {
+    /// Nexus's category ("MAIN", "OPTIONAL", ...).
+    pub category: String,
+    pub label: &'static str,
+    pub files: Vec<FileInfo>,
+}
+
+/// The order the categories are listed in.
+const GROUP_ORDER: &[&str] = &["MAIN", "UPDATE", "OPTIONAL", "MISCELLANEOUS", "OLD_VERSION", "ARCHIVED"];
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct FileUpdate {
@@ -262,50 +314,103 @@ impl FileList {
             .find(|f| f.is_primary)
             .or_else(|| self.files.iter().filter(|f| f.category == "MAIN").max_by_key(|f| f.uploaded_timestamp))
     }
+
+    /// Every downloadable file of the mod, grouped by category (main, updates, optional, other, old versions,
+    /// archived), newest first in each group. Removed files are left out; empty groups too.
+    pub fn groups(&self) -> Vec<FileGroup> {
+        let mut out: Vec<FileGroup> = Vec::new();
+        let rank = |c: &str| GROUP_ORDER.iter().position(|g| *g == c).unwrap_or(GROUP_ORDER.len());
+        let mut files: Vec<&FileInfo> = self.files.iter().filter(|f| !f.is_removed()).collect();
+        files.sort_by(|a, b| {
+            rank(&a.category).cmp(&rank(&b.category)).then(b.uploaded_timestamp.cmp(&a.uploaded_timestamp)).then(b.file_id.cmp(&a.file_id))
+        });
+        for f in files {
+            // Unknown categories are shown under "Other files" with the miscellaneous ones.
+            let cat = if rank(&f.category) == GROUP_ORDER.len() { "MISCELLANEOUS" } else { f.category.as_str() };
+            match out.iter_mut().find(|g| g.category == cat) {
+                Some(g) => g.files.push(f.clone()),
+                None => out.push(FileGroup { category: cat.to_string(), label: category_label(cat), files: vec![f.clone()] }),
+            }
+        }
+        out.sort_by_key(|g| rank(&g.category));
+        out
+    }
+
+    /// The "Other versions" list for an installed file: every group, without the file that is installed.
+    pub fn other_versions(&self, installed_file_id: u64) -> Vec<FileGroup> {
+        self.groups()
+            .into_iter()
+            .filter_map(|mut g| {
+                g.files.retain(|f| f.file_id != installed_file_id);
+                (!g.files.is_empty()).then_some(g)
+            })
+            .collect()
+    }
+
+    pub fn file(&self, file_id: u64) -> Option<&FileInfo> {
+        self.files.iter().find(|f| f.file_id == file_id)
+    }
+
+    /// Which file to fetch for a wanted file ID: that file while it can still be downloaded, else the newest one
+    /// replacing it, else the main file. None (or no wanted ID) gives the main file.
+    pub fn pick(&self, wanted: Option<u64>) -> Option<&FileInfo> {
+        if let Some(id) = wanted {
+            if let Some(f) = self.file(id).filter(|f| !f.is_removed()) {
+                return Some(f);
+            }
+            if let Some(f) = self.newest_replacement(id).filter(|f| !f.is_removed()) {
+                return Some(f);
+            }
+        }
+        self.main_file()
+    }
+}
+
+fn category_name(f: &Json) -> String {
+    f.str_at("category_name").filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| {
+        match n(f.get("category_id")) as u64 {
+            1 => "MAIN",
+            2 => "UPDATE",
+            3 => "OPTIONAL",
+            4 => "OLD_VERSION",
+            5 => "MISCELLANEOUS",
+            6 => "DELETED",
+            7 => "ARCHIVED",
+            _ => "",
+        }
+        .to_string()
+    })
+}
+
+fn file_from_json(f: &Json) -> Option<FileInfo> {
+    let file_id = n(f.get("file_id")) as u64;
+    if file_id == 0 {
+        return None;
+    }
+    let bytes = n(f.get("size_in_bytes")) as u64;
+    let kb = n(f.get("size_kb")).max(n(f.get("size"))) as u64;
+    Some(FileInfo {
+        file_id,
+        name: s(f, "name"),
+        version: f.str_at("version").filter(|v| !v.is_empty()).or(f.str_at("mod_version")).unwrap_or("").to_string(),
+        category: category_name(f),
+        file_name: s(f, "file_name"),
+        size_bytes: if bytes > 0 { bytes } else { kb * 1024 },
+        uploaded_timestamp: n(f.get("uploaded_timestamp")) as u64,
+        is_primary: b(f, "is_primary"),
+        description: s(f, "description"),
+    })
+}
+
+/// Reads games/<domain>/mods/<id>/files/<file id>.json (one file).
+pub fn parse_file(text: &str) -> Result<FileInfo, String> {
+    file_from_json(&parse(text)?).ok_or_else(|| "Nexus's answer has no file in it".to_string())
 }
 
 /// Reads games/<domain>/mods/<id>/files.json.
 pub fn parse_files(text: &str) -> Result<FileList, String> {
     let j = parse(text)?;
-    let files = j
-        .get("files")
-        .map(Json::as_array)
-        .unwrap_or(&[])
-        .iter()
-        .filter_map(|f| {
-            let file_id = n(f.get("file_id")) as u64;
-            if file_id == 0 {
-                return None;
-            }
-            let bytes = n(f.get("size_in_bytes")) as u64;
-            let kb = n(f.get("size_kb")).max(n(f.get("size"))) as u64;
-            let category = f
-                .str_at("category_name")
-                .map(str::to_string)
-                .unwrap_or_else(|| match n(f.get("category_id")) as u64 {
-                    1 => "MAIN",
-                    2 => "UPDATE",
-                    3 => "OPTIONAL",
-                    4 => "OLD_VERSION",
-                    5 => "MISCELLANEOUS",
-                    6 => "DELETED",
-                    7 => "ARCHIVED",
-                    _ => "",
-                }
-                .to_string());
-            Some(FileInfo {
-                file_id,
-                name: s(f, "name"),
-                version: f.str_at("version").filter(|v| !v.is_empty()).or(f.str_at("mod_version")).unwrap_or("").to_string(),
-                category,
-                file_name: s(f, "file_name"),
-                size_bytes: if bytes > 0 { bytes } else { kb * 1024 },
-                uploaded_timestamp: n(f.get("uploaded_timestamp")) as u64,
-                is_primary: b(f, "is_primary"),
-                description: s(f, "description"),
-            })
-        })
-        .collect();
+    let files = j.get("files").map(Json::as_array).unwrap_or(&[]).iter().filter_map(file_from_json).collect();
     let updates = j
         .get("file_updates")
         .map(Json::as_array)
@@ -500,6 +605,269 @@ pub fn mod_page_url(domain: &str, mod_id: u64) -> String {
     format!("https://www.nexusmods.com/{domain}/mods/{mod_id}")
 }
 
+/// The mod's Files tab, where a free account presses Mod Manager Download.
+pub fn files_page_url(domain: &str, mod_id: u64) -> String {
+    format!("https://www.nexusmods.com/{domain}/mods/{mod_id}?tab=files")
+}
+
+/// The download page of one file.
+pub fn file_page_url(domain: &str, mod_id: u64, file_id: u64) -> String {
+    format!("https://www.nexusmods.com/{domain}/mods/{mod_id}?tab=files&file_id={file_id}")
+}
+
+/// Reads a Nexus mod page address ("https://www.nexusmods.com/<domain>/mods/<id>", with or without "www." and
+/// anything after the ID) into its domain and mod ID.
+pub fn parse_mod_page_url(url: &str) -> Option<(String, u64)> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let (host, path) = rest.split_once('/')?;
+    if !host.eq_ignore_ascii_case("www.nexusmods.com") && !host.eq_ignore_ascii_case("nexusmods.com") {
+        return None;
+    }
+    let mut p = path.split(['/', '?', '#']);
+    let (domain, m, id) = (p.next()?, p.next()?, p.next()?);
+    let ok = !domain.is_empty() && domain.len() <= 64 && domain.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    let id: u64 = id.parse().ok().filter(|i| *i > 0 && id.bytes().all(|b| b.is_ascii_digit()))?;
+    (ok && m == "mods").then(|| (domain.to_string(), id))
+}
+
+// ---- Requirements (v2 GraphQL) ----
+
+/// One thing a mod needs: another Nexus mod, something outside Nexus (`external`, see `url`), or a DLC of the game.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Requirement {
+    pub name: String,
+    /// 0 for DLC and for requirements outside Nexus.
+    pub mod_id: u64,
+    /// The required mod's game domain (usually the same game). Empty when it couldn't be worked out.
+    pub domain: String,
+    /// The page to open: the mod's Nexus page, or the outside address. Empty for DLC. Only http(s) addresses.
+    pub url: String,
+    pub notes: String,
+    pub is_dlc: bool,
+    pub external: bool,
+}
+
+const REQUIREMENTS_QUERY: &str = "query TurbineRequirements($ids: [CompositeDomainWithIdInput!]!) { \
+legacyModsByDomain(ids: $ids) { nodes { modId name game { id domainName } modRequirements { \
+nexusRequirements(count: 100) { totalCount nodes { id modId modName gameId url notes externalRequirement } } \
+dlcRequirements { notes gameExpansion { id name } } } } } }";
+
+/// The JSON body asking for a mod's requirements.
+pub fn requirements_body(domain: &str, mod_id: u64) -> String {
+    format!(
+        "{{\"query\":{},\"variables\":{{\"ids\":[{{\"gameDomain\":{},\"modId\":{mod_id}}}]}}}}",
+        quote(REQUIREMENTS_QUERY),
+        quote(domain)
+    )
+}
+
+fn clean_text(t: &str, max: usize) -> String {
+    let t: String = t.chars().filter(|c| !c.is_control() || *c == '\n').collect();
+    t.trim().chars().take(max).collect()
+}
+
+/// An address that is safe to hand to the browser: http(s), no spaces or control characters, not absurdly long.
+fn browser_url(u: &str) -> Option<String> {
+    let u = u.trim();
+    let scheme = u.get(..8).is_some_and(|p| p.eq_ignore_ascii_case("https://")) || u.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("http://"));
+    (scheme && u.len() <= 2048 && u.bytes().all(|b| b.is_ascii_graphic())).then(|| u.to_string())
+}
+
+/// Reads the requirements answer. `domain` is the game the mod belongs to, used for requirements whose address
+/// doesn't name a game. GraphQL errors become one plain sentence.
+pub fn parse_requirements(text: &str, domain: &str) -> Result<Vec<Requirement>, String> {
+    let j = parse(text)?;
+    let node = j
+        .get("data")
+        .and_then(|d| d.get("legacyModsByDomain"))
+        .and_then(|m| m.get("nodes"))
+        .and_then(|list| list.as_array().first());
+    let Some(node) = node else {
+        if let Some(e) = j.get("errors").map(Json::as_array).and_then(|e| e.first()) {
+            return Err(format!("Nexus couldn't list the requirements ({})", e.str_at("message").unwrap_or("unknown error")));
+        }
+        return Err("Nexus doesn't know that mod".into());
+    };
+    let own_game = n(node.get("game").and_then(|g| g.get("id")));
+    let own_domain = node.get("game").and_then(|g| g.str_at("domainName")).filter(|d| !d.is_empty()).unwrap_or(domain);
+    let reqs = node.get("modRequirements");
+    let mut out = Vec::new();
+    for r in reqs.and_then(|r| r.get("nexusRequirements")).and_then(|p| p.get("nodes")).map(Json::as_array).unwrap_or(&[]) {
+        let external = b(r, "externalRequirement");
+        let name = clean_text(r.str_at("modName").unwrap_or(""), 200);
+        let notes = clean_text(r.str_at("notes").unwrap_or(""), 2000);
+        let raw_url = r.str_at("url").unwrap_or("");
+        if external {
+            out.push(Requirement { name, mod_id: 0, domain: String::new(), url: browser_url(raw_url).unwrap_or_default(), notes, is_dlc: false, external: true });
+            continue;
+        }
+        let mod_id = n(r.get("modId")) as u64;
+        let (req_domain, mod_id) = match parse_mod_page_url(raw_url) {
+            Some((d, id)) => (d, id),
+            None if mod_id > 0 && (n(r.get("gameId")) == own_game || r.get("gameId").is_none()) => (own_domain.to_string(), mod_id),
+            None => (String::new(), mod_id),
+        };
+        if mod_id == 0 {
+            continue;
+        }
+        let url = if req_domain.is_empty() { browser_url(raw_url).unwrap_or_default() } else { mod_page_url(&req_domain, mod_id) };
+        out.push(Requirement { name, mod_id, domain: req_domain, url, notes, is_dlc: false, external: false });
+    }
+    for d in reqs.and_then(|r| r.get("dlcRequirements")).map(Json::as_array).unwrap_or(&[]) {
+        let name = clean_text(d.get("gameExpansion").and_then(|g| g.str_at("name")).unwrap_or(""), 200);
+        if name.is_empty() {
+            continue;
+        }
+        out.push(Requirement {
+            name,
+            mod_id: 0,
+            domain: own_domain.to_string(),
+            url: String::new(),
+            notes: clean_text(d.str_at("notes").unwrap_or(""), 2000),
+            is_dlc: true,
+            external: false,
+        });
+    }
+    Ok(out)
+}
+
+/// A mod's requirements sorted against what is installed.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct RequirementCheck {
+    /// Nexus mods that aren't installed.
+    pub missing: Vec<Requirement>,
+    /// Nexus mods that are installed.
+    pub installed: Vec<Requirement>,
+    /// DLC and things outside Nexus: Turbine can't tell whether they're there, so they're listed for the player.
+    pub unchecked: Vec<Requirement>,
+}
+
+/// The (domain, mod ID) of an installed Nexus mod. Old records hold only the mod ID; their domain is empty.
+pub fn source_mod(src: &SourceInfo) -> Option<(String, u64)> {
+    if src.kind != "nexus" {
+        return None;
+    }
+    if let Some((d, m, _)) = parse_source_id(&src.id) {
+        return Some((d, m));
+    }
+    let mut p = src.id.split(':');
+    match (p.next(), p.next(), p.next()) {
+        (Some(d), Some(m), None) => m.parse().ok().map(|m| (d.to_string(), m)),
+        (Some(m), None, None) => m.parse().ok().map(|m| (String::new(), m)),
+        _ => None,
+    }
+}
+
+/// Which of a mod's requirements are missing, given where the installed mods came from (as
+/// `Store::installed_sources` returns them).
+pub fn check_requirements(reqs: &[Requirement], installed: &[(String, SourceInfo)]) -> RequirementCheck {
+    let have: Vec<(String, u64)> = installed.iter().filter_map(|(_, s)| source_mod(s)).collect();
+    let mut c = RequirementCheck::default();
+    for r in reqs {
+        if r.is_dlc || r.external || r.mod_id == 0 {
+            c.unchecked.push(r.clone());
+        } else if have.iter().any(|(d, m)| *m == r.mod_id && (d.is_empty() || r.domain.is_empty() || *d == r.domain)) {
+            c.installed.push(r.clone());
+        } else {
+            c.missing.push(r.clone());
+        }
+    }
+    c
+}
+
+/// What to do about one missing requirement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RequirementStep {
+    /// Premium: Turbine downloads the mod's main file itself (`Nexus::download_by_id` with no file ID).
+    Download { name: String, domain: String, mod_id: u64 },
+    /// Free accounts (or a requirement Turbine can't fetch): open this page in the browser. Files fetched from it
+    /// with Mod Manager Download come back as nxm links.
+    OpenPage { name: String, url: String },
+}
+
+/// The steps for the missing requirements. Requirements for games Turbine doesn't support are always pages.
+pub fn requirement_steps(missing: &[Requirement], premium: bool) -> Vec<RequirementStep> {
+    missing
+        .iter()
+        .filter(|r| !r.is_dlc && !r.external)
+        .filter_map(|r| {
+            if premium && known_domain(&r.domain) && r.mod_id > 0 {
+                Some(RequirementStep::Download { name: r.name.clone(), domain: r.domain.clone(), mod_id: r.mod_id })
+            } else if !r.domain.is_empty() && r.mod_id > 0 {
+                Some(RequirementStep::OpenPage { name: r.name.clone(), url: files_page_url(&r.domain, r.mod_id) })
+            } else {
+                (!r.url.is_empty()).then(|| RequirementStep::OpenPage { name: r.name.clone(), url: r.url.clone() })
+            }
+        })
+        .collect()
+}
+
+fn requirement_json(r: &Requirement) -> String {
+    format!(
+        "{{\"name\":{},\"modId\":{},\"domain\":{},\"url\":{},\"notes\":{},\"isDlc\":{},\"external\":{}}}",
+        quote(&r.name),
+        r.mod_id,
+        quote(&r.domain),
+        quote(&r.url),
+        quote(&r.notes),
+        r.is_dlc,
+        r.external
+    )
+}
+
+/// The check and the steps as JSON for the app:
+/// {"missing":[..],"installed":[..],"unchecked":[..],"steps":[{"action":"download"|"open","name","domain","modId","url"}]}.
+pub fn requirements_json(check: &RequirementCheck, premium: bool) -> String {
+    let list = |v: &[Requirement]| v.iter().map(requirement_json).collect::<Vec<_>>().join(",");
+    let steps: Vec<String> = requirement_steps(&check.missing, premium)
+        .iter()
+        .map(|s| match s {
+            RequirementStep::Download { name, domain, mod_id } => format!(
+                "{{\"action\":\"download\",\"name\":{},\"domain\":{},\"modId\":{mod_id},\"url\":\"\"}}",
+                quote(name),
+                quote(domain)
+            ),
+            RequirementStep::OpenPage { name, url } => {
+                format!("{{\"action\":\"open\",\"name\":{},\"domain\":\"\",\"modId\":0,\"url\":{}}}", quote(name), quote(url))
+            }
+        })
+        .collect();
+    format!(
+        "{{\"missing\":[{}],\"installed\":[{}],\"unchecked\":[{}],\"steps\":[{}]}}",
+        list(&check.missing),
+        list(&check.installed),
+        list(&check.unchecked),
+        steps.join(",")
+    )
+}
+
+fn file_group_json(g: &FileGroup) -> String {
+    let files: Vec<String> = g
+        .files
+        .iter()
+        .map(|f| {
+            format!(
+                "{{\"fileId\":{},\"name\":{},\"version\":{},\"category\":{},\"fileName\":{},\"size\":{},\"uploaded\":{},\"primary\":{},\"description\":{}}}",
+                f.file_id,
+                quote(&f.name),
+                quote(&f.version),
+                quote(&f.category),
+                quote(&f.file_name),
+                f.size_bytes,
+                f.uploaded_timestamp,
+                f.is_primary,
+                quote(&f.description)
+            )
+        })
+        .collect();
+    format!("{{\"category\":{},\"label\":{},\"files\":[{}]}}", quote(&g.category), quote(g.label), files.join(","))
+}
+
+/// File groups as JSON for the details page: [{"category","label","files":[{"fileId","name","version",...}]}].
+pub fn file_groups_json(groups: &[FileGroup]) -> String {
+    format!("[{}]", groups.iter().map(file_group_json).collect::<Vec<_>>().join(","))
+}
+
 pub fn source_info(domain: &str, mod_id: u64, file: &FileInfo, sha256: Option<String>) -> SourceInfo {
     SourceInfo {
         kind: "nexus".into(),
@@ -619,9 +987,22 @@ impl Nexus {
         progress: Option<Progress>,
     ) -> Result<(Download, SourceInfo), NetError> {
         let links = self.download_links(account, domain, mod_id, file.file_id)?;
+        self.fetch_checked(&links, domain, mod_id, file, progress)
+    }
+
+    /// Downloads from the first mirror and checks the size against the file list.
+    fn fetch_checked(
+        &self,
+        links: &[DownloadLink],
+        domain: &str,
+        mod_id: u64,
+        file: &FileInfo,
+        progress: Option<Progress>,
+    ) -> Result<(Download, SourceInfo), NetError> {
+        let first = links.first().ok_or_else(|| NetError::Failed("Nexus sent no download address Turbine can use.".into()))?;
         // Nexus's sizes are rounded to whole KB on older files, so allow a little slack instead of an exact match.
         let max = if file.size_bytes > 0 { file.size_bytes + 1024 } else { 8 << 30 };
-        let d = self.client.download(&links[0].uri, &Expect::up_to(max), progress)?;
+        let d = self.client.download(&first.uri, &Expect::up_to(max), progress)?;
         if file.size_bytes > 0 && d.size + 1024 < file.size_bytes {
             let _ = fs::remove_file(&d.path);
             return Err(NetError::Mismatch(format!("{} instead of {}", net::human_size(d.size), net::human_size(file.size_bytes))));
@@ -630,15 +1011,94 @@ impl Nexus {
         Ok((d, info))
     }
 
+    /// One file's details (size, version, category).
+    pub fn file_info(&self, domain: &str, mod_id: u64, file_id: u64) -> Result<FileInfo, NetError> {
+        Self::check_domain(domain)?;
+        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}/files/{file_id}.json"))?;
+        parse_file(&text).map_err(|e| NetError::Failed(format!("{e}.")))
+    }
+
+    /// Every file of a mod grouped for the details page's "Other versions" (main, updates, optional, other, old
+    /// versions, archived). One request.
+    pub fn file_groups(&self, domain: &str, mod_id: u64) -> Result<Vec<FileGroup>, NetError> {
+        Ok(self.files(domain, mod_id)?.groups())
+    }
+
+    /// Downloads what an nxm link points at. Works for free accounts too: the link's key lets Nexus hand out this
+    /// one download. The app adds the result to the game `link.store_ids()` names. Checks the expiry time first, so
+    /// an old link gets `nxm::EXPIRED_MESSAGE` without a request.
+    pub fn download_from_nxm(&self, link: &NxmLink, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
+        self.download_from_nxm_at(link, nxm::now(), progress)
+    }
+
+    /// `download_from_nxm` with the current time given (seconds since 1970).
+    pub fn download_from_nxm_at(&self, link: &NxmLink, now: u64, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
+        if !link.supported() {
+            return Err(NetError::Failed(format!("Turbine doesn't support Nexus mods for {} yet.", link.domain)));
+        }
+        if link.expired_at(now) {
+            return Err(NetError::Failed(nxm::EXPIRED_MESSAGE.into()));
+        }
+        let file = self.file_info(&link.domain, link.mod_id, link.file_id)?;
+        if file.is_removed() {
+            return Err(NetError::Failed("The author removed this file from Nexus, so it can't be downloaded.".into()));
+        }
+        let text = self.get(&link.download_link_path()).map_err(|e| match e {
+            // The file itself was just found, so a 404 or 410 here means the key's time is up (the computer's clock
+            // may differ from Nexus's). A key made for another account, or an old one, is refused.
+            NetError::NotFound if link.key.is_some() => NetError::Failed(nxm::EXPIRED_MESSAGE.into()),
+            NetError::Denied(_) if link.key.is_some() => NetError::Failed(
+                "Nexus didn't accept this download link. It may have expired or be for another Nexus account. Press Mod Manager Download on the Nexus page again.".into(),
+            ),
+            NetError::Denied(_) => NetError::Failed(FREE_ACCOUNT_MESSAGE.into()),
+            e => e,
+        })?;
+        let links = parse_download_links(&text).map_err(|e| NetError::Failed(format!("{e}.")))?;
+        self.fetch_checked(&links, &link.domain, link.mod_id, &file, progress)
+    }
+
+    /// Premium: downloads a mod by its IDs. With a file ID, that file while it can still be downloaded, else the
+    /// newest file replacing it, else the main file; without one, the main file (for requirements). Free accounts get
+    /// `FREE_ACCOUNT_MESSAGE` without a request.
+    pub fn download_by_id(
+        &self,
+        account: &Account,
+        domain: &str,
+        mod_id: u64,
+        file_id: Option<u64>,
+        progress: Option<Progress>,
+    ) -> Result<(Download, SourceInfo), NetError> {
+        Self::check_domain(domain)?;
+        if !account.is_premium {
+            return Err(NetError::Failed(FREE_ACCOUNT_MESSAGE.into()));
+        }
+        let list = self.files(domain, mod_id)?;
+        let file = list.pick(file_id).cloned().ok_or_else(|| NetError::Failed("This mod has no file on Nexus that can be downloaded.".into()))?;
+        self.download(account, domain, mod_id, &file, progress)
+    }
+
+    /// A mod's requirements (other Nexus mods, outside downloads and DLC) through GraphQL. Sort them with
+    /// `check_requirements` and turn the missing ones into steps with `requirement_steps`.
+    pub fn requirements(&self, domain: &str, mod_id: u64) -> Result<Vec<Requirement>, NetError> {
+        Self::check_domain(domain)?;
+        let text = self.graphql(&requirements_body(domain, mod_id))?;
+        parse_requirements(&text, domain).map_err(|e| NetError::Failed(format!("{e}.")))
+    }
+
+    /// POSTs a GraphQL body and returns the answer's text.
+    fn graphql(&self, body_json: &str) -> Result<String, NetError> {
+        fs::create_dir_all(&self.client.temp_dir).map_err(|e| NetError::Failed(format!("Couldn't make the temp folder ({e}).")))?;
+        let body = net::temp_path(&self.client.temp_dir, "query");
+        fs::write(&body, body_json).map_err(|e| NetError::Failed(format!("Couldn't save the request ({e}).")))?;
+        let resp = self.request(Request::get(GRAPHQL).post_file(&body, "application/json").max_bytes(16 << 20).max_time(60));
+        let _ = fs::remove_file(&body);
+        resp?.take_text()
+    }
+
     /// Browses mods for a game through GraphQL.
     pub fn search(&self, domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> Result<SearchPage, NetError> {
         Self::check_domain(domain)?;
-        fs::create_dir_all(&self.client.temp_dir).map_err(|e| NetError::Failed(format!("Couldn't make the temp folder ({e}).")))?;
-        let body = net::temp_path(&self.client.temp_dir, "query");
-        fs::write(&body, search_body(domain, text, sort, offset, count, adult))
-            .map_err(|e| NetError::Failed(format!("Couldn't save the search ({e}).")))?;
-        let resp = self.request(Request::get(GRAPHQL).post_file(&body, "application/json").max_bytes(16 << 20).max_time(60));
-        let _ = fs::remove_file(&body);
-        parse_search(&resp?.take_text()?).map_err(|e| NetError::Failed(format!("{e}.")))
+        let text = self.graphql(&search_body(domain, text, sort, offset, count, adult))?;
+        parse_search(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 }

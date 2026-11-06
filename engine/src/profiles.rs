@@ -10,6 +10,7 @@
 
 use crate::deploy::Report;
 use crate::json::{self, quote, Json};
+use crate::nexus;
 use crate::store::{folder_safe, SourceInfo, Store};
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -227,7 +228,8 @@ pub struct Share {
 pub struct ImportPlan {
     /// Turbine can fetch these itself (Thunderstore packages, loaders).
     pub automatic: Vec<ShareMod>,
-    /// From Nexus Mods: they need a Nexus Mods account, and downloading may need a visit to the site.
+    /// From Nexus Mods: they need a Nexus Mods account. Premium accounts can fetch them, free accounts get pages to
+    /// open (see `nexus_steps`).
     pub nexus: Vec<ShareMod>,
     /// Added from files: the player has to find and add them.
     pub by_hand: Vec<ShareMod>,
@@ -360,6 +362,23 @@ pub fn read_share(path: &Path) -> Result<Share, String> {
     parse_share(&fs::read_to_string(path).map_err(|e| format!("The share file couldn't be read ({e})."))?)
 }
 
+/// Is this installed mod the share entry? Same source and ID; for Nexus, the same mod even when another file of it
+/// is installed (an update, or a share made with an older version).
+fn same_source(m: &ShareMod, src: &SourceInfo, game_domain: Option<&str>) -> bool {
+    if m.id.is_empty() || src.kind != m.kind {
+        return false;
+    }
+    if src.id.eq_ignore_ascii_case(&m.id) {
+        return true;
+    }
+    if m.kind == "nexus" {
+        if let (Some((d, mid, _)), Some((sd, smid))) = (nexus_ids(m, game_domain), nexus::source_mod(src)) {
+            return mid == smid && (sd.is_empty() || sd == d);
+        }
+    }
+    false
+}
+
 /// Sorts a share file's mods by how they can be got, for this store's game. Refuses a file for another game.
 pub fn plan_import(share: &Share, store: &Store) -> Result<ImportPlan, String> {
     let game = store.game();
@@ -369,9 +388,10 @@ pub fn plan_import(share: &Share, store: &Store) -> Result<ImportPlan, String> {
     }
     let installed = store.installed_sources();
     let mut plan = ImportPlan::default();
+    let domain = nexus::domain_for_store_id(&game.store_id);
     for m in &share.mods {
         let have = installed.iter().any(|(id, src)| {
-            (!m.id.is_empty() && src.kind == m.kind && src.id.eq_ignore_ascii_case(&m.id))
+            same_source(m, src, domain)
                 || (m.kind == "zip" && store.mods().iter().any(|x| x.id == *id && x.name.eq_ignore_ascii_case(&m.name)))
         });
         let mut m = m.clone();
@@ -395,6 +415,7 @@ pub fn plan_import(share: &Share, store: &Store) -> Result<ImportPlan, String> {
 /// make a profile from.
 pub fn share_order(share: &Share, store: &Store) -> Vec<(String, bool)> {
     let installed = store.installed_sources();
+    let domain = nexus::domain_for_store_id(&store.game().store_id);
     share
         .mods
         .iter()
@@ -402,12 +423,89 @@ pub fn share_order(share: &Share, store: &Store) -> Vec<(String, bool)> {
             installed
                 .iter()
                 .find(|(id, src)| {
-                    (!m.id.is_empty() && src.kind == m.kind && src.id.eq_ignore_ascii_case(&m.id))
+                    same_source(m, src, domain)
                         || store.mods().iter().any(|x| x.id == *id && x.name.eq_ignore_ascii_case(&m.name))
                 })
                 .map(|(id, _)| (id.clone(), m.enabled))
         })
         .collect()
+}
+
+/// How one Nexus mod of a share file is got.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NexusAction {
+    /// Premium: Turbine downloads it (`Nexus::download_by_id`): that file while it can still be downloaded, else
+    /// the newest one replacing it, else the main file.
+    Fetch { domain: String, mod_id: u64, file_id: Option<u64> },
+    /// Free accounts: open this page and press Mod Manager Download; the file comes back as an nxm link.
+    OpenPage { url: String },
+    /// Not enough is known to find it (no mod ID): the player has to look for it by name.
+    ByHand,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NexusStep {
+    pub entry: ShareMod,
+    pub action: NexusAction,
+}
+
+/// The (domain, mod ID, file ID) a share entry names. Entries hold "<domain>:<mod>:<file>"; older ones may hold
+/// "<domain>:<mod>" or just the mod ID, which is then taken to be for `game_domain`.
+pub fn nexus_ids(m: &ShareMod, game_domain: Option<&str>) -> Option<(String, u64, Option<u64>)> {
+    let domain_ok = |d: &str| !d.is_empty() && d.len() <= 64 && d.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit());
+    let num = |s: &str| s.parse::<u64>().ok().filter(|n| *n > 0 && s.bytes().all(|b| b.is_ascii_digit()));
+    let parts: Vec<&str> = m.id.trim().split(':').collect();
+    let (d, mod_id, file_id) = match parts.as_slice() {
+        [d, mid, fid] => (d.to_string(), num(mid)?, Some(num(fid)?)),
+        [d, mid] => (d.to_string(), num(mid)?, None),
+        [mid] => (game_domain?.to_string(), num(mid)?, None),
+        _ => return None,
+    };
+    domain_ok(&d).then_some((d, mod_id, file_id))
+}
+
+/// What to do for each Nexus mod of an import plan. `game_domain` is this game's Nexus domain
+/// (`nexus::domain_for_store_id`); `premium` is the signed-in account's.
+pub fn nexus_steps(plan: &ImportPlan, game_domain: Option<&str>, premium: bool) -> Vec<NexusStep> {
+    plan.nexus
+        .iter()
+        .map(|m| {
+            let action = match nexus_ids(m, game_domain) {
+                Some((domain, mod_id, file_id)) if premium && nexus::supported_domain(&domain) => {
+                    NexusAction::Fetch { domain, mod_id, file_id }
+                }
+                Some((domain, mod_id, Some(file_id))) => NexusAction::OpenPage { url: nexus::file_page_url(&domain, mod_id, file_id) },
+                Some((domain, mod_id, None)) => NexusAction::OpenPage { url: nexus::files_page_url(&domain, mod_id) },
+                None => match m.url.as_deref().and_then(nexus::parse_mod_page_url) {
+                    Some((domain, mod_id)) => NexusAction::OpenPage { url: nexus::files_page_url(&domain, mod_id) },
+                    None => NexusAction::ByHand,
+                },
+            };
+            NexusStep { entry: m.clone(), action }
+        })
+        .collect()
+}
+
+/// The steps as JSON: [{"mod":{..},"action":"fetch"|"open"|"byHand","domain","modId","fileId","url"}].
+pub fn nexus_steps_json(steps: &[NexusStep]) -> String {
+    let items: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            let (action, domain, mod_id, file_id, url) = match &s.action {
+                NexusAction::Fetch { domain, mod_id, file_id } => ("fetch", domain.as_str(), *mod_id, *file_id, ""),
+                NexusAction::OpenPage { url } => ("open", "", 0, None, url.as_str()),
+                NexusAction::ByHand => ("byHand", "", 0, None, ""),
+            };
+            format!(
+                "{{\"mod\":{},\"action\":\"{action}\",\"domain\":{},\"modId\":{mod_id},\"fileId\":{},\"url\":{}}}",
+                share_mod_json(&s.entry),
+                quote(domain),
+                file_id.map(|f| f.to_string()).unwrap_or_else(|| "null".into()),
+                quote(url)
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
 }
 
 /// The plan as JSON: {"automatic":[..],"nexus":[..],"byHand":[..],"installed":[..]}.

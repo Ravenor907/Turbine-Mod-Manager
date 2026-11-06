@@ -322,6 +322,7 @@ while [ $# -gt 0 ]; do
     --output) out=$2; shift;;
     --dump-header) hdr=$2; shift;;
     --data-binary) data=$2; shift;;
+    --header) printf '%s\n' "$2" >> "$SERVED/sent_headers"; shift;;
     --) url=$2; shift;;
   esac
   shift
@@ -331,9 +332,12 @@ if [ -n "$data" ]; then cp "${data#@}" "$SERVED/last_post"; fi
 key=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
 if [ -f "$SERVED/$key.exit" ]; then printf '000 %s' "$url"; exit "$(cat "$SERVED/$key.exit")"; fi
 if [ ! -f "$SERVED/$key" ]; then printf 'HTTP/2 404\r\n\r\n' > "$hdr"; printf '404 %s' "$url"; exit 22; fi
-printf 'HTTP/2 200\r\n\r\n' > "$hdr"
+status=200
+if [ -f "$SERVED/$key.status" ]; then status=$(cat "$SERVED/$key.status"); fi
+printf 'HTTP/2 %s\r\n\r\n' "$status" > "$hdr"
+if [ "$status" -ge 400 ]; then printf '%s %s' "$status" "$url"; exit 22; fi
 cp "$SERVED/$key" "$out"
-printf '200 %s' "$url"
+printf '%s %s' "$status" "$url"
 "#;
 
 fn fake(tag: &str) -> (PathBuf, Client) {
@@ -424,4 +428,25 @@ fn imports_and_exports_share_codes() {
     let again = ts::read_profile_zip(&back).unwrap();
     assert_eq!(again.mods, p.mods);
     assert_eq!(again.files, vec!["BepInEx/config/a.cfg"]);
+    // The upload is a raw POST body sent as application/octet-stream, as Thunderstore's own tests send it, and
+    // starts with the format's marker line.
+    let headers = fs::read_to_string(dir.join("served/sent_headers")).unwrap();
+    assert!(headers.lines().any(|h| h == "Content-Type: application/octet-stream"), "{headers}");
+    assert!(sent.starts_with(&format!("{}\n", ts::PROFILE_PREFIX)));
+    assert!(ts::PROFILE_CREATE_URL.ends_with("/api/experimental/legacyprofile/create/"));
+
+    // Thunderstore's refusals get plain words: 6 uploads a minute (429), and 400 for an empty body or a full server.
+    let status = |s: u16| {
+        let key: String = ts::PROFILE_CREATE_URL.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        fs::write(dir.join("served").join(key + ".status"), s.to_string()).unwrap();
+    };
+    status(429);
+    let e = ts::export_code(&client, &p, &[]).unwrap_err().to_string();
+    assert_eq!(e, "Thunderstore only takes a few profile uploads a minute. Wait a minute and try again.");
+    status(400);
+    let e = ts::export_code(&client, &p, &[]).unwrap_err().to_string();
+    assert_eq!(e, "Thunderstore didn't accept the profile upload. Try again later.");
+    status(200);
+    serve(&dir, ts::PROFILE_CREATE_URL, b"{\"detail\":\"nope\"}");
+    assert_eq!(ts::export_code(&client, &p, &[]).unwrap_err().to_string(), "Thunderstore didn't send a code back.");
 }
