@@ -276,12 +276,13 @@ Item {
                         spacing: md.ui.px(8)
                         width: right.width
                         Rectangle {
+                            id: needTag
                             width: Math.max(md.ui.px(84), ntg.implicitWidth + md.ui.px(14)); height: md.ui.px(26); radius: md.ui.px(5)
                             color: md.ui.c.raised
                             Text { id: ntg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
                         }
-                        Text { width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Text { width: parent.width * 0.4; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+                        Text { id: needName; width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: Math.max(0, parent.width - needTag.width - needName.width - parent.spacing * 2); elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
                     }
                 }
             }
