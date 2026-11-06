@@ -1,5 +1,6 @@
 //! Turbine Mod Manager's engine. It has no interface of its own: the app calls into it.
 
+pub mod deploy;
 pub mod games;
 pub mod heroic;
 pub mod inflate;
