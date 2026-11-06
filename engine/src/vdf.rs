@@ -59,9 +59,13 @@ impl std::error::Error for VdfError {}
 /// Parses a whole file. The result is an object holding the top-level keys.
 pub fn parse(text: &str) -> Result<Vdf, VdfError> {
     let mut p = Parser { chars: text.chars().collect(), pos: 0, line: 1 };
-    let items = p.object_body(false)?;
+    let items = p.object_body(0)?;
     Ok(Vdf::Obj(items))
 }
+
+/// Most levels of nested objects. Real Steam files use a handful; the limit keeps a hostile file from exhausting the
+/// stack.
+pub const MAX_DEPTH: usize = 128;
 
 struct Parser {
     chars: Vec<char>,
@@ -188,7 +192,9 @@ impl Parser {
         }
     }
 
-    fn object_body(&mut self, nested: bool) -> Result<Vec<(String, Vdf)>, VdfError> {
+    /// Reads the keys of an object. `depth` is 0 for the top level and counts the braces around it.
+    fn object_body(&mut self, depth: usize) -> Result<Vec<(String, Vdf)>, VdfError> {
+        let nested = depth > 0;
         let mut items = Vec::new();
         loop {
             let key = match self.token()? {
@@ -201,7 +207,8 @@ impl Parser {
             };
             let value = match self.token()? {
                 Tok::Str(s) => Vdf::Str(s),
-                Tok::Open => Vdf::Obj(self.object_body(true)?),
+                Tok::Open if depth >= MAX_DEPTH => return Err(self.err("nested too deeply")),
+                Tok::Open => Vdf::Obj(self.object_body(depth + 1)?),
                 Tok::Close | Tok::End => return Err(self.err("key without a value")),
             };
             items.push((key, value));
@@ -261,5 +268,12 @@ mod tests {
         assert!(parse("\"a\" { \"b\" \"c\"").is_err());
         assert!(parse("\"a\"").is_err());
         assert!(parse("}").is_err());
+    }
+
+    #[test]
+    fn nesting_limit_is_exact() {
+        let at = |n: usize| format!("{}\"k\" \"v\"{}", "\"a\" {".repeat(n), "}".repeat(n));
+        assert!(parse(&at(MAX_DEPTH)).is_ok());
+        assert_eq!(parse(&at(MAX_DEPTH + 1)).unwrap_err().message, "nested too deeply");
     }
 }

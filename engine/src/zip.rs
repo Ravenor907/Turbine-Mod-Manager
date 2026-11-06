@@ -1,7 +1,8 @@
 //! Reads zip archives (including ZIP64) and unpacks them safely: nothing outside the target folder, no links, no
 //! archive bombs, every file checked against its CRC-32. Nothing inside an archive is ever run.
 
-use crate::inflate::{inflate, InflateError};
+use crate::inflate::{inflate_stream, InflateError, StreamError};
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
@@ -50,7 +51,8 @@ pub struct Entry {
     crc: u32,
     pub compressed: u64,
     pub size: u64,
-    local_offset: u64,
+    /// Where the file's data starts (after its local header), checked to lie inside the archive.
+    data_offset: u64,
     is_link: bool,
 }
 
@@ -155,7 +157,10 @@ impl Zip {
         let mut cd = vec![0u8; cd_size as usize];
         file.seek(SeekFrom::Start(cd_off))?;
         file.read_exact(&mut cd)?;
-        let mut entries = Vec::with_capacity(count as usize);
+        // Every directory entry takes at least 46 bytes, so the directory's size caps how many there can be.
+        let mut entries = Vec::with_capacity(count.min(cd_size / 46) as usize);
+        let mut names = HashSet::new();
+        let mut ranges = Vec::new();
         let mut p = 0usize;
         for _ in 0..count {
             if p + 46 > cd.len() || u32le(&cd, p) != 0x0201_4b50 {
@@ -211,60 +216,101 @@ impl Zip {
             let is_dir = name.ends_with('/') || name.ends_with('\\');
             // Unix-made zips keep the file type in the high bits: 0o120000 is a symbolic link.
             let is_link = made_by_os == 3 && (ext_attr >> 16) & 0o170000 == 0o120000;
-            entries.push(Entry {
-                name: rel.to_string_lossy().replace('\\', "/"),
-                is_dir,
-                method,
-                crc,
-                compressed,
-                size,
-                local_offset,
-                is_link,
-            });
+            let clean = rel.to_string_lossy().replace('\\', "/");
+            // Two entries landing on the same path (also when only upper/lower case differs, as on exFAT and in
+            // games that ignore case) would silently replace each other.
+            if !clean.is_empty() && !names.insert(clean.to_lowercase()) {
+                return Err(ZipError::Damaged("two files with the same name"));
+            }
+            // The local header must be inside the archive, before the directory, and agree with the directory.
+            let header_end = local_offset.checked_add(30).filter(|&e| e <= cd_off).ok_or(ZipError::Damaged("file header"))?;
+            let mut h = [0u8; 30];
+            file.seek(SeekFrom::Start(local_offset))?;
+            file.read_exact(&mut h)?;
+            if u32le(&h, 0) != 0x0403_4b50 {
+                return Err(ZipError::Damaged("file header"));
+            }
+            let local_name_len = u16le(&h, 26) as u64;
+            let local_extra_len = u16le(&h, 28) as u64;
+            let data_offset = header_end + local_name_len + local_extra_len;
+            let data_end = data_offset.checked_add(compressed).filter(|&e| e <= cd_off).ok_or(ZipError::Damaged("file size"))?;
+            if u16le(&h, 8) != method || local_name_len != name_len as u64 {
+                return Err(ZipError::Damaged("file header doesn't match the directory"));
+            }
+            let mut local_name = vec![0u8; name_len];
+            file.read_exact(&mut local_name)?;
+            if local_name != raw_name {
+                return Err(ZipError::Damaged("file header doesn't match the directory"));
+            }
+            ranges.push((local_offset, data_end));
+            entries.push(Entry { name: clean, is_dir, method, crc, compressed, size, data_offset, is_link });
             p = end;
+        }
+        // Each file's header and data must have its own bytes: entries sharing data are a known archive bomb.
+        ranges.sort_unstable();
+        if ranges.windows(2).any(|w| w[1].0 < w[0].1) {
+            return Err(ZipError::Damaged("files overlap"));
         }
         Ok(Zip { file, entries })
     }
 
     /// Reads one file's contents.
     pub fn read(&mut self, e: &Entry, limits: &Limits) -> Result<Vec<u8>, ZipError> {
+        let mut out = Vec::with_capacity(e.size.min(1 << 24) as usize);
+        self.unpack(e, limits, &mut out)?;
+        Ok(out)
+    }
+
+    /// Unpacks one file into `sink` a chunk at a time, checking its size and CRC-32 on the way. Memory use stays at a
+    /// few hundred KiB whatever the file's size. On an error, part of the file may already be in `sink`.
+    pub fn unpack(&mut self, e: &Entry, limits: &Limits, sink: &mut dyn Write) -> Result<(), ZipError> {
         if e.size > (64 << 20) && e.size / e.compressed.max(1) > limits.ratio {
             return Err(ZipError::TooBig(e.name.clone()));
         }
-        let mut h = [0u8; 30];
-        self.file.seek(SeekFrom::Start(e.local_offset))?;
-        self.file.read_exact(&mut h)?;
-        if u32le(&h, 0) != 0x0403_4b50 {
-            return Err(ZipError::Damaged("file header"));
-        }
-        let skip = u16le(&h, 26) as u64 + u16le(&h, 28) as u64;
-        self.file.seek(SeekFrom::Start(e.local_offset + 30 + skip))?;
-        let mut data = vec![0u8; usize::try_from(e.compressed).map_err(|_| ZipError::TooBig(e.name.clone()))?];
-        self.file.read_exact(&mut data)?;
-        let out = match e.method {
-            0 => data,
-            8 => {
-                let limit = usize::try_from(e.size).map_err(|_| ZipError::TooBig(e.name.clone()))?;
-                let out = inflate(&data, limit).map_err(|err| ZipError::Inflate(e.name.clone(), err))?;
-                if out.len() as u64 != e.size {
+        self.file.seek(SeekFrom::Start(e.data_offset))?;
+        let mut sink = CrcWriter { inner: sink, crc: Crc32::new() };
+        match e.method {
+            0 => {
+                if e.compressed != e.size {
                     return Err(ZipError::Damaged("file size"));
                 }
-                out
+                let mut buf = vec![0u8; COPY_CHUNK];
+                let mut left = e.size;
+                while left > 0 {
+                    let n = left.min(COPY_CHUNK as u64) as usize;
+                    self.file.read_exact(&mut buf[..n])?;
+                    sink.write_all(&buf[..n])?;
+                    left -= n as u64;
+                }
+            }
+            8 => {
+                let src = (&mut self.file).take(e.compressed);
+                let written = inflate_stream(src, &mut sink, e.size).map_err(|err| match err {
+                    StreamError::Inflate(i) => ZipError::Inflate(e.name.clone(), i),
+                    StreamError::Read(io) | StreamError::Write(io) => ZipError::Io(io),
+                })?;
+                if written != e.size {
+                    return Err(ZipError::Damaged("file size"));
+                }
             }
             m => return Err(ZipError::Unsupported(format!("compression method {m} on {}", e.name))),
-        };
-        if crc32(&out) != e.crc {
+        }
+        if sink.crc.finish() != e.crc {
             return Err(ZipError::Checksum(e.name.clone()));
         }
-        Ok(out)
+        Ok(())
     }
 
     /// Unpacks everything into `dest` (which must not exist yet). Unpacks into a temporary folder next to it first and
     /// renames it at the end, so `dest` is either complete or absent. Links are skipped. Returns the files written.
+    /// Files are streamed to disk, so memory use doesn't grow with their size.
     pub fn extract_all(&mut self, dest: &Path, limits: &Limits) -> Result<Vec<PathBuf>, ZipError> {
-        let total: u64 = self.entries.iter().filter(|e| !e.is_dir).map(|e| e.size).sum();
-        if total > limits.total {
+        let total = self.entries.iter().filter(|e| !e.is_dir).try_fold(0u64, |sum, e| sum.checked_add(e.size));
+        if total.map(|t| t > limits.total).unwrap_or(true) {
             return Err(ZipError::TooBig("The archive".into()));
+        }
+        if fs::symlink_metadata(dest).is_ok() {
+            return Err(ZipError::Io(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the destination folder already exists")));
         }
         let parent = dest.parent().ok_or(ZipError::Damaged("destination"))?;
         fs::create_dir_all(parent)?;
@@ -290,34 +336,76 @@ impl Zip {
                 if e.is_link {
                     continue;
                 }
-                let data = self.read(e, limits)?;
                 if let Some(p) = target.parent() {
                     fs::create_dir_all(p)?;
                 }
                 let mut f = File::create(&target)?;
-                f.write_all(&data)?;
+                self.unpack(e, limits, &mut f)?;
                 f.sync_all()?;
                 written.push(rel);
             }
+            fs::rename(&tmp, dest)?;
             Ok(written)
         })();
-        match result {
-            Ok(written) => {
-                fs::rename(&tmp, dest)?;
-                Ok(written)
-            }
-            Err(e) => {
-                let _ = fs::remove_dir_all(&tmp);
-                Err(e)
-            }
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&tmp);
         }
+        result
     }
 }
 
-/// CRC-32 (IEEE), as zip uses it.
-pub fn crc32(data: &[u8]) -> u32 {
+/// How much stored (uncompressed) data is copied at a time.
+const COPY_CHUNK: usize = 64 << 10;
+
+/// Passes bytes through to `inner` and keeps a running CRC-32 of them.
+struct CrcWriter<'a> {
+    inner: &'a mut dyn Write,
+    crc: Crc32,
+}
+
+impl Write for CrcWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.crc.update(&buf[..n]);
+        Ok(n)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// A CRC-32 worked out a piece at a time: `update` with each chunk, then `finish`.
+#[derive(Clone, Copy, Debug)]
+pub struct Crc32(u32);
+
+impl Default for Crc32 {
+    fn default() -> Self {
+        Crc32::new()
+    }
+}
+
+impl Crc32 {
+    pub fn new() -> Self {
+        Crc32(0xFFFF_FFFF)
+    }
+
+    pub fn update(&mut self, data: &[u8]) {
+        let t = crc_table();
+        let mut c = self.0;
+        for &b in data {
+            c = t[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
+        }
+        self.0 = c;
+    }
+
+    pub fn finish(self) -> u32 {
+        self.0 ^ 0xFFFF_FFFF
+    }
+}
+
+fn crc_table() -> &'static [u32; 256] {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let t = TABLE.get_or_init(|| {
+    TABLE.get_or_init(|| {
         let mut t = [0u32; 256];
         for (i, v) in t.iter_mut().enumerate() {
             let mut c = i as u32;
@@ -327,12 +415,14 @@ pub fn crc32(data: &[u8]) -> u32 {
             *v = c;
         }
         t
-    });
-    let mut c = 0xFFFF_FFFFu32;
-    for &b in data {
-        c = t[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
-    }
-    c ^ 0xFFFF_FFFF
+    })
+}
+
+/// CRC-32 (IEEE), as zip uses it.
+pub fn crc32(data: &[u8]) -> u32 {
+    let mut c = Crc32::new();
+    c.update(data);
+    c.finish()
 }
 
 #[cfg(test)]
@@ -342,6 +432,11 @@ mod tests {
     #[test]
     fn crc_matches_known_value() {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+        let mut c = Crc32::new();
+        c.update(b"1234");
+        c.update(b"");
+        c.update(b"56789");
+        assert_eq!(c.finish(), 0xCBF4_3926);
     }
 
     #[test]

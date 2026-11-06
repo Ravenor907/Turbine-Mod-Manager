@@ -1,5 +1,8 @@
 //! DEFLATE decompression (RFC 1951), enough for zip archives. Written here so the engine has no outside code in the
 //! path every downloaded file goes through. Output is capped so a hostile archive can't fill the disk or memory.
+//! `inflate_stream` unpacks straight from a reader to a writer, so files of any size need only a few hundred KiB.
+
+use std::io::{self, Read, Write};
 
 #[derive(Debug, PartialEq)]
 pub enum InflateError {
@@ -24,29 +27,81 @@ impl std::fmt::Display for InflateError {
 
 impl std::error::Error for InflateError {}
 
-struct Bits<'a> {
-    data: &'a [u8],
+/// What can stop a streaming inflate: damaged data, or the source or the sink failing.
+#[derive(Debug)]
+pub enum StreamError {
+    Inflate(InflateError),
+    Read(io::Error),
+    Write(io::Error),
+}
+
+impl From<InflateError> for StreamError {
+    fn from(e: InflateError) -> Self {
+        StreamError::Inflate(e)
+    }
+}
+
+impl std::fmt::Display for StreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamError::Inflate(e) => e.fmt(f),
+            StreamError::Read(e) => write!(f, "couldn't read the compressed data ({e})"),
+            StreamError::Write(e) => write!(f, "couldn't write the unpacked data ({e})"),
+        }
+    }
+}
+
+impl std::error::Error for StreamError {}
+
+/// How much compressed input is read from the source at a time.
+const IN_CHUNK: usize = 32 << 10;
+
+/// Bit reader over any byte source. Bytes are pulled one at a time from a small buffer, so after `align` the next
+/// byte is exactly the next unread byte of the stream (stored blocks depend on that).
+struct Bits<R> {
+    src: R,
+    buf: Vec<u8>,
     pos: usize,
+    end: usize,
     bit: u32,
     nbits: u32,
 }
 
-impl<'a> Bits<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Bits { data, pos: 0, bit: 0, nbits: 0 }
+impl<R: Read> Bits<R> {
+    fn new(src: R) -> Self {
+        Bits { src, buf: vec![0; IN_CHUNK], pos: 0, end: 0, bit: 0, nbits: 0 }
     }
 
-    fn need(&mut self, n: u32) -> Result<(), InflateError> {
+    fn byte(&mut self) -> Result<u8, StreamError> {
+        if self.pos == self.end {
+            loop {
+                match self.src.read(&mut self.buf) {
+                    Ok(0) => return Err(InflateError::Truncated.into()),
+                    Ok(n) => {
+                        self.pos = 0;
+                        self.end = n;
+                        break;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(StreamError::Read(e)),
+                }
+            }
+        }
+        let b = self.buf[self.pos];
+        self.pos += 1;
+        Ok(b)
+    }
+
+    fn need(&mut self, n: u32) -> Result<(), StreamError> {
         while self.nbits < n {
-            let b = *self.data.get(self.pos).ok_or(InflateError::Truncated)?;
-            self.pos += 1;
+            let b = self.byte()?;
             self.bit |= (b as u32) << self.nbits;
             self.nbits += 8;
         }
         Ok(())
     }
 
-    fn take(&mut self, n: u32) -> Result<u32, InflateError> {
+    fn take(&mut self, n: u32) -> Result<u32, StreamError> {
         if n == 0 {
             return Ok(0);
         }
@@ -60,6 +115,73 @@ impl<'a> Bits<'a> {
     fn align(&mut self) {
         self.bit = 0;
         self.nbits = 0;
+    }
+}
+
+/// The 32 KiB history that back-references reach into.
+const WINDOW: usize = 32 << 10;
+/// Unpacked bytes are handed to the sink once this many are waiting.
+const OUT_CHUNK: usize = 64 << 10;
+
+/// Output side: keeps the last 32 KiB for back-references and hands everything to the sink in chunks, so memory
+/// stays the same whatever the size of the file.
+struct Out<'a> {
+    sink: &'a mut dyn Write,
+    /// History (the last WINDOW bytes already written) followed by bytes not written yet.
+    win: Vec<u8>,
+    /// Index in `win` of the first byte not written yet.
+    pending: usize,
+    total: u64,
+    limit: u64,
+}
+
+impl<'a> Out<'a> {
+    fn new(sink: &'a mut dyn Write, limit: u64) -> Self {
+        Out { sink, win: Vec::with_capacity(WINDOW + OUT_CHUNK + 258), pending: 0, total: 0, limit }
+    }
+
+    fn room(&mut self, len: usize) -> Result<(), StreamError> {
+        if self.total.saturating_add(len as u64) > self.limit {
+            return Err(InflateError::TooLarge.into());
+        }
+        if self.win.len() + len > WINDOW + OUT_CHUNK {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), StreamError> {
+        self.sink.write_all(&self.win[self.pending..]).map_err(StreamError::Write)?;
+        let keep_from = self.win.len().saturating_sub(WINDOW);
+        self.win.drain(..keep_from);
+        self.pending = self.win.len();
+        Ok(())
+    }
+
+    fn byte(&mut self, b: u8) -> Result<(), StreamError> {
+        self.room(1)?;
+        self.win.push(b);
+        self.total += 1;
+        Ok(())
+    }
+
+    fn copy(&mut self, back: usize, len: usize) -> Result<(), StreamError> {
+        // The window always holds every byte so far, or at least the last WINDOW of them; `back` is at most WINDOW.
+        if back > self.win.len() {
+            return Err(InflateError::BadDistance.into());
+        }
+        self.room(len)?;
+        let start = self.win.len() - back;
+        if back >= len {
+            self.win.extend_from_within(start..start + len);
+        } else {
+            for k in 0..len {
+                let b = self.win[start + k];
+                self.win.push(b);
+            }
+        }
+        self.total += len as u64;
+        Ok(())
     }
 }
 
@@ -99,7 +221,7 @@ impl Huffman {
         Ok(Huffman { counts, symbols })
     }
 
-    fn decode(&self, bits: &mut Bits) -> Result<u16, InflateError> {
+    fn decode<R: Read>(&self, bits: &mut Bits<R>) -> Result<u16, StreamError> {
         let (mut code, mut first, mut index) = (0i32, 0i32, 0i32);
         for len in 1..16 {
             code |= bits.take(1)? as i32;
@@ -112,7 +234,7 @@ impl Huffman {
             first <<= 1;
             code <<= 1;
         }
-        Err(InflateError::BadCode)
+        Err(InflateError::BadCode.into())
     }
 }
 
@@ -126,26 +248,37 @@ const DIST_EXTRA: [u8; 30] = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7,
 
 /// Decompresses raw DEFLATE data. `limit` is the most bytes the output may reach.
 pub fn inflate(data: &[u8], limit: usize) -> Result<Vec<u8>, InflateError> {
-    let mut out: Vec<u8> = Vec::with_capacity(limit.min(1 << 24));
-    let mut bits = Bits::new(data);
+    let mut out: Vec<u8> = Vec::with_capacity(limit.min(1 << 16));
+    match inflate_stream(data, &mut out, limit as u64) {
+        Ok(_) => Ok(out),
+        Err(StreamError::Inflate(e)) => Err(e),
+        // A slice never fails to read and a Vec never fails to write, short of running out of memory.
+        Err(StreamError::Read(_)) => Err(InflateError::Truncated),
+        Err(StreamError::Write(_)) => Err(InflateError::TooLarge),
+    }
+}
+
+/// Decompresses raw DEFLATE data from `src` into `sink`, a chunk at a time, without holding more than a 32 KiB
+/// window and small buffers. `limit` is the most bytes the output may reach. Returns how many bytes were written.
+/// Stops after the last block; any input after it is left unread.
+pub fn inflate_stream(src: impl Read, sink: &mut dyn Write, limit: u64) -> Result<u64, StreamError> {
+    let mut bits = Bits::new(src);
+    let mut out = Out::new(sink, limit);
     loop {
         let last = bits.take(1)? == 1;
         match bits.take(2)? {
             0 => {
                 bits.align();
-                let p = bits.pos;
-                let hdr = data.get(p..p + 4).ok_or(InflateError::Truncated)?;
+                let hdr = [bits.byte()?, bits.byte()?, bits.byte()?, bits.byte()?];
                 let len = u16::from_le_bytes([hdr[0], hdr[1]]) as usize;
                 let nlen = u16::from_le_bytes([hdr[2], hdr[3]]) as usize;
                 if len != (!nlen & 0xFFFF) {
-                    return Err(InflateError::BadBlock);
+                    return Err(InflateError::BadBlock.into());
                 }
-                let chunk = data.get(p + 4..p + 4 + len).ok_or(InflateError::Truncated)?;
-                if out.len() + len > limit {
-                    return Err(InflateError::TooLarge);
+                for _ in 0..len {
+                    let b = bits.byte()?;
+                    out.byte(b)?;
                 }
-                out.extend_from_slice(chunk);
-                bits.pos = p + 4 + len;
             }
             1 => {
                 let mut l = [0u8; 288];
@@ -155,7 +288,7 @@ pub fn inflate(data: &[u8], limit: usize) -> Result<Vec<u8>, InflateError> {
                 l[280..].fill(8);
                 let lit = Huffman::new(&l)?;
                 let dist = Huffman::new(&[5u8; 30])?;
-                block(&mut bits, &mut out, &lit, &dist, limit)?;
+                block(&mut bits, &mut out, &lit, &dist)?;
             }
             2 => {
                 let hlit = bits.take(5)? as usize + 257;
@@ -179,61 +312,49 @@ pub fn inflate(data: &[u8], limit: usize) -> Result<Vec<u8>, InflateError> {
                         }
                         17 => (0, 3 + bits.take(3)? as usize),
                         18 => (0, 11 + bits.take(7)? as usize),
-                        _ => return Err(InflateError::BadCode),
+                        _ => return Err(InflateError::BadCode.into()),
                     };
                     if i + rep > hlit + hdist {
-                        return Err(InflateError::BadBlock);
+                        return Err(InflateError::BadBlock.into());
                     }
                     lengths[i..i + rep].fill(val);
                     i += rep;
                 }
                 if lengths[256] == 0 {
-                    return Err(InflateError::BadBlock);
+                    return Err(InflateError::BadBlock.into());
                 }
                 let lit = Huffman::new(&lengths[..hlit])?;
                 let dist = Huffman::new(&lengths[hlit..])?;
-                block(&mut bits, &mut out, &lit, &dist, limit)?;
+                block(&mut bits, &mut out, &lit, &dist)?;
             }
-            _ => return Err(InflateError::BadBlock),
+            _ => return Err(InflateError::BadBlock.into()),
         }
         if last {
-            return Ok(out);
+            out.flush()?;
+            return Ok(out.total);
         }
     }
 }
 
-fn block(bits: &mut Bits, out: &mut Vec<u8>, lit: &Huffman, dist: &Huffman, limit: usize) -> Result<(), InflateError> {
+fn block<R: Read>(bits: &mut Bits<R>, out: &mut Out, lit: &Huffman, dist: &Huffman) -> Result<(), StreamError> {
     loop {
         let sym = lit.decode(bits)? as usize;
         if sym < 256 {
-            if out.len() >= limit {
-                return Err(InflateError::TooLarge);
-            }
-            out.push(sym as u8);
+            out.byte(sym as u8)?;
         } else if sym == 256 {
             return Ok(());
         } else {
             let i = sym - 257;
             if i >= 29 {
-                return Err(InflateError::BadCode);
+                return Err(InflateError::BadCode.into());
             }
             let len = LEN_BASE[i] as usize + bits.take(LEN_EXTRA[i] as u32)? as usize;
             let d = dist.decode(bits)? as usize;
             if d >= 30 {
-                return Err(InflateError::BadDistance);
+                return Err(InflateError::BadDistance.into());
             }
             let back = DIST_BASE[d] as usize + bits.take(DIST_EXTRA[d] as u32)? as usize;
-            if back > out.len() {
-                return Err(InflateError::BadDistance);
-            }
-            if out.len() + len > limit {
-                return Err(InflateError::TooLarge);
-            }
-            let start = out.len() - back;
-            for k in 0..len {
-                let b = out[start + k];
-                out.push(b);
-            }
+            out.copy(back, len)?;
         }
     }
 }

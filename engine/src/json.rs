@@ -66,8 +66,9 @@ impl std::fmt::Display for JsonError {
 
 impl std::error::Error for JsonError {}
 
-/// Deep enough for any real launcher file, shallow enough that a hostile file can't exhaust the stack.
-const MAX_DEPTH: usize = 128;
+/// Most levels of nested arrays and objects: deep enough for any real launcher file, shallow enough that a hostile
+/// file can't exhaust the stack.
+pub const MAX_DEPTH: usize = 128;
 
 pub fn parse(text: &str) -> Result<Json, JsonError> {
     let mut p = P { b: text.as_bytes(), i: 0 };
@@ -112,10 +113,10 @@ impl P<'_> {
     }
 
     fn value(&mut self, depth: usize) -> Result<Json, JsonError> {
-        if depth > MAX_DEPTH {
+        self.ws();
+        if depth >= MAX_DEPTH && matches!(self.b.get(self.i), Some(b'[' | b'{')) {
             return Err(self.err("nested too deeply"));
         }
-        self.ws();
         match self.b.get(self.i) {
             None => Err(self.err("unexpected end")),
             Some(b'n') => self.lit(b"null", Json::Null),
@@ -175,26 +176,64 @@ impl P<'_> {
                     }
                 }
             }
-            Some(c) if *c == b'-' || c.is_ascii_digit() => {
-                let start = self.i;
-                while let Some(&c) = self.b.get(self.i) {
-                    if c.is_ascii_digit() || matches!(c, b'-' | b'+' | b'.' | b'e' | b'E') {
-                        self.i += 1;
-                    } else {
-                        break;
-                    }
-                }
-                let s = std::str::from_utf8(&self.b[start..self.i]).map_err(|_| self.err("bad number"))?;
-                s.parse::<f64>().map(Json::Num).map_err(|_| self.err("bad number"))
-            }
+            Some(c) if *c == b'-' || c.is_ascii_digit() => self.number(),
             Some(_) => Err(self.err("unexpected character")),
         }
     }
 
+    fn digits(&mut self) -> usize {
+        let start = self.i;
+        while self.b.get(self.i).is_some_and(u8::is_ascii_digit) {
+            self.i += 1;
+        }
+        self.i - start
+    }
+
+    /// The JSON number grammar exactly: `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?`.
+    fn number(&mut self) -> Result<Json, JsonError> {
+        let start = self.i;
+        if self.b.get(self.i) == Some(&b'-') {
+            self.i += 1;
+        }
+        match self.b.get(self.i) {
+            Some(b'0') => {
+                self.i += 1;
+                if self.b.get(self.i).is_some_and(u8::is_ascii_digit) {
+                    return Err(self.err("bad number (leading zero)"));
+                }
+            }
+            Some(b'1'..=b'9') => {
+                self.digits();
+            }
+            _ => return Err(self.err("bad number")),
+        }
+        if self.b.get(self.i) == Some(&b'.') {
+            self.i += 1;
+            if self.digits() == 0 {
+                return Err(self.err("bad number (no digits after '.')"));
+            }
+        }
+        if matches!(self.b.get(self.i), Some(b'e' | b'E')) {
+            self.i += 1;
+            if matches!(self.b.get(self.i), Some(b'+' | b'-')) {
+                self.i += 1;
+            }
+            if self.digits() == 0 {
+                return Err(self.err("bad number (no digits in the exponent)"));
+            }
+        }
+        let s = std::str::from_utf8(&self.b[start..self.i]).map_err(|_| self.err("bad number"))?;
+        s.parse::<f64>().map(Json::Num).map_err(|_| self.err("bad number"))
+    }
+
+    /// Exactly four hex digits (no sign, no spaces).
     fn hex4(&mut self) -> Result<u32, JsonError> {
         let s = self.b.get(self.i..self.i + 4).ok_or_else(|| self.err("short \\u escape"))?;
-        let s = std::str::from_utf8(s).map_err(|_| self.err("bad \\u escape"))?;
-        let v = u32::from_str_radix(s, 16).map_err(|_| self.err("bad \\u escape"))?;
+        let mut v = 0u32;
+        for &c in s {
+            let d = (c as char).to_digit(16).ok_or_else(|| self.err("bad \\u escape"))?;
+            v = v * 16 + d;
+        }
         self.i += 4;
         Ok(v)
     }
@@ -275,6 +314,22 @@ mod tests {
         }
         let deep = "[".repeat(1000);
         assert!(parse(&deep).is_err());
+        for bad in ["01", "-", "-a", "1.", ".5", "1e", "1e+", "+1", "\"\\u+041\"", "\"\\u 041\"", "\"\\u004\""] {
+            assert!(parse(bad).is_err(), "{bad:?} should fail");
+        }
+        for good in ["0", "-0", "0.5", "-1.25e-3", "1E+9", "10", "\"\\u00Ff\""] {
+            assert!(parse(good).is_ok(), "{good:?} should parse");
+        }
+    }
+
+    #[test]
+    fn nesting_limit_is_exact() {
+        let at = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
+        assert!(parse(&at(MAX_DEPTH)).is_ok());
+        assert!(parse(&at(MAX_DEPTH + 1)).is_err());
+        let objs = |n: usize| format!("{}1{}", "{\"a\":".repeat(n), "}".repeat(n));
+        assert!(parse(&objs(MAX_DEPTH)).is_ok());
+        assert!(parse(&objs(MAX_DEPTH + 1)).is_err());
     }
 }
 
