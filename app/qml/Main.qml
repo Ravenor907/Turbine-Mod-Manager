@@ -328,6 +328,9 @@ Window {
     function startPlay() {
         if (!game) return
         if (moving) endMove()
+        // Play applies the waiting changes itself; its job runs on the worker after any apply already running, so
+        // the timer must not start another one meanwhile.
+        autoApply.stop()
         say("Checking before Play...", "work")
         Turbine.check()
     }
@@ -349,25 +352,43 @@ Window {
     }
 
     // ---------------------------------------------------------------- game menu
-    // The setup to go back to: the one saved before the newest (the newest is what's in the game now).
+    // The setup to go back to: the newest one the game was played with (the engine's restore target).
     readonly property var lastGood: {
-        if (setups.length === 0) return null
-        const s = setups.slice().sort((a, b) => b.savedAt - a.savedAt)
-        return s.length > 1 && Turbine.pending === 0 ? s[1] : s[0]
+        const played = setups.filter(x => x.played === true).sort((a, b) => b.savedAt - a.savedAt)
+        return played.length > 0 ? played[0] : null
     }
     function when(sec) { return Qt.formatDateTime(new Date(sec * 1000), "MMM d, h:mm AP") }
+    // Reset shows only when the engine found records it couldn't read for this game. It runs after A is held 5 s.
+    readonly property bool canReset: game !== null && Turbine.resetFor === game.id
+    property real resetHeld: 0
+    Timer {
+        id: resetHold
+        interval: 100
+        repeat: true
+        onTriggered: {
+            app.resetHeld += 0.1
+            if (app.resetHeld >= 5) { stop(); app.resetHeld = 0; app.sheet = ""; Turbine.resetGame() }
+        }
+    }
+    function stopReset() { resetHold.stop(); resetHeld = 0 }
     readonly property var gameMenuItems: [
         { icon: "play", title: "Play original", detail: "Starts the game with no mods. Nothing is deleted.", ok: true },
         { icon: "back", title: "Restore last working setup",
-          detail: lastGood ? "From " + when(lastGood.savedAt) + " · " + plural(lastGood.modsOn, "mod", "mods") + " on" : "No saved setup yet. One is saved each time changes go into the game.",
-          ok: lastGood !== null },
-        { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true }
-    ]
+          detail: lastGood ? "From " + when(lastGood.savedAt) + " · " + plural(lastGood.modsOn, "mod", "mods") + " on" : "Nothing saved yet. A setup is saved each time you play with mods.",
+          ok: lastGood !== null }
+    ].concat(canReset ? [
+        { icon: "restore", title: "Reset game files", act: "reset", danger: true, ok: true,
+          detail: resetHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(5 - resetHeld)) + "..."
+                  : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
+    ] : []).concat([
+        { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" }
+    ])
     function gameMenuRun(i) {
         const item = gameMenuItems[i]
-        if (!item.ok) return
+        if (!item || !item.ok) return
         if (i === 0) { sheet = ""; Turbine.playOriginal() }
-        else if (i === 1) { sheet = ""; Turbine.restoreSetup(lastGood.id) }
+        else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
+        else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
         else sheet = "details"
     }
 
@@ -436,7 +457,7 @@ Window {
     property int setRow: 0
     property int perfIndex: 0
     readonly property int railCount: games.length + 2
-    onSheetChanged: { menuIndex = 0; if (sheet === "" ) offerLoader() }
+    onSheetChanged: { menuIndex = 0; stopReset(); if (sheet === "" ) offerLoader() }
 
     Timer { interval: 16; repeat: true; running: app.active || shot.on; onTriggered: Turbine.poll() }
 
@@ -457,6 +478,7 @@ Window {
     }
     function release(b) {
         if (b === repeatButton) { repeater.stop(); repeatButton = "" }
+        if (b === "a" && resetHold.running) stopReset()
     }
 
     Item {
@@ -472,7 +494,13 @@ Window {
             map[Qt.Key_Q] = "lt"; map[Qt.Key_E] = "rt"
             map[Qt.Key_P] = "start"; map[Qt.Key_Tab] = "view"
             const b = map[e.key]
-            if (b) { app.act(b); e.accepted = true }
+            if (!b) return
+            e.accepted = true
+            // Holding a key repeats it, except A (Reset waits for A to be held down).
+            if (!(b === "a" && e.isAutoRepeat)) app.act(b)
+        }
+        Keys.onReleased: (e) => {
+            if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
         }
     }
 
@@ -496,8 +524,8 @@ Window {
             else if (b === "a") modMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
         } else if (sheet === "gamemenu") {
-            if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
-            else if (b === "down") menuIndex = Math.min(gameMenuItems.length - 1, menuIndex + 1)
+            if (b === "up") { stopReset(); menuIndex = Math.max(0, menuIndex - 1) }
+            else if (b === "down") { stopReset(); menuIndex = Math.min(gameMenuItems.length - 1, menuIndex + 1) }
             else if (b === "a") gameMenuRun(menuIndex)
             else if (b === "b" || b === "view") sheet = ""
         } else if (sheet === "add") {
@@ -1280,8 +1308,8 @@ Window {
         visible: app.sheet === "gamemenu"
         gameName: app.gameTitle
         restoreDate: app.lastGood ? "From " + app.when(app.lastGood.savedAt) + " · " + app.plural(app.lastGood.modsOn, "mod", "mods") + " on" : ""
-        restoreEmptyText: "Nothing saved yet. Turbine saves your setup each time changes go into the game."
-        extraItems: [{ key: "details", label: "Game details", detail: "What Turbine found for this game", icon: "info" }]
+        restoreEmptyText: "Nothing saved yet. A setup is saved each time you play with mods."
+        extraItems: app.gameMenuItems.slice(2).map(m => ({ key: m.act, label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
         focusIndex: app.menuIndex
         onActivated: (index, key) => { app.menuIndex = index; app.gameMenuRun(index) }
         onClosed: app.act("b")

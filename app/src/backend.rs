@@ -27,6 +27,7 @@ pub mod qobject {
         #[qproperty(QString, check_json, cxx_name = "checkJson")]
         #[qproperty(bool, busy)]
         #[qproperty(i32, pending)]
+        #[qproperty(QString, reset_for, cxx_name = "resetFor")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -79,6 +80,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "playOriginal"]
         fn play_original(self: Pin<&mut Self>);
+
+        /// The way back when Turbine's records are damaged: every mod file out, the game's own files back, mods off.
+        #[qinvokable]
+        #[cxx_name = "resetGame"]
+        fn reset_game(self: Pin<&mut Self>);
 
         #[qinvokable]
         #[cxx_name = "restoreSetup"]
@@ -149,6 +155,7 @@ pub struct TurbineRust {
     check_json: QString,
     busy: bool,
     pending: i32,
+    reset_for: QString,
     reader: Option<Pads>,
     /// The games from the last scan, to hand to the worker.
     found: Vec<Game>,
@@ -176,6 +183,7 @@ impl Default for TurbineRust {
             check_json: QString::from("[]"),
             busy: false,
             pending: 0,
+            reset_for: QString::default(),
             reader: None,
             found: Vec::new(),
             current: String::new(),
@@ -215,6 +223,20 @@ impl Worker {
         F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
     {
         let _ = self.qt.queue(f);
+    }
+
+    /// Remembers whether this game's records need a Reset (shown in the game menu).
+    fn note(&self, game: &Game, report: &turbine_engine::deploy::Report) {
+        let key = game.id();
+        let needs = needs_reset(report);
+        self.post(move |mut t| {
+            let now = t.reset_for().to_string();
+            if needs && now != key {
+                t.as_mut().set_reset_for(QString::from(key.as_str()));
+            } else if !needs && now == key {
+                t.as_mut().set_reset_for(QString::default());
+            }
+        });
     }
 
     fn say(&self, text: impl Into<String>, level: &'static str) {
@@ -382,18 +404,42 @@ fn data_home() -> PathBuf {
     turbine_engine::home_dir().join(".local/share")
 }
 
-/// What an apply-like job did, for the status line.
-fn applied_words(report: &turbine_engine::deploy::Report) -> String {
+fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
+/// What an apply-like job did, for the status line: "Ready to play", then a few words on anything worth knowing.
+fn applied_words(report: &turbine_engine::deploy::Report, game: &Game) -> String {
     let mut s = String::from("Ready to play");
+    let mut add = |t: String| {
+        s.push_str(". ");
+        s.push_str(&t);
+    };
+    if !report.put_back.is_empty() {
+        add(format!("Put back {} {} replaced", count(report.put_back.len(), "mod file", "mod files"), game.store.launcher()));
+    }
     if !report.changed_by_others.is_empty() {
         let n = report.changed_by_others.len();
-        s.push_str(&format!(
-            ". {n} mod file{} changed by something else {} left alone.",
-            if n == 1 { "" } else { "s" },
-            if n == 1 { "was" } else { "were" }
-        ));
+        add(format!("{} changed by something else {} left alone", count(n, "mod file", "mod files"), if n == 1 { "was" } else { "were" }));
+    }
+    let kept = report.player_changes_saved.len() + report.player_changes_restored.len();
+    if kept > 0 {
+        add(format!("Kept your changes to {}", count(kept, "settings file", "settings files")));
+    }
+    if report.copied_not_linked > 0 {
+        add(format!("{} copied, not linked (another drive), so they use full space", count(report.copied_not_linked, "file", "files")));
+    }
+    if !report.left_in_backups.is_empty() {
+        add(format!("{} stay in the backup folder; something else is in their place", count(report.left_in_backups.len(), "game file", "game files")));
+    }
+    if needs_reset(report) {
+        add("Some of Turbine's records for this game couldn't be read. Reset is in the game menu (View)".into());
     }
     s
+}
+
+fn needs_reset(report: &turbine_engine::deploy::Report) -> bool {
+    !report.bad_entries.is_empty() || report.quarantined > 0
 }
 
 // ---------------------------------------------------------------------------------------------------- the object
@@ -633,7 +679,8 @@ impl qobject::Turbine {
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.play_original().map_err(|e| e.to_string()));
                 match result {
-                    Ok(_) => {
+                    Ok(r) => {
+                        w.note(&game, &r);
                         w.say("Starting the game with no mods. Your mods are kept.", "ok");
                         launch(w, &game);
                     }
@@ -649,6 +696,34 @@ impl qobject::Turbine {
         );
     }
 
+    pub fn reset_game(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        let _ = self.as_mut().take_pending();
+        self.as_mut().say("Resetting the game's files...", "work");
+        self.send(
+            Some(game.id()),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| s.store.reset_game().map_err(|e| e.to_string()));
+                match result {
+                    Ok(r) => {
+                        w.note(&game, &r);
+                        let mut words = String::from("Game files reset. Your mods are still here, turned off");
+                        if !r.left_in_backups.is_empty() {
+                            words.push_str(&format!(
+                                ". {} stay in the backup folder; something else is in their place",
+                                count(r.left_in_backups.len(), "game file", "game files")
+                            ));
+                        }
+                        w.say(words, "ok");
+                    }
+                    Err(e) => w.say(format!("Couldn't reset the game's files: {e}"), "error"),
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
     pub fn restore_setup(mut self: Pin<&mut Self>, id: &QString) {
         let Some(game) = self.current_game() else { return };
         let setup = id.to_string();
@@ -660,7 +735,10 @@ impl qobject::Turbine {
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.restore(&setup).map_err(|e| e.to_string()));
                 match result {
-                    Ok(r) => w.say(applied_words(&r), "ok"),
+                    Ok(r) => {
+                        w.note(&game, &r);
+                        w.say(applied_words(&r, &game), "ok")
+                    }
                     Err(e) => w.say(format!("Couldn't put that setup back: {e}"), "error"),
                 }
                 w.show(&game, false);
@@ -728,11 +806,21 @@ impl qobject::Turbine {
                 };
                 match result {
                     Ok(r) => {
+                        w.note(&game, &r);
+                        // Play went through with the mods as they are: that setup is the one Restore goes back to,
+                        // and this game build no longer counts as "updated since".
+                        if let Ok(s) = w.slot(&game) {
+                            let marked = s.store.mark_played().and_then(|_| s.store.acknowledge_build());
+                            if let Err(e) = marked {
+                                w.say(format!("Couldn't note this setup as played: {e}"), "warn");
+                            }
+                        }
                         match note {
                             Some(e) => w.say(format!("Started without BepInEx this time. {e}"), "warn"),
-                            None => w.say(applied_words(&r), "ok"),
+                            None => w.say(applied_words(&r, &game), "ok"),
                         }
                         launch(w, &game);
+                        w.show(&game, false);
                     }
                     Err(e) => {
                         w.post(move |mut t| {
@@ -764,7 +852,10 @@ fn apply_job(game: Game, n: i32) -> Job {
     Box::new(move |w: &mut Worker| {
         let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
         match result {
-            Ok(r) => w.say(applied_words(&r), "ok"),
+            Ok(r) => {
+                w.note(&game, &r);
+                w.say(applied_words(&r, &game), "ok")
+            }
             Err(e) => {
                 w.post(move |mut t| {
                     let p = *t.pending() + n;
