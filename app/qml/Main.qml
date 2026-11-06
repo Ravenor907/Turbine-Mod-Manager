@@ -1278,7 +1278,7 @@ Window {
     GameMenu {
         ui: kit
         visible: app.sheet === "gamemenu"
-        gameName: app.game ? app.game.name : ""
+        gameName: app.gameTitle
         restoreDate: app.lastGood ? "From " + app.when(app.lastGood.savedAt) + " · " + app.plural(app.lastGood.modsOn, "mod", "mods") + " on" : ""
         restoreEmptyText: "Nothing saved yet. Turbine saves your setup each time changes go into the game."
         extraItems: [{ key: "details", label: "Game details", detail: "What Turbine found for this game", icon: "info" }]
