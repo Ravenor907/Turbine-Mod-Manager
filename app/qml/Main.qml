@@ -73,7 +73,7 @@ Window {
                 app.openSettings(); app.setSection = 2; app.setRow = 3
             }
             else if (page === "perfcheck") app.openPerf()
-            else if (page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
+            else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
     }
     Timer {
@@ -82,6 +82,8 @@ Window {
         onTriggered: {
             if (shot.page === "menu" && app.menuMod) app.sheet = "modmenu"
             else if (shot.page === "check") app.startPlay()
+            // After the first frames, so the screenshot inside the report has something in it.
+            else if (shot.page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
         }
     }
     Timer {
@@ -1536,6 +1538,7 @@ Window {
                             currentIndex: app.setSection === 2 ? app.setRow : 0
                             highlightFollowsCurrentItem: false
                             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                            onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); positionViewAtIndex(currentIndex, ListView.Contain) })
                             delegate: Item {
                                 id: lrow
                                 required property int index
@@ -1562,18 +1565,19 @@ Window {
                                     id: box
                                     y: labsHead.height
                                     width: parent.width
-                                    height: lrow.isItem ? app.px(66) : app.px(50)
+                                    height: Math.max(lrow.isItem ? app.px(66) : app.px(50), labsWords.implicitHeight + app.px(18))
                                     radius: app.px(6)
                                     color: lrow.foc ? c.focusFill : c.card
                                     border.color: c.accent
                                     border.width: lrow.foc ? app.px(2) : 0
                                     Column {
+                                        id: labsWords
                                         x: app.px(14)
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: parent.width - app.px(28) - (lrow.isItem ? chips.width + app.px(10) : actionHint.width + app.px(10))
                                         spacing: app.px(2)
                                         Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.px(16); font.bold: true }
-                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.px(14) }
+                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.px(14); wrapMode: Text.WordWrap; maximumLineCount: 2 }
                                     }
                                     Hint {
                                         id: actionHint
