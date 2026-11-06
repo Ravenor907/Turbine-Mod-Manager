@@ -14,7 +14,8 @@ pub const API: &str = "https://api.nexusmods.com";
 pub const GRAPHQL: &str = "https://api.nexusmods.com/v2/graphql";
 pub const APP_NAME: &str = "TurbineModManager";
 
-/// Nexus game domains for the launch games: (store ID, domain, name). Stardew Valley's GOG ID shares its domain.
+/// Nexus game domains for the launch games: (store ID, domain, name). GOG IDs share their game's domain; see
+/// rules::GAMES for where each ID was checked.
 pub const GAMES: &[(&str, &str, &str)] = &[
     ("489830", "skyrimspecialedition", "Skyrim Special Edition"),
     ("413150", "stardewvalley", "Stardew Valley"),
@@ -22,6 +23,11 @@ pub const GAMES: &[(&str, &str, &str)] = &[
     ("892970", "valheim", "Valheim"),
     ("1966720", "lethalcompany", "Lethal Company"),
     ("632360", "riskofrain2", "Risk of Rain 2"),
+    ("1091500", "cyberpunk2077", "Cyberpunk 2077"),
+    ("1423049311", "cyberpunk2077", "Cyberpunk 2077"),
+    ("292030", "witcher3", "The Witcher 3"),
+    ("1207664643", "witcher3", "The Witcher 3"),
+    ("1495134320", "witcher3", "The Witcher 3"),
 ];
 
 pub fn domain_for_store_id(store_id: &str) -> Option<&'static str> {
@@ -1100,5 +1106,77 @@ impl Nexus {
         Self::check_domain(domain)?;
         let text = self.graphql(&search_body(domain, text, sort, offset, count, adult))?;
         parse_search(&text).map_err(|e| NetError::Failed(format!("{e}.")))
+    }
+}
+
+// ---- Identifying a downloaded file (md5_search) ----
+//
+// GET /v1/games/{domain}/mods/md5_search/{md5}.json answers with every Nexus file that has this MD5, as a list of
+// {"mod": <the mod, as games/<domain>/mods/<id>.json>, "file_details": <the file, as files/<id>.json, plus "md5">}
+// (Nexus-Mods/node-nexus-api, src/Nexus.ts getFileByMD5 and src/types.ts IMD5Result, commit f3f9728, Nov 2026). The
+// same file may be listed more than once (uploaded to two mods); the size tells them apart. No match is a 404.
+
+/// One Nexus file with the MD5 that was asked about.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Md5Match {
+    pub domain: String,
+    pub mod_info: ModInfo,
+    pub file: FileInfo,
+    /// The MD5 Nexus has for the file (lowercase hex); empty when it didn't say.
+    pub md5: String,
+}
+
+/// The API path for an MD5 lookup.
+pub fn md5_search_path(domain: &str, md5: &str) -> String {
+    format!("/v1/games/{domain}/mods/md5_search/{}.json", md5.to_ascii_lowercase())
+}
+
+/// Reads an md5_search answer. `domain` is the game asked about (used when a mod doesn't name its own).
+pub fn parse_md5_search(text: &str, domain: &str) -> Result<Vec<Md5Match>, String> {
+    let j = parse(text)?;
+    let list = match &j {
+        Json::Arr(items) => items.as_slice(),
+        _ => return Err("Nexus's answer isn't a list of files".into()),
+    };
+    let mut out = Vec::new();
+    for item in list {
+        let (Some(m), Some(f)) = (item.get("mod"), item.get("file_details")) else { continue };
+        let (Some(mut mod_info), Some(file)) = (mod_from_json(m), file_from_json(f)) else { continue };
+        if mod_info.domain.is_empty() {
+            mod_info.domain = domain.to_string();
+        }
+        out.push(Md5Match { domain: mod_info.domain.clone(), mod_info, file, md5: s(f, "md5").to_ascii_lowercase() });
+    }
+    Ok(out)
+}
+
+/// The match for a file of this size: the one whose size is within 1 KB (Nexus rounds older sizes to whole KB),
+/// preferring a current, primary file, then a newer upload; when no size fits, the first one still downloadable.
+pub fn best_md5_match(matches: &[Md5Match], size: u64) -> Option<&Md5Match> {
+    let rank = |m: &Md5Match| (m.file.is_current(), m.file.is_primary, m.file.uploaded_timestamp);
+    let fits = |m: &&Md5Match| m.file.size_bytes == 0 || m.file.size_bytes.abs_diff(size) < 1024;
+    matches.iter().filter(fits).max_by_key(|m| rank(m)).or_else(|| matches.iter().filter(|m| !m.file.is_removed()).max_by_key(|m| rank(m)))
+}
+
+/// The record for a file identified by its MD5: a proper Nexus source, so it gets the mod's name, version and update
+/// checks like a file added through Mod Manager Download.
+pub fn md5_source_info(m: &Md5Match, sha256: Option<String>) -> SourceInfo {
+    source_info(&m.domain, m.mod_info.mod_id, &m.file, sha256)
+}
+
+impl Nexus {
+    /// Looks a downloaded archive up by its MD5. Ok(None) when Nexus doesn't know the file (made elsewhere, or
+    /// changed after download).
+    pub fn identify(&self, domain: &str, archive: &Path) -> Result<Option<Md5Match>, NetError> {
+        Self::check_domain(domain)?;
+        let size = fs::metadata(archive).map_err(|e| NetError::Failed(format!("Couldn't read the file ({e}).")))?.len();
+        let md5 = crate::md5::md5_file(archive).map_err(|e| NetError::Failed(format!("Couldn't read the file ({e}).")))?;
+        let text = match self.get(&md5_search_path(domain, &md5)) {
+            Ok(t) => t,
+            Err(NetError::NotFound) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let matches = parse_md5_search(&text, domain).map_err(|e| NetError::Failed(format!("{e}.")))?;
+        Ok(best_md5_match(&matches, size).cloned())
     }
 }

@@ -22,6 +22,18 @@ pub enum Kind {
     Generic,
 }
 
+/// Games with rules of their own beyond their Kind (where archives go, checks before Play). Kept apart from Kind so
+/// code that matches on Kind keeps working: these games are Kind::Generic there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Family {
+    #[default]
+    Standard,
+    /// Cyberpunk 2077: archive/pc/mod, REDmod, Cyber Engine Tweaks, RED4ext, redscript, TweakXL, ArchiveXL.
+    Cyberpunk,
+    /// The Witcher 3 (next-gen): mods/modXXX, dlc/, menu files, mods.settings priorities.
+    Witcher3,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loader {
     /// Plain name, e.g. "SKSE (Skyrim Script Extender)".
@@ -60,6 +72,8 @@ pub struct GameRules {
     pub launch_option: Option<String>,
     /// Plain words on why and how, shown with `launch_option` (or alone when there's nothing to type).
     pub launch_help: Option<String>,
+    /// Games with rules of their own (Cyberpunk 2077, The Witcher 3); Standard for the rest.
+    pub family: Family,
 }
 
 /// One line of the check before Play.
@@ -93,6 +107,7 @@ pub struct GameDef {
     pub loader_source: Option<&'static str>,
     /// For the game's native Linux build: the Launch Option its loader needs, and why.
     pub native_launch: Option<(&'static str, &'static str)>,
+    pub family: Family,
 }
 
 /// One script loader. Data only.
@@ -113,7 +128,8 @@ pub const GAMES: &[GameDef] = &[
     GameDef {
         name: "Skyrim Special Edition",
         short_name: Some("Skyrim Special Edition"),
-        // GOG sells it as Skyrim Anniversary Edition. The GOG product ID below is from memory and not verified yet.
+        // GOG sells it as Skyrim Anniversary Edition: product 1711230643 is "The Elder Scrolls V: Skyrim Special
+        // Edition", type Game, with Windows builds (gogdb.org/product/1711230643, checked Nov 6 2026).
         ids: &[(Store::Steam, "489830"), (Store::Gog, "1711230643")],
         kind: Kind::Bethesda,
         mod_root: "Data",
@@ -122,6 +138,7 @@ pub const GAMES: &[GameDef] = &[
         loader: Some("skse"),
         loader_source: None,
         native_launch: None,
+        family: Family::Standard,
     },
     GameDef {
         name: "Stardew Valley",
@@ -134,6 +151,7 @@ pub const GAMES: &[GameDef] = &[
         loader: Some("smapi"),
         loader_source: None,
         native_launch: None,
+        family: Family::Standard,
     },
     GameDef {
         name: "Valheim",
@@ -155,6 +173,7 @@ pub const GAMES: &[GameDef] = &[
              it. Steam only runs that script when you ask it to: in Steam, open Valheim's Properties, and under Launch \
              Options type exactly the line below. You only do this once. Without it, the game starts without mods.",
         )),
+        family: Family::Standard,
     },
     GameDef {
         name: "Lethal Company",
@@ -167,6 +186,7 @@ pub const GAMES: &[GameDef] = &[
         loader: Some("bepinex"),
         loader_source: Some("https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/"),
         native_launch: None,
+        family: Family::Standard,
     },
     GameDef {
         name: "Risk of Rain 2",
@@ -179,6 +199,40 @@ pub const GAMES: &[GameDef] = &[
         loader: Some("bepinex"),
         loader_source: Some("https://thunderstore.io/c/riskofrain2/p/bbepis/BepInExPack/"),
         native_launch: None,
+        family: Family::Standard,
+    },
+    GameDef {
+        name: "Cyberpunk 2077",
+        short_name: None,
+        // Steam 1091500 (store.steampowered.com/app/1091500, "Cyberpunk 2077"); GOG 1423049311 (gogdb.org, "Cyberpunk
+        // 2077", type Game). Both checked Nov 6 2026.
+        ids: &[(Store::Steam, "1091500"), (Store::Gog, "1423049311")],
+        kind: Kind::Generic,
+        mod_root: "",
+        plugins: false,
+        ordered: true,
+        // Several frameworks instead of one loader: see cyberpunk::FRAMEWORKS and mod_checks.
+        loader: None,
+        loader_source: None,
+        native_launch: None,
+        family: Family::Cyberpunk,
+    },
+    GameDef {
+        name: "The Witcher 3",
+        short_name: Some("The Witcher 3"),
+        // Steam 292030 (store.steampowered.com/app/292030, "The Witcher 3: Wild Hunt"). On GOG, 1207664663 is the
+        // Complete Edition package (gogdb.org, type Package, no builds); the installable games are 1207664643 ("The
+        // Witcher 3: Wild Hunt", type Game, the one that package holds) and 1495134320 (the Game of the Year
+        // Edition, type Game). Checked Nov 6 2026.
+        ids: &[(Store::Steam, "292030"), (Store::Gog, "1207664643"), (Store::Gog, "1495134320")],
+        kind: Kind::Generic,
+        mod_root: "",
+        plugins: false,
+        ordered: true,
+        loader: None,
+        loader_source: None,
+        native_launch: None,
+        family: Family::Witcher3,
     },
 ];
 
@@ -261,6 +315,7 @@ impl GameRules {
                 launcher_swap: None,
                 launch_option: None,
                 launch_help: None,
+                family: Family::Standard,
             },
         }
     }
@@ -289,6 +344,7 @@ impl GameRules {
                 .map(|(a, b)| (a.to_string(), b.to_string())),
             launch_option: def.native_launch.map(|(o, _)| o.to_string()),
             launch_help: def.native_launch.map(|(_, h)| h.to_string()),
+            family: def.family,
         }
     }
 
@@ -298,11 +354,18 @@ impl GameRules {
     pub fn map_archive(&self, files: &[String], mod_name: &str) -> Result<Vec<(String, String)>, String> {
         let entries = normalize(files)?;
         let name = safe_name(mod_name);
-        let out = match self.kind {
-            Kind::Bethesda => map_bethesda(&entries, &self.mod_root, self.launcher_swap.as_ref())?,
-            Kind::BepInEx => map_bepinex(&entries, &name),
-            Kind::Smapi => map_smapi(&entries, &self.mod_root, &name)?,
-            Kind::Generic => map_generic(&entries, &self.mod_root),
+        let out = match (self.family, self.kind) {
+            (Family::Cyberpunk, _) => map_cyberpunk(&entries, &name)?,
+            (Family::Witcher3, _) => map_witcher(&entries, &name),
+            (_, kind) => match kind {
+                Kind::Bethesda => match map_skse(&entries, &self.mod_root, self.launcher_swap.is_some()) {
+                    Some(out) => out,
+                    None => map_bethesda(&entries, &self.mod_root, self.launcher_swap.as_ref())?,
+                },
+                Kind::BepInEx => map_bepinex(&entries, &name),
+                Kind::Smapi => map_smapi(&entries, &self.mod_root, &name)?,
+                Kind::Generic => map_generic(&entries, &self.mod_root),
+            },
         };
         if out.is_empty() {
             return Err("This archive has no files Turbine knows where to put.".into());
@@ -312,6 +375,12 @@ impl GameRules {
 
     /// Does this mod (its game-relative files) need the game's script loader?
     pub fn needs_loader(&self, game_files: &[String]) -> bool {
+        match self.family {
+            // Any framework it needs and doesn't bring itself (CET mods, RED4ext plugins, .reds, tweaks, .xl).
+            Family::Cyberpunk => return !crate::cyberpunk::needs(game_files).is_empty(),
+            Family::Witcher3 => return false,
+            Family::Standard => {}
+        }
         // The loader itself doesn't need the loader.
         if let Some(l) = &self.loader {
             let has = |name: &str| {
@@ -569,6 +638,45 @@ fn map_bethesda(entries: &[Entry], data_root: &str, swap: Option<&(String, Strin
     Ok(out)
 }
 
+/// SKSE's own archive (from skse.silverlock.org, Nexus Mod Manager Download, or a Slow download picked up from
+/// Downloads): laid out with the same install plan as when Turbine fetches SKSE itself (loaders::skse_plan): the top
+/// folder dropped, source code and readmes left out, the loader also in place of the launcher Steam starts.
+/// None when the archive isn't SKSE.
+fn map_skse(entries: &[Entry], data_root: &str, swap: bool) -> Option<Vec<(String, String)>> {
+    let loader = entries.iter().find(|e| {
+        let f = e.file_lc();
+        f.starts_with("skse") && f.ends_with("_loader.exe")
+    })?;
+    let depth = loader.parts.len() - 1;
+    if depth > 1 || entries.iter().any(|e| e.parts.len() <= depth || e.parts[..depth] != loader.parts[..depth]) {
+        return None;
+    }
+    let mut plan = crate::loaders::skse_plan();
+    plan.strip_folders = depth;
+    let mut out = Vec::new();
+    for e in entries {
+        let Some(mut dest) = plan.map_path(&e.src) else { continue };
+        let lc = dest.to_lowercase();
+        if (e.parts.len() == depth + 1 && (is_doc(&e.file_lc()) || is_image(&e.file_lc()))) || lc.starts_with("src/") {
+            continue;
+        }
+        if let Some(rest) = lc.strip_prefix("data/") {
+            dest = join(data_root, &dest[dest.len() - rest.len()..]);
+        }
+        out.push((e.src.clone(), dest));
+    }
+    if swap {
+        for hook in &plan.hooks {
+            if let crate::loaders::Hook::LauncherSwap { original, replacement } = hook {
+                if let Some((src, _)) = out.iter().find(|(_, d)| d.eq_ignore_ascii_case(replacement)).cloned() {
+                    out.push((src, original.clone()));
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
 // ----- BepInEx ----------------------------------------------------------------------------------------------
 
 const BEPINEX_SUBFOLDERS: &[(&str, &str)] =
@@ -794,6 +902,177 @@ impl GameRules {
     }
 }
 
+// ----- Cyberpunk 2077 ---------------------------------------------------------------------------------------
+//
+// Folders at the top of the game folder that mods fill (see cyberpunk.rs for where each comes from): archive/pc/mod
+// (.archive and ArchiveXL's .xl files), bin/x64 (Cyber Engine Tweaks and its Lua mods), engine and r6 (redscript,
+// its .reds scripts in r6/scripts, TweakXL's r6/tweaks), red4ext (RED4ext and its plugins), mods (REDmod).
+
+const CP_ROOTS: &[&str] = &["archive", "bin", "engine", "r6", "red4ext", "mods"];
+
+fn cp_folder_holds(entries: &[Entry], top_lc: &str, test: &dyn Fn(&str) -> bool) -> bool {
+    entries.iter().any(|e| e.parts.len() == 2 && e.top_lc() == top_lc && test(&e.file_lc()))
+}
+
+fn cp_is_redmod(name_lc: &str) -> bool {
+    name_lc == "info.json"
+}
+fn cp_is_cet(name_lc: &str) -> bool {
+    name_lc == "init.lua"
+}
+fn cp_is_script(name_lc: &str) -> bool {
+    ext(name_lc) == "reds"
+}
+fn cp_is_tweak(name_lc: &str) -> bool {
+    matches!(ext(name_lc), "yaml" | "yml" | "tweak")
+}
+fn cp_is_archive(name_lc: &str) -> bool {
+    matches!(ext(name_lc), "archive" | "xl")
+}
+
+/// Every file in one top folder passes `test` (readmes aside).
+fn cp_folder_all(entries: &[Entry], top_lc: &str, test: &dyn Fn(&str) -> bool) -> bool {
+    entries.iter().filter(|x| x.top_lc() == top_lc).all(|x| test(&x.file_lc()) || is_doc(&x.file_lc()))
+}
+
+fn map_cyberpunk(entries: &[Entry], name: &str) -> Result<Vec<(String, String)>, String> {
+    let mut entries = entries.to_vec();
+    // Take off wrapper folders ("My Mod 1.2/archive/pc/mod/..."), but not a folder that is itself a REDmod, a Lua
+    // mod or a script mod: its name is the mod's folder name.
+    for _ in 0..4 {
+        let snapshot = entries.clone();
+        let own = |top: &str| {
+            CP_ROOTS.contains(&top)
+                || cp_folder_holds(&snapshot, top, &|f| cp_is_redmod(f) || cp_is_cet(f) || cp_is_script(f) || cp_is_tweak(f))
+        };
+        if !unwrap_once(&mut entries, &own) {
+            break;
+        }
+    }
+    let flat_redmod = entries.iter().any(|e| e.is_top_file() && cp_is_redmod(&e.top_lc()));
+    let flat_cet = entries.iter().any(|e| e.is_top_file() && cp_is_cet(&e.top_lc()));
+    let cet_mods = "bin/x64/plugins/cyber_engine_tweaks/mods";
+    let mut out: Vec<(String, String)> = Vec::new();
+    for e in &entries {
+        let lc = e.top_lc();
+        let file = e.file_lc();
+        if e.is_top_file() && (is_doc(&lc) || is_image(&lc)) && !(flat_redmod || flat_cet) {
+            continue;
+        }
+        if !e.is_top_file() && CP_ROOTS.contains(&lc.as_str()) {
+            out.push((e.src.clone(), e.rest(0)));
+        } else if flat_redmod {
+            out.push((e.src.clone(), format!("mods/{name}/{}", e.rest(0))));
+        } else if flat_cet {
+            out.push((e.src.clone(), format!("{cet_mods}/{name}/{}", e.rest(0))));
+        } else if e.is_top_file() {
+            let dest = if cp_is_archive(&lc) {
+                format!("archive/pc/mod/{}", e.top())
+            } else if cp_is_script(&lc) {
+                format!("r6/scripts/{name}/{}", e.top())
+            } else if cp_is_tweak(&lc) {
+                format!("r6/tweaks/{name}/{}", e.top())
+            } else {
+                continue; // nothing says where it goes
+            };
+            out.push((e.src.clone(), dest));
+        } else if cp_folder_holds(&entries, &lc, &cp_is_redmod) {
+            out.push((e.src.clone(), format!("mods/{}", e.rest(0))));
+        } else if cp_folder_holds(&entries, &lc, &cp_is_cet) {
+            out.push((e.src.clone(), format!("{cet_mods}/{}", e.rest(0))));
+        } else if cp_is_script(&file) && cp_folder_all(&entries, &lc, &cp_is_script) {
+            out.push((e.src.clone(), format!("r6/scripts/{}", e.rest(0))));
+        } else if cp_is_tweak(&file) && cp_folder_all(&entries, &lc, &cp_is_tweak) {
+            out.push((e.src.clone(), format!("r6/tweaks/{}", e.rest(0))));
+        } else if cp_is_archive(&file) {
+            // .archive files in a plain folder: they all go flat into archive/pc/mod.
+            out.push((e.src.clone(), format!("archive/pc/mod/{}", e.parts.last().cloned().unwrap_or_default())));
+        }
+    }
+    // Two files for the same place means the archive holds choices (one folder per option), which Turbine can't pick.
+    let mut seen: Vec<(String, &str)> = Vec::new();
+    for (src, dest) in &out {
+        let key = dest.to_lowercase();
+        if let Some((_, first)) = seen.iter().find(|(k, _)| *k == key) {
+            let folder = |p: &str| p.split('/').next().unwrap_or("").to_string();
+            return Err(format!(
+                "This archive has more than one version of {} (in \"{}\" and \"{}\"), so it holds choices Turbine \
+                 can't make. Pick the one you want and add it as its own zip",
+                dest.rsplit('/').next().unwrap_or(dest),
+                folder(first),
+                folder(src)
+            ));
+        }
+        seen.push((key, src));
+    }
+    Ok(out)
+}
+
+// ----- The Witcher 3 ----------------------------------------------------------------------------------------
+//
+// Game folder layout (see witcher.rs): mods/<modName>/content/..., dlc/<dlcName>/content/..., menu files in
+// bin/config/r4game/user_config_matrix/pc. A mod folder's name must start with "mod" or the game ignores it.
+
+fn w3_mod_folder(folder: &str) -> String {
+    if folder.to_lowercase().starts_with("mod") {
+        folder.to_string()
+    } else {
+        format!("mod{}", folder.replace(' ', ""))
+    }
+}
+
+fn w3_holds_content(entries: &[Entry], top: &str) -> bool {
+    entries.iter().any(|e| e.parts.len() > 2 && e.top_lc() == top && e.parts[1].eq_ignore_ascii_case("content"))
+}
+
+fn map_witcher(entries: &[Entry], name: &str) -> Vec<(String, String)> {
+    let mut entries = entries.to_vec();
+    for _ in 0..4 {
+        let snapshot = entries.clone();
+        let own = |top: &str| matches!(top, "mods" | "dlc" | "bin" | "content") || w3_holds_content(&snapshot, top);
+        if !unwrap_once(&mut entries, &own) {
+            break;
+        }
+    }
+    let menu_dir = "bin/config/r4game/user_config_matrix/pc";
+    let mut out = Vec::new();
+    for e in &entries {
+        let lc = e.top_lc();
+        if e.is_top_file() {
+            // Menu files on their own; readmes, pictures and settings lines (written to the log) stay out.
+            if ext(&lc) == "xml" {
+                out.push((e.src.clone(), format!("{menu_dir}/{}", e.top())));
+            }
+            continue;
+        }
+        match lc.as_str() {
+            "mods" if e.parts.len() > 2 => {
+                out.push((e.src.clone(), format!("mods/{}/{}", w3_mod_folder(&e.parts[1]), e.rest(2))));
+            }
+            "dlc" | "bin" => out.push((e.src.clone(), e.rest(0))),
+            "content" => {
+                // The game's own content0 folder (patches for the classic game ship it that way), or a mod's content
+                // folder without its mod folder around it.
+                let p1 = e.parts[1].to_lowercase();
+                if e.parts.len() > 2 && p1.starts_with("content") && p1.len() > "content".len() {
+                    out.push((e.src.clone(), e.rest(0)));
+                } else {
+                    out.push((e.src.clone(), format!("mods/{}/{}", w3_mod_folder(name), e.rest(0))));
+                }
+            }
+            _ if w3_holds_content(&entries, &lc) => {
+                if lc.starts_with("dlc") {
+                    out.push((e.src.clone(), format!("dlc/{}", e.rest(0))));
+                } else {
+                    out.push((e.src.clone(), format!("mods/{}/{}", w3_mod_folder(e.top()), e.rest(1))));
+                }
+            }
+            _ => {} // a folder the game has no use for (documents, screenshots, optional extras)
+        }
+    }
+    out
+}
+
 // ----- Generic ----------------------------------------------------------------------------------------------
 
 fn map_generic(entries: &[Entry], root: &str) -> Vec<(String, String)> {
@@ -867,6 +1146,127 @@ pub fn master_checks(missing: &[MissingMaster]) -> Vec<Check> {
         .collect()
 }
 
+/// One mod's files in the game folder (game-relative), for the checks that look at what each mod brings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModFiles {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub files: Vec<String>,
+}
+
+/// Address Library for SKSE Plugins: the version database file SKSE plugins built with CommonLibSSE read, in
+/// Data/SKSE/Plugins. Special Edition's is version-<game version>.bin, Anniversary Edition's
+/// versionlib-<game version>.bin (nexusmods.com/skyrimspecialedition/mods/32444: versiondb.h reads the first,
+/// versionlibdb.h the second).
+pub const ADDRESS_LIBRARY: &str = "Address Library for SKSE Plugins";
+pub const ADDRESS_LIBRARY_URL: &str = "https://www.nexusmods.com/skyrimspecialedition/mods/32444";
+pub const ADDRESS_LIBRARY_DIR: &str = "Data/SKSE/Plugins";
+
+/// Is this game-relative file part of Address Library?
+pub fn is_address_library_file(path: &str) -> bool {
+    let p = path.replace('\\', "/").trim_start_matches('/').to_lowercase();
+    let Some(file) = p.strip_prefix("data/skse/plugins/") else { return false };
+    !file.contains('/') && (file.starts_with("version-") || file.starts_with("versionlib-")) && file.ends_with(".bin")
+}
+
+fn is_skse_plugin(path: &str) -> bool {
+    let p = path.replace('\\', "/").trim_start_matches('/').to_lowercase();
+    p.starts_with("data/skse/plugins/") && p.ends_with(".dll")
+}
+
+impl GameRules {
+    /// Notes for the activity log about a mod's archive (paths inside it) that the player may want to act on:
+    /// settings lines to add by hand, a menu file the game's menu list must name, REDmod needing the launcher.
+    pub fn install_notes(&self, archive_files: &[String]) -> Vec<String> {
+        match self.family {
+            Family::Witcher3 => crate::witcher::install_notes(archive_files),
+            Family::Cyberpunk => {
+                let mapped = self.map_archive(archive_files, "mod").unwrap_or_default();
+                let dests: Vec<String> = mapped.into_iter().map(|(_, d)| d).collect();
+                if crate::cyberpunk::has_redmod(&dests) {
+                    vec!["This is a REDmod mod: it loads after Cyberpunk's own launcher sets it up (Enable mods in the launcher's settings).".into()]
+                } else {
+                    Vec::new()
+                }
+            }
+            Family::Standard => Vec::new(),
+        }
+    }
+
+    /// Game-relative files the mod checks look for in the game folder (frameworks, tools, Address Library).
+    /// Folders in the list ending in '/' mean "every file directly in this folder".
+    pub fn files_to_look_for(&self) -> Vec<String> {
+        match (self.family, self.kind) {
+            (Family::Cyberpunk, _) => crate::cyberpunk::files_to_look_for().into_iter().map(String::from).collect(),
+            (Family::Standard, Kind::Bethesda) => vec![format!("{ADDRESS_LIBRARY_DIR}/")],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The game folder's files that `files_to_look_for` asks about, game-relative, as found on disk (case ignored).
+pub fn present_files(game: &Game, rules: &GameRules) -> Vec<String> {
+    let mut out = Vec::new();
+    for want in rules.files_to_look_for() {
+        if let Some(dir) = want.strip_suffix('/') {
+            if let Some(found) = find_ci(&game.install_dir, dir) {
+                if let Ok(rd) = std::fs::read_dir(found) {
+                    for e in rd.flatten() {
+                        out.push(format!("{dir}/{}", e.file_name().to_string_lossy()));
+                    }
+                }
+            }
+        } else if find_ci(&game.install_dir, &want).is_some() {
+            out.push(want);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The checks before Play that look at each turned-on mod's files: missing Cyberpunk frameworks and REDmod, Witcher 3
+/// scripts that need merging, SKSE plugins without Address Library. Add them to `pre_play`'s list with `add_checks`.
+pub fn mod_checks(game: &Game, rules: &GameRules, mods: &[ModFiles]) -> Vec<Check> {
+    mod_checks_with(rules, mods, &present_files(game, rules))
+}
+
+/// `mod_checks` with the game folder's relevant files given (as `present_files` returns them), for tests.
+pub fn mod_checks_with(rules: &GameRules, mods: &[ModFiles], game_files: &[String]) -> Vec<Check> {
+    let on: Vec<(&str, &[String])> = mods.iter().filter(|m| m.enabled).map(|m| (m.name.as_str(), m.files.as_slice())).collect();
+    match (rules.family, rules.kind) {
+        (Family::Cyberpunk, _) => crate::cyberpunk::checks(&on, game_files),
+        (Family::Witcher3, _) => crate::witcher::conflict_checks(&on),
+        (Family::Standard, Kind::Bethesda) => {
+            let users: Vec<&str> = on
+                .iter()
+                .filter(|(_, files)| files.iter().any(|f| is_skse_plugin(f)) && !files.iter().any(|f| is_address_library_file(f)))
+                .map(|(n, _)| *n)
+                .collect();
+            let have = game_files.iter().any(|f| is_address_library_file(f))
+                || on.iter().any(|(_, files)| files.iter().any(|f| is_address_library_file(f)));
+            if users.is_empty() || have {
+                return Vec::new();
+            }
+            let who = match users.len() {
+                1 => format!("{} adds code to the game (an SKSE plugin)", users[0]),
+                2 => format!("{} and {} add code to the game (SKSE plugins)", users[0], users[1]),
+                n => format!("{}, {} and {} more add code to the game (SKSE plugins)", users[0], users[1], n - 2),
+            };
+            vec![Check {
+                level: "warn".into(),
+                title: format!("{ADDRESS_LIBRARY} is missing"),
+                detail: format!(
+                    "{who}, and most such plugins need {ADDRESS_LIBRARY} to find their way around the game. Without \
+                     it they don't load, or the game closes at start. Get it from {ADDRESS_LIBRARY_URL} (the \
+                     All in one file)."
+                ),
+            }]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The same check with the drive's file system type and loader state given, so it can be tested without a real
 /// drive or game folder.
 pub fn pre_play_with(
@@ -885,7 +1285,19 @@ pub fn pre_play_with(
         if now != then {
             let launcher = game.store.launcher();
             let title = format!("{launcher} updated this game");
-            if rules.kind == Kind::Bethesda && needs_loader {
+            if rules.family == Family::Cyberpunk && needs_loader {
+                checks.push(check(
+                    "warn",
+                    title,
+                    format!(
+                        "{} changed since your mods were last set up. Cyber Engine Tweaks and RED4ext (and the mods \
+                         built on them) usually stop working after a game update until their makers release new \
+                         versions. If the game crashes at start or mods are missing, update them, or use Play \
+                         original: it starts the game without mods.",
+                        game.name
+                    ),
+                ));
+            } else if rules.kind == Kind::Bethesda && needs_loader {
                 let loader = rules.loader.as_ref().map(|l| l.name.as_str()).unwrap_or("The script loader");
                 checks.push(check(
                     "stop",

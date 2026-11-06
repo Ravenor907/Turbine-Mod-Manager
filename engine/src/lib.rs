@@ -5,6 +5,8 @@
 #![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 
 pub mod archives;
+pub mod browser;
+pub mod cyberpunk;
 pub mod deploy;
 pub mod fomod;
 pub mod games;
@@ -12,6 +14,7 @@ pub mod heroic;
 pub mod inflate;
 pub mod json;
 pub mod loaders;
+pub mod md5;
 pub mod net;
 pub mod nexus;
 pub mod nxm;
@@ -26,6 +29,8 @@ pub mod store;
 pub mod thunderstore;
 pub mod updates;
 pub mod vdf;
+pub mod watch;
+pub mod witcher;
 pub mod xml;
 pub mod zip;
 

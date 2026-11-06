@@ -97,6 +97,10 @@ pub trait ModRules: Send {
     fn has_plugins(&self) -> bool {
         false
     }
+    /// Notes for the activity log about an archive (paths inside it), added to the install's notes.
+    fn install_notes(&self, _files: &[String]) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 impl ModRules for GameRules {
@@ -123,6 +127,9 @@ impl ModRules for GameRules {
     }
     fn has_plugins(&self) -> bool {
         self.plugins
+    }
+    fn install_notes(&self, files: &[String]) -> Vec<String> {
+        GameRules::install_notes(self, files)
     }
 }
 
@@ -768,6 +775,20 @@ impl Store {
         write_atomic(&self.state_path(), &text)
     }
 
+    /// Every mod's files in the game (game-relative), in Turbine's order, then the Recently removed ones (turned off),
+    /// for the checks before Play (rules::mod_checks) and The Witcher 3's mods.settings.
+    pub fn mod_files(&self) -> Vec<rules::ModFiles> {
+        let files = |id: &str| walk_files(&self.mod_dir(id)).into_iter().map(|(rel, _)| rel).collect::<Vec<String>>();
+        let mut out: Vec<rules::ModFiles> =
+            self.mods.iter().map(|m| rules::ModFiles { id: m.id.clone(), name: m.name.clone(), enabled: m.enabled, files: files(&m.id) }).collect();
+        for r in &self.removed_extra {
+            let m = &r.removed.item;
+            let files = walk_files(&self.removed_dir(&m.id)).into_iter().map(|(rel, _)| rel).collect();
+            out.push(rules::ModFiles { id: m.id.clone(), name: m.name.clone(), enabled: false, files });
+        }
+        out
+    }
+
     pub fn mods(&self) -> &[Mod] {
         &self.mods
     }
@@ -1009,6 +1030,7 @@ impl Store {
             }
 
             let map = self.rules.map_archive(&files, &folder_safe(&target.name)).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            notes.extend(self.rules.install_notes(&files));
             self.stage_and_commit(&work, &map, &target, notes).map(Import::Added)
         })();
         // An installer waiting for choices keeps its files; everything else is cleaned up.

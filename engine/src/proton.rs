@@ -1,4 +1,5 @@
-//! Proton settings for games whose script loader is a DLL placed next to the game (BepInEx's winhttp.dll).
+//! Proton settings for games whose script loader is a DLL placed next to the game (BepInEx's winhttp.dll, RED4ext's
+//! winmm.dll and Cyber Engine Tweaks' version.dll for Cyberpunk 2077).
 //!
 //! Wine only loads a game folder's own winhttp.dll when the prefix says so: a value in
 //! HKEY_CURRENT_USER\Software\Wine\DllOverrides, e.g. "winhttp"="native,builtin". Wine keeps that branch of the
@@ -24,7 +25,7 @@
 //! Wine writes user.reg again when the prefix shuts down, so it must only be changed while the game isn't running.
 
 use crate::games::{Game, Runtime};
-use crate::rules::{GameRules, Kind};
+use crate::rules::{Family, GameRules, Kind};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -43,6 +44,42 @@ pub const BEPINEX_VALUE: &str = "native,builtin";
 /// native Linux builds start BepInEx with the pack's own script instead.
 pub fn wants_winhttp(game: &Game, rules: &GameRules) -> bool {
     rules.kind == Kind::BepInEx && game.runtime == Runtime::Windows
+}
+
+/// What Wine needs for a DLL from the game folder to load before its own: the game folder's copy first, Wine's own if
+/// there is none (so it does no harm when the mod is turned off again).
+pub const NATIVE_FIRST: &str = "native,builtin";
+
+/// The DLL overrides this game needs in its Proton prefix, as (dll, value), for what is turned on now.
+/// `files` are game-relative files of the turned-on mods plus the relevant files already in the game folder
+/// (rules::present_files). Only Windows builds run through Proton need them.
+/// - BepInEx games: winhttp (as before, see `wants_winhttp`).
+/// - Cyberpunk 2077: winmm when RED4ext is there (its loader is bin/x64/winmm.dll), version when Cyber Engine Tweaks
+///   is (its ASI loader is bin/x64/version.dll). The RED modding wiki's Linux page gives the same pair as the launch
+///   option WINEDLLOVERRIDES="winmm,version=n,b" (wiki.redmodding.org, Modding on Linux); see cyberpunk.rs for where
+///   each file comes from.
+pub fn wanted_overrides(game: &Game, rules: &GameRules, files: &[String]) -> Vec<(&'static str, &'static str)> {
+    if game.runtime != Runtime::Windows {
+        return Vec::new();
+    }
+    if wants_winhttp(game, rules) {
+        return vec![("winhttp", BEPINEX_VALUE)];
+    }
+    if rules.family == Family::Cyberpunk {
+        return crate::cyberpunk::wanted_dlls(files).into_iter().map(|d| (d, NATIVE_FIRST)).collect();
+    }
+    Vec::new()
+}
+
+/// Sets every override `wanted_overrides` names. Returns the DLLs whose setting was changed.
+pub fn ensure_overrides(prefix: &Path, wanted: &[(&str, &str)]) -> Result<Vec<String>, String> {
+    let mut changed = Vec::new();
+    for (dll, value) in wanted {
+        if ensure_override(prefix, dll, value)? {
+            changed.push(dll.to_string());
+        }
+    }
+    Ok(changed)
 }
 
 /// The value of one DLL override (e.g. "native,builtin"), or None when it isn't set.

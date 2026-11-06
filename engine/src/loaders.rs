@@ -123,6 +123,13 @@ pub fn skse_plan() -> InstallPlan {
     p
 }
 
+/// The install plan for a loader published on Nexus, by its Nexus mod: SKSE (skyrimspecialedition 30379) whether
+/// it came through Mod Manager Download or a Slow download picked up from Downloads. rules::GameRules::map_archive
+/// lays SKSE's archive out with this same plan.
+pub fn plan_for_nexus(domain: &str, mod_id: u64) -> Option<InstallPlan> {
+    (domain == SKSE_NEXUS_DOMAIN && mod_id == SKSE_NEXUS_MOD).then(skse_plan)
+}
+
 /// Which Thunderstore pack holds BepInEx for a community, and the folder inside it with the files.
 pub fn bepinex_pack(community: &str) -> Option<(&'static str, &'static str)> {
     match community {
