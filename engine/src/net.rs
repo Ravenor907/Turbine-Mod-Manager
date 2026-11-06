@@ -371,12 +371,19 @@ impl Client {
                 let _ = fs::remove_file(&out);
             }
         };
-        let mut child = match Command::new(&self.program)
-            .args(&args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
+        // "Text file busy" (ETXTBSY) can happen for a moment when the program file was just written while another
+        // thread was starting a process; a short retry gets past it.
+        let mut spawned = Command::new(&self.program).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+        for _ in 0..20 {
+            match &spawned {
+                Err(e) if e.raw_os_error() == Some(26) => {
+                    std::thread::sleep(Duration::from_millis(25));
+                    spawned = Command::new(&self.program).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn();
+                }
+                _ => break,
+            }
+        }
+        let mut child = match spawned
         {
             Ok(c) => c,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
