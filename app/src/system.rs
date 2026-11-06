@@ -105,7 +105,10 @@ pub fn nxm_handler_json() -> String {
             let shown = now.trim_end_matches(".desktop").rsplit('.').next().unwrap_or(&now).to_string();
             format!("{{\"state\":{},\"current\":{},\"message\":\"\"}}", quote(if yes { "yes" } else { "no" }), quote(&shown))
         }
-        Err(e) => format!("{{\"state\":\"unknown\",\"current\":\"\",\"message\":{}}}", quote(&e)),
+        Err(e) => {
+            crate::log::line("nxm", &format!("Couldn't ask which program opens Nexus links: {e}"));
+            format!("{{\"state\":\"unknown\",\"current\":\"\",\"message\":{}}}", quote(&e))
+        }
     }
 }
 

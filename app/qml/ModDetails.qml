@@ -28,11 +28,11 @@ Item {
         (needs.missing || []).map(r => {
             const st = stepFor(r.name)
             return { tag: "Missing", lvl: "warn", name: r.name,
-                     words: st && st.action === "download" ? "Turbine installs it with this mod" : "open its page to get it (A)" }
+                     words: st && st.action === "download" ? "comes with Install" : "its page opens with A" }
         })
         .concat((needs.installed || []).map(r => ({ tag: "Have it", lvl: "ok", name: r.name, words: "already installed" })))
         .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", name: r.name,
-                                                    words: r.isDlc ? "part of the game; make sure you have it" : "from another site; get it there" })))
+                                                    words: r.isDlc ? "game add-on you need" : "get it from its own site" })))
     function size(b) {
         if (!b) return "Not listed"
         if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"
@@ -198,38 +198,6 @@ Item {
                     }
                 }
             }
-            // Nexus requirements: "Also needs", with have-it and missing states.
-            Column {
-                visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
-                width: parent.width
-                spacing: md.ui.px(6)
-                Text {
-                    text: "Also needs"
-                    color: md.ui.c.accentText
-                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.bold: true
-                }
-                Text {
-                    visible: !!md.info && !!md.info.needsNote
-                    width: parent.width; wrapMode: Text.WordWrap
-                    text: md.info && md.info.needsNote ? md.info.needsNote : ""
-                    color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
-                }
-                Repeater {
-                    model: md.needRows
-                    Row {
-                        required property var modelData
-                        spacing: md.ui.px(8)
-                        width: right.width
-                        Rectangle {
-                            width: Math.max(md.ui.px(84), ntg.implicitWidth + md.ui.px(14)); height: md.ui.px(26); radius: md.ui.px(5)
-                            color: md.ui.c.raised
-                            Text { id: ntg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                        }
-                        Text { width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Text { width: parent.width * 0.4; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
-                    }
-                }
-            }
             Row {
                 spacing: md.ui.px(12)
                 Rectangle {
@@ -284,6 +252,38 @@ Item {
                         Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }
                     TapHandler { onTapped: md.versionsClicked() }
+                }
+            }
+            // Nexus requirements: "Also needs", with have-it and missing states.
+            Column {
+                visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
+                width: parent.width
+                spacing: md.ui.px(6)
+                Text {
+                    text: "Also needs"
+                    color: md.ui.c.accentText
+                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.bold: true
+                }
+                Text {
+                    visible: !!md.info && !!md.info.needsNote
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: md.info && md.info.needsNote ? md.info.needsNote : ""
+                    color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                }
+                Repeater {
+                    model: md.needRows
+                    Row {
+                        required property var modelData
+                        spacing: md.ui.px(8)
+                        width: right.width
+                        Rectangle {
+                            width: Math.max(md.ui.px(84), ntg.implicitWidth + md.ui.px(14)); height: md.ui.px(26); radius: md.ui.px(5)
+                            color: md.ui.c.raised
+                            Text { id: ntg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
+                        }
+                        Text { width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { width: parent.width * 0.4; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+                    }
                 }
             }
         }
