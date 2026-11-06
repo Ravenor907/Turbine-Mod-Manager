@@ -609,3 +609,13 @@ fn launch_urls() {
     );
     assert_eq!(rules::launch_url(&game(Store::Steam, "", "X", p)), None);
 }
+
+// ----- Names -----------------------------------------------------------------------------------------------------
+
+#[test]
+fn short_names_for_the_header() {
+    // Steam calls it "The Elder Scrolls V: Skyrim Special Edition", too long for a handheld's header.
+    assert_eq!(skyrim().short_name.as_deref(), Some("Skyrim Special Edition"));
+    assert_eq!(valheim().short_name, None);
+    assert_eq!(generic().short_name, None);
+}

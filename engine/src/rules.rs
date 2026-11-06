@@ -46,6 +46,9 @@ pub struct GameRules {
     pub loader: Option<Loader>,
     /// Shown in Game details: "Verified" or "Works generically".
     pub support: String,
+    /// A shorter name for tight places such as the page header, when the store's name is long
+    /// ("Skyrim Special Edition" for "The Elder Scrolls V: Skyrim Special Edition"). None: use the game's own name.
+    pub short_name: Option<String>,
 }
 
 /// One line of the check before Play.
@@ -65,6 +68,8 @@ pub struct Check {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GameDef {
     pub name: &'static str,
+    /// A shorter name for the page header; None when `name` is already short.
+    pub short_name: Option<&'static str>,
     /// Store IDs the game is known by (Steam app ID, GOG product ID, Heroic's Epic app name).
     pub ids: &'static [(Store, &'static str)],
     pub kind: Kind,
@@ -92,6 +97,7 @@ pub struct LoaderDef {
 pub const GAMES: &[GameDef] = &[
     GameDef {
         name: "Skyrim Special Edition",
+        short_name: Some("Skyrim Special Edition"),
         // GOG sells it as Skyrim Anniversary Edition. The GOG product ID below is from memory and not verified yet.
         ids: &[(Store::Steam, "489830"), (Store::Gog, "1711230643")],
         kind: Kind::Bethesda,
@@ -103,6 +109,7 @@ pub const GAMES: &[GameDef] = &[
     },
     GameDef {
         name: "Stardew Valley",
+        short_name: None,
         ids: &[(Store::Steam, "413150"), (Store::Gog, "1453375253")],
         kind: Kind::Smapi,
         mod_root: "Mods",
@@ -113,6 +120,7 @@ pub const GAMES: &[GameDef] = &[
     },
     GameDef {
         name: "Valheim",
+        short_name: None,
         // Steam ships a native Linux build; its BepInEx pack starts through start_game_bepinex.sh there, and through
         // winhttp.dll under Proton. The pack holds both, so detection is the same.
         ids: &[(Store::Steam, "892970")],
@@ -125,6 +133,7 @@ pub const GAMES: &[GameDef] = &[
     },
     GameDef {
         name: "Lethal Company",
+        short_name: None,
         ids: &[(Store::Steam, "1966720")],
         kind: Kind::BepInEx,
         mod_root: "BepInEx/plugins",
@@ -135,6 +144,7 @@ pub const GAMES: &[GameDef] = &[
     },
     GameDef {
         name: "Risk of Rain 2",
+        short_name: None,
         ids: &[(Store::Steam, "632360")],
         kind: Kind::BepInEx,
         mod_root: "BepInEx/plugins",
@@ -195,6 +205,7 @@ impl GameRules {
                 ordered: true,
                 loader: None,
                 support: "Works generically".into(),
+                short_name: None,
             },
         }
     }
@@ -214,6 +225,7 @@ impl GameRules {
             ordered: def.ordered,
             loader,
             support: "Verified".into(),
+            short_name: def.short_name.map(Into::into),
         }
     }
 
