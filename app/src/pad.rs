@@ -3,8 +3,8 @@
 
 use sdl2::controller::{Axis, Button, GameController};
 use sdl2::event::Event;
-use sdl2::{EventPump, GameControllerSubsystem, Sdl};
-use std::collections::HashMap;
+use sdl2::{EventPump, GameControllerSubsystem, Sdl, TimerSubsystem};
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 /// How far a stick or trigger must move to count as a press, and where it lets go again (so it never flickers).
@@ -26,6 +26,9 @@ pub struct Pads {
     axis_down: HashMap<(u32, &'static str), bool>,
     /// Presses are dropped until then (just after Turbine's window comes back to the front).
     quiet_until: Option<Instant>,
+    timer: Option<TimerSubsystem>,
+    /// How long the last presses waited in SDL's queue before Turbine read them (ms), for Labs > Performance check.
+    waits: VecDeque<u32>,
 }
 
 impl Pads {
@@ -35,6 +38,10 @@ impl Pads {
         let sdl = sdl2::init().ok();
         let subsystem = sdl.as_ref().and_then(|s| s.game_controller().ok());
         let pump = sdl.as_ref().and_then(|s| s.event_pump().ok());
+        let timer = sdl.as_ref().and_then(|s| s.timer().ok());
+        if sdl.is_none() {
+            crate::log::line("pad", "SDL isn't available: keyboard and touch only");
+        }
         let mut pads = Pads {
             _sdl: sdl,
             subsystem,
@@ -44,12 +51,15 @@ impl Pads {
             last_up: HashMap::new(),
             axis_down: HashMap::new(),
             quiet_until: None,
+            timer,
+            waits: VecDeque::new(),
         };
         if let Some(sub) = pads.subsystem.as_ref() {
             let count = sub.num_joysticks().unwrap_or(0);
             for i in 0..count {
                 if sub.is_game_controller(i) {
                     if let Ok(c) = sub.open(i) {
+                        crate::log::line("pad", &format!("Controller found: {}", c.name()));
                         pads.open.push(c);
                     }
                 }
@@ -62,11 +72,41 @@ impl Pads {
         !self.open.is_empty()
     }
 
+    /// The controllers' names, for reports.
+    pub fn names(&self) -> Vec<String> {
+        self.open.iter().map(|c| c.name()).collect()
+    }
+
+    /// (median, worst, count) of how long recent presses waited in SDL's queue, in ms.
+    pub fn waits(&self) -> (u32, u32, usize) {
+        let mut v: Vec<u32> = self.waits.iter().copied().collect();
+        if v.is_empty() {
+            return (0, 0, 0);
+        }
+        v.sort_unstable();
+        (v[v.len() / 2], v[v.len() - 1], v.len())
+    }
+
+    fn note_wait(&mut self, stamp: u32) {
+        let Some(t) = self.timer.as_ref() else { return };
+        let wait = t.ticks().saturating_sub(stamp);
+        if self.waits.len() >= 50 {
+            self.waits.pop_front();
+        }
+        self.waits.push_back(wait);
+    }
+
     /// Turbine's window just came back to the front: presses made while a game had it (still waiting in SDL's
     /// queue) are read and thrown away, and new ones are ignored for `quiet`, so a button pressed in the game as it
     /// closes never acts in Turbine.
     pub fn wake(&mut self, quiet: Duration) {
-        let _ = self.read();
+        let kept = self.waits.len();
+        let dropped = self.read();
+        // Presses made in a game waited there on purpose; they don't count as Turbine being slow.
+        self.waits.truncate(kept);
+        if !dropped.is_empty() {
+            crate::log::line("pad", &format!("Dropped {} button events made while Turbine was in the background", dropped.len()));
+        }
         self.quiet_until = Some(Instant::now() + quiet);
     }
 
@@ -88,14 +128,16 @@ impl Pads {
         let mut raw: Vec<(u32, &'static str, bool)> = Vec::new();
         let mut added = Vec::new();
         let mut removed = Vec::new();
+        let mut stamps = Vec::new();
         if let Some(pump) = self.pump.as_mut() {
             for ev in pump.poll_iter() {
                 match ev {
                     Event::ControllerDeviceAdded { which, .. } => added.push(which),
                     Event::ControllerDeviceRemoved { which, .. } => removed.push(which),
-                    Event::ControllerButtonDown { which, button, .. } => {
+                    Event::ControllerButtonDown { which, button, timestamp } => {
                         if let Some(b) = button_name(button) {
                             raw.push((which, b, true));
+                            stamps.push(timestamp);
                         }
                     }
                     Event::ControllerButtonUp { which, button, .. } => {
@@ -118,16 +160,23 @@ impl Pads {
                 }
             }
         }
+        for stamp in stamps {
+            self.note_wait(stamp);
+        }
         if let Some(sub) = self.subsystem.as_ref() {
             for index in added {
                 if let Ok(c) = sub.open(index) {
                     if !self.open.iter().any(|o| o.instance_id() == c.instance_id()) {
+                        crate::log::line("pad", &format!("Controller connected: {}", c.name()));
                         self.open.push(c);
                     }
                 }
             }
         }
         for id in removed {
+            if let Some(c) = self.open.iter().find(|c| c.instance_id() == id) {
+                crate::log::line("pad", &format!("Controller disconnected: {}", c.name()));
+            }
             self.open.retain(|c| c.instance_id() != id);
             self.held.retain(|_, pad| *pad != id);
             self.axis_down.retain(|(pad, _), _| *pad != id);

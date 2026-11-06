@@ -103,6 +103,55 @@ pub mod qobject {
         #[cxx_name = "listDownloads"]
         fn list_downloads(self: Pin<&mut Self>);
 
+        /// One line in the activity log from the interface (taps, pages, menu choices, window changes).
+        #[qinvokable]
+        fn log(self: &Self, kind: &QString, text: &QString);
+
+        /// Puts text on the clipboard.
+        #[qinvokable]
+        #[cxx_name = "copyText"]
+        fn copy_text(self: &Self, text: &QString);
+
+        /// The Labs report, written out in plain text. item: what it's about (may be empty); interface: page,
+        /// focus, window and look, from QML; perf: Labs > Performance check's report or ""; shot: the screenshot's
+        /// file name or "".
+        #[qinvokable]
+        fn report(self: &Self, item: &QString, note: &QString, interface: &QString, perf: &QString, crash: bool, shot: &QString) -> QString;
+
+        /// Saves a report into Downloads, with the screenshot at `shot` copied beside it when not "". Answers JSON:
+        /// {"report": file name, "shot": file name or "", "error": "" or what went wrong}.
+        #[qinvokable]
+        #[cxx_name = "saveReport"]
+        fn save_report(self: &Self, text: &QString, stamp: &QString, shot: &QString) -> QString;
+
+        /// Date and time for file names: 2026-11-06_14-03-22.
+        #[qinvokable]
+        fn stamp(self: &Self) -> QString;
+
+        /// Where the report screen keeps its screenshot until Send.
+        #[qinvokable]
+        #[cxx_name = "shotTemp"]
+        fn shot_temp(self: &Self) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "hasCrashLog"]
+        fn has_crash_log(self: &Self) -> bool;
+
+        /// Microseconds since Turbine started (for frame times).
+        #[qinvokable]
+        #[cxx_name = "nowUs"]
+        fn now_us(self: &Self) -> f64;
+
+        /// Facts for Labs > Performance check, as JSON: startup, memory, processor time, controller waits, device.
+        #[qinvokable]
+        #[cxx_name = "perfFacts"]
+        fn perf_facts(self: &Self) -> QString;
+
+        /// The window has drawn its first frame: notes how long starting took.
+        #[qinvokable]
+        #[cxx_name = "markShown"]
+        fn mark_shown(self: Pin<&mut Self>);
+
         /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
         /// "up", "down", "left", "right" (D-pad and left stick).
         #[qsignal]
@@ -166,6 +215,14 @@ pub struct TurbineRust {
     /// Long jobs (import, apply, play) not finished yet.
     inflight: i32,
     jobs: Option<Sender<Task>>,
+    /// The current game's mods in a few lines, for reports (kept up to date by the worker).
+    mods_summary: Vec<String>,
+    /// The last engine report (apply, play, restore, reset), for reports.
+    last_report: String,
+    /// Recent warnings and errors said in the status line, with their times.
+    recent: std::collections::VecDeque<String>,
+    /// Milliseconds from start to the first frame drawn.
+    startup_ms: f64,
 }
 
 impl Default for TurbineRust {
@@ -190,6 +247,10 @@ impl Default for TurbineRust {
             dirty: String::new(),
             inflight: 0,
             jobs: None,
+            mods_summary: Vec::new(),
+            last_report: String::new(),
+            recent: std::collections::VecDeque::new(),
+            startup_ms: 0.0,
         }
     }
 }
@@ -213,6 +274,8 @@ type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 struct Task {
     /// The game this job works on; its store is dropped (and opened again next time) if the job panics.
     game: Option<String>,
+    /// What it is, for the activity log.
+    name: String,
     long: bool,
     run: Job,
 }
@@ -229,7 +292,10 @@ impl Worker {
     fn note(&self, game: &Game, report: &turbine_engine::deploy::Report) {
         let key = game.id();
         let needs = needs_reset(report);
+        let words = format!("{} at {}: {report:?}", game.name, crate::log::file_stamp());
+        crate::log::line("engine", &format!("Report for {key}: {report:?}"));
         self.post(move |mut t| {
+            t.as_mut().rust_mut().last_report = words;
             let now = t.reset_for().to_string();
             if needs && now != key {
                 t.as_mut().set_reset_for(QString::from(key.as_str()));
@@ -241,7 +307,13 @@ impl Worker {
 
     fn say(&self, text: impl Into<String>, level: &'static str) {
         let text = text.into();
-        self.post(move |t| t.message(QString::from(text.as_str()), QString::from(level)));
+        crate::log::line("engine", &format!("[{level}] {text}"));
+        self.post(move |mut t| {
+            if level == "warn" || level == "error" {
+                remember(t.as_mut().rust_mut().get_mut(), &format!("[{level}] {text}"));
+            }
+            t.message(QString::from(text.as_str()), QString::from(level))
+        });
     }
 
     /// The game's store and rules, opened the first time they're needed.
@@ -260,17 +332,28 @@ impl Worker {
         let key = game.id();
         let Some(slot) = self.slots.get(&key) else { return };
         let mods = slot.store.to_json();
+        let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         self.post(move |mut t| {
             if t.rust().current != key {
                 return;
             }
+            t.as_mut().rust_mut().mods_summary = summary;
             if let Some(r) = rules {
                 t.as_mut().set_rules_json(QString::from(r.as_str()));
             }
             t.as_mut().set_mods_json(QString::from(mods.as_str()));
         });
     }
+}
+
+/// Keeps the last 30 warnings and errors for reports.
+fn remember(r: &mut TurbineRust, text: &str) {
+    if r.recent.len() >= 30 {
+        r.recent.pop_front();
+    }
+    let (_, _, _, h, m, s, _) = crate::log::local_now();
+    r.recent.push_back(format!("{h:02}:{m:02}:{s:02} {text}"));
 }
 
 fn rules_json(slot: &Slot) -> String {
@@ -395,7 +478,7 @@ fn changes(n: i32) -> String {
 }
 
 /// Where Turbine keeps mods on internal storage. TURBINE_DATA moves it for the build's screenshot checks.
-fn data_home() -> PathBuf {
+pub fn data_home() -> PathBuf {
     for key in ["TURBINE_DATA", "XDG_DATA_HOME"] {
         if let Some(v) = std::env::var_os(key).filter(|v| !v.is_empty()) {
             return v.into();
@@ -446,7 +529,18 @@ fn needs_reset(report: &turbine_engine::deploy::Report) -> bool {
 
 impl qobject::Turbine {
     pub fn scan(self: Pin<&mut Self>) {
+        let at = std::time::Instant::now();
         let scan = turbine_engine::scan_games(&turbine_engine::home_dir());
+        crate::log::line(
+            "scan",
+            &format!("Found {} games in {} ms; {} problems", scan.games.len(), at.elapsed().as_millis(), scan.problems.len()),
+        );
+        for g in &scan.games {
+            crate::log::line("scan", &format!("{} ({}), {:?}, {}, build {}", g.name, g.id(), g.runtime, g.drive_label(), g.build.as_deref().unwrap_or("?")));
+        }
+        for p in &scan.problems {
+            crate::log::line("scan", &format!("Problem: {p}"));
+        }
         let mut this = self;
         this.as_mut().set_problems(QString::from(scan.problems.join("\n").as_str()));
         let json = scan.games_json();
@@ -455,6 +549,7 @@ impl qobject::Turbine {
     }
 
     pub fn wake(mut self: Pin<&mut Self>) {
+        crate::log::line("window", "Back in front; controller quiet for 250 ms");
         if let Some(r) = self.as_mut().rust_mut().reader.as_mut() {
             r.wake(Duration::from_millis(250));
         }
@@ -473,6 +568,9 @@ impl qobject::Turbine {
             self.as_mut().set_pads(connected);
         }
         for (button, pressed) in events {
+            if pressed {
+                crate::log::line("pad", &format!("Press {button}"));
+            }
             self.as_mut().pad(QString::from(button), pressed);
         }
     }
@@ -486,7 +584,7 @@ impl qobject::Turbine {
     }
 
     /// Queues a job for the worker thread (started the first time).
-    fn send(mut self: Pin<&mut Self>, game: Option<String>, long: bool, run: Job) {
+    fn send(mut self: Pin<&mut Self>, game: Option<String>, name: &str, long: bool, run: Job) {
         if self.rust().jobs.is_none() {
             let (tx, rx) = mpsc::channel::<Task>();
             let qt = self.qt_thread();
@@ -495,7 +593,14 @@ impl qobject::Turbine {
                 let mut worker = Worker { data_home: data_home(), slots: HashMap::new(), qt };
                 while let Ok(task) = rx.recv() {
                     let long = task.long;
+                    let name = task.name;
+                    let at = std::time::Instant::now();
+                    crate::log::line("engine", &format!("Start: {name}"));
                     let failed = catch_unwind(AssertUnwindSafe(|| (task.run)(&mut worker))).is_err();
+                    crate::log::line(
+                        "engine",
+                        &format!("{}: {name} after {} ms", if failed { "Stopped (not ready)" } else { "Done" }, at.elapsed().as_millis()),
+                    );
                     if failed {
                         if let Some(key) = task.game {
                             worker.slots.remove(&key);
@@ -522,7 +627,8 @@ impl qobject::Turbine {
             self.as_mut().rust_mut().inflight = n;
             self.as_mut().set_busy(true);
         }
-        let sent = self.rust().jobs.as_ref().map(|tx| tx.send(Task { game, long, run }).is_ok()).unwrap_or(false);
+        let name = name.to_string();
+        let sent = self.rust().jobs.as_ref().map(|tx| tx.send(Task { game, name, long, run }).is_ok()).unwrap_or(false);
         if !sent && long {
             let n = (self.rust().inflight - 1).max(0);
             self.as_mut().rust_mut().inflight = n;
@@ -546,7 +652,7 @@ impl qobject::Turbine {
         self.as_mut().set_rules_json(QString::default());
         let Some(game) = self.find(&id) else { return };
         self.send(
-            Some(id),
+            Some(id), &format!("Open {}", game.name),
             false,
             Box::new(move |w: &mut Worker| match w.slot(&game) {
                 Ok(_) => w.show(&game, true),
@@ -575,7 +681,7 @@ impl qobject::Turbine {
         let Some(game) = self.current_game() else { return };
         self.as_mut().edited();
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Change a mod",
             false,
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| f(&mut s.store));
@@ -594,7 +700,7 @@ impl qobject::Turbine {
         self.as_mut().say(&format!("Adding {file}..."), "work");
         self.as_mut().edited();
         self.send(
-            Some(game.id()),
+            Some(game.id()), &format!("Add {file}"),
             true,
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.import_zip(&path));
@@ -643,7 +749,8 @@ impl qobject::Turbine {
     pub fn apply_now(mut self: Pin<&mut Self>) {
         let (Some(game), n) = self.as_mut().take_pending() else { return };
         self.as_mut().say(&format!("Applying {} to the game...", changes(n)), "work");
-        self.send(Some(game.id()), true, apply_job(game, n));
+        let name = format!("Apply {} to {}", changes(n), game.name);
+        self.send(Some(game.id()), &name, true, apply_job(game, n));
     }
 
     pub fn finish(mut self: Pin<&mut Self>) {
@@ -651,7 +758,7 @@ impl qobject::Turbine {
         let (tx, rx) = mpsc::channel::<()>();
         let job = apply_job(game.clone(), n);
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Apply before closing",
             false,
             Box::new(move |w: &mut Worker| {
                 // Signal the wait below even if apply panics.
@@ -674,7 +781,7 @@ impl qobject::Turbine {
         let (_, n) = self.as_mut().take_pending();
         self.as_mut().say("Taking the mods out of the game...", "work");
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Play original",
             true,
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.play_original().map_err(|e| e.to_string()));
@@ -701,7 +808,7 @@ impl qobject::Turbine {
         let _ = self.as_mut().take_pending();
         self.as_mut().say("Resetting the game's files...", "work");
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Reset game files",
             true,
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.reset_game().map_err(|e| e.to_string()));
@@ -730,7 +837,7 @@ impl qobject::Turbine {
         let _ = self.as_mut().take_pending();
         self.as_mut().say("Putting back the saved setup...", "work");
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Restore setup",
             true,
             Box::new(move |w: &mut Worker| {
                 let result = w.slot(&game).and_then(|s| s.store.restore(&setup).map_err(|e| e.to_string()));
@@ -749,7 +856,7 @@ impl qobject::Turbine {
     pub fn check(self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         self.send(
-            Some(game.id()),
+            Some(game.id()), "Check before Play",
             false,
             Box::new(move |w: &mut Worker| {
                 let json = match w.slot(&game) {
@@ -780,7 +887,7 @@ impl qobject::Turbine {
         let (_, n) = self.as_mut().take_pending();
         self.as_mut().say("Getting the game ready...", "work");
         self.send(
-            Some(game.id()),
+            Some(game.id()), &format!("Play {}", game.name),
             true,
             Box::new(move |w: &mut Worker| {
                 let put_back = move |w: &Worker| {
@@ -837,7 +944,7 @@ impl qobject::Turbine {
     pub fn list_downloads(self: Pin<&mut Self>) {
         let home = turbine_engine::home_dir();
         self.send(
-            None,
+            None, "List Downloads",
             false,
             Box::new(move |w: &mut Worker| {
                 let json = downloads_json(&home);
@@ -845,6 +952,119 @@ impl qobject::Turbine {
             }),
         );
     }
+}
+
+impl qobject::Turbine {
+    pub fn log(&self, kind: &QString, text: &QString) {
+        crate::log::line(&kind.to_string(), &text.to_string());
+    }
+
+    pub fn copy_text(&self, text: &QString) {
+        let text = text.to_string().replace('\0', "");
+        let Ok(c) = std::ffi::CString::new(text) else { return };
+        // SAFETY: c is a valid C string for the call; qtglue.cpp copies it into the clipboard on this (the GUI) thread.
+        unsafe { turbine_copy_text(c.as_ptr()) };
+        crate::log::line("labs", "Copied text to the clipboard");
+    }
+
+    pub fn report(&self, item: &QString, note: &QString, interface: &QString, perf: &QString, crash: bool, shot: &QString) -> QString {
+        let r = self.rust();
+        let game = self.current_game();
+        let mut problems: Vec<String> = Vec::new();
+        let scan = self.problems().to_string();
+        problems.extend(scan.lines().filter(|l| !l.trim().is_empty()).map(|l| format!("Scan: {l}")));
+        problems.extend(r.recent.iter().cloned());
+        let input = crate::labs::ReportInput {
+            item: item.to_string(),
+            note: note.to_string(),
+            interface: interface.to_string(),
+            perf: perf.to_string(),
+            version: crate::VERSION.to_string(),
+            gamemode: *self.gamemode(),
+            pads: *self.pads(),
+            game: game.as_ref().map(crate::labs::game_lines).unwrap_or_else(|| vec!["No game selected".into()]),
+            mods: if game.is_some() { r.mods_summary.clone() } else { Vec::new() },
+            last_report: if r.last_report.is_empty() { "None this run".into() } else { r.last_report.clone() },
+            problems,
+            crash: if crash { crate::log::crash_tail(6000) } else { String::new() },
+            shot: shot.to_string(),
+        };
+        let mut text = crate::labs::build(&input);
+        if let Some(p) = r.reader.as_ref() {
+            let names = p.names();
+            if !names.is_empty() {
+                text = text.replace("Controller: connected", &format!("Controller: connected ({})", names.join(", ")));
+            }
+        }
+        QString::from(text.as_str())
+    }
+
+    pub fn save_report(&self, text: &QString, stamp: &QString, shot: &QString) -> QString {
+        let shot = shot.to_string();
+        let from = (!shot.is_empty()).then(|| PathBuf::from(&shot));
+        let json = match crate::labs::save(&text.to_string(), &stamp.to_string(), from.as_deref()) {
+            Ok((report, shot)) => {
+                crate::log::line("labs", &format!("Saved {report}{}", if shot.is_empty() { String::new() } else { format!(" and {shot}") }));
+                format!("{{\"report\":{},\"shot\":{},\"error\":\"\"}}", quote(&report), quote(&shot))
+            }
+            Err(e) => {
+                crate::log::line("labs", &format!("Couldn't save the report: {e}"));
+                format!("{{\"report\":\"\",\"shot\":\"\",\"error\":{}}}", quote(&e))
+            }
+        };
+        QString::from(json.as_str())
+    }
+
+    pub fn stamp(&self) -> QString {
+        QString::from(crate::log::file_stamp().as_str())
+    }
+
+    pub fn shot_temp(&self) -> QString {
+        QString::from(crate::labs::shot_temp().to_string_lossy().as_ref())
+    }
+
+    pub fn has_crash_log(&self) -> bool {
+        crate::log::has_crash_log()
+    }
+
+    pub fn now_us(&self) -> f64 {
+        crate::labs::started().elapsed().as_secs_f64() * 1_000_000.0
+    }
+
+    pub fn perf_facts(&self) -> QString {
+        let r = self.rust();
+        let (median, worst, count) = r.reader.as_ref().map(|p| p.waits()).unwrap_or((0, 0, 0));
+        let names = r.reader.as_ref().map(|p| p.names().join(", ")).unwrap_or_default();
+        let json = format!(
+            "{{\"startupMs\":{:.0},\"memoryMb\":{:.1},\"cpuMs\":{:.0},\"threads\":{},\"padMedian\":{},\"padWorst\":{},\"padCount\":{},\"pads\":{},\"device\":{},\"system\":{},\"build\":{}}}",
+            r.startup_ms,
+            crate::labs::memory_mb(),
+            crate::labs::cpu_ms(),
+            crate::labs::threads(),
+            median,
+            worst,
+            count,
+            quote(&names),
+            quote(&crate::labs::device()),
+            quote(&crate::labs::system()),
+            quote(crate::labs::COMMIT)
+        );
+        QString::from(json.as_str())
+    }
+
+    pub fn mark_shown(mut self: Pin<&mut Self>) {
+        if self.rust().startup_ms > 0.0 {
+            return;
+        }
+        let ms = crate::labs::started().elapsed().as_secs_f64() * 1000.0;
+        self.as_mut().rust_mut().startup_ms = ms;
+        crate::log::line("app", &format!("First frame drawn {ms:.0} ms after start"));
+    }
+}
+
+extern "C" {
+    // qtglue.cpp
+    fn turbine_copy_text(text: *const std::os::raw::c_char);
 }
 
 /// Applies a game's waiting changes; `n` of them go back on the count if it fails.
@@ -870,7 +1090,10 @@ fn apply_job(game: Game, n: i32) -> Job {
 
 fn launch(w: &Worker, game: &Game) {
     match rules::launch_url(game) {
-        Some(url) => w.post(move |t| t.launch(QString::from(url.as_str()))),
+        Some(url) => {
+            crate::log::line("launch", &format!("{} through {url}", game.name));
+            w.post(move |t| t.launch(QString::from(url.as_str())))
+        }
         None => w.say(format!("Turbine doesn't know how to start {} yet. Start it from its launcher.", game.name), "warn"),
     }
 }

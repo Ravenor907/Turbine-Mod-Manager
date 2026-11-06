@@ -26,6 +26,16 @@ Window {
         property bool highContrast: false
         property string vision: "typical"   // typical, red, green, blue, none
         property string layout: "handheld"  // handheld, tv
+        property string season: ""          // off, date, autumn, snow; "" until chosen (off on handhelds, by date on TV)
+        property int fallAmount: 40         // 10 to 100
+        property int fallSize: 100          // 50 to 200 percent
+    }
+    // Labs mode (ten presses on the icon in Settings > About) and the owner's checklist answers.
+    Settings {
+        id: labsSet
+        category: "labs"
+        property bool on: false
+        property string states: "{}"        // item id: "works" or "problem"; missing means not tested
     }
     Settings {
         id: seen
@@ -49,12 +59,21 @@ Window {
         readonly property int h: parseInt(arg("size").split("x")[1]) || 800
         readonly property string page: arg("page")
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
-        readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader"].indexOf(page) >= 0
+        readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report"].indexOf(page) >= 0
+        // Pages that show Labs mode (it isn't saved from a picture).
+        readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         function start() {
             const files = arg("selftest-import")
             if (files !== "") for (const f of files.split(",")) Turbine.importZip(f)
             if (page === "gamemenu") app.sheet = "gamemenu"
             else if (page === "add") { app.tab = 1; app.openAdd() }
+            else if (page === "about") { app.openSettings(); app.setSection = 1 }
+            else if (page === "labs") {
+                app.labsAnswers = { "pad-quiet": "works", "proton-bepinex": "problem" }
+                app.openSettings(); app.setSection = 2; app.setRow = 3
+            }
+            else if (page === "perfcheck") app.openPerf()
+            else if (page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
         }
     }
     Timer {
@@ -76,6 +95,20 @@ Window {
     readonly property real fit: Math.min(3, Math.max(1, Math.min(width / 883, height / 514))) * (tv ? 1.5 : 1)
     readonly property real s: fit * look.textSize / 100
     function px(v) { return Math.round(v * s) }
+
+    // ---------------------------------------------------------------- Labs mode and the activity log
+    readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
+    function note(kind, text) { Turbine.log(kind, text) }
+    onPageChanged: note("page", "Page " + page)
+    onTabChanged: note("page", "Tab " + (tabs[tab] || tab))
+    onZoneChanged: note("page", "Focus zone " + zone)
+    onSetSectionChanged: note("page", "Settings section " + (settingsSections[setSection] || setSection))
+    onWidthChanged: sizeNote.restart()
+    onHeightChanged: sizeNote.restart()
+    Timer { id: sizeNote; interval: 500; onTriggered: app.note("window", "Window " + app.width + " x " + app.height + ", scale " + app.s.toFixed(2)) }
+    // The first frame drawn: how long starting took (Labs > Performance check).
+    property bool shown: false
+    onFrameSwapped: if (!shown) { shown = true; Turbine.markShown() }
 
     // ---------------------------------------------------------------- fonts
     FontLoader { id: cinzel; source: "file:///app/share/turbine-mod-manager/fonts/Cinzel.ttf" }
@@ -241,6 +274,7 @@ Window {
     Timer { id: autoApply; interval: 3000; onTriggered: if (!shot.on) Turbine.applyNow() }
     function edited() { autoApply.restart() }
     onActiveChanged: {
+        note("window", active ? "Turbine in front" : "Turbine in the background")
         if (active) {
             // Back from a game: presses made there (still queued) must not act here.
             repeater.stop()
@@ -256,6 +290,7 @@ Window {
     // ---------------------------------------------------------------- mod actions
     function toggle(m) {
         const on = !m.enabled
+        note("action", "Turn " + (on ? "on " : "off ") + m.name)
         mods = mods.map(x => x.id === m.id ? Object.assign({}, x, { enabled: on }) : x)
         Turbine.setEnabled(m.id, on)
         edited()
@@ -264,6 +299,7 @@ Window {
     function moveMod(m, to) {
         const from = mods.findIndex(x => x.id === m.id)
         if (from < 0 || to === from) return
+        note("action", "Move " + m.name + " from " + (from + 1) + " to " + (to + 1))
         let list = mods.slice()
         list.splice(from, 1)
         list.splice(to, 0, m)
@@ -273,6 +309,7 @@ Window {
         edited()
     }
     function uninstall(m) {
+        note("action", "Uninstall " + m.name)
         mods = mods.filter(x => x.id !== m.id)
         Turbine.removeMod(m.id)
         edited()
@@ -280,6 +317,7 @@ Window {
         toast.showUndo(m.id, m.name)
     }
     function putBack(id) {
+        note("action", "Put back " + id)
         Turbine.undoRemove(id)
         toast.hide()
         edited()
@@ -305,6 +343,7 @@ Window {
     function endMove() {
         moving = false
         if (modIndex !== moveFrom && mods[modIndex]) {
+            note("action", "Reorder " + mods[modIndex].name + " from " + (moveFrom + 1) + " to " + (modIndex + 1))
             Turbine.moveTo(mods[modIndex].id, modIndex)
             edited()
         }
@@ -327,6 +366,7 @@ Window {
     // ---------------------------------------------------------------- Play
     function startPlay() {
         if (!game) return
+        note("action", "Play " + game.name)
         if (moving) endMove()
         // Play applies the waiting changes itself; its job runs on the worker after any apply already running, so
         // the timer must not start another one meanwhile.
@@ -336,6 +376,7 @@ Window {
     }
     function checked(list) {
         checks = list
+        note("engine", "Check before Play: " + list.map(x => x.level + " " + x.title).join("; "))
         const trouble = list.some(x => x.level === "stop" || x.level === "warn")
         if (msgLevel === "work" && msgText === "Checking before Play...") msgText = ""
         if (trouble || shot.page === "check") { checkIndex = 0; sheet = "check" }
@@ -346,6 +387,7 @@ Window {
     property int checkIndex: 0
     function checkChoose(i) {
         const what = checkChoices[i]
+        note("action", "Check before Play: " + what)
         sheet = ""
         if (what === "Play anyway") Turbine.play(game.id)
         else if (what === "Play original") Turbine.playOriginal()
@@ -386,6 +428,7 @@ Window {
     function gameMenuRun(i) {
         const item = gameMenuItems[i]
         if (!item || !item.ok) return
+        note("action", "Game menu: " + item.title)
         if (i === 0) { sheet = ""; Turbine.playOriginal() }
         else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
         else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
@@ -410,6 +453,7 @@ Window {
     function modMenuRun(i) {
         const item = modMenuItems[i], m = menuMod
         if (!item || !m) return
+        note("action", "Mod menu: " + item.title + " for " + m.name)
         sheet = ""
         if (item.act === "toggle") toggle(m)
         else if (item.act === "top") moveMod(m, 0)
@@ -430,6 +474,7 @@ Window {
         const d = downloads[addIndex]
         sheet = ""
         if (!d) return
+        note("action", "Add from Downloads: " + d.name)
         tab = 0
         Turbine.importZip(d.path)
         edited()
@@ -457,7 +502,7 @@ Window {
     property int setRow: 0
     property int perfIndex: 0
     readonly property int railCount: games.length + 2
-    onSheetChanged: { menuIndex = 0; stopReset(); if (sheet === "" ) offerLoader() }
+    onSheetChanged: { note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset(); if (sheet === "" ) offerLoader() }
 
     Timer { interval: 16; repeat: true; running: app.active || shot.on; onTriggered: Turbine.poll() }
 
@@ -474,14 +519,17 @@ Window {
             repeater.interval = 380
             repeater.restart()
         }
+        if (b === "view") holdStart("View")
         act(b)
     }
     function release(b) {
         if (b === repeatButton) { repeater.stop(); repeatButton = "" }
         if (b === "a" && resetHold.running) stopReset()
+        if (b === "view") holdStop()
     }
 
     Item {
+        id: keyRoot
         anchors.fill: parent
         focus: true
         Keys.onPressed: (e) => {
@@ -496,24 +544,30 @@ Window {
             const b = map[e.key]
             if (!b) return
             e.accepted = true
-            // Holding a key repeats it, except A (Reset waits for A to be held down).
-            if (!(b === "a" && e.isAutoRepeat)) app.act(b)
+            if (!e.isAutoRepeat) app.note("key", "Key " + b)
+            if (b === "view" && !e.isAutoRepeat) app.holdStart("Tab")
+            // Holding a key repeats it, except A (Reset waits for A to be held down) and View (held for Labs reports).
+            if (!((b === "a" || b === "view") && e.isAutoRepeat)) app.act(b)
         }
         Keys.onReleased: (e) => {
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
+            if (!e.isAutoRepeat && e.key === Qt.Key_Tab) app.holdStop()
         }
     }
 
     function switchGame(step) {
         if (games.length === 0) return
         current = (current + step + games.length) % games.length
+        note("action", "Switch game to " + games[current].name)
         if (page !== "game") page = "game"
         railIndex = current
     }
     function openSettings() { page = "settings"; zone = "settings"; setRow = 0 }
 
     function sheetAct(b) {
-        if (sheet === "details" || sheet === "notice") {
+        if (sheet === "report") reportView.handleButton(b)
+        else if (sheet === "perf") perfView.handleButton(b)
+        else if (sheet === "details" || sheet === "notice") {
             if (b === "a" || b === "b" || b === "view") {
                 if (sheet === "notice") seen.notSteamOS = true
                 sheet = ""
@@ -584,16 +638,21 @@ Window {
             return
         }
         if (page === "settings") {
-            const rows = setSection === 0 ? lookRows.length : 1
+            const rows = setSection === 0 ? lookRows.length : setSection === 1 ? 2 : labsRows.length
+            const labsItem = setSection === 2 && labsRows[setRow] && labsRows[setRow].kind === "item"
             if (b === "b") { page = "game"; zone = "main" }
-            else if (b === "lt") { setSection = 0; setRow = 0 }
-            else if (b === "rt") { setSection = 1; setRow = 0 }
+            else if (b === "lt") { if (setSection > 0) { setSection--; setRow = 0 } }
+            else if (b === "rt") { if (setSection < settingsSections.length - 1) { setSection++; setRow = 0 } }
             else if (b === "up") setRow = Math.max(0, setRow - 1)
             else if (b === "down") setRow = Math.min(rows - 1, setRow + 1)
             else if (setSection === 0 && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
             else if (setSection === 0 && b === "a") lookRows[setRow].step(1)
-            else if (setSection === 1 && b === "a") { page = "perf"; zone = "perf"; perfIndex = 0 }
-            else if (b === "left" && setSection === 0) zone = "rail"
+            else if (setSection === 1 && b === "a") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
+            else if (labsItem && b === "left") labsChip = Math.max(0, labsChip - 1)
+            else if (labsItem && b === "right") labsChip = Math.min(2, labsChip + 1)
+            else if (labsItem && b === "a") labsChoose(labsRows[setRow], ["works", "problem", ""][labsChip])
+            else if (setSection === 2 && b === "a") labsRun(labsRows[setRow])
+            else if (b === "left") zone = "rail"
             return
         }
         if (page === "perf") {
@@ -604,11 +663,224 @@ Window {
         }
     }
     function railSelect(i) {
+        note("action", "Rail " + (i < games.length ? games[i].name : i === games.length ? "Add game" : "Settings"))
         if (i < games.length) { current = i; page = "game"; zone = "main" }
         else if (i === games.length) toast.showPlain("Turbine finds Steam and Heroic games by itself. Install a game and it shows up here.")
         else openSettings()
     }
 
+
+    // ---------------------------------------------------------------- Labs
+    readonly property var settingsSections: labsOn ? ["Look", "About", "Labs"] : ["Look", "About"]
+    onLabsOnChanged: if (!labsOn && setSection > 1) { setSection = 1; setRow = 0 }
+    // Ten presses on the icon in Settings > About, a few seconds apart at most, turn Labs mode on or off.
+    property int labsTaps: 0
+    Timer { id: labsTapReset; interval: 3000; onTriggered: app.labsTaps = 0 }
+    function labsTap() {
+        labsTaps++
+        labsTapReset.restart()
+        if (labsTaps < 10) return
+        labsTaps = 0
+        labsSet.on = !labsSet.on
+        note("labs", labsSet.on ? "Labs mode on" : "Labs mode off")
+        toast.showPlain(labsSet.on ? "Labs mode on. Labs is at the end of Settings." : "Labs mode off")
+    }
+    // Things to confirm on the device: what the build server can't check. title, how to try it, what should happen.
+    readonly property var labsItems: [
+        { id: "pad-quiet", title: "Controller quiet after a game", how: "Play a game, press buttons as you quit it, then come back to Turbine.",
+          expect: "Nothing happens in Turbine from buttons pressed in the game." },
+        { id: "proton-bepinex", title: "Proton setting on a BepInEx game", how: "Add a BepInEx mod to Valheim, Lethal Company or Risk of Rain 2, then Play.",
+          expect: "The check before Play says BepInEx gets turned on in Proton, and the game starts with the mod working." },
+        { id: "running-check", title: "Running game check", how: "With a BepInEx game running, switch back to Turbine and press Play.",
+          expect: "Turbine says the game is still running and changes nothing until it's closed." },
+        { id: "text-size", title: "Text size in Game Mode", how: "In Game Mode, look at every page at Text size 75% to 175%.",
+          expect: "Everything is readable; nothing is cut off or overlapping." },
+        { id: "add-downloads", title: "Add mods from Downloads", how: "Put a mod's zip in Downloads, then Get Mods > Add mods from Downloads.",
+          expect: "The mod shows in the list, turned on, with its name and version." },
+        { id: "auto-apply", title: "Auto-apply, then start from Steam", how: "Turn a mod on or off, wait 5 seconds, close Turbine, start the game from the Steam library.",
+          expect: "The game has the change without pressing Play in Turbine." },
+        { id: "uninstall-undo", title: "Uninstall and Undo", how: "Uninstall a mod from its menu (X), then press Y for Undo.",
+          expect: "It moves to Recently removed and comes back with Undo, in the same place." },
+        { id: "play-original", title: "Play original", how: "Game menu (View) > Play original.",
+          expect: "The game starts with no mods. The mods stay in Turbine and go back in at the next Play." },
+        { id: "restore", title: "Restore last setup played", how: "Play with mods, change some, then Game menu (View) > Restore last working setup.",
+          expect: "The mods go back to how they were the last time the game was played." },
+        { id: "sd-card", title: "Game on the SD card", how: "Add a mod to a game on the SD card and play it; then try with the card out.",
+          expect: "The mod works. With the card out, Turbine says the game is offline, never that mods are gone." },
+        { id: "heroic-play", title: "Heroic game Play", how: "Pick an Epic or GOG game from Heroic and press Play.",
+          expect: "Heroic starts the game with the mods in place." },
+        { id: "seasonal", title: "Seasonal leaves and snow", how: "Settings > Look > Seasonal: Autumn, then Snow; try Amount and Size.",
+          expect: "They fall smoothly behind the panels and stop while a game runs." },
+        { id: "quick-report", title: "Screenshot and report", how: "Hold View for 7 seconds (or hold the icon at the top of the rail).",
+          expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." }
+    ]
+    readonly property var labsRows: [
+        { kind: "action", key: "report", title: "Report a bug", how: "Screenshot, what went wrong, details Turbine adds by itself", action: "Report" },
+        { kind: "action", key: "perf", title: "Performance check", how: "Frame times, processor, startup, controller", action: "Open" }
+    ].concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
+    property var labsAnswers: parse(labsSet.states, {})
+    readonly property string labsDone: {
+        const n = labsItems.filter(x => labsAnswers[x.id] === "works").length
+        const p = labsItems.filter(x => labsAnswers[x.id] === "problem").length
+        return n + " of " + labsItems.length + " work" + (p > 0 ? ", " + p + " with a problem" : "")
+    }
+    function labsState(id) { return labsAnswers[id] || "" }
+    // Where Left and Right are on a checklist row: 0 Works, 1 Problem, 2 Not tested.
+    property int labsChip: 0
+    function labsFocusRow() {
+        const r = labsRows[setRow]
+        if (r && r.kind === "item") { const st = labsState(r.id); labsChip = st === "works" ? 0 : st === "problem" ? 1 : 2 }
+    }
+    onSetRowChanged: if (setSection === 2) labsFocusRow()
+    function labsChoose(item, st) {
+        let a = Object.assign({}, labsAnswers)
+        if (st === "") delete a[item.id]
+        else a[item.id] = st
+        labsAnswers = a
+        if (!shot.on) labsSet.states = JSON.stringify(a)
+        note("labs", "Checklist: " + item.title + " = " + (st || "not tested"))
+        if (st === "problem") openReport(item, "", "")
+    }
+    function labsRun(row) {
+        note("action", "Labs: " + row.title)
+        if (row.key === "report") openReport(null, "", "")
+        else if (row.key === "perf") openPerf()
+    }
+    function labsItemText(item) {
+        if (!item) return ""
+        return "Item: " + item.title + "\nHow to try it: " + item.how + "\nWhat should happen: " + item.expect
+               + "\nChecklist answer: " + (labsState(item.id) || "not tested")
+    }
+
+    // What the interface looks like right now, for reports.
+    function focusWords() {
+        if (sheet === "modmenu") return "Mod menu item " + (modMenuItems[menuIndex] ? modMenuItems[menuIndex].title : menuIndex)
+        if (sheet === "gamemenu") return "Game menu item " + (gameMenuItems[menuIndex] ? gameMenuItems[menuIndex].title : menuIndex)
+        if (sheet === "add") return "Add mods row " + (downloads[addIndex] ? downloads[addIndex].name : addIndex)
+        if (sheet === "check") return "Check before Play button " + (checkChoices[checkIndex] || checkIndex)
+        if (sheet !== "") return "Sheet " + sheet
+        if (zone === "rail") return "Rail item " + railIndex + (railIndex < games.length ? " (" + games[railIndex].name + ")" : "")
+        if (page === "settings") return "Settings " + (settingsSections[setSection] || setSection) + " row " + setRow
+               + (setSection === 0 && lookRows[setRow] ? " (" + lookRows[setRow].label + ")" : setSection === 2 && labsRows[setRow] ? " (" + labsRows[setRow].title + ")" : "")
+        if (page === "perf") return "Scrolling test row " + perfIndex
+        if (tab === 0 && focusedItem) return (focusedItem.kind === "mod" ? "Mod row " : "Removed row ") + (modIndex + 1) + " (" + focusedItem.m.name + ")"
+        return "Tab " + (tabs[tab] || tab)
+    }
+    function interfaceText() {
+        return [
+            "Page: " + page + (sheet !== "" ? ", sheet " + sheet : "") + ", tab " + (tabs[tab] || tab) + (moving ? ", moving a mod" : ""),
+            "Focus: " + focusWords() + " (zone " + zone + ")",
+            "Window: " + width + " x " + height + (visibility === Window.FullScreen ? ", full screen" : ", windowed") + (active ? ", in front" : ", in the background"),
+            "Screen: " + Screen.width + " x " + Screen.height + " px, pixel ratio " + Screen.devicePixelRatio.toFixed(2),
+            "Scale: fit " + fit.toFixed(2) + "x, text size " + look.textSize + "%, everything " + s.toFixed(2) + "x, layout " + look.layout,
+            "Look: theme " + look.theme + ", accent " + look.accent + ", contrast " + (look.highContrast ? "high" : "standard")
+                + ", color vision " + look.vision + ", seasonal " + seasonPick + (seasonKind !== "" ? " (" + seasonKind + ", amount " + look.fallAmount + ", size " + look.fallSize + "%)" : ""),
+            "Status line: " + statusNow.words + (statusNow.detail ? " · " + statusNow.detail : ""),
+            "Waiting changes: " + Turbine.pending + ", busy " + (Turbine.busy ? "yes" : "no"),
+            "Labs mode: " + (labsOn ? "on" : "off")
+        ].join("\n")
+    }
+
+    // Report a bug: the screenshot is taken first, so the report screen isn't in it.
+    property string reportContext: ""
+    property var reportItem: null
+    property bool discardArmed: false
+    Timer { id: discardReset; interval: 3000; onTriggered: app.discardArmed = false }
+    function openReport(item, startText, perfText) {
+        reportContext = interfaceText()
+        reportItem = item
+        const tmp = Turbine.shotTemp()
+        const open = function (ok) {
+            reportView.shotUrl = ok ? fileUrl(tmp) + "?" + Date.now() : ""
+            reportView.aboutLine = "Send saves the report to Downloads and copies it, with Turbine " + Turbine.version
+                + ", this device, the game and its mods, and the last 300 lines of the activity log."
+            reportView.open(item ? item.title : "", startText !== "" ? startText : item ? "Problem: " + item.title + ". " : "",
+                            perfText, Turbine.hasCrashLog())
+            perfView.visible = false
+            sheet = "report"
+        }
+        if (!app.contentItem.grabToImage(function (r) { open(r.saveToFile(tmp)) })) open(false)
+    }
+    function sendReport() {
+        if (reportView.text.trim() === "") { toast.showPlain("Say what went wrong first."); return }
+        const stamp = Turbine.stamp()
+        const withShot = reportView.include && reportView.shotUrl !== ""
+        const shotName = withShot ? "Turbine-screenshot-" + stamp + ".png" : ""
+        const text = Turbine.report(labsItemText(reportItem), reportView.text, reportContext,
+                                    reportView.includePerf ? reportView.perf : "", reportView.includeLog && reportView.hasLog, shotName)
+        const res = parse(Turbine.saveReport(text, stamp, withShot ? Turbine.shotTemp() : ""), { error: "Couldn't save the report." })
+        if (res.error !== "") { toast.showPlain(res.error); return }
+        Turbine.copyText(text)
+        closeReport()
+        toast.showPlain("Report saved to Downloads as " + res.report + ". The report is copied.")
+    }
+    function closeReport() {
+        reportView.close()
+        discardArmed = false
+        if (sheet === "report") sheet = ""
+    }
+    function dismissReport() {
+        if (reportView.text.trim() === "" || discardArmed) { note("labs", "Report closed without saving"); closeReport(); return }
+        discardArmed = true
+        discardReset.restart()
+        toast.showPlain("Press B again to throw this report away.")
+    }
+    function reportEditing(on) {
+        note("labs", on ? "Typing the report" : "Done typing the report")
+        if (Turbine.gamemode && !shot.on) Qt.openUrlExternally(on ? "steam://open/keyboard" : "steam://close/keyboard")
+        if (!on) keyRoot.forceActiveFocus()
+    }
+    function openPerf() { perfView.version = Turbine.version; perfView.extra = perfExtra(); perfView.open(); sheet = "perf" }
+    function perfExtra() {
+        return "Window: " + width + " x " + height + ", " + (Turbine.gamemode ? "Game Mode" : "Desktop") + "\n"
+            + "Turbine scale: fit " + fit.toFixed(2) + "x, text size " + look.textSize + "%, everything " + s.toFixed(2) + "x, layout " + look.layout + "\n"
+            + "Look: theme " + look.theme + ", high contrast " + (look.highContrast ? "on" : "off") + ", seasonal " + seasonPick
+            + (seasonKind !== "" ? " (" + seasonKind + (fallen.moving ? ", moving" : ", still") + ")" : "")
+    }
+
+    // Labs: hold View (or the icon at the top of the rail) for 7 seconds: a screenshot and a report go to Downloads
+    // and the report is copied. Letting go early stops it.
+    property real holdMs: 0
+    Timer {
+        id: holdTimer
+        interval: 50
+        repeat: true
+        onTriggered: {
+            app.holdMs += interval
+            if (app.holdMs >= 7000) { stop(); app.holdMs = 0; app.quickReport() }
+        }
+    }
+    readonly property bool holdShown: holdTimer.running && holdMs >= 300
+    function holdStart(how) {
+        if (!labsOn || holdTimer.running) return
+        holdMs = 0
+        holdTimer.start()
+        note("labs", "Holding " + how + " for a screenshot and report")
+    }
+    function holdStop() {
+        if (!holdTimer.running) return
+        holdTimer.stop()
+        holdMs = 0
+        note("labs", "Let go early: no screenshot")
+    }
+    function quickReport() {
+        const stamp = Turbine.stamp()
+        const tmp = Turbine.shotTemp()
+        const done = function (ok) {
+            const shotName = ok ? "Turbine-screenshot-" + stamp + ".png" : ""
+            const text = Turbine.report("", "", interfaceText(), "", false, shotName)
+            const res = parse(Turbine.saveReport(text, stamp, ok ? tmp : ""), { error: "Couldn't save the report." })
+            if (res.error !== "") { toast.showPlain(res.error); return }
+            Turbine.copyText(text)
+            toast.showPlain(ok ? "Screenshot and report saved to Downloads. The report is copied." : "Report saved to Downloads (the screenshot didn't work). The report is copied.")
+        }
+        // A moment for the ring to go before the picture.
+        Qt.callLater(function () { if (!app.contentItem.grabToImage(function (r) { done(r.saveToFile(tmp)) })) done(false) })
+    }
+
+    // The app icon: the small, simpler one where the full one would be under 64 physical pixels.
+    readonly property string iconFull: "file:///app/share/icons/hicolor/128x128/apps/io.github.ravenor907.TurbineModManager.png"
+    readonly property string iconSmall: "file:///app/share/turbine-mod-manager/icon-small.png"
 
     // ---------------------------------------------------------------- Look settings rows
     readonly property var lookRows: [
@@ -616,18 +888,40 @@ Window {
           step: (d) => cycle("theme", ["brass", "black", "light"], d) },
         { label: "Accent", options: Object.keys(c.swatches), key: "accent", swatch: true,
           step: (d) => cycle("accent", ["brass", "iron", "copper", "jade", "fjord", "heather", "ember"], d) },
-        { label: "Text size", key: "textSize", slider: true,
-          step: (d) => { look.textSize = Math.max(75, Math.min(175, look.textSize + d * 25)) } },
+        { label: "Text size", key: "textSize", slider: true, min: 75, max: 175, unit: "%",
+          step: (d) => slide("textSize", 75, 175, 25, d) },
         { label: "Contrast", options: [false, true], names: ["Standard", "High"], key: "highContrast",
           step: (d) => { look.highContrast = !look.highContrast } },
         { label: "Color vision", options: ["typical", "red", "green", "blue", "none"], names: ["Typical", "Red", "Green", "Blue", "None"], key: "vision",
           step: (d) => cycle("vision", ["typical", "red", "green", "blue", "none"], d) },
         { label: "Layout", options: ["handheld", "tv"], names: ["Handheld", "TV"], key: "layout",
-          step: (d) => cycle("layout", ["handheld", "tv"], d) }
+          step: (d) => cycle("layout", ["handheld", "tv"], d) },
+        { label: "Seasonal", options: ["off", "date", "autumn", "snow"], names: ["Off", "By date", "Autumn", "Snow"], key: "season",
+          now: seasonPick, step: (d) => { look.season = seasonPick; cycle("season", ["off", "date", "autumn", "snow"], d) } },
+        { label: "Amount", key: "fallAmount", slider: true, min: 10, max: 100, unit: "", dim: seasonKind === "",
+          step: (d) => slide("fallAmount", 10, 100, 10, d) },
+        { label: "Size", key: "fallSize", slider: true, min: 50, max: 200, unit: "%", dim: seasonKind === "",
+          step: (d) => slide("fallSize", 50, 200, 25, d) }
     ]
+    function slide(key, lo, hi, by, d) {
+        look[key] = Math.max(lo, Math.min(hi, look[key] + d * by))
+        note("action", "Look: " + key + " " + look[key])
+    }
+    // Seasonal: off on handhelds and by date on TV until chosen. By date: snow from December 1 to the end of
+    // February, leaves the rest of the year. Checked every hour, so a new season starts without a restart.
+    readonly property string seasonPick: shot.arg("season") !== "" ? shot.arg("season") : look.season !== "" ? look.season : (tv ? "date" : "off")
+    property date today: new Date()
+    Timer { interval: 3600000; running: true; repeat: true; onTriggered: app.today = new Date() }
+    readonly property string seasonKind: {
+        if (seasonPick === "autumn" || seasonPick === "snow") return seasonPick
+        if (seasonPick !== "date") return ""
+        const md = (today.getMonth() + 1) * 100 + today.getDate()
+        return md >= 1201 || md <= 229 ? "snow" : "autumn"
+    }
     function cycle(key, list, d) {
         const i = list.indexOf(look[key])
         look[key] = list[(i + d + list.length) % list.length]
+        note("action", "Look: " + key + " " + look[key])
     }
 
     // ---------------------------------------------------------------- shared pieces
@@ -695,6 +989,17 @@ Window {
         return "Not started yet"
     }
     // ---------------------------------------------------------------- layout
+    // Seasonal leaves or snow, behind everything. Still while Turbine isn't in front (a game is running).
+    Seasonal {
+        id: fallen
+        anchors.fill: parent
+        kind: app.seasonKind
+        amount: look.fallAmount
+        size: look.fallSize
+        scale: app.s
+        light: c.light
+        moving: app.active || shot.on
+    }
     Row {
         anchors.fill: parent
 
@@ -710,16 +1015,21 @@ Window {
                 anchors.topMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: app.px(10)
-                // The app icon; a plain "T" if it can't be loaded.
+                // The app icon (the simpler small one under 64 physical pixels); a plain "T" if it can't be loaded.
+                // In Labs mode, holding it for 7 seconds saves a screenshot and a report.
                 Image {
                     id: logo
+                    readonly property bool small: app.px(44) * Screen.devicePixelRatio < 64
                     width: app.px(44); height: app.px(44)
                     anchors.horizontalCenter: parent.horizontalCenter
-                    source: "file:///app/share/icons/hicolor/128x128/apps/io.github.ravenor907.TurbineModManager.png"
+                    source: small ? app.iconSmall : app.iconFull
                     sourceSize.width: app.px(88)
                     smooth: true
                     mipmap: true
                     visible: status === Image.Ready
+                    TapHandler {
+                        onPressedChanged: pressed ? app.holdStart("the rail icon") : app.holdStop()
+                    }
                 }
                 Rectangle {
                     visible: logo.status !== Image.Ready
@@ -1069,7 +1379,7 @@ Window {
                             width: app.px(170)
                             spacing: app.px(4)
                             Repeater {
-                                model: ["Look", "About"]
+                                model: app.settingsSections
                                 Rectangle {
                                     required property int index
                                     required property string modelData
@@ -1081,101 +1391,229 @@ Window {
                                 }
                             }
                         }
-                        Column {
+                        // Look
+                        ListView {
+                            id: lookList
                             width: parent.width - app.px(184)
-                            spacing: app.px(4)
+                            height: parent.height
                             visible: app.setSection === 0
-                            Repeater {
-                                model: app.lookRows
-                                Rectangle {
-                                    id: srow
-                                    required property int index
-                                    required property var modelData
-                                    readonly property bool foc: app.zone === "settings" && app.setRow === index
-                                    width: parent.width; height: app.px(50); radius: app.px(6)
-                                    color: foc ? c.focusFill : c.card
-                                    border.color: c.accent
-                                    border.width: foc ? app.px(2) : 0
-                                    Label { x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.px(16); font.bold: true }
-                                    Item {
-                                        x: app.px(160); width: parent.width - app.px(174); height: parent.height
-                                        // Choices
-                                        Row {
-                                            visible: !srow.modelData.swatch && !srow.modelData.slider
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width
-                                            spacing: app.px(4)
-                                            Repeater {
-                                                model: srow.modelData.names || []
-                                                Rectangle {
-                                                    required property int index
-                                                    required property string modelData
-                                                    readonly property bool on: look[srow.modelData.key] === srow.modelData.options[index]
-                                                    width: (parent.width - app.px(4) * ((srow.modelData.names || []).length - 1)) / (srow.modelData.names || [1]).length
-                                                    height: app.px(32); radius: app.px(5)
-                                                    color: on ? c.raised : c.ground
-                                                    Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
-                                                    Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.px(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
-                                                    TapHandler { onTapped: { app.setRow = srow.index; look[srow.modelData.key] = srow.modelData.options[parent.index] } }
-                                                }
-                                            }
-                                        }
-                                        // Accent swatches
-                                        Row {
-                                            visible: srow.modelData.swatch === true
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            spacing: app.px(10)
-                                            Repeater {
-                                                model: ["brass", "iron", "copper", "jade", "fjord", "heather", "ember"]
-                                                Rectangle {
-                                                    required property string modelData
-                                                    width: app.px(24); height: width; radius: width / 2
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    color: c.swatches[modelData]
-                                                    border.color: c.text
-                                                    border.width: look.accent === modelData ? app.px(2) : 0
-                                                    TapHandler { onTapped: look.accent = parent.modelData }
-                                                }
-                                            }
-                                            Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
-                                        }
-                                        // Text size
-                                        Row {
-                                            visible: srow.modelData.slider === true
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: parent.width
-                                            spacing: app.px(12)
+                            clip: true
+                            spacing: app.px(4)
+                            model: app.lookRows
+                            currentIndex: app.setSection === 0 ? app.setRow : 0
+                            highlightFollowsCurrentItem: false
+                            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                            delegate: Rectangle {
+                                id: srow
+                                required property int index
+                                required property var modelData
+                                readonly property bool foc: app.zone === "settings" && app.setRow === index
+                                readonly property var now: srow.modelData.now !== undefined ? srow.modelData.now : look[srow.modelData.key]
+                                width: lookList.width; height: app.px(50); radius: app.px(6)
+                                color: foc ? c.focusFill : c.card
+                                border.color: c.accent
+                                border.width: foc ? app.px(2) : 0
+                                opacity: srow.modelData.dim ? 0.6 : 1
+                                Label { x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.px(16); font.bold: true }
+                                Item {
+                                    x: app.px(160); width: parent.width - app.px(174); height: parent.height
+                                    // Choices
+                                    Row {
+                                        visible: !srow.modelData.swatch && !srow.modelData.slider
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width
+                                        spacing: app.px(4)
+                                        Repeater {
+                                            model: srow.modelData.names || []
                                             Rectangle {
-                                                width: parent.width - app.px(70); height: app.px(6); radius: height / 2
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                color: c.line
-                                                Rectangle { width: parent.width * (look.textSize - 75) / 100; height: parent.height; radius: parent.radius; color: c.accent }
-                                                Rectangle {
-                                                    x: parent.width * (look.textSize - 75) / 100 - width / 2
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    width: app.px(18); height: width; radius: width / 2; color: c.accentHi
-                                                }
+                                                required property int index
+                                                required property string modelData
+                                                readonly property bool on: srow.now === srow.modelData.options[index]
+                                                width: (parent.width - app.px(4) * ((srow.modelData.names || []).length - 1)) / (srow.modelData.names || [1]).length
+                                                height: app.px(32); radius: app.px(5)
+                                                color: on ? c.raised : c.ground
+                                                Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
+                                                Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.px(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
+                                                TapHandler { onTapped: { app.setRow = srow.index; look[srow.modelData.key] = srow.modelData.options[parent.index]; app.note("action", "Look: " + srow.modelData.key + " " + look[srow.modelData.key]) } }
                                             }
-                                            Label { text: look.textSize + "%"; color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                         }
                                     }
-                                    TapHandler { onTapped: app.setRow = srow.index }
+                                    // Accent swatches
+                                    Row {
+                                        visible: srow.modelData.swatch === true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: app.px(10)
+                                        Repeater {
+                                            model: ["brass", "iron", "copper", "jade", "fjord", "heather", "ember"]
+                                            Rectangle {
+                                                required property string modelData
+                                                width: app.px(24); height: width; radius: width / 2
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                color: c.swatches[modelData]
+                                                border.color: c.text
+                                                border.width: look.accent === modelData ? app.px(2) : 0
+                                                TapHandler { onTapped: { look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } }
+                                            }
+                                        }
+                                        Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
+                                    }
+                                    // Sliders: Text size, Seasonal amount and size
+                                    Row {
+                                        visible: srow.modelData.slider === true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width
+                                        spacing: app.px(12)
+                                        Rectangle {
+                                            id: track
+                                            readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
+                                            width: parent.width - app.px(70); height: app.px(6); radius: height / 2
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: c.line
+                                            Rectangle { width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent }
+                                            Rectangle {
+                                                x: parent.width * track.part - width / 2
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: app.px(18); height: width; radius: width / 2; color: c.accentHi
+                                            }
+                                        }
+                                        Label { text: srow.now + (srow.modelData.unit || ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                    }
                                 }
+                                TapHandler { onTapped: app.setRow = srow.index }
                             }
                         }
+                        // About: the app icon (ten presses turn Labs mode on or off), version, the scrolling test.
                         Column {
                             width: parent.width - app.px(184)
                             spacing: app.px(8)
                             visible: app.setSection === 1
-                            Label { text: "Turbine Mod Manager " + Turbine.version; font.family: app.titleFont; font.pixelSize: app.px(19); font.bold: true }
+                            Row {
+                                spacing: app.px(14)
+                                Rectangle {
+                                    id: aboutIcon
+                                    readonly property bool foc: app.zone === "settings" && app.setRow === 0
+                                    width: app.px(76); height: width; radius: app.px(10)
+                                    color: foc ? c.focusFill : "transparent"
+                                    border.color: c.accent
+                                    border.width: foc ? app.px(2) : 0
+                                    Image {
+                                        anchors.centerIn: parent
+                                        width: app.px(64); height: width
+                                        source: app.iconFull
+                                        sourceSize.width: app.px(128)
+                                        smooth: true
+                                        mipmap: true
+                                    }
+                                    TapHandler { onTapped: { app.setRow = 0; app.labsTap() } }
+                                }
+                                Column {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: app.px(4)
+                                    Label { text: "Turbine Mod Manager " + Turbine.version; font.family: app.titleFont; font.pixelSize: app.px(19); font.bold: true }
+                                    Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.px(15); font.bold: true }
+                                }
+                            }
                             Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
                             Rectangle {
+                                readonly property bool foc: app.zone === "settings" && app.setRow === 1
                                 width: perfRow.implicitWidth + app.px(28); height: app.px(40); radius: app.px(8)
-                                color: app.zone === "settings" ? c.focusFill : c.card
+                                color: foc ? c.focusFill : c.card
                                 border.color: c.accent
-                                border.width: app.zone === "settings" ? app.px(2) : 0
+                                border.width: foc ? app.px(2) : 0
                                 Hint { id: perfRow; anchors.centerIn: parent; k: "a"; label: "Scrolling test (2,000 rows)" }
                                 TapHandler { onTapped: { app.page = "perf"; app.zone = "perf" } }
+                            }
+                        }
+                        // Labs: Report a bug, Performance check, and the checklist of things to confirm on the device.
+                        ListView {
+                            id: labsList
+                            width: parent.width - app.px(184)
+                            height: parent.height
+                            visible: app.setSection === 2
+                            clip: true
+                            spacing: app.px(4)
+                            model: app.labsRows
+                            currentIndex: app.setSection === 2 ? app.setRow : 0
+                            highlightFollowsCurrentItem: false
+                            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                            delegate: Item {
+                                id: lrow
+                                required property int index
+                                required property var modelData
+                                readonly property bool foc: app.zone === "settings" && app.setRow === index
+                                readonly property bool isItem: modelData.kind === "item"
+                                readonly property string answer: isItem ? app.labsState(modelData.id) : ""
+                                width: labsList.width
+                                height: (modelData.head ? labsHead.height : 0) + box.height
+                                Label {
+                                    id: labsHead
+                                    visible: !!lrow.modelData.head
+                                    height: visible ? app.px(34) : 0
+                                    x: app.px(6)
+                                    verticalAlignment: Text.AlignBottom
+                                    bottomPadding: app.px(6)
+                                    text: (lrow.modelData.head || "").toUpperCase() + (lrow.modelData.head ? " · " + app.labsDone : "")
+                                    color: c.muted
+                                    font.pixelSize: app.px(14)
+                                    font.bold: true
+                                    font.letterSpacing: app.px(1)
+                                }
+                                Rectangle {
+                                    id: box
+                                    y: labsHead.height
+                                    width: parent.width
+                                    height: lrow.isItem ? app.px(66) : app.px(50)
+                                    radius: app.px(6)
+                                    color: lrow.foc ? c.focusFill : c.card
+                                    border.color: c.accent
+                                    border.width: lrow.foc ? app.px(2) : 0
+                                    Column {
+                                        x: app.px(14)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - app.px(28) - (lrow.isItem ? chips.width + app.px(10) : actionHint.width + app.px(10))
+                                        spacing: app.px(2)
+                                        Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.px(16); font.bold: true }
+                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.px(14) }
+                                    }
+                                    Hint {
+                                        id: actionHint
+                                        visible: !lrow.isItem
+                                        anchors.right: parent.right; anchors.rightMargin: app.px(12)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        k: lrow.foc ? "a" : ""
+                                        label: lrow.modelData.action || ""
+                                    }
+                                    Row {
+                                        id: chips
+                                        visible: lrow.isItem
+                                        anchors.right: parent.right; anchors.rightMargin: app.px(10)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: app.px(4)
+                                        Repeater {
+                                            model: [["works", "Works"], ["problem", "Problem"], ["", "Not tested"]]
+                                            Rectangle {
+                                                required property int index
+                                                required property var modelData
+                                                readonly property bool on: lrow.answer === modelData[0]
+                                                readonly property bool cursor: lrow.foc && app.labsChip === index
+                                                width: chipText.implicitWidth + app.px(18); height: app.px(32); radius: app.px(5)
+                                                color: on ? c.raised : c.ground
+                                                border.color: cursor ? c.text : on ? c.accent : c.line
+                                                border.width: cursor ? app.px(2) : Math.max(1, app.px(1))
+                                                Label {
+                                                    id: chipText
+                                                    anchors.centerIn: parent
+                                                    text: parent.modelData[1]
+                                                    font.pixelSize: app.px(14)
+                                                    font.bold: parent.on
+                                                    color: !parent.on ? c.muted : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
+                                                }
+                                                TapHandler { onTapped: { app.setRow = lrow.index; app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) } }
+                                            }
+                                        }
+                                    }
+                                    TapHandler { onTapped: { app.setRow = lrow.index; if (!lrow.isItem) app.labsRun(lrow.modelData) } }
+                                }
                             }
                         }
                     }
@@ -1350,6 +1788,26 @@ Window {
         onClosed: app.act("b")
     }
 
+    PerfCheck {
+        id: perfView
+        ui: kit
+        win: app
+        onCopyClicked: (text) => { Turbine.copyText(text); toast.showPlain("Performance check copied.") }
+        onReportClicked: (text) => app.openReport(null, "Performance check", text)
+        onCloseClicked: { perfView.close(); app.sheet = "" }
+        Component.onCompleted: if (shot.page === "perfcheck") reportText = "Turbine performance check\nTurbine: 0.2 (build sample)\nVerdict: Smooth\n"
+            + "Still: 60 fps, median 16.7 ms, worst 18.9 ms, spikes 0.0%, CPU 9%\nScrolling: 59 fps, median 16.7 ms, worst 24.0 ms, spikes 0.4%, CPU 31%\n"
+            + "Idle: 0 frames in 4.0 s, CPU 0.2%\n\nStartup: first frame 640 ms after start\nDrawing: Vulkan, software drawing no"
+    }
+    LabsReport {
+        id: reportView
+        ui: kit
+        onSendClicked: app.sendReport()
+        onCloseClicked: app.dismissReport()
+        onEditStarted: app.reportEditing(true)
+        onEditEnded: app.reportEditing(false)
+    }
+
     // Legend: only the controls that matter here. Declared after the menus so their backdrop never dims it.
     Rectangle {
         id: legend
@@ -1372,14 +1830,17 @@ Window {
             Hint { visible: app.moving; k: "a"; label: "Done" }
             // Sheets
             Hint { visible: app.sheet === "modmenu" || app.sheet === "gamemenu" || app.sheet === "add"; k: "▲▼"; label: "Choose" }
-            Hint { visible: app.sheet === "check" || app.sheet === "loader"; k: "◀▶"; label: "Choose" }
-            Hint { visible: app.sheet !== ""; k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
+            Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
+            Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
+            Hint { visible: app.sheet === "report" && reportView.editing; k: "b"; label: "Done typing" }
+            Hint { visible: app.sheet !== "" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
             // Game page
             Hint { visible: legend.gamePage && !app.moving && app.tab === 0 && app.ordered && app.mods.length > 1; k: "y"; label: "Reorder" }
             Hint { visible: legend.gamePage && !app.moving; k: "lb+rb"; label: "Switch game" }
             Hint { visible: legend.gamePage && !app.moving; k: "view"; label: "Game menu" }
             Hint { visible: app.sheet === "" && app.page === "settings"; k: "lt+rt"; label: "Sections" }
             Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 0; k: "◀▶"; label: "Change" }
+            Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 2 && !!app.labsRows[app.setRow] && app.labsRows[app.setRow].kind === "item"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "" && app.page !== "game"; k: "b"; label: "Back" }
             Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail"; k: "◀"; label: "Games" }
         }
@@ -1406,5 +1867,29 @@ Window {
         timeout: app.undoId !== "" ? 7000 : 4000
         onActionClicked: if (app.undoId !== "") app.putBack(app.undoId)
         onHidden: app.undoId = ""
+    }
+
+    // Labs: the brass ring that fills around the rail icon while View (or the icon) is held for a report.
+    Shape {
+        id: holdRing
+        visible: app.holdShown
+        readonly property real r: app.px(28)
+        x: rail.width / 2 - r - app.px(3)
+        y: app.px(10) + app.px(22) - r - app.px(3)
+        width: (r + app.px(3)) * 2; height: width
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeColor: c.line
+            strokeWidth: app.px(4)
+            fillColor: "transparent"
+            PathAngleArc { centerX: holdRing.width / 2; centerY: holdRing.height / 2; radiusX: holdRing.r; radiusY: holdRing.r; startAngle: 0; sweepAngle: 360 }
+        }
+        ShapePath {
+            strokeColor: c.accentHi
+            strokeWidth: app.px(4)
+            fillColor: "transparent"
+            capStyle: ShapePath.RoundCap
+            PathAngleArc { centerX: holdRing.width / 2; centerY: holdRing.height / 2; radiusX: holdRing.r; radiusY: holdRing.r; startAngle: -90; sweepAngle: 360 * Math.min(1, app.holdMs / 7000) }
+        }
     }
 }

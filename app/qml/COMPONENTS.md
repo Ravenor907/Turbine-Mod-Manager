@@ -330,3 +330,21 @@ EmptyState {
     onActivated: app.act("a")
 }
 ```
+
+## Seasonal
+
+Falling leaves (`kind: "autumn"`) or snow (`kind: "snow"`) in one Canvas, drawn behind everything; `""` hides it.
+`amount` (10 to 100, for a 1280 x 800 window), `size` (50 to 200 percent), `scale` (design to screen pixels),
+`light` (colors for the Light theme) and `moving` (false holds it still; Main.qml passes the window being active).
+
+## LabsReport
+
+Labs > Report a bug, in the same shape as the owner's other app: the screenshot, Include screenshot, what went wrong
+(typed with Steam's keyboard, up to 2000 characters), Include performance check, Include crash log, Cancel and Send.
+Main.qml calls `open(itemTitle, startText, perfText, hasCrashLog)`, passes buttons to `handleButton(b)` and saves on
+`sendClicked`. `editStarted` and `editEnded` say when typing starts and stops (Steam's keyboard opens and closes).
+
+## PerfCheck
+
+Labs > Performance check: Run check (about 13 seconds: still, scrolling, idle), Copy report, Report a bug. Needs `win`
+(the Window, for its frame times). Signals `copyClicked(text)`, `reportClicked(text)`, `closeClicked()`.

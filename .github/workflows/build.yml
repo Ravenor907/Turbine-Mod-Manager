@@ -123,6 +123,10 @@ jobs:
           m=packaging/io.github.ravenor907.TurbineModManager.json
           sed -i -E "s|\"TURBINE_VERSION\": \"[0-9.]+\"|\"TURBINE_VERSION\": \"$VERSION\"|" "$m"
           grep -q "\"TURBINE_VERSION\": \"$VERSION\"" "$m" || { echo "::error::The version didn't go into the Flatpak manifest"; exit 1; }
+          # The commit goes in beside the app (read by app/build.rs), so the manifest and its build cache stay the same.
+          git config --global --add safe.directory "$PWD" 2>/dev/null || true
+          git rev-parse --short=9 HEAD > app/build-commit.txt || echo "${GITHUB_SHA:0:9}" > app/build-commit.txt
+          cat app/build-commit.txt
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .flatpak-builder
@@ -187,6 +191,11 @@ jobs:
             shoot "check-$size" "$size" check "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
             shoot "add-$size" "$size" add "$PWD/home" --game=$skyrim
             shoot "loader-$size" "$size" loader "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
+            # Labs mode and Seasonal (neither is saved from a picture).
+            for page in about labs perfcheck; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
+            shoot "report-$size" "$size" report "$PWD/home" --game=$skyrim
+            shoot "autumn-$size" "$size" mods "$PWD/home" --game=steam:892970 --season=autumn "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
+            shoot "snow-$size" "$size" settings "$PWD/home" --season=snow
           done
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.

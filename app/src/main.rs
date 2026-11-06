@@ -1,4 +1,6 @@
 mod backend;
+mod labs;
+mod log;
 mod pad;
 mod system;
 
@@ -10,7 +12,18 @@ pub const VERSION: &str = match option_env!("TURBINE_VERSION") {
     None => "dev",
 };
 
+extern "C" {
+    // qtglue.cpp
+    fn turbine_install_qt_handler(sink: extern "C" fn(i32, *const std::os::raw::c_char, *const std::os::raw::c_char));
+}
+
 fn main() {
+    let _ = labs::started();
+    log::start(log::folder(&backend::data_home()));
+    log::line("app", &format!("Turbine Mod Manager {VERSION} (build {}) starting", labs::COMMIT));
+    log::line("app", &format!("Device {}; {}", labs::device(), labs::system()));
+    // SAFETY: the sink is a plain function that lives for the whole run.
+    unsafe { turbine_install_qt_handler(log::qt_message) };
     let mut app = QGuiApplication::new();
     if let Some(mut a) = app.as_mut() {
         a.as_mut().set_organization_name(&QString::from("Turbine Mod Manager"));
@@ -23,4 +36,5 @@ fn main() {
     if let Some(app) = app.as_mut() {
         app.exec();
     }
+    log::clean_exit();
 }
