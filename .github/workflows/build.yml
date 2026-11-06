@@ -160,8 +160,19 @@ jobs:
         shell: bash
         run: |
           flatpak install --user -y --noninteractive TurbineModManager.flatpak > /dev/null
-          mkdir -p shots home empty data
+          # The programs the engine runs from the runtime: curl (downloads) and bsdtar (7z and rar).
+          for tool in curl bsdtar; do
+            if v=$(flatpak run --command=$tool io.github.ravenor907.TurbineModManager --version 2>&1 | head -n1); then
+              echo "::notice title=$tool in the Flatpak::$v"
+            else
+              echo "::error title=$tool missing from the Flatpak::$v"; exit 1
+            fi
+          done
+          mkdir -p shots home empty data samples
           python3 tools/fake-home.py "$PWD/home"
+          # Recorded answers instead of the internet: the engine's samples, then the app's own.
+          cp engine/tests/data/*.json engine/tests/data/*.html samples/
+          cp tools/selftest-data/* samples/
           fail=0
           shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
             name=$1 size=$2 page=$3 home=$4
@@ -170,8 +181,8 @@ jobs:
             # Each picture gets its own mod store, so imports never pile up between pictures.
             timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
               --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$PWD/data/$name" \
-              --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" \
-              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" "$@" > "shots/$name.log" 2>&1
+              --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
+              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" --selftest-data="$PWD/samples" "$@" > "shots/$name.log" 2>&1
             if [ ! -s "$out" ]; then echo "::error title=No screenshot::$name"; cat "shots/$name.log"; fail=1; fi
             if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
             # The engine answers "not ready" while parts of it are unfinished; say so without failing the build.
@@ -196,6 +207,15 @@ jobs:
             shoot "report-$size" "$size" report "$PWD/home" --game=$skyrim
             shoot "autumn-$size" "$size" mods "$PWD/home" --game=steam:892970 --season=autumn "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
             shoot "snow-$size" "$size" settings "$PWD/home" --season=snow
+            # 0.3: Get Mods, details, installer choices, load order, profiles, accounts, updates.
+            lethal=steam:1966720
+            shoot "browse-$size" "$size" browse "$PWD/home" --game=$lethal
+            shoot "moddetails-$size" "$size" moddetails "$PWD/home" --game=$lethal
+            shoot "fomod-$size" "$size" fomod "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lush Meadows 1.0.zip"
+            shoot "loadorder-$size" "$size" loadorder "$PWD/home" --game=$skyrim
+            shoot "profiles-$size" "$size" profiles "$PWD/home" --game=$skyrim
+            shoot "accounts-$size" "$size" accounts "$PWD/home"
+            shoot "updates-$size" "$size" updates "$PWD/home"
           done
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.

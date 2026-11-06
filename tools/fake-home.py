@@ -66,7 +66,94 @@ def main(home):
           '{"installed": [{"appName": "1453375253", "install_path": "%s", "platform": "linux", "version": "1.6.15"}]}' % sv)
     write(os.path.join(heroic, "store_cache/gog_library.json"), '{"games": [{"app_name": "1453375253", "title": "Stardew Valley"}]}')
 
+    skyrim_plugins(os.path.join(steam, "steamapps/common/Skyrim Special Edition/Data"),
+                   os.path.join(steam, "steamapps/compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"))
     downloads(os.path.join(home, "Downloads"))
+
+
+def plugin(path, flags, masters):
+    """A minimal plugin: its TES4 header record with HEDR, an author and its masters (nothing else is read)."""
+    def sub(kind, data):
+        return kind + struct.pack("<H", len(data)) + data
+    body = sub(b"HEDR", struct.pack("<fII", 1.7, 0, 0x800)) + sub(b"CNAM", b"TurbineTest\0")
+    for m in masters:
+        body += sub(b"MAST", m.encode() + b"\0") + sub(b"DATA", struct.pack("<Q", 0))
+    data = b"TES4" + struct.pack("<IIIIHH", len(body), flags, 0, 0, 44, 0) + body
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def skyrim_plugins(data, settings):
+    """Skyrim's own masters and three made-up plugins, one of them missing a master, for the Load order tab."""
+    for name in ["Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm"]:
+        plugin(os.path.join(data, name), 1, [] if name == "Skyrim.esm" else ["Skyrim.esm"])
+    plugin(os.path.join(data, "Unofficial Skyrim Patch.esp"), 1, ["Skyrim.esm", "Update.esm", "Dawnguard.esm"])
+    plugin(os.path.join(data, "Quiet Roads.esp"), 0, ["Skyrim.esm"])
+    plugin(os.path.join(data, "Lantern Paths.esp"), 0x200, ["Skyrim.esm", "Lanterns Of Skyrim.esm"])
+    write(os.path.join(settings, "plugins.txt"), "*Unofficial Skyrim Patch.esp\n*Quiet Roads.esp\n*Lantern Paths.esp\n")
+
+
+def tiny_png(w, h, top, bottom):
+    """A small picture as PNG bytes (for an installer's option pictures)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "x.png")
+        png(p, w, h, top, bottom)
+        with open(p, "rb") as f:
+            return f.read()
+
+
+FOMOD_CONFIG = """<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <moduleName>Lush Meadows</moduleName>
+  <requiredInstallFiles><folder source="00 Core" destination=""/></requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Grass">
+      <optionalFileGroups order="Explicit">
+        <group name="Grass style" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Full and lush">
+              <description>Thick grass everywhere, as in the pictures. Uses the most graphics memory and can cost a few frames per second in forests.</description>
+              <image path="fomod/images/full.png"/>
+              <files><folder source="10 Full" destination=""/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Lighter grass">
+              <description>About half as dense. Smoother on handhelds.</description>
+              <image path="fomod/images/light.png"/>
+              <files><folder source="11 Light" destination=""/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Keep the game's grass">
+              <description>Only changes the ground textures.</description>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+    <installStep name="Extras">
+      <optionalFileGroups order="Explicit">
+        <group name="Extras" type="SelectAny">
+          <plugins order="Explicit">
+            <plugin name="Wildflowers">
+              <description>Small flowers along the roads.</description>
+              <files><folder source="20 Flowers" destination=""/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Fallen leaves">
+              <description>Leaves on the forest floor in autumn regions.</description>
+              <files><folder source="21 Leaves" destination=""/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
 
 
 def zip_file(path, files, when):
@@ -110,6 +197,25 @@ def downloads(folder):
                                                   "MinimumApiVersion": "4.0.0"}),
         "QuietRooster/QuietRooster.dll": fake_dll,
     }, now - 2 * 86400)
+    # Skyrim: a mod with an installer (FOMOD): one question per step, pictures for the options.
+    zip_file(os.path.join(folder, "Lush Meadows 1.0.zip"), {
+        "fomod/info.xml": "<fomod><Name>Lush Meadows</Name><Author>TurbineTest</Author><Version>1.0</Version></fomod>",
+        "fomod/ModuleConfig.xml": FOMOD_CONFIG,
+        "fomod/images/full.png": tiny_png(96, 54, (120, 140, 160), (60, 110, 50)),
+        "fomod/images/light.png": tiny_png(96, 54, (130, 150, 170), (110, 130, 80)),
+        "00 Core/textures/terrain/meadow01.dds": b"DDS " + b"\0" * 124,
+        "10 Full/meshes/grass/meadowgrass01.nif": b"nif" * 40,
+        "11 Light/meshes/grass/meadowgrass01.nif": b"nif" * 20,
+        "20 Flowers/meshes/flowers/flower01.nif": b"nif" * 10,
+        "21 Leaves/textures/leaves/leaf01.dds": b"DDS " + b"\0" * 124,
+    }, now - 3 * 86400)
+    # A profile share file someone sent, for Lethal Company.
+    share = {"turbineProfile": 1, "app": "Turbine Mod Manager",
+             "game": {"name": "Lethal Company", "store": "steam", "storeId": "1966720"}, "profile": "Friday night",
+             "mods": [{"name": "LateCompany", "enabled": True, "source": "thunderstore", "id": "anormaltwig-LateCompany", "version": "1.0.10"},
+                      {"name": "More Suits", "enabled": True, "source": "thunderstore", "id": "x753-More_Suits", "version": "1.4.3"},
+                      {"name": "Brighter Flashlights", "enabled": True, "source": "zip", "id": "", "version": None}]}
+    write(os.path.join(folder, "Turbine profile - Lethal Company - Friday night.json"), json.dumps(share, indent=1))
 
 
 if __name__ == "__main__":

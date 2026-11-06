@@ -28,6 +28,18 @@ pub mod qobject {
         #[qproperty(bool, busy)]
         #[qproperty(i32, pending)]
         #[qproperty(QString, reset_for, cxx_name = "resetFor")]
+        #[qproperty(QString, browse_json, cxx_name = "browseJson")]
+        #[qproperty(QString, details_json, cxx_name = "detailsJson")]
+        #[qproperty(QString, download_json, cxx_name = "downloadJson")]
+        #[qproperty(i32, net_busy, cxx_name = "netBusy")]
+        #[qproperty(QString, fomod_json, cxx_name = "fomodJson")]
+        #[qproperty(QString, order_json, cxx_name = "orderJson")]
+        #[qproperty(QString, profiles_json, cxx_name = "profilesJson")]
+        #[qproperty(QString, shares_json, cxx_name = "sharesJson")]
+        #[qproperty(QString, import_json, cxx_name = "importJson")]
+        #[qproperty(QString, updates_json, cxx_name = "updatesJson")]
+        #[qproperty(QString, account_json, cxx_name = "accountJson")]
+        #[qproperty(QString, self_json, cxx_name = "selfJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -152,6 +164,120 @@ pub mod qobject {
         #[cxx_name = "markShown"]
         fn mark_shown(self: Pin<&mut Self>);
 
+        // ------------------------------------------------ 0.3: online sources and everything after (actions.rs)
+
+        /// Recorded samples instead of the internet (the build's screenshot checks).
+        #[qinvokable]
+        #[cxx_name = "setSampleData"]
+        fn set_sample_data(self: Pin<&mut Self>, dir: &QString);
+
+        /// Get Mods: source "thunderstore" or "nexus"; sort "downloads", "rating", "updated" or "name".
+        #[qinvokable]
+        fn browse(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString);
+
+        #[qinvokable]
+        fn details(self: Pin<&mut Self>, id: &QString, source: &QString);
+
+        /// Downloads a mod (and what it needs) and adds it to the current game.
+        #[qinvokable]
+        fn install(self: Pin<&mut Self>, id: &QString, source: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "installLoader"]
+        fn install_loader(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "cancelDownload"]
+        fn cancel_download(self: Pin<&mut Self>);
+
+        /// FOMOD installer: A on an option, next and back a step, cancel.
+        #[qinvokable]
+        #[cxx_name = "fomodChoose"]
+        fn fomod_choose(self: Pin<&mut Self>, group: i32, option: i32);
+        #[qinvokable]
+        #[cxx_name = "fomodNext"]
+        fn fomod_next(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "fomodBack"]
+        fn fomod_back(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "fomodCancel"]
+        fn fomod_cancel(self: Pin<&mut Self>);
+
+        /// Load order (Skyrim): read, move, turn on or off, sort.
+        #[qinvokable]
+        #[cxx_name = "loadOrder"]
+        fn load_order(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "orderMove"]
+        fn order_move(self: Pin<&mut Self>, name: &QString, index: i32);
+        #[qinvokable]
+        #[cxx_name = "orderToggle"]
+        fn order_toggle(self: Pin<&mut Self>, name: &QString, on: bool);
+        #[qinvokable]
+        #[cxx_name = "orderSort"]
+        fn order_sort(self: Pin<&mut Self>);
+
+        /// Profiles of the current game.
+        #[qinvokable]
+        fn profiles(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "profileSwitch"]
+        fn profile_switch(self: Pin<&mut Self>, name: &QString);
+        #[qinvokable]
+        #[cxx_name = "profileCreate"]
+        fn profile_create(self: Pin<&mut Self>, name: &QString);
+        #[qinvokable]
+        #[cxx_name = "profileExport"]
+        fn profile_export(self: Pin<&mut Self>, name: &QString);
+        /// Share files in Downloads, into `sharesJson`.
+        #[qinvokable]
+        #[cxx_name = "listShares"]
+        fn list_shares(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "profileImportFile"]
+        fn profile_import_file(self: Pin<&mut Self>, path: &QString);
+        #[qinvokable]
+        #[cxx_name = "profileImportCode"]
+        fn profile_import_code(self: Pin<&mut Self>, code: &QString);
+        /// Gets the mods of the share being imported and makes its profile.
+        #[qinvokable]
+        #[cxx_name = "profileImportGo"]
+        fn profile_import_go(self: Pin<&mut Self>);
+
+        /// Mod updates for the current game.
+        #[qinvokable]
+        #[cxx_name = "checkUpdates"]
+        fn check_updates(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "updateMod"]
+        fn update_mod(self: Pin<&mut Self>, mod_id: &QString);
+        #[qinvokable]
+        #[cxx_name = "updateAll"]
+        fn update_all(self: Pin<&mut Self>);
+
+        /// Nexus Mods account.
+        #[qinvokable]
+        #[cxx_name = "setNexusKey"]
+        fn set_nexus_key(self: Pin<&mut Self>, key: &QString);
+        #[qinvokable]
+        #[cxx_name = "nexusSignOut"]
+        fn nexus_sign_out(self: Pin<&mut Self>);
+        #[qinvokable]
+        #[cxx_name = "accountStatus"]
+        fn account_status(self: Pin<&mut Self>);
+
+        /// Turbine's own updates. labs: pre-releases count; back: the newest stable even if older.
+        #[qinvokable]
+        #[cxx_name = "selfCheck"]
+        fn self_check(self: Pin<&mut Self>, labs: bool, back: bool);
+        #[qinvokable]
+        #[cxx_name = "selfInstall"]
+        fn self_install(self: Pin<&mut Self>);
+        /// Starts the newly installed Turbine; QML quits right after.
+        #[qinvokable]
+        fn restart(self: Pin<&mut Self>);
+
         /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
         /// "up", "down", "left", "right" (D-pad and left stick).
         #[qsignal]
@@ -188,41 +314,61 @@ use turbine_engine::rules::{self, GameRules, Kind};
 use turbine_engine::store::{self, Store};
 use turbine_engine::Game;
 
+/// The check before Play's line about a game's one-time Steam Launch Option (QML hides it once it's been seen).
+const LAUNCH_OPTION_TITLE: &str = "One-time Steam setting for the mod loader";
+
 /// Said when a part of the engine isn't finished in this build (it panics instead of answering).
 const NOT_READY: &str = "Not ready yet: this part of Turbine isn't finished in this build.";
 
 pub struct TurbineRust {
-    games: QString,
-    problems: QString,
-    version: QString,
-    steamos: bool,
-    gamemode: bool,
-    pads: bool,
-    mods_json: QString,
-    rules_json: QString,
-    downloads_json: QString,
-    check_json: QString,
-    busy: bool,
-    pending: i32,
-    reset_for: QString,
-    reader: Option<Pads>,
+    pub(crate) games: QString,
+    pub(crate) problems: QString,
+    pub(crate) version: QString,
+    pub(crate) steamos: bool,
+    pub(crate) gamemode: bool,
+    pub(crate) pads: bool,
+    pub(crate) mods_json: QString,
+    pub(crate) rules_json: QString,
+    pub(crate) downloads_json: QString,
+    pub(crate) check_json: QString,
+    pub(crate) busy: bool,
+    pub(crate) pending: i32,
+    pub(crate) reset_for: QString,
+    pub(crate) reader: Option<Pads>,
     /// The games from the last scan, to hand to the worker.
-    found: Vec<Game>,
+    pub(crate) found: Vec<Game>,
     /// The game on screen.
-    current: String,
+    pub(crate) current: String,
     /// The game the waiting changes belong to.
-    dirty: String,
+    pub(crate) dirty: String,
     /// Long jobs (import, apply, play) not finished yet.
-    inflight: i32,
-    jobs: Option<Sender<Task>>,
+    pub(crate) inflight: i32,
+    pub(crate) jobs: Option<Sender<Task>>,
     /// The current game's mods in a few lines, for reports (kept up to date by the worker).
-    mods_summary: Vec<String>,
+    pub(crate) mods_summary: Vec<String>,
     /// The last engine report (apply, play, restore, reset), for reports.
-    last_report: String,
+    pub(crate) last_report: String,
     /// Recent warnings and errors said in the status line, with their times.
-    recent: std::collections::VecDeque<String>,
+    pub(crate) recent: std::collections::VecDeque<String>,
     /// Milliseconds from start to the first frame drawn.
-    startup_ms: f64,
+    pub(crate) startup_ms: f64,
+    // 0.3
+    pub(crate) browse_json: QString,
+    pub(crate) details_json: QString,
+    pub(crate) download_json: QString,
+    pub(crate) net_busy: i32,
+    pub(crate) fomod_json: QString,
+    pub(crate) order_json: QString,
+    pub(crate) profiles_json: QString,
+    pub(crate) shares_json: QString,
+    pub(crate) import_json: QString,
+    pub(crate) updates_json: QString,
+    pub(crate) account_json: QString,
+    pub(crate) self_json: QString,
+    /// The download lane (started the first time it's needed).
+    pub(crate) net: Option<Sender<crate::actions::NetTask>>,
+    /// What the download lane needs to know about the game on screen (kept up to date by the worker).
+    pub(crate) game_info: crate::online::GameInfo,
 }
 
 impl Default for TurbineRust {
@@ -251,25 +397,43 @@ impl Default for TurbineRust {
             last_report: String::new(),
             recent: std::collections::VecDeque::new(),
             startup_ms: 0.0,
+            browse_json: QString::default(),
+            details_json: QString::default(),
+            download_json: QString::from("{\"active\":false}"),
+            net_busy: 0,
+            fomod_json: QString::default(),
+            order_json: QString::default(),
+            profiles_json: QString::default(),
+            shares_json: QString::from("[]"),
+            import_json: QString::default(),
+            updates_json: QString::default(),
+            account_json: QString::from("{\"state\":\"none\"}"),
+            self_json: QString::from("{\"state\":\"idle\"}"),
+            net: None,
+            game_info: crate::online::GameInfo::default(),
         }
     }
 }
 
 // ---------------------------------------------------------------------------------------------------- worker thread
 
-struct Slot {
-    game: Game,
-    rules: GameRules,
-    store: Store,
+pub(crate) struct Slot {
+    pub(crate) game: Game,
+    pub(crate) rules: GameRules,
+    pub(crate) store: Store,
 }
 
-struct Worker {
-    data_home: PathBuf,
-    slots: HashMap<String, Slot>,
-    qt: CxxQtThread<qobject::Turbine>,
+pub(crate) struct Worker {
+    pub(crate) data_home: PathBuf,
+    pub(crate) slots: HashMap<String, Slot>,
+    pub(crate) qt: CxxQtThread<qobject::Turbine>,
+    /// Installers waiting for the player's choices (game id, installer), oldest first.
+    pub(crate) pending: std::collections::VecDeque<(String, store::Pending)>,
+    /// A profile share being imported (game id, share).
+    pub(crate) share: Option<(String, turbine_engine::profiles::Share)>,
 }
 
-type Job = Box<dyn FnOnce(&mut Worker) + Send>;
+pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 
 struct Task {
     /// The game this job works on; its store is dropped (and opened again next time) if the job panics.
@@ -281,7 +445,7 @@ struct Task {
 }
 
 impl Worker {
-    fn post<F>(&self, f: F)
+    pub(crate) fn post<F>(&self, f: F)
     where
         F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
     {
@@ -289,7 +453,7 @@ impl Worker {
     }
 
     /// Remembers whether this game's records need a Reset (shown in the game menu).
-    fn note(&self, game: &Game, report: &turbine_engine::deploy::Report) {
+    pub(crate) fn note(&self, game: &Game, report: &turbine_engine::deploy::Report) {
         let key = game.id();
         let needs = needs_reset(report);
         let words = format!("{} at {}: {report:?}", game.name, crate::log::file_stamp());
@@ -305,7 +469,7 @@ impl Worker {
         });
     }
 
-    fn say(&self, text: impl Into<String>, level: &'static str) {
+    pub(crate) fn say(&self, text: impl Into<String>, level: &'static str) {
         let text = text.into();
         crate::log::line("engine", &format!("[{level}] {text}"));
         self.post(move |mut t| {
@@ -317,7 +481,7 @@ impl Worker {
     }
 
     /// The game's store and rules, opened the first time they're needed.
-    fn slot(&mut self, game: &Game) -> Result<&mut Slot, String> {
+    pub(crate) fn slot(&mut self, game: &Game) -> Result<&mut Slot, String> {
         let key = game.id();
         if !self.slots.contains_key(&key) {
             let rules = GameRules::for_game(game);
@@ -328,17 +492,19 @@ impl Worker {
     }
 
     /// Sends the game's mods (and rules) to the interface if it's still the game on screen.
-    fn show(&mut self, game: &Game, with_rules: bool) {
+    pub(crate) fn show(&mut self, game: &Game, with_rules: bool) {
         let key = game.id();
         let Some(slot) = self.slots.get(&key) else { return };
         let mods = slot.store.to_json();
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
+        let info = crate::actions::game_info(slot);
         self.post(move |mut t| {
             if t.rust().current != key {
                 return;
             }
             t.as_mut().rust_mut().mods_summary = summary;
+            t.as_mut().rust_mut().game_info = info;
             if let Some(r) = rules {
                 t.as_mut().set_rules_json(QString::from(r.as_str()));
             }
@@ -377,7 +543,7 @@ fn rules_json(slot: &Slot) -> String {
         None => ("null".to_string(), false),
     };
     format!(
-        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{}}}",
+        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{},\"launchOption\":{},\"launchHelp\":{},\"community\":{},\"domain\":{}}}",
         quote(kind),
         r.ordered,
         r.plugins,
@@ -385,7 +551,11 @@ fn rules_json(slot: &Slot) -> String {
         quote(&r.support),
         loader,
         installed,
-        r.short_name.as_deref().map(quote).unwrap_or_else(|| "null".to_string())
+        r.short_name.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
+        r.launch_option.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
+        r.launch_help.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
+        crate::actions::community(&slot.game).map(quote).unwrap_or_else(|| "null".to_string()),
+        turbine_engine::nexus::domain_for_store_id(&slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string())
     )
 }
 
@@ -575,22 +745,28 @@ impl qobject::Turbine {
         }
     }
 
-    fn find(&self, id: &str) -> Option<Game> {
+    pub(crate) fn find(&self, id: &str) -> Option<Game> {
         self.rust().found.iter().find(|g| g.id() == id).cloned()
     }
 
-    fn current_game(&self) -> Option<Game> {
+    pub(crate) fn current_game(&self) -> Option<Game> {
         self.find(&self.rust().current)
     }
 
     /// Queues a job for the worker thread (started the first time).
-    fn send(mut self: Pin<&mut Self>, game: Option<String>, name: &str, long: bool, run: Job) {
+    pub(crate) fn send(mut self: Pin<&mut Self>, game: Option<String>, name: &str, long: bool, run: Job) {
         if self.rust().jobs.is_none() {
             let (tx, rx) = mpsc::channel::<Task>();
             let qt = self.qt_thread();
             let spawned = std::thread::Builder::new().name("turbine-worker".into()).spawn(move || {
                 // Stores are made and used on this thread only.
-                let mut worker = Worker { data_home: data_home(), slots: HashMap::new(), qt };
+                let mut worker = Worker {
+                    data_home: data_home(),
+                    slots: HashMap::new(),
+                    qt,
+                    pending: std::collections::VecDeque::new(),
+                    share: None,
+                };
                 while let Ok(task) = rx.recv() {
                     let long = task.long;
                     let name = task.name;
@@ -636,7 +812,7 @@ impl qobject::Turbine {
         }
     }
 
-    fn say(self: Pin<&mut Self>, text: &str, level: &str) {
+    pub(crate) fn say(self: Pin<&mut Self>, text: &str, level: &str) {
         self.message(QString::from(text), QString::from(level));
     }
 
@@ -662,7 +838,7 @@ impl qobject::Turbine {
     }
 
     /// Notes one more change waiting to be applied to the current game.
-    fn edited(mut self: Pin<&mut Self>) {
+    pub(crate) fn edited(mut self: Pin<&mut Self>) {
         let cur = self.rust().current.clone();
         if self.rust().dirty != cur && *self.pending() > 0 {
             // Changes for another game are still waiting; put them in before starting on this one.
@@ -703,12 +879,8 @@ impl qobject::Turbine {
             Some(game.id()), &format!("Add {file}"),
             true,
             Box::new(move |w: &mut Worker| {
-                let result = w.slot(&game).and_then(|s| s.store.import_zip(&path));
-                match result {
-                    Ok(m) => w.say(format!("Added {}", m.name), "ok"),
-                    Err(e) => w.say(format!("Couldn't add {file}: {e}"), "error"),
-                }
-                w.show(&game, true);
+                let source = turbine_engine::net::SourceInfo { kind: "zip".into(), ..Default::default() };
+                crate::actions::add_archive(w, &game, &path, source, None, &file);
             }),
         );
     }
@@ -865,7 +1037,17 @@ impl qobject::Turbine {
                         let free = crate::system::free_bytes(&s.game.install_dir);
                         let last = s.store.last_build();
                         let mut list = rules::pre_play(&s.game, &s.rules, last.as_deref(), needs, free);
-                        let extra = proton_checks(s);
+                        let mut extra = proton_checks(s);
+                        // Native games whose loader starts through a Steam Launch Option: the one-time setting.
+                        if let (Some(help), Some(option)) = (&s.rules.launch_help, &s.rules.launch_option) {
+                            if needs && s.rules.loader_installed(&s.game) {
+                                extra.push(rules::Check {
+                                    level: "warn".into(),
+                                    title: LAUNCH_OPTION_TITLE.into(),
+                                    detail: format!("{help}\n{option}"),
+                                });
+                            }
+                        }
                         if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
                             list.clear(); // "Everything checks out" no longer says it all
                         }
@@ -905,6 +1087,7 @@ impl qobject::Turbine {
                     return;
                 }
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
+                crate::actions::sync_order(w, &game);
                 // The loader may have just been put in place by apply, so this comes after it.
                 let note = match w.slot(&game).ok().and_then(|s| proton_prefix(s)) {
                     None => None,
@@ -1071,6 +1254,7 @@ extern "C" {
 fn apply_job(game: Game, n: i32) -> Job {
     Box::new(move |w: &mut Worker| {
         let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
+        crate::actions::sync_order(w, &game);
         match result {
             Ok(r) => {
                 w.note(&game, &r);

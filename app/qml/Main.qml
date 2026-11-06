@@ -42,6 +42,14 @@ Window {
         category: "seen"
         property bool notSteamOS: false
         property string lastGame: ""
+        property string launchDone: "[]"    // games whose one-time Steam Launch Option note was seen
+    }
+    // Settings > Updates (and Labs > Update channel).
+    Settings {
+        id: updates
+        category: "updates"
+        property bool auto: true
+        property bool prerelease: false
     }
 
     // ---------------------------------------------------------------- screenshot mode (used by the build checks)
@@ -59,7 +67,8 @@ Window {
         readonly property int h: parseInt(arg("size").split("x")[1]) || 800
         readonly property string page: arg("page")
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
-        readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report"].indexOf(page) >= 0
+        readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
+                                      "loadorder", "profiles", "accounts", "updates"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         function start() {
@@ -67,11 +76,15 @@ Window {
             if (files !== "") for (const f of files.split(",")) Turbine.importZip(f)
             if (page === "gamemenu") app.sheet = "gamemenu"
             else if (page === "add") { app.tab = 1; app.openAdd() }
-            else if (page === "about") { app.openSettings(); app.setSection = 1 }
+            else if (page === "about") app.openSection("About")
             else if (page === "labs") {
                 app.labsAnswers = { "pad-quiet": "works", "proton-bepinex": "problem" }
-                app.openSettings(); app.setSection = 2; app.setRow = 3
+                app.openSection("Labs"); app.setRow = 5
             }
+            else if (page === "browse" || page === "moddetails") { app.tab = 1; app.zone = "main" }
+            else if (page === "loadorder") { app.tab = 2; app.zone = "main" }
+            else if (page === "accounts") app.openSection("Accounts")
+            else if (page === "updates") { app.openSection("Updates"); Turbine.selfCheck(false, false) }
             else if (page === "perfcheck") app.openPerf()
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
@@ -82,6 +95,8 @@ Window {
         onTriggered: {
             if (shot.page === "menu" && app.menuMod) app.sheet = "modmenu"
             else if (shot.page === "check") app.startPlay()
+            else if (shot.page === "moddetails" && app.browseData && app.browseData.items && app.browseData.items.length > 0) app.openDetails(app.browseData.items[0])
+            else if (shot.page === "profiles") app.openProfiles()
             // After the first frames, so the screenshot inside the report has something in it.
             else if (shot.page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
         }
@@ -102,7 +117,12 @@ Window {
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
     function note(kind, text) { Turbine.log(kind, text) }
     onPageChanged: note("page", "Page " + page)
-    onTabChanged: note("page", "Tab " + (tabs[tab] || tab))
+    onTabChanged: {
+        note("page", "Tab " + (tabs[tab] || tab))
+        modPage = false
+        if (tab === 1 && !browseData) browseNow()
+        else if (tab === 2) { orderIndex = 0; Turbine.loadOrder() }
+    }
     onZoneChanged: note("page", "Focus zone " + zone)
     onSetSectionChanged: note("page", "Settings section " + (settingsSections[setSection] || setSection))
     onWidthChanged: sizeNote.restart()
@@ -213,8 +233,13 @@ Window {
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
             app.offerLoader()
+            app.maybeCheckUpdates()
         }
-        function onRulesJsonChanged() { app.rules = app.parse(Turbine.rulesJson, null); app.offerLoader() }
+        function onRulesJsonChanged() {
+            app.rules = app.parse(Turbine.rulesJson, null)
+            app.offerLoader()
+            if (app.rules && app.tab === 1 && !app.browseData) app.browseNow()
+        }
         function onDownloadsJsonChanged() {
             app.downloads = app.parse(Turbine.downloadsJson, [])
             app.addIndex = Math.max(0, Math.min(app.addIndex, app.downloads.length - 1))
@@ -223,6 +248,51 @@ Window {
         function onChecked(json) { app.checked(app.parse(json, [])) }
         function onLaunch(url) { if (!shot.on) Qt.openUrlExternally(url) }
         function onPad(button, pressed) { pressed ? app.press(button) : app.release(button) }
+        // 0.3
+        function onBrowseJsonChanged() {
+            const v = app.parse(Turbine.browseJson, null)
+            if (!v || !app.game || v.game !== app.game.id) return
+            app.browseData = v
+            app.browseLoading = false
+            if (app.getArea === "grid") app.getIndex = Math.max(0, Math.min(app.getIndex, (v.items || []).length - 1))
+        }
+        function onDetailsJsonChanged() { app.detailsData = app.parse(Turbine.detailsJson, null) }
+        function onDownloadJsonChanged() { app.dl = app.parse(Turbine.downloadJson, { active: false }) }
+        function onFomodJsonChanged() {
+            app.fomod = app.parse(Turbine.fomodJson, null)
+            if (app.fomod && app.sheet === "") app.sheet = "fomod"
+            else if (!app.fomod && app.sheet === "fomod") app.sheet = ""
+        }
+        function onOrderJsonChanged() {
+            const v = app.parse(Turbine.orderJson, null)
+            if (!v || !app.game || v.game !== app.game.id) return
+            if (app.orderMoving) return
+            app.order = v.plugins || []
+            app.orderError = v.error || ""
+            app.orderIndex = Math.max(-1, Math.min(app.orderIndex, app.order.length - 1))
+        }
+        function onProfilesJsonChanged() {
+            const v = app.parse(Turbine.profilesJson, null)
+            if (!v || !app.game || v.game !== app.game.id) return
+            app.profileData = v.data
+        }
+        function onSharesJsonChanged() { app.shares = app.parse(Turbine.sharesJson, []) }
+        function onImportJsonChanged() {
+            const v = app.parse(Turbine.importJson, null)
+            app.importData = v && (v.plan || v.error) ? v : null
+            if (app.importData && app.sheet === "") { app.profIndex = 0; app.sheet = "profiles" }
+            if (app.importData) app.profIndex = 0
+        }
+        function onUpdatesJsonChanged() { app.updatesData = app.parse(Turbine.updatesJson, null) }
+        function onAccountJsonChanged() { app.account = app.parse(Turbine.accountJson, { state: "none" }) }
+        function onSelfJsonChanged() {
+            app.selfUpd = app.parse(Turbine.selfJson, { state: "idle" })
+            if (app.selfUpd.state === "available" && app.selfAuto) {
+                app.selfAuto = false
+                toast.showPlain("Turbine " + app.selfUpd.version + " is ready to install: Settings, Updates.")
+            }
+            if (app.selfUpd.state === "ready" && app.backToStable) { app.backToStable = false; updates.prerelease = false }
+        }
     }
     onGameChanged: {
         if (!game) return
@@ -230,9 +300,21 @@ Window {
         moving = false
         modIndex = 0
         if (tab >= 2) tab = 0
+        modPage = false
+        browseData = null
+        getArea = "bar"; getIndex = 0; getText = ""; getCategory = ""
+        order = []; orderIndex = 0
+        profileData = null
         Turbine.select(game.id)
+        if (tab === 1) Qt.callLater(browseNow)
     }
     Component.onCompleted: {
+        // Recorded samples instead of the internet (the build's screenshot checks); first, before anything asks.
+        if (shot.arg("selftest-data") !== "") Turbine.setSampleData(shot.arg("selftest-data"))
+        else if (!shot.on) {
+            Turbine.accountStatus()
+            if (updates.auto) { selfAuto = true; Turbine.selfCheck(labsOn && updates.prerelease, false) }
+        }
         load()
         if (shot.page === "settings") { page = "settings"; zone = "settings" }
         else if (shot.page === "details") sheet = "details"
@@ -261,6 +343,8 @@ Window {
         if (page === "settings") return { level: "ok", words: "Changes show right away", detail: "" }
         if (page === "perf") return { level: "ok", words: "2,000 rows", detail: "Hold the D-pad or stick to scroll fast." }
         if (!game) return { level: Turbine.problems !== "" ? "warn" : "ok", words: "No games found yet", detail: "" }
+        if (dl.active) return { level: "busy", words: "Downloading " + dl.label, detail: "", progress: dlPart >= 0 ? dlPart : 0,
+                                 progressText: dl.total > 0 ? Math.round(dlPart * 100) + "% · " + sizeWords(dl.got) + " of " + sizeWords(dl.total) : sizeWords(dl.got) }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (Turbine.pending > 0)
             return { level: "busy", words: plural(Turbine.pending, "change", "changes") + " waiting", detail: "They go into the game in a few seconds" }
@@ -268,7 +352,8 @@ Window {
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
         const on = mods.filter(m => m.enabled).length
         const found = game.launcher === "Steam" ? "Found in Steam" : "Found in Heroic (" + game.storeLabel + ")"
-        return { level: "ok", words: "Ready to play", detail: !modsLoaded ? found : mods.length === 0 ? "No mods yet · " + found : on + " of " + mods.length + " mods on" }
+        return { level: "ok", words: "Ready to play", detail: !modsLoaded ? found : mods.length === 0 ? "No mods yet · " + found : on + " of " + mods.length + " mods on",
+                 pill: updateCount > 0 ? plural(updateCount, "update", "updates") + " ready" : "" }
     }
 
     // ---------------------------------------------------------------- applying changes
@@ -376,7 +461,11 @@ Window {
         say("Checking before Play...", "work")
         Turbine.check()
     }
+    readonly property string launchTitle: "One-time Steam setting for the mod loader"
+    function launchSeen() { return game && parse(seen.launchDone, []).indexOf(game.id) >= 0 }
     function checked(list) {
+        if (launchSeen()) list = list.filter(x => x.title !== launchTitle)
+        if (list.length === 0) list = [{ level: "ok", title: "Ready to play", detail: "Everything checks out." }]
         checks = list
         note("engine", "Check before Play: " + list.map(x => x.level + " " + x.title).join("; "))
         const trouble = list.some(x => x.level === "stop" || x.level === "warn")
@@ -391,6 +480,9 @@ Window {
         const what = checkChoices[i]
         note("action", "Check before Play: " + what)
         sheet = ""
+        if (checks.some(x => x.title === launchTitle) && what !== "Wait") {
+            let done = parse(seen.launchDone, []); done.push(game.id); seen.launchDone = JSON.stringify(done)
+        }
         if (what === "Play anyway") Turbine.play(game.id)
         else if (what === "Play original") Turbine.playOriginal()
     }
@@ -425,6 +517,10 @@ Window {
           detail: resetHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(5 - resetHeld)) + "..."
                   : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
     ] : []).concat([
+        { icon: "profile", title: "Profiles", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
+    ]).concat(updateCount > 0 ? [
+        { icon: "update", title: "Update all", detail: plural(updateCount, "mod has", "mods have") + " a newer version", ok: true, act: "updateall" }
+    ] : []).concat([
         { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" }
     ])
     function gameMenuRun(i) {
@@ -434,6 +530,8 @@ Window {
         if (i === 0) { sheet = ""; Turbine.playOriginal() }
         else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
         else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
+        else if (item.act === "profiles") openProfiles()
+        else if (item.act === "updateall") { sheet = ""; Turbine.updateAll() }
         else sheet = "details"
     }
 
@@ -445,7 +543,9 @@ Window {
     readonly property var menuMod: focusedItem && focusedItem.kind === "mod" ? focusedItem.m : null
     readonly property var modMenuItems: !menuMod ? [] : [
         { icon: "power", title: menuMod.enabled ? "Turn off" : "Turn on", detail: menuMod.enabled ? "Stays installed" : "Goes into the game", act: "toggle" }
-    ].concat(ordered ? [
+    ].concat(updateMap[menuMod.id] ? [
+        { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
+    ] : []).concat(ordered ? [
         { icon: "move", title: "Move to top", detail: "First in the load order. Mods below it win when files overlap.", act: "top" },
         { icon: "move", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" }
     ] : []).concat([
@@ -461,6 +561,7 @@ Window {
         else if (item.act === "top") moveMod(m, 0)
         else if (item.act === "bottom") moveMod(m, mods.length - 1)
         else if (item.act === "remove") uninstall(m)
+        else if (item.act === "update") { Turbine.updateMod(m.id); edited() }
     }
     function modWords(m) {
         let parts = []
@@ -503,8 +604,8 @@ Window {
     property int setSection: 0            // 0 Look, 1 About
     property int setRow: 0
     property int perfIndex: 0
-    readonly property int railCount: games.length + 2
-    onSheetChanged: { note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset(); if (sheet === "" ) offerLoader() }
+    readonly property int railCount: games.length + 3   // games, add, Downloads, Settings
+    onSheetChanged: { note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset(); if (sheet === "" && fomod) sheet = "fomod"; else if (sheet === "") offerLoader() }
 
     Timer { interval: 16; repeat: true; running: app.active || shot.on; onTriggered: Turbine.poll() }
 
@@ -597,10 +698,25 @@ Window {
         } else if (sheet === "loader") {
             if (b === "left" || b === "up") loaderIndex = 0
             else if (b === "right" || b === "down") loaderIndex = 1
+            else if (b === "a" && loaderIndex === 0 && loaderCanGet) { sheet = ""; note("action", "Install the loader"); Turbine.installLoader() }
             else if (b === "a" && loaderIndex === 0 && !loaderSourceShown) loaderSourceShown = true
             else if (b === "a" || b === "b") sheet = ""
+        } else if (sheet === "fomod") fomodView.handleButton(b)
+        else if (sheet === "ask") askView.handleButton(b)
+        else if (sheet === "profiles") {
+            if (b === "up") profIndex = Math.max(0, profIndex - 1)
+            else if (b === "down") profIndex = Math.min(profilesView.rows - 1, profIndex + 1)
+            else if (b === "a") profileRun(profIndex)
+            else if (b === "b" || b === "view") { if (importData) { importData = null; profIndex = 0 } else sheet = "" }
+        } else if (sheet === "shares") {
+            if (b === "up") shareIndex = Math.max(0, shareIndex - 1)
+            else if (b === "down") shareIndex = Math.min(shares.length - 1, shareIndex + 1)
+            else if (b === "a" && shares[shareIndex]) { Turbine.profileImportFile(shares[shareIndex].path); sheet = "profiles" }
+            else if (b === "b") sheet = "profiles"
         }
     }
+    // Turbine can fetch the loader itself (SKSE, BepInEx, SMAPI).
+    readonly property bool loaderCanGet: !!rules && !!rules.loader && ["bethesda", "bepinex", "smapi"].indexOf(rules.kind) >= 0
 
     function act(b) {
         if (sheet !== "") { sheetAct(b); return }
@@ -610,6 +726,7 @@ Window {
             else if (b === "a" || b === "b" || b === "y") endMove()
             return
         }
+        if (orderMoving) { orderAct(b); return }
         if (b === "y" && undoShown) { putBack(undoId); return }
         if (b === "start") { startPlay(); return }
         if (b === "lb") { switchGame(-1); return }
@@ -621,6 +738,17 @@ Window {
             else if (b === "a") railSelect(railIndex)
             return
         }
+        if (page === "game" && modPage) {
+            if (b === "b") modPage = false
+            else if (b === "a") installFromDetails()
+            else if (b === "left") { zone = "rail"; railIndex = current }
+            else if (b === "lt") tab = Math.max(0, tab - 1)
+            else if (b === "rt") tab = Math.min(tabs.length - 1, tab + 1)
+            else if (b === "view" && game) { menuIndex = 0; sheet = "gamemenu" }
+            return
+        }
+        if (page === "game" && tab === 1 && game && sources.length > 0 && ["up", "down", "left", "right", "a"].indexOf(b) >= 0) { getAct(b); return }
+        if (page === "game" && tab === 2 && game && ["up", "down", "left", "a", "y"].indexOf(b) >= 0) { orderAct(b); return }
         if (page === "game") {
             if (b === "left") { zone = "rail"; railIndex = current }
             else if (b === "lt") tab = Math.max(0, tab - 1)
@@ -640,20 +768,22 @@ Window {
             return
         }
         if (page === "settings") {
-            const rows = setSection === 0 ? lookRows.length : setSection === 1 ? 2 : labsRows.length
-            const labsItem = setSection === 2 && labsRows[setRow] && labsRows[setRow].kind === "item"
+            const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
+            const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
+            const kind = r ? r.kind : ""
             if (b === "b") { page = "game"; zone = "main" }
             else if (b === "lt") { if (setSection > 0) { setSection--; setRow = 0 } }
             else if (b === "rt") { if (setSection < settingsSections.length - 1) { setSection++; setRow = 0 } }
             else if (b === "up") setRow = Math.max(0, setRow - 1)
             else if (b === "down") setRow = Math.min(rows - 1, setRow + 1)
-            else if (setSection === 0 && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
-            else if (setSection === 0 && b === "a") lookRows[setRow].step(1)
-            else if (setSection === 1 && b === "a") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
-            else if (labsItem && b === "left") labsChip = Math.max(0, labsChip - 1)
-            else if (labsItem && b === "right") labsChip = Math.min(2, labsChip + 1)
-            else if (labsItem && b === "a") labsChoose(labsRows[setRow], ["works", "problem", ""][labsChip])
-            else if (setSection === 2 && b === "a") labsRun(labsRows[setRow])
+            else if (sec === "Look" && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
+            else if (sec === "Look" && b === "a") lookRows[setRow].step(1)
+            else if (sec === "About" && b === "a") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
+            else if (kind === "item" && b === "left") labsChip = Math.max(0, labsChip - 1)
+            else if (kind === "item" && b === "right") labsChip = Math.min(2, labsChip + 1)
+            else if (kind === "item" && b === "a") labsChoose(r, ["works", "problem", ""][labsChip])
+            else if ((kind === "choice" || kind === "toggle") && (b === "left" || b === "right" || b === "a")) rowStep(r, b === "left" ? -1 : 1)
+            else if (kind === "action" && b === "a") rowRun(r)
             else if (b === "left") zone = "rail"
             return
         }
@@ -665,16 +795,272 @@ Window {
         }
     }
     function railSelect(i) {
-        note("action", "Rail " + (i < games.length ? games[i].name : i === games.length ? "Add game" : "Settings"))
+        note("action", "Rail " + (i < games.length ? games[i].name : i === games.length ? "Add game" : i === games.length + 1 ? "Downloads" : "Settings"))
+        if (i === games.length + 1) {
+            if (games.length > 0) { page = "game"; zone = "main"; tab = 1 }
+            if (dl.active) toast.showPlain("Downloading " + dl.label + (Turbine.netBusy > 1 ? ", then " + (Turbine.netBusy - 1) + " more" : "") + ". It shows on the status line.")
+            return
+        }
         if (i < games.length) { current = i; page = "game"; zone = "main" }
         else if (i === games.length) toast.showPlain("Turbine finds Steam and Heroic games by itself. Install a game and it shows up here.")
         else openSettings()
     }
 
 
+
+    // ---------------------------------------------------------------- Get Mods (0.3)
+    // Where this game's mods come from: Thunderstore for its games, Nexus Mods for the rest (with a key).
+    readonly property var sources: !rules ? [] : [].concat(rules.community ? ["thunderstore"] : []).concat(rules.domain ? ["nexus"] : [])
+    property string getSource: ""
+    readonly property string srcNow: sources.indexOf(getSource) >= 0 ? getSource : (sources[0] || "")
+    function srcName(s) { return s === "nexus" ? "Nexus Mods" : s === "thunderstore" ? "Thunderstore" : "" }
+    property string getText: ""
+    property string getCategory: ""
+    property int getSortIndex: 0
+    readonly property var sortKeys: srcNow === "nexus" ? ["endorsements", "downloads", "updated", "name"] : ["downloads", "rating", "updated", "name"]
+    readonly property var sortNames: srcNow === "nexus" ? ["Most endorsed", "Most downloaded", "Recently updated", "A to Z"]
+                                                        : ["Most downloaded", "Top rated", "Recently updated", "A to Z"]
+    property var browseData: null
+    property bool browseLoading: false
+    property string getArea: "bar"        // bar, cats, grid
+    property int getIndex: 0
+    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
+                                   { key: "source", label: "From " + srcName(srcNow) },
+                                   { key: "sort", label: sortNames[getSortIndex] || "" },
+                                   { key: "add", label: "Add from Downloads" }]
+    readonly property var getCats: browseData && browseData.categories && browseData.categories.length > 0 ? [""].concat(browseData.categories) : []
+    readonly property var getItems: browseData && browseData.items ? browseData.items : []
+    function browseNow() {
+        if (!game || !rules || srcNow === "") return
+        browseLoading = true
+        Turbine.browse(getText, getCategory, sortKeys[getSortIndex] || "", srcNow)
+    }
+    function getAct(b) {
+        const cols = 3
+        if (getArea === "bar") {
+            if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
+            else if (b === "right") getIndex = Math.min(getBar.length - 1, getIndex + 1)
+            else if (b === "down") { if (getCats.length > 0) { getArea = "cats"; getIndex = Math.max(0, getCats.indexOf(getCategory)) } else if (getItems.length > 0) { getArea = "grid"; getIndex = 0 } }
+            else if (b === "a") getBarRun(getIndex)
+        } else if (getArea === "cats") {
+            if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
+            else if (b === "right") getIndex = Math.min(getCats.length - 1, getIndex + 1)
+            else if (b === "up") { getArea = "bar"; getIndex = 0 }
+            else if (b === "down" && getItems.length > 0) { getArea = "grid"; getIndex = 0 }
+            else if (b === "a") { getCategory = getCats[getIndex]; note("action", "Get Mods category " + (getCategory || "All")); browseNow() }
+        } else {
+            if (b === "left") { if (getIndex % cols > 0) getIndex--; else { zone = "rail"; railIndex = current } }
+            else if (b === "right") getIndex = Math.min(getItems.length - 1, getIndex + 1)
+            else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (getCats.length > 0) { getArea = "cats"; getIndex = Math.max(0, getCats.indexOf(getCategory)) } else { getArea = "bar"; getIndex = 0 } }
+            else if (b === "down") getIndex = Math.min(getItems.length - 1, getIndex + cols)
+            else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
+        }
+    }
+    function getBarRun(i) {
+        const k = getBar[i] ? getBar[i].key : ""
+        getArea = "bar"; getIndex = i
+        if (k === "search") openAsk("search", "Search " + gameTitle + " mods", "Words from the mod's name or what it does.", getText, "Search", 100, false, "Search")
+        else if (k === "source" && sources.length > 1) {
+            getSource = sources[(sources.indexOf(srcNow) + 1) % sources.length]; getCategory = ""; getSortIndex = 0
+            note("action", "Get Mods source " + getSource); browseData = null; browseNow()
+        }
+        else if (k === "sort") { getSortIndex = (getSortIndex + 1) % sortNames.length; note("action", "Get Mods sort " + sortNames[getSortIndex]); browseNow() }
+        else if (k === "add") openAdd()
+    }
+
+    // A mod's details, with Install.
+    property bool modPage: false
+    property var detailsData: null
+    property var detailsItem: null
+    function openDetails(item) {
+        note("action", "Mod details: " + item.name)
+        detailsItem = item
+        detailsData = { loading: true }
+        modPage = true
+        Turbine.details(item.id, srcNow)
+    }
+    function installFromDetails() {
+        if (!detailsData || detailsData.loading || detailsData.error) return
+        if (detailsData.premium === false) { toast.showPlain(detailsData.message); return }
+        note("action", "Install " + detailsData.name + " from " + srcNow)
+        Turbine.install(detailsData.id, srcNow)
+        edited()
+        modPage = false
+    }
+
+    // Downloads: the status line and the rail's Downloads ring.
+    property var dl: ({ active: false })
+    readonly property real dlPart: dl.active && dl.total > 0 ? Math.min(1, dl.got / dl.total) : -1
+
+    // Installer choices (FOMOD).
+    property var fomod: null
+
+    // Load order (Skyrim).
+    property var order: []
+    property string orderError: ""
+    property int orderIndex: 0
+    property bool orderMoving: false
+    property int orderFrom: -1
+    function orderAct(b) {
+        const p = order[orderIndex]
+        if (orderMoving) {
+            if (b === "up" || b === "down") {
+                const to = orderIndex + (b === "up" ? -1 : 1)
+                if (to < 0 || to >= order.length || order[to].fixed) return
+                let list = order.slice(); const x = list[orderIndex]; list[orderIndex] = list[to]; list[to] = x
+                order = list; orderIndex = to
+            } else if (b === "a" || b === "b" || b === "y") {
+                orderMoving = false
+                if (orderIndex !== orderFrom && order[orderIndex]) Turbine.orderMove(order[orderIndex].name, orderIndex)
+            }
+            return
+        }
+        if (b === "up") orderIndex = Math.max(-1, orderIndex - 1)
+        else if (b === "down") orderIndex = Math.min(order.length - 1, orderIndex + 1)
+        else if (b === "a" && orderIndex === -1) Turbine.orderSort()
+        else if (b === "a" && p && !p.fixed) {
+            order = order.map((x, i) => i === orderIndex ? Object.assign({}, x, { active: !x.active }) : x)
+            Turbine.orderToggle(p.name, !p.active)
+        }
+        else if (b === "y" && p && !p.fixed) { orderMoving = true; orderFrom = orderIndex }
+        else if (b === "left") { zone = "rail"; railIndex = current }
+    }
+
+    // Profiles.
+    property var profileData: null
+    property var shares: []
+    property int shareIndex: 0
+    property var importData: null
+    property int profIndex: 0
+    readonly property var profileList: profileData ? profileData.profiles : []
+    readonly property var profileActions: [
+        { key: "new", label: "New profile", detail: "From the mods as they are now" },
+        { key: "export", label: "Export to a share file", detail: "Saves \"" + (profileData ? profileData.active : "") + "\" to Downloads, to share" },
+        { key: "importFile", label: "Import a share file", detail: "A Turbine profile file in Downloads" }
+    ].concat(rules && rules.community ? [{ key: "importCode", label: "Import a Thunderstore profile code", detail: "A code someone shared with you" }] : [])
+    function openProfiles() { profIndex = 0; importData = null; Turbine.profiles(); sheet = "profiles" }
+    function profileRun(i) {
+        if (importData) {
+            if (i === 0 && !importData.error) { note("action", "Import profile: get them"); Turbine.profileImportGo(); sheet = "" }
+            importData = null
+            if (sheet === "profiles") profIndex = 0
+            return
+        }
+        if (i < profileList.length) {
+            const n = profileList[i].name
+            if (profileData && n === profileData.active) return
+            note("action", "Switch profile to " + n)
+            Turbine.profileSwitch(n)
+            sheet = ""
+            return
+        }
+        const a = profileActions[i - profileList.length]
+        if (!a) return
+        note("action", "Profiles: " + a.label)
+        if (a.key === "new") openAsk("newProfile", "New profile", "A name for the mods as they are now.", "", "Profile name", 60, false, "Make it")
+        else if (a.key === "export" && profileData) Turbine.profileExport(profileData.active)
+        else if (a.key === "importFile") { Turbine.listShares(); shareIndex = 0; sheet = "shares" }
+        else if (a.key === "importCode") openAsk("code", "Thunderstore profile code", "The code looks like 0190a2b4-7c1d-4e8f-9a0b-1c2d3e4f5a6b.", "", "Profile code", 40, false, "Read it")
+    }
+
+    // Mod updates: badges, the mod menu and Update all.
+    property var updatesData: null
+    readonly property var updateMap: {
+        let m = {}
+        if (updatesData && game && updatesData.game === game.id) for (const u of updatesData.items || []) m[u.mod] = u
+        return m
+    }
+    readonly property int updateCount: Object.keys(updateMap).length
+    property var updatesChecked: ({})
+    function maybeCheckUpdates() {
+        if (!game || updatesChecked[game.id] || shot.on) return
+        const any = mods.some(m => m.source === "Thunderstore" || m.source === "Nexus Mods")
+        if (!any) return
+        let c = Object.assign({}, updatesChecked); c[game.id] = true; updatesChecked = c
+        Turbine.checkUpdates()
+    }
+
+    // Accounts and Turbine's own updates.
+    property var account: ({ state: "none" })
+    property var selfUpd: ({ state: "idle" })
+    property bool selfAuto: false
+    property bool backToStable: false
+
+    // A line of text (search, profile name, code, Nexus key), typed with Steam's keyboard in Game Mode.
+    property string askPurpose: ""
+    property string askReturn: ""
+    function openAsk(purpose, title, noteText, start, placeholder, max, secret, done) {
+        askPurpose = purpose
+        askReturn = sheet
+        askView.open(title, noteText, start, placeholder, max, secret, done)
+        sheet = "ask"
+        reportEditing(true)
+    }
+    function askDone(text) {
+        reportEditing(false)
+        sheet = askReturn === "ask" ? "" : askReturn
+        if (askPurpose === "search") { getText = text; getArea = "bar"; getIndex = 0; note("action", "Get Mods search"); browseNow() }
+        else if (askPurpose === "nexusKey" && text !== "") Turbine.setNexusKey(text)
+        else if (askPurpose === "newProfile" && text !== "") Turbine.profileCreate(text)
+        else if (askPurpose === "code" && text !== "") Turbine.profileImportCode(text)
+    }
+    function askCancelled() {
+        reportEditing(false)
+        sheet = askReturn === "ask" ? "" : askReturn
+    }
+
     // ---------------------------------------------------------------- Labs
-    readonly property var settingsSections: labsOn ? ["Look", "About", "Labs"] : ["Look", "About"]
-    onLabsOnChanged: if (!labsOn && setSection > 1) { setSection = 1; setRow = 0 }
+    readonly property var settingsSections: ["Look", "Accounts", "Updates", "About"].concat(labsOn ? ["Labs"] : [])
+    readonly property string sec: settingsSections[setSection] || "Look"
+    function openSection(name) { openSettings(); setSection = Math.max(0, settingsSections.indexOf(name)); setRow = 0 }
+    onLabsOnChanged: if (!labsOn && setSection >= settingsSections.length) { setSection = settingsSections.indexOf("About"); setRow = 0 }
+    // Accounts, Updates and Labs: rows of one kind each. action (A does it), toggle and choice (Left, Right or A
+    // change it), item (a Labs checklist item), info (words only).
+    readonly property var rowsNow: sec === "Accounts" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : []
+    readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
+        : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: downloads work right here" : " · Free account: browse here, download in Desktop Mode")
+        : account.state === "error" ? account.message
+        : account.message ? account.message : "Not signed in. Add your personal API key to browse Nexus Mods."
+    readonly property var accountRows: [
+        { kind: "action", key: "nexusKey", title: "Nexus Mods", how: accountWords, action: account.hasKey ? "Change key" : "Add key" }
+    ].concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
+        { kind: "info", key: "help", title: "Where the key comes from", how: "In Desktop Mode, sign in at nexusmods.com, open Site preferences, API Keys, and copy your Personal API Key. Then paste it here." },
+        { kind: "info", key: "ts", title: "Thunderstore", how: "No account needed. Valheim, Lethal Company and Risk of Rain 2 mods come from there." }
+    ])
+    readonly property string selfWords: selfUpd.state === "checking" ? "Looking for a newer Turbine..."
+        : selfUpd.state === "available" ? "Turbine " + selfUpd.version + (selfUpd.prerelease ? " (pre-release)" : "") + " is ready to install"
+        : selfUpd.state === "stable" ? "The latest stable Turbine is " + selfUpd.version
+        : selfUpd.state === "current" ? "Turbine " + Turbine.version + " is the newest" + (labsOn && updates.prerelease ? ", pre-releases included" : "")
+        : selfUpd.state === "installing" ? "Downloading and installing Turbine " + selfUpd.version + "..."
+        : selfUpd.state === "ready" ? "Turbine " + selfUpd.version + " is installed. Restart to use it."
+        : selfUpd.state === "error" ? selfUpd.message
+        : "This is Turbine " + Turbine.version
+    readonly property var updateRows: [
+        { kind: "action", key: "checkNow", title: "Check for updates", how: selfWords, action: selfUpd.state === "checking" ? "" : "Check now" }
+    ].concat(selfUpd.state === "available" || selfUpd.state === "stable" ? [
+        { kind: "action", key: "install", title: "Install Turbine " + selfUpd.version, how: (selfUpd.notes || "").split("\n")[0] || "Downloads it, checks it, then installs it", action: "Install" }
+    ] : []).concat(selfUpd.state === "ready" ? [
+        { kind: "action", key: "restart", title: "Restart Turbine", how: "Closes Turbine and opens the new version", action: "Restart" }
+    ] : []).concat([
+        { kind: "toggle", key: "auto", title: "Check when Turbine starts", how: "Looks once at each start. Nothing installs without you.", value: updates.auto, options: [false, true], names: ["Off", "On"] },
+        { kind: "info", key: "channel", title: "Update channel: " + (labsOn && updates.prerelease ? "Pre-release" : "Stable"), how: labsOn ? "Change it in Labs" : "Stable releases only" }
+    ])
+    function rowStep(r, d) {
+        if (r.key === "auto") updates.auto = !updates.auto
+        else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
+        note("action", "Setting " + r.key + " changed")
+    }
+    function rowRun(r) {
+        note("action", "Settings: " + r.title)
+        if (r.key === "report") openReport(null, "", "")
+        else if (r.key === "perf") openPerf()
+        else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", "Paste or type your Personal API Key from nexusmods.com (Site preferences, API Keys). It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
+        else if (r.key === "signOut") Turbine.nexusSignOut()
+        else if (r.key === "checkNow") Turbine.selfCheck(labsOn && updates.prerelease, false)
+        else if (r.key === "install") Turbine.selfInstall()
+        else if (r.key === "restart") { Turbine.finish(); Turbine.restart(); Qt.quit() }
+        else if (r.key === "stable") { backToStable = true; Turbine.selfCheck(false, true); openSection("Updates") }
+    }
     // Ten presses on the icon in Settings > About, a few seconds apart at most, turn Labs mode on or off.
     property int labsTaps: 0
     Timer { id: labsTapReset; interval: 3000; onTriggered: app.labsTaps = 0 }
@@ -714,12 +1100,37 @@ Window {
         { id: "seasonal", title: "Seasonal leaves and snow", how: "Settings > Look > Seasonal: Autumn, then Snow; try Amount and Size.",
           expect: "They fall smoothly behind the panels and stop while a game runs." },
         { id: "quick-report", title: "Screenshot and report", how: "Hold View for 7 seconds (or hold the icon at the top of the rail).",
-          expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." }
+          expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." },
+        { id: "ts-install", title: "Thunderstore install", how: "Valheim, Lethal Company or Risk of Rain 2: Get Mods, pick a mod, A Install.",
+          expect: "It downloads with progress on the status line and the rail ring, and shows in Mods with what it needs." },
+        { id: "loader-install", title: "Loader install", how: "Turn on a mod that needs the loader, then A Install in the prompt (SKSE, BepInEx or SMAPI).",
+          expect: "The loader downloads from its official home, shows as a mod, and the Needs badges go away." },
+        { id: "fomod", title: "Installer choices (FOMOD)", how: "Add a Skyrim mod with an installer, from Get Mods or Downloads.",
+          expect: "One question per page with pictures; B goes back; the files of the chosen options go in." },
+        { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one with Y, then Sort automatically.",
+          expect: "The game loads plugins in that order; masters stay first; missing masters are named." },
+        { id: "nexus-key", title: "Nexus Mods key", how: "Settings, Accounts: add your personal API key with Steam's keyboard.",
+          expect: "It says your name and Premium or Free; Nexus Mods browsing works; Sign out removes the key." },
+        { id: "mod-updates", title: "Mod updates", how: "Have an older Thunderstore or Nexus mod, open its game.",
+          expect: "Update ready shows on it; X Update or the game menu's Update all brings the new version, same place and on or off." },
+        { id: "profiles", title: "Profiles", how: "Game menu (View), Profiles: make one, switch, export a share file, import it or a Thunderstore code.",
+          expect: "Switching changes which mods are on right away; an import gets the mods and makes the profile." },
+        { id: "self-update", title: "Turbine updates itself", how: "Settings, Updates: Check now, Install, then Restart.",
+          expect: "The new version installs and opens. With Pre-release in Labs, test builds show; Go back to stable returns to stable." },
+        { id: "archives", title: "7z and rar mods", how: "Add a .7z and a .rar mod from Downloads.",
+          expect: "Both unpack and install like zip files." },
+        { id: "heroic-art", title: "Heroic covers", how: "Look at Heroic (Epic and GOG) games in the rail.",
+          expect: "They show their cover art; games without art show their initials." },
+        { id: "launch-option", title: "Valheim Launch Option", how: "Valheim with a BepInEx mod: press Play and read the check, then set the Launch Option in Steam.",
+          expect: "The check explains the one-time setting once; after setting it, mods load when the game starts from Steam." }
     ]
     readonly property var labsRows: [
         { kind: "action", key: "report", title: "Report a bug", how: "Screenshot, what went wrong, details Turbine adds by itself", action: "Report" },
-        { kind: "action", key: "perf", title: "Performance check", how: "Frame times, processor, startup, controller", action: "Open" }
-    ].concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
+        { kind: "action", key: "perf", title: "Performance check", how: "Frame times, processor, startup, controller", action: "Open" },
+        { kind: "choice", key: "channel", title: "Update channel", how: "Pre-release gets test builds first", value: updates.prerelease, options: [false, true], names: ["Stable", "Pre-release"] }
+    ].concat(updates.prerelease ? [
+        { kind: "action", key: "stable", title: "Go back to stable", how: "Installs the latest stable Turbine, even if it's older, and turns Pre-release off", action: "Go back" }
+    ] : []).concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
     property var labsAnswers: parse(labsSet.states, {})
     readonly property string labsDone: {
         const n = labsItems.filter(x => labsAnswers[x.id] === "works").length
@@ -733,7 +1144,7 @@ Window {
         const r = labsRows[setRow]
         if (r && r.kind === "item") { const st = labsState(r.id); labsChip = st === "works" ? 0 : st === "problem" ? 1 : 2 }
     }
-    onSetRowChanged: if (setSection === 2) labsFocusRow()
+    onSetRowChanged: if (sec === "Labs") labsFocusRow()
     function labsChoose(item, st) {
         let a = Object.assign({}, labsAnswers)
         if (st === "") delete a[item.id]
@@ -763,7 +1174,7 @@ Window {
         if (sheet !== "") return "Sheet " + sheet
         if (zone === "rail") return "Rail item " + railIndex + (railIndex < games.length ? " (" + games[railIndex].name + ")" : "")
         if (page === "settings") return "Settings " + (settingsSections[setSection] || setSection) + " row " + setRow
-               + (setSection === 0 && lookRows[setRow] ? " (" + lookRows[setRow].label + ")" : setSection === 2 && labsRows[setRow] ? " (" + labsRows[setRow].title + ")" : "")
+               + (sec === "Look" && lookRows[setRow] ? " (" + lookRows[setRow].label + ")" : rowsNow[setRow] ? " (" + rowsNow[setRow].title + ")" : "")
         if (page === "perf") return "Scrolling test row " + perfIndex
         if (tab === 0 && focusedItem) return (focusedItem.kind === "mod" ? "Mod row " : "Removed row ") + (modIndex + 1) + " (" + focusedItem.m.name + ")"
         return "Tab " + (tabs[tab] || tab)
@@ -1118,9 +1529,47 @@ Window {
                 anchors.bottomMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: app.px(6)
+                // Downloads: a brass ring fills while something downloads; A goes to Get Mods.
                 Rectangle {
+                    id: dlButton
                     width: app.px(44); height: app.px(44); radius: app.px(8)
                     readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length + 1
+                    color: "transparent"
+                    border.width: focused ? app.px(2) : 0
+                    border.color: c.text
+                    Icon {
+                        anchors.centerIn: parent
+                        tint: app.dl.active ? c.accentHi : c.muted
+                        d: "M12 4v11M7 10l5 5 5-5M5 20h14"
+                    }
+                    Shape {
+                        visible: app.dl.active
+                        anchors.fill: parent
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: c.line; strokeWidth: app.px(3); fillColor: "transparent"
+                            PathAngleArc { centerX: dlButton.width / 2; centerY: dlButton.height / 2; radiusX: dlButton.width / 2 - app.px(3); radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
+                        }
+                        ShapePath {
+                            strokeColor: c.accentHi; strokeWidth: app.px(3); fillColor: "transparent"; capStyle: ShapePath.RoundCap
+                            PathAngleArc {
+                                centerX: dlButton.width / 2; centerY: dlButton.height / 2; radiusX: dlButton.width / 2 - app.px(3); radiusY: radiusX
+                                startAngle: -90; sweepAngle: app.dlPart >= 0 ? 360 * app.dlPart : 90
+                            }
+                        }
+                    }
+                    Rectangle {
+                        visible: Turbine.netBusy > 1
+                        anchors.right: parent.right; anchors.top: parent.top
+                        width: app.px(18); height: width; radius: width / 2
+                        color: c.accent
+                        Text { anchors.centerIn: parent; text: Turbine.netBusy; color: c.onAccent; font.family: app.bodyFont; font.pixelSize: app.px(11); font.bold: true }
+                    }
+                    TapHandler { onTapped: app.railSelect(app.games.length + 1) }
+                }
+                Rectangle {
+                    width: app.px(44); height: app.px(44); radius: app.px(8)
+                    readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length + 2
                     color: app.page === "settings" || app.page === "perf" ? c.raised : "transparent"
                     border.width: focused ? app.px(2) : 0
                     border.color: c.text
@@ -1178,7 +1627,7 @@ Window {
                         }
                     }
                     Rectangle {
-                        visible: app.page !== "game"
+                        visible: app.page !== "game" || app.modPage
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
                         width: backRow.implicitWidth + app.px(20); height: app.px(30); radius: app.px(6)
@@ -1216,6 +1665,10 @@ Window {
                     level: app.statusNow.level
                     words: app.statusNow.words
                     detail: app.statusNow.detail
+                    progress: app.statusNow.progress !== undefined ? app.statusNow.progress : -1
+                    progressText: app.statusNow.progressText || ""
+                    pillText: app.statusNow.pill || ""
+                    onPillClicked: if (app.updateCount > 0) Turbine.updateAll()
                 }
 
                 // Tabs (game page only)
@@ -1264,12 +1717,12 @@ Window {
                         readonly property bool empty: app.game !== null && app.tab === 0 && app.modsLoaded && app.listItems.length === 0
                         ui: kit
                         anchors.fill: parent
-                        visible: app.page === "game" && (none || loading || empty || app.tab === 2)
-                        title: none ? "No games yet" : loading ? "Reading mods..." : empty ? "No mods yet" : "Load order"
+                        visible: app.page === "game" && (none || loading || empty)
+                        title: none ? "No games yet" : loading ? "Reading mods..." : "No mods yet"
                         body: none ? "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here."
                               : loading ? ""
-                              : empty ? "Add mods from zip files in your Downloads folder. Download a mod's zip file in Desktop Mode first."
-                              : "Sorting comes in a later build. For now the order on the Mods tab is the load order: a mod lower in the list wins when two mods change the same file."
+                              : app.sources.length > 0 ? "Find mods on the Get Mods tab (RT), or add them from archives in your Downloads folder."
+                              : "Add mods from archives (zip, 7z, rar) in your Downloads folder. Download a mod in Desktop Mode first."
                         buttonKey: none || empty ? "a" : ""
                         buttonLabel: none ? "Look again" : empty ? "Add mods from Downloads" : ""
                         onActivated: none ? app.load() : app.openAdd()
@@ -1310,8 +1763,8 @@ Window {
                                 ordered: app.ordered
                                 order: entry.index + 1
                                 focused: entry.foc
-                                badge: app.moving && entry.foc ? "Moving" : (entry.m.needsLoader && app.loaderMissing ? "Needs " + app.loaderShort : "")
-                                badgeLevel: app.moving && entry.foc ? "info" : "warn"
+                                badge: app.moving && entry.foc ? "Moving" : (entry.m.needsLoader && app.loaderMissing ? "Needs " + app.loaderShort : app.updateMap[entry.m.id] ? "Update ready" : "")
+                                badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) ? "warn" : "info"
                                 showHints: entry.foc && !app.moving
                                 onClicked: app.modIndex = entry.index
                                 onToggleClicked: { app.modIndex = entry.index; app.toggle(entry.m) }
@@ -1358,18 +1811,59 @@ Window {
                         }
                     }
 
-                    // Get Mods tab
+                    // Get Mods tab: online for games with a source, otherwise archives from Downloads.
                     EmptyState {
                         ui: kit
                         anchors.fill: parent
-                        visible: app.page === "game" && app.game !== null && app.tab === 1
+                        visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length === 0
                         title: "Get Mods"
-                        body: "Add mods from zip files in your Downloads folder, for example ones you downloaded in Desktop Mode."
+                        body: "Add mods from archives (zip, 7z, rar) in your Downloads folder, for example ones you downloaded in Desktop Mode."
                         buttonKey: "a"
                         buttonLabel: "Add mods from Downloads"
                         buttonFocused: app.zone === "main"
-                        note: "Browsing and searching mods online comes in a later build."
+                        note: app.rules ? "This game has no online mod source in Turbine yet." : ""
                         onActivated: app.openAdd()
+                    }
+                    GetMods {
+                        ui: kit
+                        anchors.fill: parent
+                        anchors.topMargin: app.px(4)
+                        visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length > 0 && !app.modPage
+                        result: app.browseData
+                        loading: app.browseLoading
+                        search: app.getText
+                        category: app.getCategory
+                        bar: app.getBar
+                        focusArea: app.getArea
+                        focusIndex: app.getIndex
+                        active: app.zone === "main" && app.sheet === ""
+                        onBarClicked: (i) => app.getBarRun(i)
+                        onCategoryClicked: (i) => { app.getArea = "cats"; app.getIndex = i; app.getAct("a") }
+                        onItemClicked: (i) => { app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
+                    }
+                    ModDetails {
+                        ui: kit
+                        anchors.fill: parent
+                        anchors.topMargin: app.px(4)
+                        visible: app.page === "game" && app.modPage
+                        info: app.detailsData
+                        focused: app.zone === "main"
+                        onInstallClicked: app.installFromDetails()
+                    }
+                    // Load order tab (Skyrim)
+                    LoadOrderList {
+                        ui: kit
+                        anchors.fill: parent
+                        anchors.topMargin: app.px(4)
+                        visible: app.page === "game" && app.game !== null && app.tab === 2
+                        plugins: app.order
+                        error: app.orderError
+                        focusIndex: app.orderIndex
+                        moving: app.orderMoving
+                        active: app.zone === "main" && app.sheet === ""
+                        onSortClicked: { app.orderIndex = -1; Turbine.orderSort() }
+                        onRowClicked: (i) => app.orderIndex = i
+                        onToggleClicked: (i) => { app.orderIndex = i; app.orderAct("a") }
                     }
 
                     // Settings
@@ -1398,11 +1892,11 @@ Window {
                             id: lookList
                             width: parent.width - app.px(184)
                             height: parent.height
-                            visible: app.setSection === 0
+                            visible: app.sec === "Look"
                             clip: true
                             spacing: app.px(4)
                             model: app.lookRows
-                            currentIndex: app.setSection === 0 ? app.setRow : 0
+                            currentIndex: app.sec === "Look" ? app.setRow : 0
                             highlightFollowsCurrentItem: false
                             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
                             delegate: Rectangle {
@@ -1488,7 +1982,7 @@ Window {
                         Column {
                             width: parent.width - app.px(184)
                             spacing: app.px(8)
-                            visible: app.setSection === 1
+                            visible: app.sec === "About"
                             Row {
                                 spacing: app.px(14)
                                 Rectangle {
@@ -1531,11 +2025,11 @@ Window {
                             id: labsList
                             width: parent.width - app.px(184)
                             height: parent.height
-                            visible: app.setSection === 2
+                            visible: app.sec === "Accounts" || app.sec === "Updates" || app.sec === "Labs"
                             clip: true
                             spacing: app.px(4)
-                            model: app.labsRows
-                            currentIndex: app.setSection === 2 ? app.setRow : 0
+                            model: app.rowsNow
+                            currentIndex: visible ? app.setRow : 0
                             highlightFollowsCurrentItem: false
                             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
                             onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); positionViewAtIndex(currentIndex, ListView.Contain) })
@@ -1545,6 +2039,7 @@ Window {
                                 required property var modelData
                                 readonly property bool foc: app.zone === "settings" && app.setRow === index
                                 readonly property bool isItem: modelData.kind === "item"
+                                readonly property bool hasChips: isItem || modelData.kind === "choice" || modelData.kind === "toggle"
                                 readonly property string answer: isItem ? app.labsState(modelData.id) : ""
                                 width: labsList.width
                                 height: (modelData.head ? labsHead.height : 0) + box.height
@@ -1574,14 +2069,14 @@ Window {
                                         id: labsWords
                                         x: app.px(14)
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - app.px(28) - (lrow.isItem ? chips.width + app.px(10) : actionHint.width + app.px(10))
+                                        width: parent.width - app.px(28) - (lrow.hasChips ? chips.width + app.px(10) : actionHint.width + app.px(10))
                                         spacing: app.px(2)
                                         Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.px(16); font.bold: true }
                                         Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.px(14); wrapMode: Text.WordWrap; maximumLineCount: 2 }
                                     }
                                     Hint {
                                         id: actionHint
-                                        visible: !lrow.isItem
+                                        visible: lrow.modelData.kind === "action"
                                         anchors.right: parent.right; anchors.rightMargin: app.px(12)
                                         anchors.verticalCenter: parent.verticalCenter
                                         k: lrow.foc ? "a" : ""
@@ -1589,17 +2084,18 @@ Window {
                                     }
                                     Row {
                                         id: chips
-                                        visible: lrow.isItem
+                                        visible: lrow.hasChips
                                         anchors.right: parent.right; anchors.rightMargin: app.px(10)
                                         anchors.verticalCenter: parent.verticalCenter
                                         spacing: app.px(4)
                                         Repeater {
-                                            model: [["works", "Works"], ["problem", "Problem"], ["", "Not tested"]]
+                                            model: lrow.isItem ? [["works", "Works"], ["problem", "Problem"], ["", "Not tested"]]
+                                                   : lrow.hasChips ? lrow.modelData.options.map((o, i) => [o, lrow.modelData.names[i]]) : []
                                             Rectangle {
                                                 required property int index
                                                 required property var modelData
-                                                readonly property bool on: lrow.answer === modelData[0]
-                                                readonly property bool cursor: lrow.foc && app.labsChip === index
+                                                readonly property bool on: lrow.isItem ? lrow.answer === modelData[0] : lrow.modelData.value === modelData[0]
+                                                readonly property bool cursor: lrow.isItem && lrow.foc && app.labsChip === index
                                                 width: chipText.implicitWidth + app.px(18); height: app.px(32); radius: app.px(5)
                                                 color: on ? c.raised : c.ground
                                                 border.color: cursor ? c.text : on ? c.accent : c.line
@@ -1610,13 +2106,19 @@ Window {
                                                     text: parent.modelData[1]
                                                     font.pixelSize: app.px(14)
                                                     font.bold: parent.on
-                                                    color: !parent.on ? c.muted : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
+                                                    color: !parent.on ? c.muted : !lrow.isItem ? c.text : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
                                                 }
-                                                TapHandler { onTapped: { app.setRow = lrow.index; app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) } }
+                                                TapHandler {
+                                                    onTapped: {
+                                                        app.setRow = lrow.index
+                                                        if (lrow.isItem) { app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) }
+                                                        else if (!parent.on) app.rowStep(lrow.modelData, 1)
+                                                    }
+                                                }
                                             }
                                         }
                                     }
-                                    TapHandler { onTapped: { app.setRow = lrow.index; if (!lrow.isItem) app.labsRun(lrow.modelData) } }
+                                    TapHandler { onTapped: { app.setRow = lrow.index; if (lrow.modelData.kind === "action") app.rowRun(lrow.modelData) } }
                                 }
                             }
                         }
@@ -1699,7 +2201,10 @@ Window {
                         ["Folder", app.game.installDir],
                         ["Version", app.game.build || "Not reported"],
                         ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"]
-                    ] : []
+                    ].concat(app.rules && app.rules.launchOption ? [
+                        ["Loader setup", app.rules.launchHelp || ""],
+                        ["Launch Option", app.rules.launchOption]
+                    ] : []) : []
                     Row {
                         required property var modelData
                         width: detailCol.width
@@ -1787,9 +2292,57 @@ Window {
         neededBy: app.loaderFor
         sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
         sourceShown: app.loaderSourceShown
+        canDownload: app.loaderCanGet
         focusIndex: app.loaderIndex
         onActivated: (index, key) => { app.loaderIndex = index; app.act(key || "a") }
         onClosed: app.act("b")
+    }
+
+    // Installer choices: over the main area, the rail stays in view.
+    FomodSheet {
+        id: fomodView
+        ui: kit
+        visible: app.sheet === "fomod" && app.fomod !== null
+        x: rail.width
+        width: parent.width - rail.width
+        height: parent.height - legend.height - app.px(16)
+        info: app.fomod
+        onChoose: (g, o) => { app.note("action", "Installer: question " + (g + 1) + ", option " + (o + 1)); Turbine.fomodChoose(g, o) }
+        onNext: { app.note("action", "Installer: next step"); Turbine.fomodNext() }
+        onBack: { app.note("action", "Installer: back a step"); Turbine.fomodBack() }
+        onStop: { app.note("action", "Installer: stopped"); Turbine.fomodCancel() }
+    }
+    ProfilesSheet {
+        id: profilesView
+        ui: kit
+        visible: app.sheet === "profiles"
+        gameName: app.gameTitle
+        profiles: app.profileList
+        active: app.profileData ? app.profileData.active : ""
+        actions: app.profileActions
+        plan: app.importData
+        focusIndex: app.profIndex
+        onActivated: (i) => { app.profIndex = i; app.profileRun(i) }
+        onClosed: app.act("b")
+    }
+    AddMods {
+        ui: kit
+        visible: app.sheet === "shares"
+        title: "Import a share file"
+        subtitle: "Turbine profile files in your Downloads folder, newest first"
+        files: app.shares.map(x => ({ name: x.name, size: "", age: "" }))
+        focusIndex: app.shareIndex
+        actionLabel: "Read"
+        emptyText: "No Turbine profile files in Downloads. Someone makes one with Profiles, Export to a share file."
+        laterText: ""
+        onActivated: (index) => { app.shareIndex = index; app.act("a") }
+        onClosed: app.act("b")
+    }
+    AskText {
+        id: askView
+        ui: kit
+        onAccepted: (text) => app.askDone(text)
+        onCancelled: app.askCancelled()
     }
 
     PerfCheck {
@@ -1833,18 +2386,28 @@ Window {
             Hint { visible: app.moving; k: "▲▼"; label: "Move" }
             Hint { visible: app.moving; k: "a"; label: "Done" }
             // Sheets
-            Hint { visible: app.sheet === "modmenu" || app.sheet === "gamemenu" || app.sheet === "add"; k: "▲▼"; label: "Choose" }
+            Hint { visible: ["modmenu", "gamemenu", "add", "fomod", "profiles", "shares"].indexOf(app.sheet) >= 0; k: "▲▼"; label: "Choose" }
             Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
             Hint { visible: app.sheet === "report" && reportView.editing; k: "b"; label: "Done typing" }
-            Hint { visible: app.sheet !== "" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
+            Hint { visible: app.sheet !== "" && app.sheet !== "ask" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : app.sheet === "fomod" ? "Back a step" : "Close" }
+            Hint { visible: app.sheet === "ask"; k: "a"; label: "Done" }
+            Hint { visible: app.sheet === "ask"; k: "b"; label: "Cancel" }
+            // Get Mods, details, load order
+            Hint { visible: legend.gamePage && app.modPage; k: "a"; label: "Install" }
+            Hint { visible: legend.gamePage && app.modPage; k: "b"; label: "Back to the list" }
+            Hint { visible: legend.gamePage && !app.modPage && app.tab === 1 && app.sources.length > 0; k: "a"; label: app.getArea === "grid" ? "Details" : "Choose" }
+            Hint { visible: legend.gamePage && app.tab === 2 && !app.orderMoving; k: "a"; label: app.orderIndex < 0 ? "Sort" : "Turn on or off" }
+            Hint { visible: legend.gamePage && app.tab === 2 && !app.orderMoving && app.orderIndex >= 0; k: "y"; label: "Move" }
+            Hint { visible: app.orderMoving; k: "▲▼"; label: "Move" }
+            Hint { visible: app.orderMoving; k: "a"; label: "Done" }
             // Game page
             Hint { visible: legend.gamePage && !app.moving && app.tab === 0 && app.ordered && app.mods.length > 1; k: "y"; label: "Reorder" }
             Hint { visible: legend.gamePage && !app.moving; k: "lb+rb"; label: "Switch game" }
             Hint { visible: legend.gamePage && !app.moving; k: "view"; label: "Game menu" }
             Hint { visible: app.sheet === "" && app.page === "settings"; k: "lt+rt"; label: "Sections" }
-            Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 0; k: "◀▶"; label: "Change" }
-            Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 2 && !!app.labsRows[app.setRow] && app.labsRows[app.setRow].kind === "item"; k: "◀▶"; label: "Choose" }
+            Hint { visible: app.sheet === "" && app.page === "settings" && (app.sec === "Look" || (!!app.rowsNow[app.setRow] && ["choice", "toggle"].indexOf(app.rowsNow[app.setRow].kind) >= 0)); k: "◀▶"; label: "Change" }
+            Hint { visible: app.sheet === "" && app.page === "settings" && !!app.rowsNow[app.setRow] && app.rowsNow[app.setRow].kind === "item"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "" && app.page !== "game"; k: "b"; label: "Back" }
             Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail"; k: "◀"; label: "Games" }
         }

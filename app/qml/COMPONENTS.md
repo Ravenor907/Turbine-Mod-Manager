@@ -348,3 +348,16 @@ Main.qml calls `open(itemTitle, startText, perfText, hasCrashLog)`, passes butto
 
 Labs > Performance check: Run check (about 13 seconds: still, scrolling, idle), Copy report, Report a bug. Needs `win`
 (the Window, for its frame times). Signals `copyClicked(text)`, `reportClicked(text)`, `closeClicked()`.
+
+## 0.3 components
+
+- `GetMods`: the Get Mods tab (search, source, sort, Add from Downloads, categories, mod cards in three columns).
+  Main.qml gives `result` (the engine's browse answer), `bar`, `focusArea` ("bar", "cats", "grid") and `focusIndex`.
+- `ModDetails`: a mod's details with what it also installs and Install. `info` is the engine's details answer.
+- `FomodSheet`: installer choices, one question per page with a picture preview. Main.qml passes buttons to
+  `handleButton(b)`; it emits `choose(group, option)`, `next()`, `back()` and `stop()`.
+- `LoadOrderList`: the Load order tab (Skyrim). `plugins` is the engine's load order, `focusIndex` -1 is Sort
+  automatically.
+- `ProfilesSheet`: Profiles from the game menu, and a share being imported (`plan`).
+- `AskText`: one line of text typed with Steam's keyboard: `open(title, note, start, placeholder, max, secret,
+  done)`, then `accepted(text)` or `cancelled()`.

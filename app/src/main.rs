@@ -1,6 +1,8 @@
+mod actions;
 mod backend;
 mod labs;
 mod log;
+mod online;
 mod pad;
 mod system;
 

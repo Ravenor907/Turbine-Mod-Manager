@@ -1,0 +1,6 @@
+[{"tag_name": "v0.4", "name": "Turbine Mod Manager 0.4", "draft": false, "prerelease": false,
+  "html_url": "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/tag/v0.4",
+  "body": "Nexus Mods sign-in from Steam's browser, LOOT sorting for Skyrim, and a faster Get Mods.",
+  "assets": [{"name": "TurbineModManager.flatpak", "size": 31457280,
+              "browser_download_url": "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/v0.4/TurbineModManager.flatpak",
+              "digest": "sha256:0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"}]}]
