@@ -182,7 +182,7 @@ fn names_come_from_the_file_name() {
 fn imports_and_lays_out_relative_to_the_game_folder() {
     let w = world("import");
     let mut s = w.open();
-    assert_eq!(s.root(), w.data_home.join("turbine-mod-manager/steam-489830"), "same drive: under the data folder");
+    assert_eq!(s.root(), w.game.library.join(".turbine-mod-manager/steam-489830"), "on the game's own library");
     let z = w.zip("Cool_Mod-1234-1-2-1700000000.zip", &[("readme.txt", "read me"), ("textures/a.dds", "A tex"), ("Data/b.esp", "B esp")]);
     let m = s.import_zip(&z).unwrap();
     assert_eq!(m.name, "Cool Mod");
@@ -336,7 +336,7 @@ fn remove_undo_and_purge() {
 
     // a and b were removed at 1_800_000_000; make b recent and reopen: a is purged, b stays.
     drop(s);
-    let state = w.data_home.join("turbine-mod-manager/steam-489830/state.json");
+    let state = w.game.library.join(".turbine-mod-manager/steam-489830/state.json");
     let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
     let text = fs::read_to_string(&state).unwrap();
     let old = now - KEEP_REMOVED_SECS - 10;
@@ -504,24 +504,17 @@ fn store_goes_on_the_game_drive() {
     let home = Path::new("/home/deck/.var/app/x/data");
     let sd = Path::new("/run/media/deck/SD/SteamLibrary");
     let key = "steam-489830";
-    // Different devices: hidden folder at the top of the library.
+    // Every library gets the hidden folder at its top (same device or not: separate mounts can't link).
     assert_eq!(choose_root(key, sd, Some(2), Some(1), true, home), sd.join(DRIVE_FOLDER).join(key));
+    let internal = Path::new("/home/deck/.local/share/Steam");
+    assert_eq!(choose_root(key, internal, Some(1), Some(1), true, home), internal.join(DRIVE_FOLDER).join(key));
+    assert_eq!(choose_root(key, internal, None, None, true, home), internal.join(DRIVE_FOLDER).join(key));
     // Not writable: back to the data folder.
     assert_eq!(choose_root(key, sd, Some(2), Some(1), false, home), home.join("turbine-mod-manager").join(key));
-    // Same device: data folder, even under /mnt.
-    let mnt = Path::new("/mnt/games");
-    assert_eq!(choose_root(key, mnt, Some(1), Some(1), true, home), home.join("turbine-mod-manager").join(key));
-    // Devices unknown (card not readable yet): mount paths decide.
-    assert_eq!(choose_root(key, mnt, None, Some(1), true, home), mnt.join(DRIVE_FOLDER).join(key));
-    assert_eq!(choose_root(key, Path::new("/media/x"), None, None, true, home), Path::new("/media/x").join(DRIVE_FOLDER).join(key));
-    let internal = Path::new("/home/deck/.local/share/Steam");
-    assert_eq!(choose_root(key, internal, None, Some(1), true, home), home.join("turbine-mod-manager").join(key));
-    // Internal library on another device (a second internal drive) still gets its own folder.
-    assert_eq!(choose_root(key, internal, Some(5), Some(1), true, home), internal.join(DRIVE_FOLDER).join(key));
 
-    // A real game on the same drive as the data folder.
+    // A real game: its library is writable here.
     let w = world("root");
-    assert_eq!(Store::root_for(&w.game, &w.data_home), w.data_home.join("turbine-mod-manager/steam-489830"));
+    assert_eq!(Store::root_for(&w.game, &w.data_home), w.game.library.join(".turbine-mod-manager/steam-489830"));
 }
 
 #[test]

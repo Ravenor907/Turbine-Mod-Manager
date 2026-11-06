@@ -10,7 +10,8 @@
 //! - `deploy/`            the deploy record, plan and backups of game files mods replace
 //! - `tmp/`               archives being unpacked (cleared on open)
 //!
-//! The store sits on the same drive as the game so deploy can hard link instead of copying.
+//! The store sits on the game's own library (a hidden folder at its top) so deploy can hard link instead of copying:
+//! inside the Flatpak, the app's data folder is a separate mount, and links from it into a game always fail.
 
 use crate::deploy::{self, Paths, Record, Report};
 use crate::games::Game;
@@ -51,6 +52,8 @@ pub struct Setup {
     pub id: String,
     pub saved_at: u64,
     pub mods_on: usize,
+    /// The game was started with this setup (Play went through).
+    pub played: bool,
 }
 
 /// The parts of a game's rules the store needs. `GameRules` is the real one; tests may pass their own.
@@ -183,31 +186,26 @@ pub fn clean_name(file_name: &str) -> (String, Option<String>) {
     (if name.is_empty() { "Mod".into() } else { name }, version)
 }
 
-/// Where a game's store goes. `library_dev` and `home_dev` are the device numbers of the game's library and of the
-/// data folder (None when unknown). A library on another drive gets a hidden folder at its top, if it can be written.
-pub fn choose_root(game_key: &str, library: &Path, library_dev: Option<u64>, home_dev: Option<u64>, library_writable: bool, data_home: &Path) -> PathBuf {
-    let removable = ["/run/media", "/media", "/mnt"].iter().any(|p| library.starts_with(p));
-    let other_drive = match (library_dev, home_dev) {
-        (Some(a), Some(b)) => a != b,
-        _ => removable,
-    };
-    if other_drive && library_writable {
+/// Where a game's store goes: a hidden folder at the top of the game's library, for every library (internal storage
+/// too: device numbers can match while the folders are still separate mounts, and links between mounts fail). Only
+/// when the library can't be written does it go in the data folder. The device numbers are no longer used.
+pub fn choose_root(game_key: &str, library: &Path, _library_dev: Option<u64>, _home_dev: Option<u64>, library_writable: bool, data_home: &Path) -> PathBuf {
+    if library_writable {
         library.join(DRIVE_FOLDER).join(game_key)
     } else {
         data_home.join("turbine-mod-manager").join(game_key)
     }
 }
 
-/// Device number of a path, or of its nearest existing parent folder.
-fn device_of(p: &Path) -> Option<u64> {
-    let mut cur = Some(p);
-    while let Some(c) = cur {
-        if let Ok(m) = fs::metadata(c) {
-            return Some(m.dev());
-        }
-        cur = c.parent();
+/// Can files be made in `dir` (made if missing)? Tried for real.
+fn writable(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
     }
-    None
+    let probe = dir.join(format!(".turbine-write-test-{}", std::process::id()));
+    let ok = File::create(&probe).is_ok();
+    let _ = fs::remove_file(&probe);
+    ok
 }
 
 fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
@@ -307,17 +305,28 @@ impl Store {
     /// Where `open` puts this game's store.
     pub fn root_for(game: &Game, data_home: &Path) -> PathBuf {
         let key = folder_safe(&game.id().replace(':', "-"));
-        let lib_dev = fs::metadata(&game.library).ok().map(|m| m.dev());
-        let home_dev = device_of(data_home);
-        let first = choose_root(&key, &game.library, lib_dev, home_dev, true, data_home);
-        if first.starts_with(&game.library) && fs::create_dir_all(&first).is_err() {
-            return choose_root(&key, &game.library, lib_dev, home_dev, false, data_home);
+        let on_library = choose_root(&key, &game.library, None, None, true, data_home);
+        let in_data = choose_root(&key, &game.library, None, None, false, data_home);
+        // A store already in the data folder stays there: its record lists the files it placed in the game.
+        if in_data.join("state.json").exists() && !on_library.join("state.json").exists() {
+            return in_data;
         }
-        first
+        // Card out: keep the library's place (opening it then says the drive is missing) rather than splitting the store.
+        if !game.library.is_dir() || writable(&on_library) {
+            on_library
+        } else {
+            in_data
+        }
     }
 
     /// Opens the store kept in `root`.
     pub fn open_at(game: &Game, root: &Path, rules: Box<dyn ModRules>) -> io::Result<Store> {
+        if root.starts_with(&game.library) && !game.library.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("The drive with {} isn't there. If it's on an SD card, put the card back in.", game.name),
+            ));
+        }
         for d in ["mods", "removed", "deploy"] {
             fs::create_dir_all(root.join(d))?;
         }
@@ -421,7 +430,12 @@ impl Store {
                 .filter_map(|o| Some((o.str_at("id")?.to_string(), o.get("enabled").and_then(Json::as_bool).unwrap_or(false))))
                 .collect();
             self.saved.push(SavedSetup {
-                setup: Setup { id: id.to_string(), saved_at: num(s.get("savedAt")), mods_on: num(s.get("modsOn")) as usize },
+                setup: Setup {
+                    id: id.to_string(),
+                    saved_at: num(s.get("savedAt")),
+                    mods_on: num(s.get("modsOn")) as usize,
+                    played: s.get("played").and_then(Json::as_bool).unwrap_or(false),
+                },
                 order,
             });
         }
@@ -512,10 +526,11 @@ impl Store {
             .map(|s| {
                 let order: Vec<String> = s.order.iter().map(|(id, on)| format!("{{\"id\":{},\"enabled\":{}}}", quote(id), on)).collect();
                 format!(
-                    "{{\"id\":{},\"savedAt\":{},\"modsOn\":{},\"order\":[{}]}}",
+                    "{{\"id\":{},\"savedAt\":{},\"modsOn\":{},\"played\":{},\"order\":[{}]}}",
                     quote(&s.setup.id),
                     s.setup.saved_at,
                     s.setup.mods_on,
+                    s.setup.played,
                     order.join(",")
                 )
             })
@@ -762,6 +777,10 @@ impl Store {
             .files
             .iter()
             .filter(|p| match fs::metadata(&p.source) {
+                // The staged file as it was when placed is written down: any change means a new copy.
+                Ok(m) if p.src_ino != 0 || p.src_size != 0 || p.src_mtime != 0 => {
+                    m.ino() != p.src_ino || m.len() != p.src_size || m.mtime() * 1_000_000_000 + m.mtime_nsec() != p.src_mtime
+                }
                 Ok(m) if p.copy => m.len() != p.size || m.mtime() * 1_000_000_000 + m.mtime_nsec() != p.mtime,
                 Ok(m) => m.ino() != p.ino,
                 Err(_) => false,
@@ -776,10 +795,19 @@ impl Store {
         let mut report = deploy::apply(&paths, &wanted, stop_after)?;
         report.added += first.added;
         report.removed += first.removed;
+        report.copied_not_linked += first.copied_not_linked;
         report.recovered |= recovered || first.recovered;
-        let mut changed = first.changed_by_others;
-        changed.append(&mut report.changed_by_others);
-        report.changed_by_others = changed;
+        fn before(a: Vec<String>, b: &mut Vec<String>) {
+            let mut a = a;
+            a.append(b);
+            *b = a;
+        }
+        before(first.changed_by_others, &mut report.changed_by_others);
+        before(first.put_back, &mut report.put_back);
+        before(first.player_changes_saved, &mut report.player_changes_saved);
+        before(first.player_changes_restored, &mut report.player_changes_restored);
+        before(first.bad_entries, &mut report.bad_entries);
+        before(first.left_in_backups, &mut report.left_in_backups);
         Ok(report)
     }
 
@@ -793,9 +821,43 @@ impl Store {
         };
         let order: Vec<(String, bool)> = self.mods.iter().map(|m| (m.id.clone(), m.enabled)).collect();
         let mods_on = order.iter().filter(|(_, on)| *on).count();
-        self.saved.insert(0, SavedSetup { setup: Setup { id, saved_at: now, mods_on }, order });
-        self.saved.truncate(KEEP_SETUPS);
+        self.saved.insert(0, SavedSetup { setup: Setup { id, saved_at: now, mods_on, played: false }, order });
+        // The newest played setup is always kept: it's what "Restore last working setup" goes back to.
+        let keep_played = self.saved.iter().position(|s| s.setup.played).filter(|&i| i >= KEEP_SETUPS);
+        let played = keep_played.map(|i| self.saved.remove(i));
+        self.saved.truncate(if played.is_some() { KEEP_SETUPS - 1 } else { KEEP_SETUPS });
+        self.saved.extend(played);
         self.sync_lists();
+    }
+
+    /// The current on/off and order, as a setup stores it.
+    fn current_order(&self) -> Vec<(String, bool)> {
+        self.mods.iter().map(|m| (m.id.clone(), m.enabled)).collect()
+    }
+
+    /// The game was started with the mods as they are now (the app calls this when Play goes through): the setup is
+    /// marked as played, so "Restore last working setup" goes back to it.
+    pub fn mark_played(&mut self) -> io::Result<()> {
+        let order = self.current_order();
+        let on = |o: &[(String, bool)]| o.iter().filter(|(_, e)| *e).cloned().collect::<Vec<_>>();
+        let i = match self.saved.iter().position(|s| on(&s.order) == on(&order)) {
+            Some(i) => i,
+            None => {
+                self.save_setup();
+                0
+            }
+        };
+        if !self.saved[i].setup.played {
+            self.saved[i].setup.played = true;
+            self.sync_lists();
+            self.save()?;
+        }
+        Ok(())
+    }
+
+    /// What "Restore last working setup" goes back to: the newest setup the game was played with.
+    pub fn restore_target(&self) -> Option<&Setup> {
+        self.setup_list.iter().find(|s| s.played)
     }
 
     /// Takes every mod file out of the game (nothing is deleted; mods stay on/off as they were).
@@ -805,7 +867,16 @@ impl Store {
 
     /// Goes back to a saved setup and applies it. Mods that are gone are skipped; mods added since are turned off and
     /// kept after the others.
+    /// An empty `setup_id` means the newest played setup (`restore_target`).
     pub fn restore(&mut self, setup_id: &str) -> io::Result<Report> {
+        let setup_id = if setup_id.is_empty() {
+            self.restore_target()
+                .map(|s| s.id.clone())
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "The game hasn't been played with mods yet, so there's no working setup to go back to."))?
+        } else {
+            setup_id.to_string()
+        };
+        let setup_id = setup_id.as_str();
         let s = self
             .saved
             .iter()
@@ -831,6 +902,17 @@ impl Store {
         self.archives = archives;
         self.save()?;
         self.apply()
+    }
+
+    /// The way back when something went wrong: takes out every mod file Turbine knows it placed and puts the game's
+    /// own files back from the backup folder (see `deploy::reset_from_backups`). Mods stay listed, all turned off.
+    pub fn reset_game(&mut self) -> io::Result<Report> {
+        let report = deploy::reset_from_backups(&self.deploy_paths())?;
+        for m in &mut self.mods {
+            m.enabled = false;
+        }
+        self.save()?;
+        Ok(report)
     }
 
     /// The player chose to play this game build with its mods (Play anyway after an update warning, or a normal
@@ -859,7 +941,7 @@ impl Store {
         let setups: Vec<String> = self
             .setup_list
             .iter()
-            .map(|s| format!("{{\"id\":{},\"savedAt\":{},\"modsOn\":{}}}", quote(&s.id), s.saved_at, s.mods_on))
+            .map(|s| format!("{{\"id\":{},\"savedAt\":{},\"modsOn\":{},\"played\":{}}}", quote(&s.id), s.saved_at, s.mods_on, s.played))
             .collect();
         format!(
             "{{\"mods\":[{}],\"removed\":[{}],\"setups\":[{}],\"lastBuild\":{}}}",

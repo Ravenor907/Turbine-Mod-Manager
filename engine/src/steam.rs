@@ -5,6 +5,7 @@ use crate::games::{Game, Runtime, Scan, Store};
 use crate::vdf::{self, Vdf};
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Steam's own folders on SteamOS, in the order Steam itself uses them.
@@ -34,7 +35,12 @@ fn is_tool(app_id: &str, name: &str) -> bool {
 fn read_vdf(path: &Path, scan: &mut Scan) -> Option<Vdf> {
     let text = match fs::read(path) {
         Ok(b) => String::from_utf8_lossy(&b).into_owned(),
-        Err(_) => return None,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            // Often a whole SD card's games hide behind one unreadable file, so say so.
+            scan.problems.push(format!("Couldn't open {} ({e}).", path.display()));
+            return None;
+        }
     };
     match vdf::parse(&text) {
         Ok(v) => Some(v),
@@ -127,6 +133,34 @@ pub fn runtime_of(install_dir: &Path, prefix: Option<&Path>) -> Runtime {
     }
 }
 
+/// The game's folder for a manifest's installdir: one plain folder name inside steamapps/common, nothing else.
+/// The folder itself may be a link (a player moved the game elsewhere), but never to the common folder, the root of
+/// the drive or any folder above common.
+pub fn game_folder(common: &Path, installdir: &str) -> Option<PathBuf> {
+    let name = installdir.trim_end_matches('/');
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+        return None;
+    }
+    let dir = common.join(name);
+    let Ok(real_common) = fs::canonicalize(common) else {
+        // No common folder: the game's folder isn't there either, and the caller skips it.
+        return Some(dir);
+    };
+    match fs::canonicalize(&dir) {
+        // Not there (yet): the caller skips it.
+        Err(_) => Some(dir),
+        Ok(real) => {
+            let is_link = fs::symlink_metadata(&dir).map(|m| m.file_type().is_symlink()).unwrap_or(false);
+            let fine = if is_link {
+                !real_common.starts_with(&real)
+            } else {
+                real.parent() == Some(real_common.as_path())
+            };
+            fine.then_some(dir)
+        }
+    }
+}
+
 /// Every installed Steam game, across all libraries.
 pub fn scan(home: &Path, scan: &mut Scan) {
     let mut seen = HashSet::new();
@@ -151,6 +185,11 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 else {
                     continue;
                 };
+                // The app ID is used in folder names (compatdata, librarycache): digits only.
+                if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
+                    scan.problems.push(format!("Skipped {}: its app ID isn't a number.", m.display()));
+                    continue;
+                }
                 if is_tool(app_id, name) || !seen.insert(app_id.to_string()) {
                     continue;
                 }
@@ -159,8 +198,17 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 if flags & 4 == 0 {
                     continue;
                 }
-                let install_dir = steamapps.join("common").join(dir);
+                let common = steamapps.join("common");
+                let Some(install_dir) = game_folder(&common, dir) else {
+                    scan.problems.push(format!("Skipped {name}: {} names a folder outside steamapps/common.", m.display()));
+                    continue;
+                };
                 if !install_dir.is_dir() {
+                    continue;
+                }
+                // A linked game folder may live elsewhere, but never at the root of the drive, the home folder or above.
+                if !crate::heroic::safe_install_path(&install_dir, home) {
+                    scan.problems.push(format!("Skipped {name}: its folder links to {}, which isn't a game folder.", install_dir.display()));
                     continue;
                 }
                 let pfx = steamapps.join("compatdata").join(app_id).join("pfx");

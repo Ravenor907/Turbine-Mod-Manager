@@ -1845,7 +1845,6 @@ fn scan_survives_invalid_utf8_bom_and_crlf() {
 }
 
 #[test]
-#[ignore = "DEFECT: Steam's installdir is joined without checks, so '/abs' or '../..' puts a game's folder outside its library"]
 fn steam_installdir_cannot_leave_the_library() {
     let home = Home(scratch("installdir"));
     let h = &home.0;

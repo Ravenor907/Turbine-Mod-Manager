@@ -4,6 +4,7 @@ use crate::games::{Game, Runtime, Scan, Store};
 use crate::json::{self, Json};
 use crate::steam::runtime_of;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Heroic's config folders that exist: the Flatpak's first (the usual one on SteamOS), then a native install.
@@ -16,7 +17,20 @@ pub fn heroic_roots(home: &Path) -> Vec<PathBuf> {
 }
 
 fn read_json(path: &Path, scan: &mut Scan) -> Option<Json> {
-    let text = fs::read_to_string(path).ok()?;
+    let text = match fs::read(path) {
+        Ok(b) => match String::from_utf8(b) {
+            Ok(t) => t,
+            Err(_) => {
+                scan.problems.push(format!("Couldn't read {} (it isn't valid text).", path.display()));
+                return None;
+            }
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            scan.problems.push(format!("Couldn't open {} ({e}).", path.display()));
+            return None;
+        }
+    };
     match json::parse(&text) {
         Ok(v) => Some(v),
         Err(e) => {
@@ -34,11 +48,34 @@ fn runtime_from_platform(platform: Option<&str>, install_dir: &Path) -> Runtime 
     }
 }
 
-fn push(scan: &mut Scan, store: Store, id: &str, name: &str, dir: &str, build: Option<&str>, platform: Option<&str>) {
+/// Is `dir` usable as a game's folder? It must be a full path, and never the root of the drive, the home folder or a
+/// folder above it (Turbine would put mod files straight into it).
+pub fn safe_install_path(dir: &Path, home: &Path) -> bool {
+    if !dir.is_absolute() || dir.parent().is_none() {
+        return false;
+    }
+    let too_high = |d: &Path, h: &Path| h.starts_with(d);
+    if too_high(dir, home) {
+        return false;
+    }
+    match (fs::canonicalize(dir), fs::canonicalize(home)) {
+        (Ok(d), Ok(h)) => d.parent().is_some() && !too_high(&d, &h),
+        (Ok(d), Err(_)) => d.parent().is_some(),
+        _ => true,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push(scan: &mut Scan, home: &Path, store: Store, id: &str, name: &str, dir: &str, build: Option<&str>, platform: Option<&str>) {
     if id.is_empty() || dir.is_empty() {
         return;
     }
     let install_dir = PathBuf::from(dir);
+    if !safe_install_path(&install_dir, home) {
+        let shown = if name.is_empty() { id } else { name };
+        scan.problems.push(format!("Skipped {shown}: Heroic lists its folder as {dir}, which isn't a game folder."));
+        return;
+    }
     if !install_dir.is_dir() {
         return;
     }
@@ -90,6 +127,7 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 }
                 push(
                     scan,
+                    home,
                     Store::Epic,
                     id,
                     g.str_at("title").unwrap_or(""),
@@ -110,6 +148,7 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 let title = titles.iter().find(|(i, _)| i == id).map(|(_, t)| t.as_str()).unwrap_or("");
                 push(
                     scan,
+                    home,
                     Store::Gog,
                     id,
                     title,
@@ -128,6 +167,7 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 let platform = g.get("install").and_then(|i| i.str_at("platform"));
                 push(
                     scan,
+                    home,
                     Store::Sideload,
                     g.str_at("app_name").unwrap_or(""),
                     g.str_at("title").unwrap_or(""),
