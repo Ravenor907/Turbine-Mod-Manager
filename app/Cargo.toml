@@ -1,0 +1,21 @@
+[package]
+name = "turbine-mod-manager"
+description = "Controller-first mod manager for SteamOS handhelds"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "turbine-mod-manager"
+path = "src/main.rs"
+
+[dependencies]
+turbine-engine = { path = "../engine" }
+cxx = "1.0.176"
+cxx-qt = "0.10"
+cxx-qt-lib = { version = "0.10", features = ["qt_gui", "qt_qml"] }
+sdl2 = { version = "0.37", default-features = false }
+
+[build-dependencies]
+cxx-qt-build = "0.10"

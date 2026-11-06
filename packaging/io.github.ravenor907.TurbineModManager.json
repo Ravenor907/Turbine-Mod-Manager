@@ -1,0 +1,46 @@
+{
+    "id": "io.github.ravenor907.TurbineModManager",
+    "runtime": "org.kde.Platform",
+    "runtime-version": "6.10",
+    "sdk": "org.kde.Sdk",
+    "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+    "command": "turbine-mod-manager",
+    "finish-args": [
+        "--share=ipc",
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--device=all",
+        "--filesystem=~/.local/share/Steam:ro",
+        "--filesystem=~/.steam:ro",
+        "--filesystem=/run/media:ro",
+        "--filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro",
+        "--filesystem=~/.config/heroic:ro",
+        "--filesystem=~/Games:ro"
+    ],
+    "modules": [
+        {
+            "name": "turbine-mod-manager",
+            "buildsystem": "simple",
+            "build-options": {
+                "append-path": "/usr/lib/sdk/rust-stable/bin",
+                "env": {
+                    "CARGO_HOME": "/run/build/turbine-mod-manager/cargo",
+                    "CARGO_NET_OFFLINE": "true",
+                    "TURBINE_VERSION": "0.1"
+                }
+            },
+            "build-commands": [
+                "cargo --offline build --release --locked -p turbine-mod-manager",
+                "install -Dm755 target/release/turbine-mod-manager /app/bin/turbine-mod-manager",
+                "install -Dm644 -t /app/share/turbine-mod-manager/fonts fonts/*.ttf",
+                "install -Dm644 -t /app/share/turbine-mod-manager/licenses fonts/OFL-*.txt LICENSE",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.desktop /app/share/applications/io.github.ravenor907.TurbineModManager.desktop",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineModManager.metainfo.xml",
+                "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.svg /app/share/icons/hicolor/scalable/apps/io.github.ravenor907.TurbineModManager.svg"
+            ],
+            "sources": [
+                { "type": "dir", "path": ".." }
+            ]
+        }
+    ]
+}

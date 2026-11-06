@@ -1,0 +1,183 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish this build as a release (only when the owner says so)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rules:
+    name: House rules
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: No em dashes, no attribution
+        shell: bash
+        run: |
+          fail=0
+          hits=$(git grep -n -I -F "$(printf '\342\200\224')" -- . | head -n 20 || true)
+          if [ -n "$hits" ]; then echo "::error title=House rule broken::Em dash"; echo "$hits"; fail=1; fi
+          pattern=$(printf '%s' 'Y28tYXV0aG9yZWQtYnl8YW50aHJvcGljfGNsYXVkZXxjaGF0Z3B0fGNvcGlsb3Q=' | base64 -d)
+          hits=$(git grep -n -I -i -E "$pattern" -- . | head -n 20 || true)
+          if [ -n "$hits" ]; then echo "::error title=House rule broken::Attribution"; echo "$hits"; fail=1; fi
+          exit $fail
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          v=$(head -n1 VERSION | tr -d '\r')
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+$' || { echo "::error::VERSION must look like 0.3 or 1.0, not \"$v\""; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  engine:
+    name: Engine tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Test and lint the engine
+        shell: bash
+        run: |
+          cd engine
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+
+  vendor:
+    name: Rust crates for the offline Flatpak build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Lock and vendor
+        shell: bash
+        run: |
+          [ -f Cargo.lock ] || cargo generate-lockfile
+          mkdir -p .cargo
+          cargo vendor --locked vendor > .cargo/config.toml
+          du -sh vendor
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: vendor
+          path: |
+            vendor
+            .cargo/config.toml
+            Cargo.lock
+          include-hidden-files: true
+          retention-days: 3
+
+  flatpak:
+    name: Flatpak
+    needs: [rules, engine, vendor]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      options: --privileged
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: vendor
+          path: .
+      - name: Fonts
+        run: sh tools/get-fonts.sh
+      - name: Version
+        shell: bash
+        env:
+          VERSION: ${{ needs.rules.outputs.version }}
+        run: |
+          m=packaging/io.github.ravenor907.TurbineModManager.json
+          sed -i "s|\"TURBINE_VERSION\": \"0.1\"|\"TURBINE_VERSION\": \"$VERSION\"|" "$m"
+          grep -q "\"TURBINE_VERSION\": \"$VERSION\"" "$m" || { echo "::error::The version didn't go into the Flatpak manifest"; exit 1; }
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: .flatpak-builder
+          key: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}-${{ github.sha }}
+          restore-keys: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}-
+      - name: Build Flatpak
+        shell: bash
+        run: |
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          set +e
+          flatpak-builder --repo=repo --disable-rofiles-fuse --force-clean --ccache --install-deps-from=flathub \
+            --state-dir=.flatpak-builder flatpak_app packaging/io.github.ravenor907.TurbineModManager.json > build.log 2>&1
+          code=$?
+          set -e
+          tail -n 60 build.log
+          if [ $code -ne 0 ]; then
+            errs=$(grep -E "^error|error\[|error:|Error:|undefined reference|cannot find" build.log | head -n 30 | cut -c1-240 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            [ -n "$errs" ] && echo "::error title=Build errors::$errs"
+            exit 1
+          fi
+          flatpak build-bundle repo TurbineModManager.flatpak io.github.ravenor907.TurbineModManager \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+          echo "::notice title=TurbineModManager.flatpak::$(stat -c %s TurbineModManager.flatpak) bytes"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
+      - name: Screenshots at Steam Deck and Ally X sizes (fails on any QML error)
+        shell: bash
+        run: |
+          flatpak install --user -y --noninteractive TurbineModManager.flatpak > /dev/null
+          mkdir -p shots home empty
+          python3 tools/fake-home.py "$PWD/home"
+          fail=0
+          shoot() {   # shoot <name> <WxH> <page> <home>
+            out="$PWD/shots/$1.png"
+            timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
+              --env=TURBINE_HOME="$4" --filesystem="$PWD/shots" --filesystem="$4" \
+              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$2" --page="$3" > "shots/$1.log" 2>&1
+            if [ ! -s "$out" ]; then echo "::error title=No screenshot::$1"; cat "shots/$1.log"; fail=1; fi
+            if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$1.log"; then echo "::error title=QML problem::$1"; fail=1; fi
+          }
+          for size in 1280x800 1920x1080; do
+            for page in game settings details perf notice; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
+            shoot "nogames-$size" "$size" game "$PWD/empty"
+          done
+          ls -la shots
+          exit $fail
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: screenshots
+          path: shots
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: TurbineModManager.flatpak
+          path: TurbineModManager.flatpak
+          retention-days: 30
+
+  release:
+    name: Release (owner approved)
+    needs: [rules, flatpak]
+    if: github.event_name == 'workflow_dispatch' && inputs.release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: TurbineModManager.flatpak
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
+        with:
+          tag_name: v${{ needs.rules.outputs.version }}
+          name: Turbine Mod Manager ${{ needs.rules.outputs.version }}
+          prerelease: ${{ startsWith(needs.rules.outputs.version, '0.') }}
+          files: TurbineModManager.flatpak
+          body: |
+            Test build for SteamOS handhelds. Download TurbineModManager.flatpak in Desktop Mode and open it to install.

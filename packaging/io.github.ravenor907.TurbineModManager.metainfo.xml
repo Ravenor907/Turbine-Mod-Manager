@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ravenor907.TurbineModManager</id>
+  <name>Turbine Mod Manager</name>
+  <summary>Mod manager for SteamOS handhelds</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.ravenor907">
+    <name>Ravenor907</name>
+  </developer>
+  <description>
+    <p>A controller-first mod manager for Steam and Heroic games on SteamOS handhelds.</p>
+  </description>
+  <launchable type="desktop-id">io.github.ravenor907.TurbineModManager.desktop</launchable>
+  <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1" date="2026-11-06"/>
+  </releases>
+</component>

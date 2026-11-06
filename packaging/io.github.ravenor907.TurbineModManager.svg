@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Placeholder until the owner's icon is ready. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#EDC87A"/>
+      <stop offset="1" stop-color="#785A27"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="#0B0A08"/>
+  <circle cx="64" cy="64" r="54" fill="url(#g)"/>
+  <path d="M34 36h60v14H71v46H57V50H34z" fill="#0B0A08"/>
+</svg>

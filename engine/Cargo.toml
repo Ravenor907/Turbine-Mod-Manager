@@ -1,0 +1,10 @@
+[package]
+name = "turbine-engine"
+description = "Game detection, installs and deploys for Turbine Mod Manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The engine has no outside dependencies on purpose: fewer moving parts, nothing to audit, and it builds anywhere.
+[dependencies]

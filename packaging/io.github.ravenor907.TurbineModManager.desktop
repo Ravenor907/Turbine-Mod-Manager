@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Turbine Mod Manager
+Comment=Mod manager for SteamOS handhelds
+Exec=turbine-mod-manager
+Icon=io.github.ravenor907.TurbineModManager
+Terminal=false
+Categories=Game;Utility;
+Keywords=mods;modding;steam;heroic;handheld;
