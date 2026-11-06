@@ -165,6 +165,15 @@ impl Net {
         Some(fs::read_to_string(dir.join(name)).map_err(|e| format!("The sample {name} couldn't be read ({e}).")))
     }
 
+    /// A picture's address for the interface: none in the screenshot checks (they have no internet).
+    fn pic(&self, url: &str) -> String {
+        if self.sample.is_some() || !url.starts_with("https://") {
+            String::new()
+        } else {
+            url.to_string()
+        }
+    }
+
     fn no_downloads(&self) -> Result<(), String> {
         if self.sample.is_some() {
             return Err("Downloads are off in this test run.".into());
@@ -226,7 +235,7 @@ impl Net {
                     quote(&p.description),
                     p.downloads,
                     p.rating,
-                    quote(&p.icon),
+                    quote(&self.pic(&p.icon)),
                     code_mod(p),
                     quote(v.map(|v| v.number.as_str()).unwrap_or("")),
                     v.map(|v| v.file_size).unwrap_or(0),
@@ -276,7 +285,7 @@ impl Net {
             quote(&p.display_name()),
             quote(&p.owner),
             quote(&p.description),
-            quote(&p.icon),
+            quote(&self.pic(&p.icon)),
             code_mod(p),
             quote(v.map(|v| v.number.as_str()).unwrap_or("")),
             v.map(|v| v.file_size).unwrap_or(0),
@@ -424,7 +433,7 @@ impl Net {
                     quote(&m.summary),
                     m.downloads,
                     m.endorsements,
-                    quote(&m.thumbnail_url),
+                    quote(&self.pic(&m.thumbnail_url)),
                     quote(&m.version),
                     quote(&day(&m.updated_at)),
                     game.have.iter().any(|h| h.source.kind == "nexus"
@@ -475,7 +484,7 @@ impl Net {
             quote(&info.name),
             quote(&info.author),
             quote(&info.summary),
-            quote(&info.picture_url),
+            quote(&self.pic(&info.picture_url)),
             quote(&info.version),
             main.as_ref().map(|f| f.size_bytes).unwrap_or(0),
             info.downloads,

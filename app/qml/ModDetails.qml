@@ -40,12 +40,12 @@ Item {
     }
 
     Text {
-        visible: md.loading || (md.info && md.info.error)
+        visible: md.loading || !!(md.info && md.info.error)
         anchors.centerIn: parent
         width: Math.min(parent.width, md.ui.px(520))
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
-        text: md.loading ? "Reading the details..." : md.info.error
+        text: md.loading ? "Reading the details..." : (md.info.error || "")
         color: md.ui.c.soft
         font.family: md.ui.bodyFont
         font.pixelSize: md.ui.px(16)
@@ -53,7 +53,7 @@ Item {
 
     Flickable {
         id: view
-        visible: !md.loading && !md.info.error
+        visible: !md.loading && !(md.info && md.info.error)
         anchors.fill: parent
         contentHeight: Math.max(left.implicitHeight, right.implicitHeight) + md.ui.px(8)
         clip: true

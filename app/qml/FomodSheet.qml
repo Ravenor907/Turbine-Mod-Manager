@@ -122,11 +122,12 @@ Item {
             spacing: fs.ui.px(14)
             Column {
                 width: parent.width * 0.58
+                height: parent.height
                 spacing: fs.ui.px(6)
                 Row {
                     spacing: fs.ui.px(10)
                     Text { text: fs.group ? fs.group.name : (fs.step ? fs.step.name : ""); color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(19); font.bold: true }
-                    Text { text: fs.group ? fs.group.hint : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); anchors.bottom: parent.children[0].bottom; anchors.bottomMargin: fs.ui.px(2) }
+                    Text { text: fs.group ? fs.group.hint : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); topPadding: fs.ui.px(4) }
                 }
                 ListView {
                     id: optList
