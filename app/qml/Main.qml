@@ -1195,49 +1195,6 @@ Window {
                 }
             }
 
-            // Legend: only the controls that matter here.
-            Rectangle {
-                id: legend
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: app.px(8)
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.leftMargin: app.px(14)
-                anchors.rightMargin: app.px(14)
-                height: app.px(36)
-                radius: app.px(6)
-                color: c.panel
-                readonly property bool gamePage: app.page === "game" && app.game !== null && app.sheet === ""
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: app.px(12)
-                    spacing: app.px(16)
-                    // Moving a mod
-                    Hint { visible: app.moving; k: "▲▼"; label: "Move" }
-                    Hint { visible: app.moving; k: "a"; label: "Done" }
-                    // Sheets
-                    Hint { visible: app.sheet === "modmenu" || app.sheet === "gamemenu" || app.sheet === "add"; k: "▲▼"; label: "Choose" }
-                    Hint { visible: app.sheet === "check" || app.sheet === "loader"; k: "◀▶"; label: "Choose" }
-                    Hint { visible: app.sheet !== ""; k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
-                    // Game page
-                    Hint { visible: legend.gamePage && !app.moving && app.tab === 0 && app.ordered && app.mods.length > 1; k: "y"; label: "Reorder" }
-                    Hint { visible: legend.gamePage && !app.moving; k: "lb+rb"; label: "Switch game" }
-                    Hint { visible: legend.gamePage && !app.moving; k: "view"; label: "Game menu" }
-                    Hint { visible: app.sheet === "" && app.page === "settings"; k: "lt+rt"; label: "Sections" }
-                    Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 0; k: "◀▶"; label: "Change" }
-                    Hint { visible: app.sheet === "" && app.page !== "game"; k: "b"; label: "Back" }
-                    Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail"; k: "◀"; label: "Games" }
-                }
-                Label {
-                    anchors.right: parent.right
-                    anchors.rightMargin: app.px(12)
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: !Turbine.pads
-                    text: "No controller found"
-                    color: c.muted
-                    font.pixelSize: app.px(14)
-                }
-            }
         }
     }
 
@@ -1363,6 +1320,50 @@ Window {
         focusIndex: app.loaderIndex
         onActivated: (index, key) => { app.loaderIndex = index; app.act(key || "a") }
         onClosed: app.act("b")
+    }
+
+    // Legend: only the controls that matter here. Declared after the menus so their backdrop never dims it.
+    Rectangle {
+        id: legend
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: app.px(8)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: rail.width + app.px(14)
+        anchors.rightMargin: app.px(14)
+        height: app.px(36)
+        radius: app.px(6)
+        color: c.panel
+        readonly property bool gamePage: app.page === "game" && app.game !== null && app.sheet === ""
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            x: app.px(12)
+            spacing: app.px(16)
+            // Moving a mod
+            Hint { visible: app.moving; k: "▲▼"; label: "Move" }
+            Hint { visible: app.moving; k: "a"; label: "Done" }
+            // Sheets
+            Hint { visible: app.sheet === "modmenu" || app.sheet === "gamemenu" || app.sheet === "add"; k: "▲▼"; label: "Choose" }
+            Hint { visible: app.sheet === "check" || app.sheet === "loader"; k: "◀▶"; label: "Choose" }
+            Hint { visible: app.sheet !== ""; k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
+            // Game page
+            Hint { visible: legend.gamePage && !app.moving && app.tab === 0 && app.ordered && app.mods.length > 1; k: "y"; label: "Reorder" }
+            Hint { visible: legend.gamePage && !app.moving; k: "lb+rb"; label: "Switch game" }
+            Hint { visible: legend.gamePage && !app.moving; k: "view"; label: "Game menu" }
+            Hint { visible: app.sheet === "" && app.page === "settings"; k: "lt+rt"; label: "Sections" }
+            Hint { visible: app.sheet === "" && app.page === "settings" && app.setSection === 0; k: "◀▶"; label: "Change" }
+            Hint { visible: app.sheet === "" && app.page !== "game"; k: "b"; label: "Back" }
+            Hint { visible: app.sheet === "" && !app.moving && app.zone !== "rail"; k: "◀"; label: "Games" }
+        }
+        Label {
+            anchors.right: parent.right
+            anchors.rightMargin: app.px(12)
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !Turbine.pads
+            text: "No controller found"
+            color: c.muted
+            font.pixelSize: app.px(14)
+        }
     }
 
     // ---------------------------------------------------------------- toast

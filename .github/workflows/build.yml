@@ -82,14 +82,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-      - name: Lock and vendor
+      - name: Vendor the locked crates
         shell: bash
         run: |
-          [ -f Cargo.lock ] || cargo generate-lockfile
-          # Printed so it can be read from the log (artifacts can't always be downloaded).
-          echo "CARGO-LOCK-BEGIN"
-          base64 -w0 Cargo.lock; echo
-          echo "CARGO-LOCK-END"
+          # The crate versions are pinned in the committed Cargo.lock; a build without it would pick new ones.
+          [ -f Cargo.lock ] || { echo "::error title=Cargo.lock missing::Commit Cargo.lock so every build uses the same crate versions"; exit 1; }
           mkdir -p .cargo
           cargo vendor --locked vendor > .cargo/config.toml
           du -sh vendor
