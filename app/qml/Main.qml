@@ -112,7 +112,6 @@ Window {
                     : { checked: true, result: { found: true, name: "Google Chrome", how: "flatpak" } }
                 app.bridge = { running: true, port: 47701, paired: true, connected: page === "browser" ? 1 : 0, ext: "iniglfblobfbekihldmgekchfehncbeb", error: "" }
                 app.openSection("Accounts")
-                if (page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "browser")
                 else if (page === "helper") { app.helperFolder = "/home/deck/Downloads/Turbine browser helper"; app.infoIndex = 0; app.sheet = "helper" }
                 else app.noBrowser()
             }
@@ -138,6 +137,7 @@ Window {
             else if ((shot.page === "nexusdetails" || shot.page === "nexusversions" || shot.page === "nexusfree") && app.getItems.length > 0) app.openDetails(app.getItems[0])
             else if (shot.page === "code") { app.openProfiles(); Turbine.profileCode("Default"); app.sheet = "code" }
             else if (shot.page === "profiles") app.openProfiles()
+            else if (shot.page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "browser")
             else if (shot.page === "lootsort" || shot.page === "lootnotes") { app.orderIndex = -1; Turbine.orderSort() }
             // After the first frames, so the screenshot inside the report has something in it.
             else if (shot.page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
@@ -786,6 +786,7 @@ Window {
             if (b === "left") checkIndex = Math.max(0, checkIndex - 1)
             else if (b === "right") checkIndex = Math.min(checkChoices.length - 1, checkIndex + 1)
             else if (b === "a") checkChoose(checkIndex)
+            else if (b === "up" || b === "down") checkView.scroll(b === "up" ? -1 : 1)
             else if (b === "b") sheet = ""
         } else if (sheet === "loader") {
             if (b === "left" || b === "up") loaderIndex = 0
@@ -2635,6 +2636,7 @@ Window {
         onClosed: app.act("b")
     }
     PrePlayCheck {
+        id: checkView
         ui: kit
         visible: app.sheet === "check"
         checks: app.checks
@@ -2839,6 +2841,7 @@ Window {
             Hint { visible: ["nobrowser", "helper", "found"].indexOf(app.sheet) >= 0; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "code" && !!app.codeData && app.codeData.state === "ready"; k: "a"; label: "Copy" }
             Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
+            Hint { visible: app.sheet === "check" && checkView.scrolls; k: "▲▼"; label: "Scroll" }
             Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
             Hint { visible: app.sheet === "report" && reportView.editing; k: "b"; label: "Done typing" }
             Hint { visible: app.sheet !== "" && app.sheet !== "ask" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : app.sheet === "fomod" ? "Back a step" : app.sheet === "found" ? "Not this one" : "Close" }

@@ -33,7 +33,7 @@ Rectangle {
     color: ui.c.panel
     border.color: ui.c.accentLo
     border.width: Math.max(1, ui.px(1))
-    Rectangle { width: parent.width; height: ui.px(3); radius: ui.px(2); color: ui.c.accent }
+    Rectangle { x: parent.radius; width: parent.width - parent.radius * 2; height: ui.px(3); radius: ui.px(2); color: ui.c.accent }
 
     Column {
         id: col
@@ -76,6 +76,8 @@ Rectangle {
         Text {
             visible: !!card.status && !!card.status.added
             width: parent.width
+            wrapMode: Text.WordWrap
+            maximumLineCount: 2
             elide: Text.ElideRight
             text: card.status && card.status.added ? card.status.added + " is in your mods, turned on" : ""
             color: ui.c.soft

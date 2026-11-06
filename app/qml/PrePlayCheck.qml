@@ -23,9 +23,16 @@ Item {
     property var buttons: []
     property int focusIndex: 0
     property string note: ""              // e.g. "Wait checks again every few hours."
+    readonly property bool scrolls: checkList.contentHeight > checkList.height + 1
 
     signal activated(int index, string key)
     signal closed()
+
+    // Up and Down scroll the lines when they don't all fit (the buttons always stay in view).
+    function scroll(d) {
+        checkList.contentY = Math.max(0, Math.min(checkList.contentHeight - checkList.height, checkList.contentY + d * ui.px(80)))
+    }
+    onChecksChanged: checkList.contentY = 0
 
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
@@ -78,6 +85,7 @@ Item {
             spacing: root.ui.px(8)
 
             Text {
+                id: titleText
                 width: parent.width
                 text: (root.title || "").toUpperCase()
                 elide: Text.ElideRight
@@ -88,6 +96,19 @@ Item {
                 font.letterSpacing: root.ui.px(1)
             }
 
+            Flickable {
+                id: checkList
+                width: parent.width
+                // What's left of the screen after the title, the buttons and the note.
+                height: Math.min(checkCol.implicitHeight, root.height - root.ui.px(24) - root.ui.px(34) - titleText.height
+                                 - buttonFlow.height - (noteText.visible ? noteText.height + content.spacing : 0) - content.spacing * 2)
+                contentHeight: checkCol.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                Column {
+                    id: checkCol
+                    width: checkList.width
+                    spacing: content.spacing
             Repeater {
                 model: root.checks || []
                 Rectangle {
@@ -141,8 +162,11 @@ Item {
                     }
                 }
             }
+                }
+            }
 
             Flow {
+                id: buttonFlow
                 width: parent.width
                 spacing: root.ui.px(10)
                 topPadding: root.ui.px(6)
@@ -161,6 +185,7 @@ Item {
             }
 
             Text {
+                id: noteText
                 visible: text !== ""
                 width: parent.width
                 text: root.note || ""
