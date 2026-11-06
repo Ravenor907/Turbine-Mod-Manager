@@ -2,9 +2,11 @@
 
 pub mod games;
 pub mod heroic;
+pub mod inflate;
 pub mod json;
 pub mod steam;
 pub mod vdf;
+pub mod zip;
 
 pub use games::{Game, Runtime, Scan, Store};
 
