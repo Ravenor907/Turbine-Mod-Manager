@@ -69,7 +69,7 @@ Rectangle {
             wrapMode: Text.WordWrap
             maximumLineCount: 3
             elide: Text.ElideRight
-            text: card.status ? card.status.text : ""
+            text: card.status && card.status.text ? card.status.text : ""
             color: ui.c.text
             font.family: ui.bodyFont; font.pixelSize: ui.px(17); font.bold: true
         }
