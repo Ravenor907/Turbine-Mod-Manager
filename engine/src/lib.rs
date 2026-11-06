@@ -1,5 +1,9 @@
 //! Turbine Mod Manager's engine. It has no interface of its own: the app calls into it.
 
+// Newer clippy suggests as_chunks for fixed-size chunks; the explicit form reads better here and works on every
+// toolchain the build uses.
+#![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
+
 pub mod archives;
 pub mod deploy;
 pub mod fomod;
