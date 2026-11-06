@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2" date="2026-11-06" type="development">
+      <description>
+        <p>Mods you can use, for testing on the owner's handhelds:</p>
+        <ul>
+          <li>Add mods from zip files in Downloads, turn them on and off, and set their order where it matters</li>
+          <li>Recently removed keeps uninstalled mods for 7 days, with Undo</li>
+          <li>Changes go into the game a few seconds after the last edit and when leaving Turbine</li>
+          <li>Play checks the game first: game updates, missing mod loaders, low space and exFAT drives</li>
+          <li>Game menu with Play original and Restore last working setup</li>
+          <li>Rules for Skyrim Special Edition, Stardew Valley, Valheim, Lethal Company and Risk of Rain 2</li>
+          <li>BepInEx games under Proton get the winhttp setting they need, with a backup of the old settings</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1" date="2026-11-06"/>
   </releases>
 </component>

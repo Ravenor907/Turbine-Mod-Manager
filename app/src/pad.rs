@@ -5,7 +5,7 @@ use sdl2::controller::{Axis, Button, GameController};
 use sdl2::event::Event;
 use sdl2::{EventPump, GameControllerSubsystem, Sdl};
 use std::collections::HashMap;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// How far a stick or trigger must move to count as a press, and where it lets go again (so it never flickers).
 const PRESS_AT: i16 = 20_000;
@@ -24,6 +24,8 @@ pub struct Pads {
     last_up: HashMap<&'static str, (u32, Instant)>,
     /// Stick and trigger directions currently counted as pressed, per pad.
     axis_down: HashMap<(u32, &'static str), bool>,
+    /// Presses are dropped until then (just after Turbine's window comes back to the front).
+    quiet_until: Option<Instant>,
 }
 
 impl Pads {
@@ -41,6 +43,7 @@ impl Pads {
             held: HashMap::new(),
             last_up: HashMap::new(),
             axis_down: HashMap::new(),
+            quiet_until: None,
         };
         if let Some(sub) = pads.subsystem.as_ref() {
             let count = sub.num_joysticks().unwrap_or(0);
@@ -59,8 +62,29 @@ impl Pads {
         !self.open.is_empty()
     }
 
+    /// Turbine's window just came back to the front: presses made while a game had it (still waiting in SDL's
+    /// queue) are read and thrown away, and new ones are ignored for `quiet`, so a button pressed in the game as it
+    /// closes never acts in Turbine.
+    pub fn wake(&mut self, quiet: Duration) {
+        let _ = self.read();
+        self.quiet_until = Some(Instant::now() + quiet);
+    }
+
     /// Everything that happened since the last call, as (button, pressed) pairs.
     pub fn poll(&mut self) -> Vec<(&'static str, bool)> {
+        let events = self.read();
+        if let Some(until) = self.quiet_until {
+            if Instant::now() < until {
+                // Releases still go through, so nothing stays held down in the interface.
+                return events.into_iter().filter(|(_, down)| !*down).collect();
+            }
+            self.quiet_until = None;
+        }
+        events
+    }
+
+    /// Reads SDL's queue: controllers coming and going, buttons, sticks and triggers.
+    fn read(&mut self) -> Vec<(&'static str, bool)> {
         let mut raw: Vec<(u32, &'static str, bool)> = Vec::new();
         let mut added = Vec::new();
         let mut removed = Vec::new();

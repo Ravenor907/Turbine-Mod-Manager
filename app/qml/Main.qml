@@ -100,18 +100,21 @@ Window {
         readonly property color line: hc ? "#FFFFFF" : light ? "#CDBF9F" : black ? "#26221C" : "#33291B"
         readonly property color text: hc ? "#FFFFFF" : light ? "#2A2216" : "#EADFC6"
         readonly property color soft: hc ? "#FFFFFF" : light ? "#4A3E2A" : "#CDBE9F"
-        readonly property color muted: hc ? "#E0E0E0" : light ? "#5E5038" : "#A08C68"
+        readonly property color muted: hc ? "#E0E0E0" : light ? "#5E5038" : "#AC9873"
         readonly property var swatches: ({ brass: "#C99E52", iron: "#A9B4BE", copper: "#B07A5A", jade: "#6FAE8C",
                                            fjord: "#6E9CC8", heather: "#A58BC6", ember: "#CF6F54" })
         readonly property color accentBase: look.vision === "none" ? "#BDBDBD" : (swatches[look.accent] || swatches.brass)
-        readonly property color accent: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 1.7) : accentBase
-        readonly property color accentHi: hc ? "#FFE680" : light ? Qt.darker(accentBase, 1.4) : Qt.lighter(accentBase, 1.22)
+        readonly property color accent: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 1.8) : accentBase
+        readonly property color accentHi: hc ? "#FFE680" : light ? Qt.darker(accentBase, 1.6) : Qt.lighter(accentBase, 1.22)
         readonly property color accentLo: light ? Qt.darker(accentBase, 2.1) : Qt.darker(accentBase, 1.35)
         readonly property color onAccent: light ? "#FFFFFF" : "#0B0A08"
+        // Accent-colored words: at least 4.5:1 on every surface here, in every theme, accent and color vision mode.
+        readonly property color accentText: hc ? "#FFD54A" : light ? Qt.darker(accentBase, 2.2) : Qt.lighter(accentBase, 1.12)
         readonly property color focusFill: hc ? "#333300" : light ? Qt.lighter(accentBase, 1.55) : Qt.darker(accentBase, 4.2)
-        // Status colors stay apart for each kind of color vision; words always carry the meaning too.
-        readonly property color ok: look.vision === "none" ? soft : (look.vision === "red" || look.vision === "green") ? "#6E9CC8" : light ? "#4E6B2E" : "#9DBF7A"
-        readonly property color warn: look.vision === "none" ? text : (look.vision === "red" || look.vision === "green") ? "#E0A040" : light ? "#9A4A2A" : "#E6A98A"
+        // Status colors stay apart for each kind of color vision; words always carry the meaning too. Each reads at
+        // 4.5:1 or better as text on ground, panel, card, raised and focusFill.
+        readonly property color ok: look.vision === "none" ? soft : (look.vision === "red" || look.vision === "green") ? (light ? "#25507E" : "#7FAAD3") : light ? "#3F5824" : "#9DBF7A"
+        readonly property color warn: look.vision === "none" ? text : (look.vision === "red" || look.vision === "green") ? (light ? "#704700" : "#E0A040") : light ? "#843C20" : "#E6A98A"
         readonly property color stop: look.vision === "none" ? text : hc ? "#FF8A80" : light ? "#8E2A1E" : "#F0907A"
     }
 
@@ -142,6 +145,8 @@ Window {
     property var downloads: []
     property var checks: []
     readonly property bool ordered: rules !== null && rules.ordered === true
+    // The name for tight places (the header): the game rules' short name when it has one.
+    readonly property string gameTitle: game ? ((rules && rules.shortName) || game.name) : ""
     readonly property bool loaderMissing: rules !== null && rules.loader !== null && rules.loader !== undefined && !rules.loaderInstalled
     readonly property string loaderShort: rules && rules.loader ? rules.loader.name.split(" (")[0] : ""
     readonly property var needLoader: loaderMissing ? mods.filter(m => m.enabled && m.needsLoader) : []
@@ -235,7 +240,17 @@ Window {
     // Changes go into the game 3 seconds after the last edit, when Turbine loses focus and when it closes.
     Timer { id: autoApply; interval: 3000; onTriggered: if (!shot.on) Turbine.applyNow() }
     function edited() { autoApply.restart() }
-    onActiveChanged: if (!active && !shot.on && Turbine.pending > 0) { autoApply.stop(); Turbine.applyNow() }
+    onActiveChanged: {
+        if (active) {
+            // Back from a game: presses made there (still queued) must not act here.
+            repeater.stop()
+            repeatButton = ""
+            Turbine.wake()
+        } else if (!shot.on && Turbine.pending > 0) {
+            autoApply.stop()
+            Turbine.applyNow()
+        }
+    }
     onClosing: Turbine.finish()
 
     // ---------------------------------------------------------------- mod actions
@@ -244,7 +259,7 @@ Window {
         mods = mods.map(x => x.id === m.id ? Object.assign({}, x, { enabled: on }) : x)
         Turbine.setEnabled(m.id, on)
         edited()
-        if (on && m.needsLoader && loaderMissing) { loaderFor = [m.name]; sheet = "loader" }
+        if (on && m.needsLoader && loaderMissing) { loaderFor = [m.name]; openLoader() }
     }
     function moveMod(m, to) {
         const from = mods.findIndex(x => x.id === m.id)
@@ -262,11 +277,11 @@ Window {
         Turbine.removeMod(m.id)
         edited()
         modIndex = Math.max(0, Math.min(modIndex, mods.length - 1))
-        undoToast.show(m.id, m.name)
+        toast.showUndo(m.id, m.name)
     }
     function putBack(id) {
         Turbine.undoRemove(id)
-        undoToast.hide()
+        toast.hide()
         edited()
     }
     // Reorder mode (Y): the D-pad moves the mod, A, B or Y puts it down.
@@ -297,13 +312,16 @@ Window {
     // The loader prompt shows once per game while a mod that needs the missing loader is on.
     property string loaderOffered: ""
     property var loaderFor: []
+    property bool loaderSourceShown: false
+    property int loaderIndex: 0
+    function openLoader() { loaderSourceShown = false; loaderIndex = 0; sheet = "loader" }
     function offerLoader() {
         if (!game || !modsLoaded || loaderOffered === game.id || needLoader.length === 0) return
         if (shot.on && shot.page !== "loader") return
         if (sheet !== "" || page !== "game") return
         loaderOffered = game.id
         loaderFor = needLoader.map(m => m.name)
-        sheet = "loader"
+        openLoader()
     }
 
     // ---------------------------------------------------------------- Play
@@ -362,10 +380,10 @@ Window {
     readonly property var modMenuItems: !menuMod ? [] : [
         { icon: "power", title: menuMod.enabled ? "Turn off" : "Turn on", detail: menuMod.enabled ? "Stays installed" : "Goes into the game", act: "toggle" }
     ].concat(ordered ? [
-        { icon: "up", title: "Move to top", detail: "First in the load order. Mods below it win when files overlap.", act: "top" },
-        { icon: "down", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" }
+        { icon: "move", title: "Move to top", detail: "First in the load order. Mods below it win when files overlap.", act: "top" },
+        { icon: "move", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" }
     ] : []).concat([
-        { icon: "trash", title: "Uninstall", detail: "Kept in Recently removed for 7 days", act: "remove", danger: true }
+        { icon: "remove", title: "Uninstall", detail: "Kept in Recently removed for 7 days", act: "remove", danger: true }
     ])
     property int menuIndex: 0
     function modMenuRun(i) {
@@ -394,6 +412,10 @@ Window {
         tab = 0
         Turbine.importZip(d.path)
         edited()
+    }
+    function age(sec) {
+        const d = Math.floor((Date.now() / 1000 - sec) / 86400)
+        return d <= 0 ? "Today" : d === 1 ? "Yesterday" : d + " days ago"
     }
     function sizeWords(b) {
         if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB"
@@ -489,7 +511,10 @@ Window {
             else if (b === "a") checkChoose(checkIndex)
             else if (b === "b") sheet = ""
         } else if (sheet === "loader") {
-            if (b === "a" || b === "b") sheet = ""
+            if (b === "left" || b === "up") loaderIndex = 0
+            else if (b === "right" || b === "down") loaderIndex = 1
+            else if (b === "a" && loaderIndex === 0 && !loaderSourceShown) loaderSourceShown = true
+            else if (b === "a" || b === "b") sheet = ""
         }
     }
 
@@ -501,7 +526,7 @@ Window {
             else if (b === "a" || b === "b" || b === "y") endMove()
             return
         }
-        if (b === "y" && undoToast.shown) { putBack(undoToast.modId); return }
+        if (b === "y" && undoShown) { putBack(undoId); return }
         if (b === "start") { startPlay(); return }
         if (b === "lb") { switchGame(-1); return }
         if (b === "rb") { switchGame(1); return }
@@ -521,6 +546,7 @@ Window {
             else if (tab === 0 && game) {
                 if (b === "up") modIndex = Math.max(0, modIndex - 1)
                 else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
+                else if (b === "a" && modsLoaded && listItems.length === 0) openAdd()
                 else if (b === "a" && focusedItem) focusedItem.kind === "mod" ? toggle(focusedItem.m) : putBack(focusedItem.m.id)
                 else if (b === "x" && menuMod) sheet = "modmenu"
                 else if (b === "y") startMove()
@@ -551,7 +577,7 @@ Window {
     }
     function railSelect(i) {
         if (i < games.length) { current = i; page = "game"; zone = "main" }
-        else if (i === games.length) toast.show("Turbine finds Steam and Heroic games by itself. Install a game and it shows up here.")
+        else if (i === games.length) toast.showPlain("Turbine finds Steam and Heroic games by itself. Install a game and it shows up here.")
         else openSettings()
     }
 
@@ -587,8 +613,8 @@ Window {
     component Key: Rectangle {
         property string k: ""
         property bool square: k.length > 1
-        implicitWidth: Math.max(app.px(20), keyText.implicitWidth + app.px(10))
-        implicitHeight: app.px(20)
+        implicitWidth: Math.max(app.px(24), keyText.implicitWidth + app.px(12))
+        implicitHeight: app.px(24)
         radius: square ? app.px(5) : height / 2
         color: c.raised
         border.color: c.accentLo
@@ -599,7 +625,7 @@ Window {
             text: parent.k.toUpperCase()
             color: c.text
             font.family: app.bodyFont
-            font.pixelSize: app.px(11)
+            font.pixelSize: app.px(14)
             font.bold: true
         }
     }
@@ -640,94 +666,6 @@ Window {
         if (g.runtime === "native") return "Native Linux game"
         return "Not started yet"
     }
-    readonly property var icons: ({
-        power: "M12 3v8M6.5 6.5a8 8 0 1 0 11 0",
-        up: "M12 20V4M5 11l7-7 7 7",
-        down: "M12 4v16M5 13l7 7 7-7",
-        trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
-        play: "M7 4l13 8-13 8z",
-        back: "M4 4v6h6M5 15a8 8 0 1 0 2-8.5L4 10",
-        info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5M12 7.5v.5",
-        dl: "M12 4v11M7 10l5 5 5-5M5 20h14"
-    })
-    // One choice in a menu sheet: icon, title, one or two lines under it, and A on the focused one.
-    component MenuRow: Rectangle {
-        id: mrow
-        property string icon: ""
-        property string title: ""
-        property string detail: ""
-        property bool focused: false
-        property bool danger: false
-        property bool usable: true
-        signal picked()
-        width: parent ? parent.width : 0
-        height: Math.max(app.px(56), mcol.implicitHeight + app.px(16))
-        radius: app.px(7)
-        color: focused ? c.focusFill : "transparent"
-        border.color: c.accent
-        border.width: focused ? Math.max(1, app.px(1.5)) : 0
-        opacity: usable ? 1 : 0.6
-        Rectangle {
-            id: micon
-            x: app.px(10)
-            anchors.verticalCenter: parent.verticalCenter
-            width: app.px(34); height: width; radius: app.px(7)
-            color: c.raised
-            Icon { anchors.centerIn: parent; d: app.icons[mrow.icon] || ""; tint: mrow.danger ? c.warn : c.accentHi; width: app.px(20); height: app.px(20) }
-        }
-        Column {
-            id: mcol
-            anchors.left: micon.right
-            anchors.leftMargin: app.px(12)
-            anchors.right: mkey.left
-            anchors.rightMargin: app.px(8)
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: app.px(2)
-            Label { width: parent.width; text: mrow.title; font.pixelSize: app.px(16); font.bold: true; color: mrow.danger ? c.warn : c.text }
-            Label { width: parent.width; visible: text !== ""; text: mrow.detail; color: c.soft; font.pixelSize: app.px(14); wrapMode: Text.WordWrap; elide: Text.ElideNone; maximumLineCount: 3 }
-        }
-        Key { id: mkey; k: "a"; visible: mrow.focused && mrow.usable; anchors.right: parent.right; anchors.rightMargin: app.px(12); anchors.verticalCenter: parent.verticalCenter }
-        TapHandler { onTapped: mrow.picked() }
-    }
-    // A button in a sheet's row of choices.
-    component Choice: Rectangle {
-        id: ch
-        property string label: ""
-        property string k: ""
-        property bool focused: false
-        signal picked()
-        width: chRow.implicitWidth + app.px(28)
-        height: app.px(40)
-        radius: app.px(8)
-        color: focused ? c.focusFill : c.card
-        border.color: focused ? c.accent : c.line
-        border.width: focused ? app.px(2) : Math.max(1, app.px(1))
-        Hint { id: chRow; anchors.centerIn: parent; k: ch.k; label: ch.label }
-        TapHandler { onTapped: ch.picked() }
-    }
-    // A centered sheet: title, then whatever goes in it.
-    component Sheet: Rectangle {
-        id: sh
-        property string title: ""
-        default property alias content: shBody.data
-        anchors.centerIn: parent
-        width: Math.min(parent.width - app.px(40), app.px(620))
-        height: Math.min(parent.height - app.px(30), shCol.implicitHeight + app.px(34))
-        radius: app.px(10)
-        color: c.panel
-        border.color: c.line
-        clip: true
-        TapHandler { }   // taps inside don't close it
-        Column {
-            id: shCol
-            x: app.px(20); y: app.px(16)
-            width: parent.width - app.px(40)
-            spacing: app.px(10)
-            Label { width: parent.width; text: sh.title; font.family: app.titleFont; font.pixelSize: app.px(18); font.bold: true; font.letterSpacing: app.px(1) }
-            Column { id: shBody; width: parent.width; spacing: app.px(10) }
-        }
-    }
-
     // ---------------------------------------------------------------- layout
     Row {
         anchors.fill: parent
@@ -761,7 +699,7 @@ Window {
                     anchors.horizontalCenter: parent.horizontalCenter
                     gradient: Gradient {
                         GradientStop { position: 0; color: c.accentHi }
-                        GradientStop { position: 1; color: c.accentLo }
+                        GradientStop { position: 1; color: c.accent }
                     }
                     Text {
                         anchors.centerIn: parent
@@ -874,18 +812,30 @@ Window {
                 Item {
                     width: parent.width
                     height: app.px(52)
+                    // The game's short name when it has one ("Skyrim Special Edition"); one size smaller if it still
+                    // doesn't fit, and only then cut short.
                     Text {
+                        id: headerTitle
+                        readonly property bool fits: headerFull.advanceWidth <= width
                         anchors.centerIn: parent
                         width: parent.width - app.px(320)
                         horizontalAlignment: Text.AlignHCenter
                         text: app.page === "settings" ? "SETTINGS" : app.page === "perf" ? "SCROLLING TEST"
-                              : app.game ? app.game.name.toUpperCase() : "TURBINE MOD MANAGER"
+                              : app.game ? app.gameTitle.toUpperCase() : "TURBINE MOD MANAGER"
                         color: c.text
                         font.family: app.titleFont
-                        font.pixelSize: app.px(17)
+                        font.pixelSize: app.px(fits ? 17 : 15)
                         font.bold: true
-                        font.letterSpacing: app.px(1.5)
+                        font.letterSpacing: app.px(fits ? 1.5 : 1)
                         elide: Text.ElideRight
+                        TextMetrics {
+                            id: headerFull
+                            text: headerTitle.text
+                            font.family: app.titleFont
+                            font.pixelSize: app.px(17)
+                            font.bold: true
+                            font.letterSpacing: app.px(1.5)
+                        }
                     }
                     Rectangle {
                         visible: app.page !== "game"
@@ -902,9 +852,10 @@ Window {
                         anchors.verticalCenter: parent.verticalCenter
                         width: playRow.implicitWidth + app.px(28); height: app.px(38); radius: app.px(8)
                         opacity: Turbine.busy ? 0.7 : 1
+                        // accentHi to accent: the Play words stay at 4.5:1 over the whole button.
                         gradient: Gradient {
                             GradientStop { position: 0; color: c.accentHi }
-                            GradientStop { position: 1; color: c.accentLo }
+                            GradientStop { position: 1; color: c.accent }
                         }
                         Row {
                             id: playRow
@@ -965,45 +916,23 @@ Window {
                     height: mainCol.height - y
                     clip: true
 
-                    // A message in the middle of the page: title, words, and an optional button.
-                    Column {
+                    // When there is no list to show: no games, mods being read, no mods yet, Load order.
+                    EmptyState {
                         id: middle
                         readonly property bool none: !app.game
                         readonly property bool loading: app.game !== null && app.tab === 0 && !app.modsLoaded
                         readonly property bool empty: app.game !== null && app.tab === 0 && app.modsLoaded && app.listItems.length === 0
+                        ui: kit
+                        anchors.fill: parent
                         visible: app.page === "game" && (none || loading || empty || app.tab === 2)
-                        anchors.centerIn: parent
-                        width: Math.min(parent.width, app.px(560))
-                        spacing: app.px(10)
-                        Label {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            font.family: app.titleFont
-                            font.pixelSize: app.px(19)
-                            font.bold: true
-                            text: middle.none ? "No games yet" : middle.loading ? "Reading mods..." : middle.empty ? "No mods yet" : "Load order"
-                        }
-                        Label {
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            wrapMode: Text.WordWrap
-                            elide: Text.ElideNone
-                            color: c.soft
-                            text: middle.none ? "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here."
-                                  : middle.loading ? ""
-                                  : middle.empty ? "Download a mod's zip file in Desktop Mode, then press RT for Get Mods and add it from your Downloads folder."
-                                  : "Sorting comes in a later build. For now the order on the Mods tab is the load order: a mod lower in the list wins when two mods change the same file."
-                        }
-                        Rectangle {
-                            visible: middle.none
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            width: againRow.implicitWidth + app.px(28); height: app.px(40); radius: app.px(8)
-                            color: c.focusFill
-                            border.color: c.accent
-                            border.width: app.px(2)
-                            Hint { id: againRow; anchors.centerIn: parent; k: "a"; label: "Look again" }
-                            TapHandler { onTapped: app.load() }
-                        }
+                        title: none ? "No games yet" : loading ? "Reading mods..." : empty ? "No mods yet" : "Load order"
+                        body: none ? "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here."
+                              : loading ? ""
+                              : empty ? "Add mods from zip files in your Downloads folder. Download a mod's zip file in Desktop Mode first."
+                              : "Sorting comes in a later build. For now the order on the Mods tab is the load order: a mod lower in the list wins when two mods change the same file."
+                        buttonKey: none || empty ? "a" : ""
+                        buttonLabel: none ? "Look again" : empty ? "Add mods from Downloads" : ""
+                        onActivated: none ? app.load() : app.openAdd()
                     }
 
                     // Mods tab: the mods, then Recently removed.
@@ -1054,7 +983,7 @@ Window {
                                 height: app.px(30)
                                 text: "RECENTLY REMOVED · KEPT 7 DAYS"
                                 color: c.muted
-                                font.pixelSize: app.px(13)
+                                font.pixelSize: app.px(14)
                                 font.bold: true
                                 font.letterSpacing: app.px(1)
                             }
@@ -1090,30 +1019,17 @@ Window {
                     }
 
                     // Get Mods tab
-                    Column {
+                    EmptyState {
+                        ui: kit
+                        anchors.fill: parent
                         visible: app.page === "game" && app.game !== null && app.tab === 1
-                        anchors.top: parent.top
-                        anchors.topMargin: app.px(4)
-                        width: parent.width
-                        spacing: app.px(12)
-                        MenuRow {
-                            x: app.px(4)
-                            width: parent.width - app.px(8)
-                            icon: "dl"
-                            title: "Add mods from Downloads"
-                            detail: "Zip files you downloaded in Desktop Mode or with a browser"
-                            focused: app.zone === "main" && app.sheet === ""
-                            onPicked: app.openAdd()
-                        }
-                        Label {
-                            x: app.px(8)
-                            width: parent.width - app.px(16)
-                            wrapMode: Text.WordWrap
-                            elide: Text.ElideNone
-                            color: c.muted
-                            font.pixelSize: app.px(14)
-                            text: "Browsing and searching mods online comes in a later build."
-                        }
+                        title: "Get Mods"
+                        body: "Add mods from zip files in your Downloads folder, for example ones you downloaded in Desktop Mode."
+                        buttonKey: "a"
+                        buttonLabel: "Add mods from Downloads"
+                        buttonFocused: app.zone === "main"
+                        note: "Browsing and searching mods online comes in a later build."
+                        onActivated: app.openAdd()
                     }
 
                     // Settings
@@ -1212,7 +1128,7 @@ Window {
                                                     width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                                                 }
                                             }
-                                            Label { text: look.textSize + "%"; color: c.accent; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                            Label { text: look.textSize + "%"; color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                         }
                                     }
                                     TapHandler { onTapped: app.setRow = srow.index }
@@ -1266,7 +1182,7 @@ Window {
                                     width: app.px(38); height: app.px(22); radius: app.px(5)
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: prow.off ? c.ground : c.raised
-                                    Label { anchors.centerIn: parent; text: prow.off ? "OFF" : "ON"; font.pixelSize: app.px(13); font.bold: true; color: prow.off ? c.muted : c.accentHi }
+                                    Label { anchors.centerIn: parent; text: prow.off ? "OFF" : "ON"; font.pixelSize: app.px(14); font.bold: true; color: prow.off ? c.muted : c.accentText }
                                 }
                                 Column {
                                     anchors.verticalCenter: parent.verticalCenter
@@ -1301,7 +1217,7 @@ Window {
                     Hint { visible: app.moving; k: "a"; label: "Done" }
                     // Sheets
                     Hint { visible: app.sheet === "modmenu" || app.sheet === "gamemenu" || app.sheet === "add"; k: "▲▼"; label: "Choose" }
-                    Hint { visible: app.sheet === "check"; k: "◀▶"; label: "Choose" }
+                    Hint { visible: app.sheet === "check" || app.sheet === "loader"; k: "◀▶"; label: "Choose" }
                     Hint { visible: app.sheet !== ""; k: "b"; label: app.sheet === "check" ? "Wait" : "Close" }
                     // Game page
                     Hint { visible: legend.gamePage && !app.moving && app.tab === 0 && app.ordered && app.mods.length > 1; k: "y"; label: "Reorder" }
@@ -1328,177 +1244,9 @@ Window {
     // ---------------------------------------------------------------- sheets
     Rectangle {
         anchors.fill: parent
-        visible: app.sheet !== ""
+        visible: app.sheet === "details" || app.sheet === "notice"
         color: "#B0000000"
         TapHandler { onTapped: app.act("b") }
-
-        // Side sheet: the mod menu (X) and the game menu (View). The list stays in view behind it.
-        Rectangle {
-            id: side
-            visible: app.sheet === "modmenu" || app.sheet === "gamemenu"
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: app.px(52)
-            width: Math.min(parent.width * 0.5, app.px(440))
-            color: c.panel
-            border.color: c.line
-            TapHandler { }
-            readonly property bool modMenu: app.sheet === "modmenu"
-            Column {
-                x: app.px(16); y: app.px(16)
-                width: parent.width - app.px(32)
-                spacing: app.px(6)
-                Label {
-                    width: parent.width
-                    text: side.modMenu ? (app.menuMod ? app.menuMod.name.toUpperCase() : "") : (app.game ? app.game.name.toUpperCase() : "")
-                    font.family: app.titleFont; font.pixelSize: app.px(17); font.bold: true; font.letterSpacing: app.px(1)
-                }
-                Label {
-                    width: parent.width
-                    color: c.soft
-                    font.pixelSize: app.px(14)
-                    text: !side.modMenu ? "Game menu"
-                          : !app.menuMod ? ""
-                          : [app.modWords(app.menuMod), (app.menuMod.enabled ? "On" : "Off") + (app.ordered ? ", " + app.ordinal(app.mods.indexOf(app.menuMod) + 1) + " in load order" : "")].filter(s => s !== "").join(" · ")
-                }
-                Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
-                Item { width: 1; height: app.px(2) }
-                Repeater {
-                    model: side.modMenu ? app.modMenuItems : app.gameMenuItems
-                    MenuRow {
-                        required property int index
-                        required property var modelData
-                        icon: modelData.icon
-                        title: modelData.title
-                        detail: modelData.detail
-                        danger: modelData.danger === true
-                        usable: modelData.ok !== false
-                        focused: app.menuIndex === index
-                        onPicked: { app.menuIndex = index; side.modMenu ? app.modMenuRun(index) : app.gameMenuRun(index) }
-                    }
-                }
-            }
-        }
-
-        // Add mods from Downloads
-        Sheet {
-            visible: app.sheet === "add"
-            title: "ADD MODS FROM DOWNLOADS"
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap; elide: Text.ElideNone
-                color: c.soft
-                font.pixelSize: app.px(14)
-                text: app.downloads.length > 0 ? "Zip files in your Downloads folder, newest first. A adds the selected one to " + (app.game ? app.game.name : "this game") + "."
-                      : "No zip files in your Downloads folder yet. Download a mod's zip file in Desktop Mode, then come back here."
-            }
-            ListView {
-                id: addList
-                visible: app.downloads.length > 0
-                width: parent.width
-                height: Math.min(contentHeight, app.px(56) * 5)
-                clip: true
-                spacing: app.px(4)
-                model: app.downloads
-                currentIndex: app.addIndex
-                highlightFollowsCurrentItem: false
-                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-                delegate: MenuRow {
-                    required property int index
-                    required property var modelData
-                    width: addList.width
-                    icon: "dl"
-                    title: modelData.name
-                    detail: app.sizeWords(modelData.size) + (modelData.modified > 0 ? " · " + app.when(modelData.modified) : "")
-                    focused: app.addIndex === index
-                    onPicked: { app.addIndex = index; app.addChosen() }
-                }
-            }
-        }
-
-        // The check before Play
-        Sheet {
-            visible: app.sheet === "check"
-            title: "BEFORE YOU PLAY"
-            Repeater {
-                model: app.checks
-                Row {
-                    required property var modelData
-                    width: parent.width
-                    spacing: app.px(12)
-                    Rectangle {
-                        width: app.px(22); height: width; radius: width / 2
-                        color: parent.modelData.level === "ok" ? c.ok : parent.modelData.level === "stop" ? c.stop : c.warn
-                        Text { anchors.centerIn: parent; text: parent.parent.modelData.level === "ok" ? "✓" : "!"; color: c.onAccent; font.pixelSize: app.px(13); font.bold: true }
-                    }
-                    Column {
-                        width: parent.width - app.px(34)
-                        spacing: app.px(2)
-                        Label { width: parent.width; text: parent.parent.modelData.title; font.bold: true; font.pixelSize: app.px(16) }
-                        Label { width: parent.width; visible: text !== ""; text: parent.parent.modelData.detail; color: c.soft; font.pixelSize: app.px(14); wrapMode: Text.WordWrap; elide: Text.ElideNone }
-                    }
-                }
-            }
-            Label {
-                visible: app.checks.length === 0
-                width: parent.width
-                text: "Nothing to check."
-                color: c.soft
-            }
-            Row {
-                spacing: app.px(10)
-                Repeater {
-                    model: app.checkChoices
-                    Choice {
-                        required property int index
-                        required property string modelData
-                        label: modelData
-                        k: app.checkIndex === index ? "a" : modelData === "Wait" ? "b" : ""
-                        focused: app.checkIndex === index
-                        onPicked: app.checkChoose(index)
-                    }
-                }
-            }
-        }
-
-        // A mod needs the game's script loader and it isn't installed
-        Sheet {
-            visible: app.sheet === "loader"
-            title: app.loaderShort.toUpperCase() + " NEEDED"
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap; elide: Text.ElideNone
-                font.pixelSize: app.px(16); font.bold: true
-                text: (app.loaderFor.length === 1 ? "This mod needs " : "These mods need ") + (app.rules && app.rules.loader ? app.rules.loader.name : "") + "."
-            }
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap; elide: Text.ElideNone
-                color: c.soft
-                text: app.rules && app.rules.loader ? app.rules.loader.explain : ""
-            }
-            Row {
-                width: parent.width
-                spacing: app.px(12)
-                Label { width: app.px(100); text: "Needed by"; color: c.muted; font.pixelSize: app.px(14) }
-                Label { width: parent.width - app.px(112); text: app.loaderFor.join(", "); wrapMode: Text.WordWrap; elide: Text.ElideNone; maximumLineCount: 3; font.pixelSize: app.px(15) }
-            }
-            Row {
-                width: parent.width
-                spacing: app.px(12)
-                Label { width: app.px(100); text: "Get it from"; color: c.muted; font.pixelSize: app.px(14) }
-                Label { width: parent.width - app.px(112); text: app.rules && app.rules.loader ? app.rules.loader.source : ""; color: c.accentHi; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.px(15) }
-            }
-            Label {
-                width: parent.width
-                wrapMode: Text.WordWrap; elide: Text.ElideNone
-                color: c.muted
-                font.pixelSize: app.px(14)
-                text: "This test build can't install it for you yet. Install it from that page in Desktop Mode. Until then the game plays without these mods, and they're marked \"Needs " + app.loaderShort + "\"."
-            }
-            Choice { label: "OK"; k: "a"; focused: true; onPicked: app.sheet = "" }
-        }
 
         // Game details: what Turbine found, so the owner can check detection on the device.
         Rectangle {
@@ -1558,59 +1306,76 @@ Window {
         }
     }
 
-    // ---------------------------------------------------------------- toasts
-    Rectangle {
-        id: toast
-        property string message: ""
-        function show(m) { message = m; toastTimer.restart() }
-        visible: toastTimer.running && !undoToast.shown
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: app.px(56)
-        width: Math.min(parent.width - app.px(120), toastText.implicitWidth + app.px(32))
-        height: toastText.implicitHeight + app.px(20)
-        radius: app.px(8)
-        color: c.raised
-        border.color: c.accentLo
-        Label { id: toastText; anchors.centerIn: parent; width: parent.width - app.px(32); text: toast.message; wrapMode: Text.WordWrap; elide: Text.ElideNone; horizontalAlignment: Text.AlignHCenter }
-        Timer { id: toastTimer; interval: 3500 }
+    // ---------------------------------------------------------------- menus and prompts (they cover the window)
+    ModMenu {
+        ui: kit
+        visible: app.sheet === "modmenu"
+        title: app.menuMod ? app.menuMod.name : ""
+        subtitle: !app.menuMod ? ""
+                  : [app.modWords(app.menuMod), (app.menuMod.enabled ? "On" : "Off") + (app.ordered ? ", " + app.ordinal(app.mods.indexOf(app.menuMod) + 1) + " in load order" : "")].filter(s => s !== "").join(" · ")
+        items: app.modMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
+        focusIndex: app.menuIndex
+        onActivated: (index) => { app.menuIndex = index; app.modMenuRun(index) }
+        onClosed: app.act("b")
     }
-    // After Uninstall: the mod is in Recently removed, and Y puts it back.
-    Rectangle {
-        id: undoToast
-        property string modId: ""
-        property string modName: ""
-        readonly property bool shown: undoTimer.running && app.sheet === ""
-        function show(id, name) { modId = id; modName = name; undoTimer.restart() }
-        function hide() { undoTimer.stop() }
-        visible: shown
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: app.px(56)
-        width: Math.min(parent.width - app.px(120), undoRow.implicitWidth + app.px(28))
-        height: app.px(46)
-        radius: app.px(8)
-        color: c.raised
-        border.color: c.accentLo
-        Row {
-            id: undoRow
-            anchors.centerIn: parent
-            spacing: app.px(14)
-            Label {
-                width: Math.min(implicitWidth, app.px(320))
-                text: "Recently removed: <b>" + undoToast.modName.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</b>"
-                textFormat: Text.StyledText
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            Label { text: "Kept 7 days"; color: c.muted; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
-            Rectangle {
-                width: undoHint.implicitWidth + app.px(18); height: app.px(32); radius: app.px(6)
-                color: c.card
-                anchors.verticalCenter: parent.verticalCenter
-                Hint { id: undoHint; anchors.centerIn: parent; k: "y"; label: "Undo" }
-                TapHandler { onTapped: app.putBack(undoToast.modId) }
-            }
-        }
-        Timer { id: undoTimer; interval: 7000 }
+    GameMenu {
+        ui: kit
+        visible: app.sheet === "gamemenu"
+        gameName: app.game ? app.game.name : ""
+        restoreDate: app.lastGood ? "From " + app.when(app.lastGood.savedAt) + " · " + app.plural(app.lastGood.modsOn, "mod", "mods") + " on" : ""
+        restoreEmptyText: "Nothing saved yet. Turbine saves your setup each time changes go into the game."
+        extraItems: [{ key: "details", label: "Game details", detail: "What Turbine found for this game", icon: "info" }]
+        focusIndex: app.menuIndex
+        onActivated: (index, key) => { app.menuIndex = index; app.gameMenuRun(index) }
+        onClosed: app.act("b")
+    }
+    AddMods {
+        ui: kit
+        visible: app.sheet === "add"
+        subtitle: "Zip files in your Downloads folder, newest first"
+        files: app.downloads.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: d.modified > 0 ? app.age(d.modified) : "" }))
+        focusIndex: app.addIndex
+        emptyText: "No zip files in Downloads yet. Download a mod's zip file in Desktop Mode, then come back."
+        laterText: "Browsing and searching mods online comes in a later build."
+        onActivated: (index) => { app.addIndex = index; app.addChosen() }
+        onClosed: app.act("b")
+    }
+    PrePlayCheck {
+        ui: kit
+        visible: app.sheet === "check"
+        checks: app.checks
+        buttons: app.checkChoices.map((label, i) => ({ key: i === 0 ? "a" : label === "Wait" ? "b" : "", label: label }))
+        focusIndex: app.checkIndex
+        note: app.checkStops ? "Play original starts the game with no mods. Nothing is deleted." : ""
+        onActivated: (index, key) => { app.checkIndex = index; app.checkChoose(index) }
+        onClosed: app.act("b")
+    }
+    LoaderPrompt {
+        ui: kit
+        visible: app.sheet === "loader"
+        title: (app.loaderShort || "Mod loader") + " needed"
+        loaderName: app.loaderShort
+        loaderFullName: app.rules && app.rules.loader && app.rules.loader.name.indexOf(" (") > 0 ? app.rules.loader.name.split(" (")[1].replace(")", "") : ""
+        explain: app.rules && app.rules.loader ? app.rules.loader.explain : ""
+        neededBy: app.loaderFor
+        sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
+        sourceShown: app.loaderSourceShown
+        focusIndex: app.loaderIndex
+        onActivated: (index, key) => { app.loaderIndex = index; app.act(key || "a") }
+        onClosed: app.act("b")
+    }
+
+    // ---------------------------------------------------------------- toast
+    // Plain messages, and after Uninstall "Recently removed: name · Kept 7 days · Y Undo".
+    property string undoId: ""
+    readonly property bool undoShown: toast.shown && undoId !== "" && sheet === ""
+    Toast {
+        id: toast
+        ui: kit
+        function showUndo(id, name) { app.undoId = id; show("Recently removed:", name, "Kept 7 days", "y", "Undo") }
+        function showPlain(m) { app.undoId = ""; show(m) }
+        timeout: app.undoId !== "" ? 7000 : 4000
+        onActionClicked: if (app.undoId !== "") app.putBack(app.undoId)
+        onHidden: app.undoId = ""
     }
 }

@@ -37,6 +37,10 @@ pub mod qobject {
         #[qinvokable]
         fn poll(self: Pin<&mut Self>);
 
+        /// Turbine's window came back to the front: drops controller presses made meanwhile (in a game).
+        #[qinvokable]
+        fn wake(self: Pin<&mut Self>);
+
         /// Shows this game's mods and rules (opens its store the first time).
         #[qinvokable]
         fn select(self: Pin<&mut Self>, game_id: &QString);
@@ -124,6 +128,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 use turbine_engine::json::quote;
+use turbine_engine::proton;
 use turbine_engine::rules::{self, GameRules, Kind};
 use turbine_engine::store::{self, Store};
 use turbine_engine::Game;
@@ -267,15 +272,64 @@ fn rules_json(slot: &Slot) -> String {
         None => ("null".to_string(), false),
     };
     format!(
-        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{}}}",
+        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{}}}",
         quote(kind),
         r.ordered,
         r.plugins,
         quote(&r.mod_root),
         quote(&r.support),
         loader,
-        installed
+        installed,
+        r.short_name.as_deref().map(quote).unwrap_or_else(|| "null".to_string())
     )
+}
+
+// ---------------------------------------------------------------------------------------------------- Proton
+
+/// BepInEx under Proton needs winhttp set to "native,builtin" in the game's prefix. Some(prefix) when this game
+/// needs that and its loader is in place (a Steam game run through Proton, with BepInEx installed).
+fn proton_prefix(slot: &Slot) -> Option<Option<PathBuf>> {
+    let g = &slot.game;
+    let wanted = g.store == turbine_engine::Store::Steam
+        && proton::wants_winhttp(g, &slot.rules)
+        && slot.rules.loader_installed(g);
+    wanted.then(|| g.prefix.clone())
+}
+
+/// Lines for the check before Play about the Proton setting, when there is something to say.
+fn proton_checks(slot: &Slot) -> Vec<rules::Check> {
+    let Some(prefix) = proton_prefix(slot) else { return Vec::new() };
+    let line = |level: &str, title: String, detail: String| rules::Check { level: level.into(), title, detail };
+    let name = &slot.game.name;
+    if crate::system::game_running(&slot.game.install_dir) == Some(true) {
+        return vec![line(
+            "stop",
+            format!("{name} is still running"),
+            "Close the game first. Turbine turns BepInEx on in the game's Proton settings, which only works while the \
+             game is closed."
+                .into(),
+        )];
+    }
+    let now = match prefix {
+        None => Err(proton::NOT_STARTED.to_string()),
+        Some(p) => proton::read_override(&p, "winhttp"),
+    };
+    match now {
+        Ok(Some(v)) if v.eq_ignore_ascii_case(proton::BEPINEX_VALUE) => Vec::new(),
+        Ok(_) => vec![line(
+            "ok",
+            "BepInEx gets turned on in Proton".into(),
+            "At Play, Turbine sets winhttp to \"native,builtin\" in this game's Proton settings so BepInEx loads. \
+             A copy of the old settings is kept."
+                .into(),
+        )],
+        Err(e) if e == proton::NOT_STARTED => vec![line(
+            "warn",
+            "BepInEx can't load yet".into(),
+            format!("Proton makes this game's settings the first time it runs. {} Until then mods that need BepInEx don't load.", proton::NOT_STARTED),
+        )],
+        Err(e) => vec![line("warn", "BepInEx may not load".into(), e)],
+    }
 }
 
 fn checks_json(checks: &[rules::Check]) -> String {
@@ -352,6 +406,12 @@ impl qobject::Turbine {
         let json = scan.games_json();
         this.as_mut().rust_mut().found = scan.games;
         this.as_mut().set_games(QString::from(json.as_str()));
+    }
+
+    pub fn wake(mut self: Pin<&mut Self>) {
+        if let Some(r) = self.as_mut().rust_mut().reader.as_mut() {
+            r.wake(Duration::from_millis(250));
+        }
     }
 
     pub fn poll(mut self: Pin<&mut Self>) {
@@ -619,7 +679,13 @@ impl qobject::Turbine {
                         let needs = s.store.mods().iter().any(|m| m.enabled && m.needs_loader);
                         let free = crate::system::free_bytes(&s.game.install_dir);
                         let last = s.store.last_build();
-                        checks_json(&rules::pre_play(&s.game, &s.rules, last.as_deref(), needs, free))
+                        let mut list = rules::pre_play(&s.game, &s.rules, last.as_deref(), needs, free);
+                        let extra = proton_checks(s);
+                        if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
+                            list.clear(); // "Everything checks out" no longer says it all
+                        }
+                        list.extend(extra);
+                        checks_json(&list)
                     }
                     Err(e) => checks_json(&[rules::Check { level: "stop".into(), title: "Mods couldn't be read".into(), detail: e }]),
                 };
@@ -639,10 +705,33 @@ impl qobject::Turbine {
             Some(game.id()),
             true,
             Box::new(move |w: &mut Worker| {
+                let put_back = move |w: &Worker| {
+                    w.post(move |mut t| {
+                        let p = *t.pending() + n;
+                        t.as_mut().set_pending(p);
+                    })
+                };
+                // A running game would write its Proton settings over Turbine's change when it closes.
+                let running = w.slot(&game).ok().and_then(|s| proton_prefix(s)).is_some()
+                    && crate::system::game_running(&game.install_dir) == Some(true);
+                if running {
+                    put_back(w);
+                    w.say(format!("{} is still running. Close it, then press Play again.", game.name), "error");
+                    return;
+                }
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
+                // The loader may have just been put in place by apply, so this comes after it.
+                let note = match w.slot(&game).ok().and_then(|s| proton_prefix(s)) {
+                    None => None,
+                    Some(None) => Some(proton::NOT_STARTED.to_string()),
+                    Some(Some(p)) => proton::ensure_override(&p, "winhttp", proton::BEPINEX_VALUE).err(),
+                };
                 match result {
                     Ok(r) => {
-                        w.say(applied_words(&r), "ok");
+                        match note {
+                            Some(e) => w.say(format!("Started without BepInEx this time. {e}"), "warn"),
+                            None => w.say(applied_words(&r), "ok"),
+                        }
                         launch(w, &game);
                     }
                     Err(e) => {
