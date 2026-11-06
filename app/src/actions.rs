@@ -122,7 +122,7 @@ fn progress(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
 }
 
 /// Every downloaded file goes to the mod worker to be added.
-fn hand_over(qt: &Qt, game: &Game) -> impl FnMut(Fetched) + '_ {
+fn hand_over<'a>(qt: &'a Qt, game: &Game) -> impl FnMut(Fetched) + 'a {
     let game = game.clone();
     move |f: Fetched| {
         let g = game.clone();
