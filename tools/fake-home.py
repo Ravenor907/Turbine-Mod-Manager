@@ -47,6 +47,9 @@ def main(home):
         (steam, "1966720", "Lethal Company", "Lethal Company", "Lethal Company.exe", True, (150, 60, 40), (30, 15, 10)),
         (sd, "892970", "Valheim", "Valheim", "valheim.x86_64", False, (60, 110, 100), (15, 30, 28)),
         (sd, "632360", "Risk of Rain 2", "Risk of Rain 2", "Risk of Rain 2.exe", True, (120, 80, 150), (25, 15, 35)),
+        # The first Nexus test games: Cyberpunk 2077 and The Witcher 3 (Windows builds run through Proton).
+        (steam, "1091500", "Cyberpunk 2077", "Cyberpunk 2077", "bin/x64/Cyberpunk2077.exe", True, (200, 190, 40), (40, 20, 50)),
+        (steam, "292030", "The Witcher 3: Wild Hunt", "The Witcher 3", "bin/x64/witcher3.exe", True, (150, 30, 30), (20, 20, 25)),
     ]
     for lib, app_id, name, folder, exe, proton, top, bottom in games:
         apps = os.path.join(lib, "steamapps")
@@ -209,6 +212,25 @@ def downloads(folder):
         "20 Flowers/meshes/flowers/flower01.nif": b"nif" * 10,
         "21 Leaves/textures/leaves/leaf01.dds": b"DDS " + b"\0" * 124,
     }, now - 3 * 86400)
+    # Cyberpunk 2077: a Cyber Engine Tweaks mod (a folder with init.lua), which needs the framework that isn't installed.
+    zip_file(os.path.join(folder, "Quiet Streets CET 1.0.zip"), {
+        "QuietStreets/init.lua": "-- placeholder, never run\nreturn {}\n",
+        "QuietStreets/settings.json": "{}",
+    }, now - 4 * 86400)
+    # Cyberpunk 2077: a REDmod mod (a folder with info.json), which loads through the game's own launcher.
+    zip_file(os.path.join(folder, "Neon Signs REDmod 1.1.zip"), {
+        "NeonSigns/info.json": json.dumps({"name": "NeonSigns", "version": "1.1.0"}),
+        "NeonSigns/archives/neonsigns.archive": b"RDAR" + b"\0" * 60,
+    }, now - 4 * 86400)
+    # The Witcher 3: two script mods that change the same script (they need merging), one with key bindings to add.
+    script = "// placeholder script\n"
+    zip_file(os.path.join(folder, "Better Torches 1.0.zip"), {
+        "modBetterTorches/content/scripts/game/player/playerWitcher.ws": script,
+    }, now - 5 * 86400)
+    zip_file(os.path.join(folder, "Faster Roach 2.0.zip"), {
+        "modFasterRoach/content/scripts/game/player/playerWitcher.ws": script,
+        "input.settings": "[Exploration]\nIK_F8=(Action=FasterRoach)\n",
+    }, now - 5 * 86400)
     # A profile share file someone sent, for Lethal Company.
     share = {"turbineProfile": 1, "app": "Turbine Mod Manager",
              "game": {"name": "Lethal Company", "store": "steam", "storeId": "1966720"}, "profile": "Friday night",

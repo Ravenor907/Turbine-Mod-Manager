@@ -78,6 +78,13 @@ jobs:
           cd engine
           cargo +1.97.0 test --release
           cargo +1.97.0 clippy --all-targets -- -D warnings
+      - name: Test the browser helper's link (app/src/bridge.rs needs only the engine)
+        shell: bash
+        run: |
+          mkdir -p /tmp/bridge
+          rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
+          rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/tests
+          /tmp/bridge/tests
 
   vendor:
     name: Rust crates for the offline Flatpak build
@@ -233,7 +240,47 @@ jobs:
               "nxm://skyrimspecialedition/mods/12604/files/200?key=abc123&expires=4102444800&user_id=1234567"
             shoot "code-$size" "$size" code "$PWD/home" --game=$lethal \
               "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
+            # The browser: Settings > Accounts > Browser, the no-browser warning, the helper's steps, the status card.
+            for page in browser nobrowser helper overlay overlaygm; do shoot "$page-$size" "$size" $page "$PWD/home"; done
+            # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
+            cp2077=steam:1091500
+            w3=steam:292030
+            shoot "mods-cyberpunk-$size" "$size" mods "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
+            shoot "check-cyberpunk-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
+            shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"
+            shoot "notes-witcher-$size" "$size" mods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
           done
+          # The browser helper is in the Flatpak (without its tests).
+          ext=$(flatpak run --command=sh io.github.ravenor907.TurbineModManager -c 'ls /app/share/turbine-mod-manager/extension' 2>&1 | tr '\n' ' ')
+          echo "Browser helper in the Flatpak: $ext"
+          case "$ext" in *manifest.json*) ;; *) echo "::error title=Browser helper missing::$ext"; fail=1 ;; esac
+          case "$ext" in *test*) echo "::error title=Browser helper ships its tests::$ext"; fail=1 ;; esac
+          # X11 (what SteamOS uses for Turbine now): the main window draws, and the Game Mode overlay window gets
+          # GAMESCOPE_EXTERNAL_OVERLAY. Needs Xvfb in the build container; said as a warning when it can't be had.
+          if ! command -v Xvfb > /dev/null; then
+            (dnf install -y xorg-x11-server-Xvfb xprop > /dev/null 2>&1 || (apt-get update > /dev/null 2>&1 && apt-get install -y xvfb x11-utils > /dev/null 2>&1)) || true
+          fi
+          if command -v Xvfb > /dev/null; then
+            Xvfb :77 -screen 0 1280x800x24 > /dev/null 2>&1 &
+            xvfb=$!
+            sleep 2
+            for page in game overlaygm; do
+              out="$PWD/shots/x11-$page-1280x800.png"
+              rm -rf "$PWD/data/x11-$page"
+              DISPLAY=:77 timeout 60 dbus-run-session -- flatpak run --socket=x11 --env=QT_QPA_PLATFORM=xcb --env=QT_QUICK_BACKEND=software \
+                --env=TURBINE_HOME="$PWD/home" --env=TURBINE_DATA="$PWD/data/x11-$page" \
+                --filesystem="$PWD/shots" --filesystem="$PWD/home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
+                io.github.ravenor907.TurbineModManager --screenshot="$out" --size=1280x800 --page=$page --selftest-data="$PWD/samples" > "shots/x11-$page.log" 2>&1
+              if [ ! -s "$out" ]; then echo "::error title=No screenshot under X11::$page"; cat "shots/x11-$page.log"; fail=1; fi
+              if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/x11-$page.log"; then echo "::error title=QML problem under X11::$page"; fail=1; fi
+            done
+            mark=$(grep -h "GAMESCOPE_EXTERNAL_OVERLAY" "$PWD"/data/x11-overlaygm/turbine-mod-manager/activity.log || true)
+            echo "Overlay mark: $mark"
+            case "$mark" in *"set to 1 (done)"*) echo "::notice title=Game Mode overlay::$mark" ;; *) echo "::error title=Overlay window not marked under X11::$mark"; fail=1 ;; esac
+            kill $xvfb 2>/dev/null || true
+          else
+            echo "::warning title=No Xvfb::The X11 check didn't run"
+          fi
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.
           for f in shots/*.png; do echo "SHOT $(basename "$f") $(base64 -w0 "$f")"; done

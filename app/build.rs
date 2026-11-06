@@ -28,4 +28,6 @@ fn main() {
         .files(["src/backend.rs"])
         .cpp_file("src/qtglue.cpp")
         .build();
+    // qtglue.cpp marks the Game Mode overlay window through Xlib.
+    println!("cargo:rustc-link-lib=X11");
 }

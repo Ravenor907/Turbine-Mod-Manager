@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "Turbine browser helper",
+  "short_name": "Turbine",
+  "version": "0.3",
+  "description": "Sends mods you download from Nexus Mods to Turbine Mod Manager and shows install progress and choices on the page.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxQKPlbbW/nICrHrBt0f3ybNFtxQhV4xAyud25W6sovMUygRTQtNAqQeJWsrV2ANE21EnH66pEb+B3qqlx5VmF9ADOJZgC0HPfzYoKXZxGJNwSbiHoHX6O3+eD8H0trJzgoC3bF+QZAHKwzd5mw3M/b+YIPkczxtRwHBSpan4aspPGXBoaAvzfuYsAKcbv+511WCOtCrddGWemI/o7LNTfkndYUORuMSQGoC11ziWtWN2NkLcNtC4MTnZiS9HTS8NyYSHYSrvOgfaD6V9j+iBIIUyr5bGgBNmzXK2ec+dL5SjrXlNVhPG2E4WS0OCw1QZMgQ5hjRNN7dlH5yeFhAfcwIDAQAB",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.nexusmods.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Turbine",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.nexusmods.com/*"
+      ],
+      "js": [
+        "lib/protocol.js",
+        "lib/choices.js",
+        "content/nexus.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "http://127.0.0.1/pair*"
+      ],
+      "js": [
+        "lib/protocol.js",
+        "content/pair.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}

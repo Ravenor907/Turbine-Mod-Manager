@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Turbine</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header><img src="../icons/icon32.png" alt="" width="32" height="32"><h1>Turbine</h1></header>
+<section>
+  <div class="line"><span id="dot" class="dot"></span><span id="conn">Checking...</span></div>
+  <div id="version" class="muted"></div>
+</section>
+<section id="statusBox" hidden>
+  <div id="status"></div>
+  <div id="game" class="muted"></div>
+  <div class="bar" id="bar" hidden><div id="fill"></div></div>
+</section>
+<section>
+  <button id="retry" type="button">Connect now</button>
+</section>
+<section class="help">
+  <h2>Pair again</h2>
+  <p>If this browser is not paired, or Turbine says it does not know it: in Turbine, open Settings, then Accounts, and choose <b>Pair again</b>. Turbine opens a page in this browser that pairs it.</p>
+  <p class="muted">Turbine has to be running for downloads from Nexus to go into it. Without it, they still land in your Downloads folder.</p>
+</section>
+<script src="popup.js"></script>
+</body>
+</html>

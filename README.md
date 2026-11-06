@@ -13,7 +13,7 @@ Early test builds.
 
 Turbine only ever removes files it placed itself, keeps a backup of any game file a mod replaces, and never runs anything from a mod archive. Downloading mods and loaders from the internet comes in a later build.
 
-Game rules for: Skyrim Special Edition, Stardew Valley, Valheim, Lethal Company and Risk of Rain 2. Other games work generically: files go where the archive says, from the game folder.
+Game rules for: Skyrim Special Edition, Cyberpunk 2077, The Witcher 3, Stardew Valley, Valheim, Lethal Company and Risk of Rain 2. Other games work generically: files go where the archive says, from the game folder.
 
 ## Controls
 

@@ -9,7 +9,7 @@
         "--share=ipc",
         "--share=network",
         "--socket=wayland",
-        "--socket=fallback-x11",
+        "--socket=x11",
         "--device=all",
         "--filesystem=~/.local/share/Steam",
         "--filesystem=~/.steam:ro",
@@ -40,6 +40,7 @@
                 "for d in vendor/libloot vendor/libloot-*; do if [ -f \"$d/LICENSE\" ]; then install -Dm644 \"$d/LICENSE\" /app/share/turbine-mod-manager/licenses/libloot-LICENSE.txt; fi; done",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.desktop /app/share/applications/io.github.ravenor907.TurbineModManager.desktop",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineModManager.metainfo.xml",
+                "mkdir -p /app/share/turbine-mod-manager/extension && cd extension && for f in *; do if [ \"$f\" != test ]; then cp -r \"$f\" /app/share/turbine-mod-manager/extension/; fi; done",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager-small.png /app/share/turbine-mod-manager/icon-small.png",
                 "for n in 128 256 512; do install -Dm644 packaging/io.github.ravenor907.TurbineModManager-$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineModManager.png; done"
             ],

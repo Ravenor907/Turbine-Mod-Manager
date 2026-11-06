@@ -43,6 +43,13 @@ Window {
         property bool notSteamOS: false
         property string lastGame: ""
         property string launchDone: "[]"    // games whose one-time Steam Launch Option note was seen
+        property string onceDone: "[]"      // "<game id>|<title>": check lines read once (REDmod)
+    }
+    // Settings > Accounts > Browser.
+    Settings {
+        id: browserSet
+        category: "browser"
+        property bool overlay: true         // Show status over other apps
     }
     // Settings > Updates (and Labs > Update channel).
     Settings {
@@ -69,7 +76,7 @@ Window {
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
         readonly property bool slow: ["mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
-                                      "nexusdetails", "nexusversions", "nexusfree", "nxm"].indexOf(page) >= 0
+                                      "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         function start() {
@@ -93,6 +100,27 @@ Window {
             }
             else if (page === "loadorder" || page === "lootsort" || page === "lootnotes") { app.tab = 2; app.zone = "main" }
             else if (page === "accounts") app.openSection("Accounts")
+            // The browser: Settings > Accounts with a browser found and the helper connected; the no-browser
+            // warning; the helper's setup steps; the status card in both its windows.
+            else if (page === "browser" || page === "helper" || page === "nobrowser") {
+                app.browser = page === "nobrowser" ? { checked: true, result: { found: false, name: "", how: "" }, title: "No web browser found",
+                    text: "Turbine opens Nexus Mods in your web browser, and this system doesn't have one yet. Installing one takes a minute.",
+                    steps: ["Switch to Desktop Mode: press the Steam button, open Power, and pick Switch to Desktop.",
+                            "In Desktop Mode, open Discover, search for Google Chrome or Firefox, and press Install.",
+                            "Optional, so it also opens in Game Mode: open the app menu, right-click the browser, and pick Add to Steam.",
+                            "Switch back to Game Mode and open Turbine again."] }
+                    : { checked: true, result: { found: true, name: "Google Chrome", how: "flatpak" } }
+                app.bridge = { running: true, port: 47701, paired: true, connected: page === "browser" ? 1 : 0, ext: "iniglfblobfbekihldmgekchfehncbeb", error: "" }
+                app.openSection("Accounts")
+                if (page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "browser")
+                else if (page === "helper") { app.helperFolder = "/home/deck/Downloads/Turbine browser helper"; app.infoIndex = 0; app.sheet = "helper" }
+                else app.noBrowser()
+            }
+            else if (page === "overlay" || page === "overlaygm") {
+                app.status = { active: true, text: "Added to Cyberpunk 2077", level: "ok", progress: -1, game: "Cyberpunk 2077",
+                               added: "Cyber Engine Tweaks 1.32.0", done: true, ask: "" }
+                app.showOverlay(true, page === "overlaygm")
+            }
             else if (page === "updates") { app.openSection("Updates"); Turbine.selfCheck(false, false) }
             else if (page === "perfcheck") app.openPerf()
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
@@ -118,7 +146,8 @@ Window {
     Timer {
         running: shot.on
         interval: shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 ? 6500 : shot.slow ? 4500 : 1500
-        onTriggered: app.contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
+        // The overlay pictures are of the overlay window itself.
+        onTriggered: (shot.page === "overlay" ? panelWin : shot.page === "overlaygm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
 
     // ---------------------------------------------------------------- size
@@ -140,7 +169,7 @@ Window {
     onZoneChanged: note("page", "Focus zone " + zone)
     onSetSectionChanged: {
         note("page", "Settings section " + (settingsSections[setSection] || setSection))
-        if (settingsSections[setSection] === "Accounts") Turbine.handlerStatus()
+        if (settingsSections[setSection] === "Accounts") { Turbine.handlerStatus(); if (!shot.on) Turbine.bridgeRefresh() }
     }
     onWidthChanged: sizeNote.restart()
     onHeightChanged: sizeNote.restart()
@@ -266,6 +295,21 @@ Window {
         function onLaunch(url) { if (!shot.on) Qt.openUrlExternally(url) }
         function onPages(title, json) { app.openPages(title, app.parse(json, [])) }
         function onHandlerJsonChanged() { app.handler = app.parse(Turbine.handlerJson, { state: "unknown" }) }
+        // Catching browser downloads (catch.rs).
+        function onStatusJsonChanged() { if (!shot.on) app.status = app.parse(Turbine.statusJson, { active: false }) }
+        function onBrowserJsonChanged() {
+            if (shot.on) return
+            app.browser = app.parse(Turbine.browserJson, { checked: false })
+            if (app.sheet === "nobrowser" && app.browserFound) { app.sheet = ""; toast.showPlain("Found " + app.browser.result.name + ". Nexus pages open there.") }
+        }
+        function onBridgeJsonChanged() {
+            if (shot.on) return
+            app.bridge = app.parse(Turbine.bridgeJson, { running: false })
+            // The helper was paired on another port: the pairing page again, once.
+            if (app.bridge.moved && !app.movedPaired) { app.movedPaired = true; app.note("bridge", "Port changed: opening the pairing page again"); app.pair(false) }
+        }
+        function onAdded(name, notes) { app.openNotes(name, app.parse(notes, [])) }
+        function onAsked(json) { app.found = app.parse(json, null); if (app.found && app.sheet === "") { app.infoIndex = 0; app.sheet = "found" } }
         function onPad(button, pressed) { pressed ? app.press(button) : app.release(button) }
         // 0.3
         function onBrowseJsonChanged() {
@@ -346,9 +390,11 @@ Window {
         if (shot.arg("selftest-data") !== "") Turbine.setSampleData(shot.arg("selftest-data"))
         else if (!shot.on) {
             Turbine.accountStatus()
+            Turbine.startCatching()
             if (updates.auto) { selfAuto = true; Turbine.selfCheck(labsOn && updates.prerelease, false) }
         }
         load()
+        note("app", "Qt platform " + Qt.platform.pluginName + (Turbine.gamemode ? ", Game Mode" : ""))
         if (shot.page === "settings") { page = "settings"; zone = "settings" }
         else if (shot.page === "details") sheet = "details"
         else if (shot.page === "perf") { page = "perf"; zone = "perf" }
@@ -496,8 +542,10 @@ Window {
     }
     readonly property string launchTitle: "One-time Steam setting for the mod loader"
     function launchSeen() { return game && parse(seen.launchDone, []).indexOf(game.id) >= 0 }
+    function onceSeen(title) { return game && parse(seen.onceDone, []).indexOf(game.id + "|" + title) >= 0 }
     function checked(list) {
         if (launchSeen()) list = list.filter(x => x.title !== launchTitle)
+        list = list.filter(x => !(x.once && x.title !== launchTitle && onceSeen(x.title)))
         if (list.length === 0) list = [{ level: "ok", title: "Ready to play", detail: "Everything checks out." }]
         checks = list
         note("engine", "Check before Play: " + list.map(x => x.level + " " + x.title).join("; "))
@@ -515,6 +563,11 @@ Window {
         sheet = ""
         if (checks.some(x => x.title === launchTitle) && what !== "Wait") {
             let done = parse(seen.launchDone, []); done.push(game.id); seen.launchDone = JSON.stringify(done)
+        }
+        // Other read-once lines (REDmod): seen once the player moves on from the check.
+        const once = checks.filter(x => x.once && x.title !== launchTitle)
+        if (once.length > 0 && what !== "Wait" && !shot.on) {
+            let done = parse(seen.onceDone, []); for (const x of once) done.push(game.id + "|" + x.title); seen.onceDone = JSON.stringify(done)
         }
         if (what === "Play anyway") Turbine.play(game.id)
         else if (what === "Play original") Turbine.playOriginal()
@@ -638,7 +691,13 @@ Window {
     property int setRow: 0
     property int perfIndex: 0
     readonly property int railCount: games.length + 3   // games, add, Downloads, Settings
-    onSheetChanged: { note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset(); if (sheet === "" && fomod) sheet = "fomod"; else if (sheet === "") offerLoader() }
+    onSheetChanged: {
+        note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset()
+        if (sheet === "" && fomod) sheet = "fomod"
+        else if (sheet === "" && found) { infoIndex = 0; sheet = "found" }
+        else if (sheet === "" && pendingNotes) { pendingNotes = false; infoIndex = 0; sheet = "notes" }
+        else if (sheet === "") offerLoader()
+    }
 
     Timer { interval: 16; repeat: true; running: app.active || shot.on; onTriggered: Turbine.poll() }
 
@@ -749,7 +808,8 @@ Window {
             else if (b === "b") sheet = "profiles"
         } else if (sheet === "plugin") {
             if (b === "b" || b === "x" || b === "a") sheet = ""
-        } else if (sheet === "fomod") fomodView.handleButton(b)
+        } else if (["nobrowser", "helper", "notes", "found"].indexOf(sheet) >= 0) infoAct(b)
+        else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "ask") askView.handleButton(b)
         else if (sheet === "profiles") {
             if (b === "up") profIndex = Math.max(0, profIndex - 1)
@@ -964,9 +1024,109 @@ Window {
         const p = pagesList[i]
         if (!p) return
         note("action", "Open page: " + p.name)
-        if (!shot.on) Qt.openUrlExternally(p.url)
-        toast.showPlain("Opened " + p.name + " in the browser. Press Mod Manager Download there.")
+        if (!openNexus(p.url)) return
+        toast.showPlain("Opened " + p.name + " in the browser. Press Mod Manager Download there, or Slow download: Turbine picks it up from Downloads.")
     }
+
+    // ---------------------------------------------------------------- the browser (catch.rs)
+    // What the browser check found, the browser helper's link, and the status shown over the browser.
+    property var browser: ({ checked: false })
+    property var bridge: ({ running: false })
+    property var status: ({ active: false })
+    property bool movedPaired: false
+    readonly property bool browserFound: !browser.checked || (!!browser.result && browser.result.found === true)
+    // Opens a Nexus page in the player's browser and watches Downloads for its file. False when there is no browser.
+    function openNexus(url) {
+        if (!browserFound) { noBrowser(); return false }
+        const w = parse(Turbine.watchPage(url), {})
+        if (w.watching) note("catch", "Watching Downloads for this mod (" + w.game + ")")
+        if (!shot.on) Qt.openUrlExternally(url)
+        return true
+    }
+    function noBrowser() {
+        note("browser", "No browser found: showing how to get one")
+        infoIndex = 0
+        sheet = "nobrowser"
+    }
+    // The browser helper: copied into Downloads, then the four steps; Pair opens the pairing page.
+    property string helperFolder: ""
+    function setupHelper() {
+        const r = parse(Turbine.helperSetup(), { error: "Turbine couldn't put the helper in Downloads." })
+        if (r.error) { toast.showPlain(r.error); return }
+        helperFolder = r.folder
+        infoIndex = 0
+        sheet = "helper"
+    }
+    function pair(again) {
+        if (!browserFound) { noBrowser(); return }
+        const url = again ? Turbine.bridgePairAgain() : Turbine.bridgePairUrl()
+        if (url === "") { toast.showPlain("Turbine's link for the browser helper isn't running. Close Turbine and open it again."); return }
+        if (!shot.on) Qt.openUrlExternally(url)
+        toast.showPlain("Opened the pairing page in the browser. It says Paired with Turbine when the helper is set up.")
+    }
+    readonly property string browserWords: !browser.checked ? "Looking for a web browser..."
+        : browserFound ? browser.result.name + (browser.result.how === "flatpak" ? " (installed from Discover)" : browser.result.how === "default" ? " (your default browser)" : "")
+          + ". Nexus pages open there."
+        : "None found. Turbine opens Nexus Mods in your browser; A shows how to get one."
+    readonly property string bridgeTitle: bridge.connected > 0 ? "Browser helper: Connected" : bridge.paired ? "Browser helper: Paired" : "Browser helper: Not paired"
+    readonly property string bridgeWords: !bridge.running ? (bridge.error ? "Turbine's link isn't running: " + bridge.error + "." : "Turbine's link isn't running.")
+        : bridge.connected > 0 ? "The helper is talking to Turbine now: downloads, progress and installer choices show on Nexus pages."
+        : bridge.paired ? "Paired. It connects when the browser is open."
+        : "After setting it up, Pair opens a page that links the helper to this Turbine."
+    // Install notes after adding a mod, and "Add this file?" for a download the watcher could only guess.
+    property string notesName: ""
+    property var notesList: []
+    property var found: null
+    property int infoIndex: 0
+    function openNotes(name, list) {
+        if (!list || list.length === 0) return
+        notesName = name; notesList = list
+        note("engine", "Install notes for " + name + ": " + list.length)
+        if (sheet === "" || sheet === "notes") { infoIndex = 0; sheet = "notes" }
+        else pendingNotes = true
+    }
+    property bool pendingNotes: false
+    readonly property var infoButtons: sheet === "nobrowser" ? [{ key: "a", label: "Check again" }, { key: "b", label: "Close" }]
+        : sheet === "helper" ? [{ key: "a", label: "Pair" }, { key: "b", label: "Close" }]
+        : sheet === "found" ? [{ key: "a", label: "Add it" }, { key: "b", label: "Not this one" }]
+        : [{ key: "a", label: "OK" }]
+    function infoRun(i) {
+        const label = infoButtons[i] ? infoButtons[i].label : ""
+        note("action", "Sheet " + sheet + ": " + label)
+        if (sheet === "nobrowser") { if (label === "Check again") { Turbine.browserCheck(); toast.showPlain("Looking for a browser...") } else sheet = "" }
+        else if (sheet === "helper") { if (label === "Pair") { sheet = ""; pair(false) } else sheet = "" }
+        else if (sheet === "found") { const f = found; found = null; sheet = ""; if (f) Turbine.watchConfirm(f.path, label === "Add it") }
+        else sheet = ""
+    }
+    function infoAct(b) {
+        if (b === "left" || b === "up") infoIndex = Math.max(0, infoIndex - 1)
+        else if (b === "right" || b === "down") infoIndex = Math.min(infoButtons.length - 1, infoIndex + 1)
+        else if (b === "a") infoRun(infoIndex)
+        else if (b === "b") {
+            const i = infoButtons.findIndex(x => x.key === "b")
+            if (i >= 0) infoRun(i); else sheet = ""
+        }
+    }
+
+    // The status card over other apps: only while Turbine isn't the window in front (the player is in the
+    // browser), only with Settings > Accounts > Show status over other apps on. Game Mode uses the input-less
+    // overlay window gamescope paints over the browser; Desktop Mode a small panel kept above the browser.
+    readonly property var transfer: status.active ? status
+        : dl.active ? { active: true, text: "Downloading " + dl.label, level: "busy", progress: dlPart, game: gameTitle, added: "", done: false, ask: "" }
+        : null
+    readonly property bool overlayWanted: !shot.on && browserSet.overlay && !app.active && transfer !== null
+    onOverlayWantedChanged: showOverlay(overlayWanted, Turbine.gamemode)
+    property bool hudMarked: false
+    function showOverlay(on, gameMode) {
+        if (gameMode) {
+            if (on) { Turbine.overlayMark(true); hudMarked = true; hudWin.visible = true }
+            else if (hudWin.visible || hudMarked) { hudWin.visible = false; Turbine.overlayMark(false); hudMarked = false }
+        } else panelWin.visible = on
+        note("overlay", (on ? "Status shown over other apps" : "Status overlay hidden") + (gameMode ? " (Game Mode)" : " (Desktop)"))
+    }
+    // A result stays 6 seconds, then the card goes.
+    Timer { id: statusHide; interval: 6000; onTriggered: Turbine.statusDone() }
+    onStatusChanged: if (status.active && status.done && !shot.on) statusHide.restart(); else statusHide.stop()
 
     // Nexus links (Mod Manager Download): from the command line, or from a later launch through the running Turbine.
     property var handler: ({ state: "unknown" })
@@ -1167,7 +1327,16 @@ Window {
           action: handler.state === "yes" ? "Set again" : "Use Turbine" }
     ]).concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
         { kind: "info", key: "help", title: "Where the key comes from", how: "In Desktop Mode, sign in at nexusmods.com, open Site preferences, API Keys, and copy your Personal API Key. Then paste it here." },
-        { kind: "info", key: "ts", title: "Thunderstore", how: "No account needed. Valheim, Lethal Company and Risk of Rain 2 mods come from there." }
+        { kind: "info", key: "ts", title: "Thunderstore", how: "No account needed. Valheim, Lethal Company and Risk of Rain 2 mods come from there." },
+        // Browser
+        { kind: "action", key: "browser", head: "Browser", title: "Web browser", how: browserWords, action: browserFound ? "Check again" : "How to get one" },
+        { kind: "action", key: "helper", title: "Set up the browser helper",
+          how: "Shows Turbine's progress and installer choices on Nexus pages, and sends Slow downloads to Turbine. For Chrome, Brave, Edge and other Chromium browsers.",
+          action: "Set up" },
+        { kind: "action", key: "pair", title: bridgeTitle, how: bridgeWords, action: bridge.paired ? "Pair again" : "Pair" },
+        { kind: "toggle", key: "overlay", title: "Show status over other apps",
+          how: "A small Turbine card shows download progress and Added to the game while you're in the browser.",
+          value: browserSet.overlay, options: [false, true], names: ["Off", "On"] }
     ])
     readonly property string selfWords: selfUpd.state === "checking" ? "Looking for a newer Turbine..."
         : selfUpd.state === "available" ? "Turbine " + selfUpd.version + (selfUpd.prerelease ? " (pre-release)" : "") + " is ready to install"
@@ -1189,6 +1358,7 @@ Window {
     ])
     function rowStep(r, d) {
         if (r.key === "auto") updates.auto = !updates.auto
+        else if (r.key === "overlay") browserSet.overlay = !browserSet.overlay
         else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
         note("action", "Setting " + r.key + " changed")
     }
@@ -1196,9 +1366,13 @@ Window {
         note("action", "Settings: " + r.title)
         if (r.key === "report") openReport(null, "", "")
         else if (r.key === "perf") openPerf()
+        else if (r.key === "steamBrowser") labsRun(r)
         else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", "Paste or type your Personal API Key from nexusmods.com (Site preferences, API Keys). It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
         else if (r.key === "signOut") Turbine.nexusSignOut()
         else if (r.key === "nxmHandler") Turbine.handlerSet()
+        else if (r.key === "browser") { if (browserFound) Turbine.browserCheck(); else noBrowser() }
+        else if (r.key === "helper") setupHelper()
+        else if (r.key === "pair") pair(bridge.paired)
         else if (r.key === "checkNow") Turbine.selfCheck(labsOn && updates.prerelease, false)
         else if (r.key === "install") Turbine.selfInstall()
         else if (r.key === "restart") { Turbine.finish(); Turbine.restart(); Qt.quit() }
@@ -1279,12 +1453,35 @@ Window {
         { id: "heroic-art", title: "Heroic covers", how: "Look at Heroic (Epic and GOG) games in the rail.",
           expect: "They show their cover art; games without art show their initials." },
         { id: "launch-option", title: "Valheim Launch Option", how: "Valheim with a BepInEx mod: press Play and read the check, then set the Launch Option in Steam.",
-          expect: "The check explains the one-time setting once; after setting it, mods load when the game starts from Steam." }
+          expect: "The check explains the one-time setting once; after setting it, mods load when the game starts from Steam." },
+        { id: "no-browser", title: "No browser warning", how: "On a system without a browser, open a Nexus page from Turbine (a mod's details, A Open on Nexus).",
+          expect: "A warning says no browser was found, with the Discover and Add to Steam steps; Check again finds one once it's installed." },
+        { id: "slow-download", title: "Slow download from Downloads", how: "Open a Nexus mod page from Turbine, press Slow download there and wait for it to finish.",
+          expect: "Turbine adds the file to the right game by itself (or asks first when it couldn't read Nexus's file list); the file stays in Downloads." },
+        { id: "md5-identify", title: "Files named from Nexus", how: "With a Nexus key, add a mod you downloaded from Nexus by hand (Add from Downloads).",
+          expect: "It shows with its Nexus name and version, and gets Update ready badges like mods installed from Get Mods." },
+        { id: "overlay-desktop", title: "Status over the browser (Desktop Mode)", how: "Desktop Mode: start a Nexus download from Turbine, then stay in the browser.",
+          expect: "A small Turbine card stays above the browser with progress, then Added to the game, and goes 6 seconds later. Its buttons work with a tap or click." },
+        { id: "overlay-gamemode", title: "Status over the browser (Game Mode)", how: "Game Mode: open a Nexus page from Turbine (it opens over Turbine), download a mod, watch the bottom left corner.",
+          expect: "The brass card shows over the browser and never takes the controller; it goes when idle, and the Performance Overlay still works after." },
+        { id: "gamemode-window", title: "Turbine's window in Game Mode", how: "Open Turbine in Game Mode and use it for a minute (this build draws through X11 on SteamOS).",
+          expect: "Turbine fills the screen, looks sharp, and the controller works as before." },
+        { id: "browser-helper", title: "Browser helper", how: "Settings, Accounts: Set up the browser helper, follow the steps, then Pair. Download a mod on Nexus.",
+          expect: "The pairing page says Paired; Settings says Connected; the Nexus page shows Turbine's progress, Added, and installer choices that work from either side." },
+        { id: "steam-browser", title: "Steam's built-in browser", how: "Game Mode: Labs, Open Nexus in Steam's browser, sign in, then Slow download a mod for the game on screen.",
+          expect: "The file arrives in Downloads and Turbine asks to add it. If it doesn't, say in the report where the file went (or that Steam didn't download it)." },
+        { id: "cyberpunk", title: "Cyberpunk 2077 mods", how: "Cyberpunk 2077: add Cyber Engine Tweaks, RED4ext and a mod that needs them, plus a REDmod mod; press Play.",
+          expect: "The check names missing frameworks and explains REDmod once; Proton settings get winmm and version; the mods load in the game." },
+        { id: "witcher3", title: "The Witcher 3 mods", how: "The Witcher 3: add two mods, reorder them, press Play (start the game once first if it never ran).",
+          expect: "Mods go in mods/modName; their order is written to mods.settings; scripts that clash show in the check; settings notes show after adding." },
+        { id: "skyrim-nexus", title: "Skyrim from Nexus", how: "Skyrim Special Edition: get SKSE, Address Library and an SKSE plugin mod from Nexus (Mod Manager Download or Slow download).",
+          expect: "SKSE goes in as the loader; without Address Library the check says it's missing; with it, the plugin loads." }
     ]
     readonly property var labsRows: [
         { kind: "action", key: "report", title: "Report a bug", how: "Screenshot, what went wrong, details Turbine adds by itself", action: "Report" },
         { kind: "action", key: "perf", title: "Performance check", how: "Frame times, processor, startup, controller", action: "Open" },
-        { kind: "choice", key: "channel", title: "Update channel", how: "Pre-release gets test builds first", value: updates.prerelease, options: [false, true], names: ["Stable", "Pre-release"] }
+        { kind: "choice", key: "channel", title: "Update channel", how: "Pre-release gets test builds first", value: updates.prerelease, options: [false, true], names: ["Stable", "Pre-release"] },
+        { kind: "action", key: "steamBrowser", title: "Open Nexus in Steam's browser", how: "For the Steam's built-in browser check below: opens nexusmods.com in Steam and watches Downloads for the game on screen", action: "Open" }
     ].concat(updates.prerelease ? [
         { kind: "action", key: "stable", title: "Go back to stable", how: "Installs the latest stable Turbine, even if it's older, and turns Pre-release off", action: "Go back" }
     ] : []).concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
@@ -1315,6 +1512,11 @@ Window {
         note("action", "Labs: " + row.title)
         if (row.key === "report") openReport(null, "", "")
         else if (row.key === "perf") openPerf()
+        else if (row.key === "steamBrowser") {
+            const url = Turbine.watchSteamBrowser()
+            if (!shot.on) Qt.openUrlExternally(url)
+            toast.showPlain("Opened Nexus Mods in Steam's browser. Try a Slow download; Turbine asks before adding what it finds.")
+        }
     }
     function labsItemText(item) {
         if (!item) return ""
@@ -2210,7 +2412,7 @@ Window {
                                     x: app.px(6)
                                     verticalAlignment: Text.AlignBottom
                                     bottomPadding: app.px(6)
-                                    text: (lrow.modelData.head || "").toUpperCase() + (lrow.modelData.head ? " · " + app.labsDone : "")
+                                    text: (lrow.modelData.head || "").toUpperCase() + (lrow.modelData.head && lrow.isItem ? " · " + app.labsDone : "")
                                     color: c.muted
                                     font.pixelSize: app.px(14)
                                     font.bold: true
@@ -2535,6 +2737,53 @@ Window {
         onActivated: (index) => { app.shareIndex = index; app.act("a") }
         onClosed: app.act("b")
     }
+    // The no-browser warning, the browser helper's steps, install notes, and "Add this file?".
+    InfoSheet {
+        ui: kit
+        visible: ["nobrowser", "helper", "notes", "found"].indexOf(app.sheet) >= 0
+        title: app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
+               : app.sheet === "helper" ? "Set up the browser helper"
+               : app.sheet === "found" ? "Is this the mod's file?"
+               : "Added " + app.notesName
+        text: app.sheet === "nobrowser" ? (app.browser.text || "")
+              : app.sheet === "helper" ? "Turbine put the helper in Downloads, in the folder Turbine browser helper. Then, once:"
+              : app.sheet === "found" && app.found ? app.found.name + " (" + app.sizeWords(app.found.size) + ") arrived in Downloads after the Nexus page opened. Turbine couldn't read the mod's file list, so it isn't sure this is the file. Add it to " + app.found.gameName + "?"
+              : app.sheet === "notes" ? "Something to know about this mod:" : ""
+        steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
+               : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
+                                           "Turn on Developer mode (top right).",
+                                           "Press Load unpacked.",
+                                           "Choose Downloads, then the folder Turbine browser helper."]
+               : []
+        notes: app.sheet === "notes" ? app.notesList : []
+        footnote: app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine." : ""
+        buttons: app.infoButtons
+        focusIndex: app.infoIndex
+        onActivated: (i) => { app.infoIndex = i; app.infoRun(i) }
+        onClosed: app.act("b")
+    }
+    // The status card over other apps (see showOverlay).
+    StatusOverlay {
+        id: panelWin
+        ui: kit
+        hud: false
+        status: shot.on ? app.status : app.transfer
+        fomod: app.fomod
+        onConfirm: (yes) => { if (app.status.ask) Turbine.watchConfirm(app.status.ask, yes); app.found = null; if (app.sheet === "found") app.sheet = "" }
+        onChoose: (g, o) => Turbine.fomodChoose(g, o)
+        onNext: Turbine.fomodNext()
+        onBack: Turbine.fomodBack()
+        onStop: Turbine.fomodCancel()
+        onOpenTurbine: { app.raise(); app.requestActivate() }
+    }
+    StatusOverlay {
+        id: hudWin
+        objectName: "turbineHud"
+        ui: kit
+        hud: true
+        status: shot.on ? app.status : app.transfer
+        fomod: app.fomod
+    }
     AskText {
         id: askView
         ui: kit
@@ -2587,11 +2836,12 @@ Window {
             Hint { visible: app.sheet === "versions"; k: "a"; label: app.detailsData && app.detailsData.premium === false ? "Open on Nexus" : "Install" }
             Hint { visible: app.sheet === "pages"; k: "▲▼"; label: "Choose" }
             Hint { visible: app.sheet === "pages"; k: "a"; label: "Open on Nexus" }
+            Hint { visible: ["nobrowser", "helper", "found"].indexOf(app.sheet) >= 0; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "code" && !!app.codeData && app.codeData.state === "ready"; k: "a"; label: "Copy" }
             Hint { visible: app.sheet === "check" || app.sheet === "loader" || app.sheet === "perf"; k: "◀▶"; label: "Choose" }
             Hint { visible: app.sheet === "report" && !reportView.editing; k: "▲▼"; label: "Move" }
             Hint { visible: app.sheet === "report" && reportView.editing; k: "b"; label: "Done typing" }
-            Hint { visible: app.sheet !== "" && app.sheet !== "ask" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : app.sheet === "fomod" ? "Back a step" : "Close" }
+            Hint { visible: app.sheet !== "" && app.sheet !== "ask" && !(app.sheet === "report" && reportView.editing); k: "b"; label: app.sheet === "check" ? "Wait" : app.sheet === "fomod" ? "Back a step" : app.sheet === "found" ? "Not this one" : "Close" }
             Hint { visible: app.sheet === "ask"; k: "a"; label: "Done" }
             Hint { visible: app.sheet === "ask"; k: "b"; label: "Cancel" }
             // Get Mods, details, load order

@@ -42,6 +42,9 @@ pub mod qobject {
         #[qproperty(QString, self_json, cxx_name = "selfJson")]
         #[qproperty(QString, code_json, cxx_name = "codeJson")]
         #[qproperty(QString, handler_json, cxx_name = "handlerJson")]
+        #[qproperty(QString, status_json, cxx_name = "statusJson")]
+        #[qproperty(QString, browser_json, cxx_name = "browserJson")]
+        #[qproperty(QString, bridge_json, cxx_name = "bridgeJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -320,6 +323,60 @@ pub mod qobject {
         #[qinvokable]
         fn restart(self: Pin<&mut Self>);
 
+        // ------------------------------------------------ catching browser downloads (catch.rs)
+
+        /// Once at start: the browser helper's link and the browser check.
+        #[qinvokable]
+        #[cxx_name = "startCatching"]
+        fn start_catching(self: Pin<&mut Self>);
+        /// Looks for a web browser again; the answer lands in `browserJson`.
+        #[qinvokable]
+        #[cxx_name = "browserCheck"]
+        fn browser_check(self: Pin<&mut Self>);
+        /// A Nexus mod page is being opened: watch Downloads for its file. {"watching","game","error"}.
+        #[qinvokable]
+        #[cxx_name = "watchPage"]
+        fn watch_page(self: Pin<&mut Self>, url: &QString) -> QString;
+        /// The player's answer to "Add it?" for a file the watcher could only guess.
+        #[qinvokable]
+        #[cxx_name = "watchConfirm"]
+        fn watch_confirm(self: Pin<&mut Self>, path: &QString, yes: bool);
+        /// Labs: watch for a download from Steam's own browser; answers the steam:// address to open.
+        #[qinvokable]
+        #[cxx_name = "watchSteamBrowser"]
+        fn watch_steam_browser(self: Pin<&mut Self>) -> QString;
+        #[qinvokable]
+        #[cxx_name = "bridgeRefresh"]
+        fn bridge_refresh(self: Pin<&mut Self>);
+        /// The pairing page's address (with its token), "" when the link isn't running.
+        #[qinvokable]
+        #[cxx_name = "bridgePairUrl"]
+        fn bridge_pair_url(self: Pin<&mut Self>) -> QString;
+        /// A new token (the old pairing stops working), then the pairing page's address.
+        #[qinvokable]
+        #[cxx_name = "bridgePairAgain"]
+        fn bridge_pair_again(self: Pin<&mut Self>) -> QString;
+        /// Copies the browser helper into Downloads: {"folder","error"}.
+        #[qinvokable]
+        #[cxx_name = "helperSetup"]
+        fn helper_setup(self: Pin<&mut Self>) -> QString;
+        /// Game Mode: marks the overlay window for gamescope (on) or takes the mark off.
+        #[qinvokable]
+        #[cxx_name = "overlayMark"]
+        fn overlay_mark(self: Pin<&mut Self>, on: bool) -> i32;
+        /// The overlay's result was shown long enough.
+        #[qinvokable]
+        #[cxx_name = "statusDone"]
+        fn status_done(self: Pin<&mut Self>);
+
+        /// A mod was added with notes the player may want to act on: its name, then the notes as a JSON list.
+        #[qsignal]
+        fn added(self: Pin<&mut Self>, name: QString, notes: QString);
+
+        /// The watcher found a file it can only guess belongs to the mod: {"path","name","size","game","gameName"}.
+        #[qsignal]
+        fn asked(self: Pin<&mut Self>, json: QString);
+
         /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
         /// "up", "down", "left", "right" (D-pad and left stick).
         #[qsignal]
@@ -417,6 +474,10 @@ pub struct TurbineRust {
     pub(crate) net: Option<Sender<crate::actions::NetTask>>,
     /// What the download lane needs to know about the game on screen (kept up to date by the worker).
     pub(crate) game_info: crate::online::GameInfo,
+    pub(crate) status_json: QString,
+    pub(crate) browser_json: QString,
+    pub(crate) bridge_json: QString,
+    pub(crate) catching: crate::catch::Catching,
 }
 
 impl Default for TurbineRust {
@@ -461,6 +522,10 @@ impl Default for TurbineRust {
             handler_json: QString::from("{\"state\":\"unknown\"}"),
             net: None,
             game_info: crate::online::GameInfo::default(),
+            status_json: QString::from("{\"active\":false}"),
+            browser_json: QString::from("{\"checked\":false}"),
+            bridge_json: QString::from("{\"running\":false}"),
+            catching: crate::catch::Catching::default(),
         }
     }
 }
@@ -478,7 +543,12 @@ pub(crate) struct Worker {
     pub(crate) slots: HashMap<String, Slot>,
     pub(crate) qt: CxxQtThread<qobject::Turbine>,
     /// Installers waiting for the player's choices (game id, installer), oldest first.
-    pub(crate) pending: std::collections::VecDeque<(String, store::Pending)>,
+    pub(crate) pending: std::collections::VecDeque<(String, store::Pending, u64)>,
+    /// Installer sessions are numbered for the browser helper; the last number given, and the one it was sent.
+    pub(crate) next_session: u64,
+    pub(crate) fomod_sent: Option<u64>,
+    /// Games whose "The Witcher 3 hasn't made its settings folder" was said this run.
+    pub(crate) witcher_said: std::collections::HashSet<String>,
     /// A profile share being imported (game id, share).
     pub(crate) share: Option<(String, turbine_engine::profiles::Share)>,
     /// LOOT's messages per game: (what the plugins looked like when they were read, plugin name lowercased: messages).
@@ -613,56 +683,120 @@ fn rules_json(slot: &Slot) -> String {
 
 // ---------------------------------------------------------------------------------------------------- Proton
 
-/// BepInEx under Proton needs winhttp set to "native,builtin" in the game's prefix. Some(prefix) when this game
-/// needs that and its loader is in place (a Steam game run through Proton, with BepInEx installed).
-fn proton_prefix(slot: &Slot) -> Option<Option<PathBuf>> {
+/// The Proton DLL overrides this game needs for what is turned on (proton::wanted_overrides): winhttp for BepInEx
+/// once its loader is in place, winmm and version for Cyberpunk's RED4ext and Cyber Engine Tweaks. Only for Steam
+/// games run through Proton (Turbine knows their prefix). Some(prefix) with the list when there is something to set.
+fn wanted_overrides(slot: &Slot) -> Option<(Option<PathBuf>, Vec<(&'static str, &'static str)>)> {
     let g = &slot.game;
-    let wanted = g.store == turbine_engine::Store::Steam
-        && proton::wants_winhttp(g, &slot.rules)
-        && slot.rules.loader_installed(g);
-    wanted.then(|| g.prefix.clone())
+    if g.store != turbine_engine::Store::Steam {
+        return None;
+    }
+    if slot.rules.kind == Kind::BepInEx && !slot.rules.loader_installed(g) {
+        return None;
+    }
+    let mut files: Vec<String> = slot.store.mod_files().into_iter().filter(|m| m.enabled).flat_map(|m| m.files).collect();
+    files.extend(rules::present_files(g, &slot.rules));
+    let wanted = proton::wanted_overrides(g, &slot.rules, &files);
+    (!wanted.is_empty()).then(|| (g.prefix.clone(), wanted))
 }
 
-/// Lines for the check before Play about the Proton setting, when there is something to say.
+fn dll_words(wanted: &[(&str, &str)]) -> String {
+    let names: Vec<&str> = wanted.iter().map(|(d, _)| *d).collect();
+    match names.len() {
+        1 => names[0].to_string(),
+        _ => format!("{} and {}", names[..names.len() - 1].join(", "), names[names.len() - 1]),
+    }
+}
+
+/// What the overrides are for, in the player's words.
+fn overrides_for(slot: &Slot) -> &'static str {
+    if slot.rules.kind == Kind::BepInEx {
+        "BepInEx"
+    } else {
+        "the mod frameworks"
+    }
+}
+
+/// Lines for the check before Play about the Proton settings, when there is something to say.
 fn proton_checks(slot: &Slot) -> Vec<rules::Check> {
-    let Some(prefix) = proton_prefix(slot) else { return Vec::new() };
+    let Some((prefix, wanted)) = wanted_overrides(slot) else { return Vec::new() };
     let line = |level: &str, title: String, detail: String| rules::Check { level: level.into(), title, detail };
     let name = &slot.game.name;
+    let what = overrides_for(slot);
+    let bepinex = slot.rules.kind == Kind::BepInEx;
     if crate::system::game_running(&slot.game.install_dir) == Some(true) {
         return vec![line(
             "stop",
             format!("{name} is still running"),
-            "Close the game first. Turbine turns BepInEx on in the game's Proton settings, which only works while the \
-             game is closed."
-                .into(),
+            format!("Close the game first. Turbine turns {what} on in the game's Proton settings, which only works while the game is closed."),
         )];
     }
-    let now = match prefix {
-        None => Err(proton::NOT_STARTED.to_string()),
-        Some(p) => proton::read_override(&p, "winhttp"),
-    };
-    match now {
-        Ok(Some(v)) if v.eq_ignore_ascii_case(proton::BEPINEX_VALUE) => Vec::new(),
-        Ok(_) => vec![line(
-            "ok",
-            "BepInEx gets turned on in Proton".into(),
-            "At Play, Turbine sets winhttp to \"native,builtin\" in this game's Proton settings so BepInEx loads. \
-             A copy of the old settings is kept."
-                .into(),
-        )],
-        Err(e) if e == proton::NOT_STARTED => vec![line(
+    let Some(prefix) = prefix else {
+        return vec![line(
             "warn",
-            "BepInEx can't load yet".into(),
-            format!("Proton makes this game's settings the first time it runs. {} Until then mods that need BepInEx don't load.", proton::NOT_STARTED),
-        )],
-        Err(e) => vec![line("warn", "BepInEx may not load".into(), e)],
+            if bepinex { "BepInEx can't load yet".into() } else { "Mod frameworks can't load yet".into() },
+            format!("Proton makes this game's settings the first time it runs. {} Until then mods that need {what} don't load.", proton::NOT_STARTED),
+        )];
+    };
+    let mut missing = Vec::new();
+    for (dll, value) in &wanted {
+        match proton::read_override(&prefix, dll) {
+            Ok(Some(v)) if v.eq_ignore_ascii_case(value) => {}
+            Ok(_) => missing.push((*dll, *value)),
+            Err(e) => return vec![line("warn", if bepinex { "BepInEx may not load".into() } else { "Mod frameworks may not load".into() }, e)],
+        }
+    }
+    if missing.is_empty() {
+        return Vec::new();
+    }
+    vec![line(
+        "ok",
+        if bepinex { "BepInEx gets turned on in Proton".into() } else { "Mod frameworks get turned on in Proton".into() },
+        format!(
+            "At Play, Turbine sets {} to \"native,builtin\" in this game's Proton settings so {what} {} A copy of the old settings is kept.",
+            dll_words(&missing),
+            if bepinex { "loads." } else { "load." }
+        ),
+    )]
+}
+
+/// The Witcher 3: writes mods.settings (the mods' order and which are on) in the game's Proton folder. Only while
+/// the game is closed (it rewrites the file when it quits). `say` puts a plain message on the status line.
+fn witcher_sync(w: &mut Worker, game: &Game, say: bool) {
+    let Ok(slot) = w.slot(game) else { return };
+    if slot.rules.family != rules::Family::Witcher3 {
+        return;
+    }
+    if crate::system::game_running(&game.install_dir) == Some(true) {
+        crate::log::line("engine", "The Witcher 3 is running: mods.settings left for later");
+        return;
+    }
+    let mods = slot.store.mod_files();
+    let list: Vec<(&[String], bool)> = mods.iter().map(|m| (m.files.as_slice(), m.enabled)).collect();
+    match turbine_engine::witcher::sync_mods_settings(game.prefix.as_deref(), &list) {
+        Ok(changed) => crate::log::line("engine", &format!("The Witcher 3 mods.settings {}", if changed { "written" } else { "already up to date" })),
+        Err(e) => {
+            crate::log::line("engine", &format!("The Witcher 3 mods.settings not written: {e}"));
+            let key = game.id();
+            if say || !w.witcher_said.contains(&key) {
+                w.witcher_said.insert(key);
+                let words = if e == turbine_engine::witcher::NOT_STARTED {
+                    format!("Mods are in place, but their order waits. {e}")
+                } else {
+                    format!("The mods' order for The Witcher 3 couldn't be saved ({e}).")
+                };
+                w.say(words, "warn");
+            }
+        }
     }
 }
 
 fn checks_json(checks: &[rules::Check]) -> String {
+    // Lines the player needs to read only once per game (the interface hides them after that).
+    let once = |t: &str| t == turbine_engine::cyberpunk::REDMOD_TITLE || t == LAUNCH_OPTION_TITLE;
     let items: Vec<String> = checks
         .iter()
-        .map(|c| format!("{{\"level\":{},\"title\":{},\"detail\":{}}}", quote(&c.level), quote(&c.title), quote(&c.detail)))
+        .map(|c| format!("{{\"level\":{},\"title\":{},\"detail\":{},\"once\":{}}}", quote(&c.level), quote(&c.title), quote(&c.detail), once(&c.title)))
         .collect();
     format!("[{}]", items.join(","))
 }
@@ -817,6 +951,9 @@ impl qobject::Turbine {
                     slots: HashMap::new(),
                     qt,
                     pending: std::collections::VecDeque::new(),
+                    next_session: 0,
+                    fomod_sent: None,
+                    witcher_said: std::collections::HashSet::new(),
                     share: None,
                     loot: HashMap::new(),
                 };
@@ -926,8 +1063,13 @@ impl qobject::Turbine {
         let Some(game) = self.current_game() else { return };
         let path = PathBuf::from(path.to_string());
         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        self.as_mut().say(&format!("Adding {file}..."), "work");
         self.as_mut().edited();
+        // With a Nexus key the file is looked up by its MD5 first, so it gets its Nexus name, version and updates.
+        let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
+        if let (Some(d), true) = (domain, crate::online::nexus_key().is_some()) {
+            return self.import_identified(game, path, d.to_string());
+        }
+        self.as_mut().say(&format!("Adding {file}..."), "work");
         self.send(
             Some(game.id()), &format!("Add {file}"),
             true,
@@ -953,7 +1095,9 @@ impl qobject::Turbine {
             Some(game.id()),
             &format!("Add {file} (test)"),
             true,
-            Box::new(move |w: &mut Worker| crate::actions::add_archive(w, &game, &path, source, None, &file)),
+            Box::new(move |w: &mut Worker| {
+                crate::actions::add_archive(w, &game, &path, source, None, &file);
+            }),
         );
     }
 
@@ -1109,6 +1253,7 @@ impl qobject::Turbine {
                         let free = crate::system::free_bytes(&s.game.install_dir);
                         let last = s.store.last_build();
                         let mut list = rules::pre_play(&s.game, &s.rules, last.as_deref(), needs, free);
+                        rules::add_checks(&mut list, rules::mod_checks(&s.game, &s.rules, &s.store.mod_files()));
                         let mut extra = proton_checks(s);
                         // Native games whose loader starts through a Steam Launch Option: the one-time setting.
                         if let (Some(help), Some(option)) = (&s.rules.launch_help, &s.rules.launch_option) {
@@ -1151,7 +1296,7 @@ impl qobject::Turbine {
                     })
                 };
                 // A running game would write its Proton settings over Turbine's change when it closes.
-                let running = w.slot(&game).ok().and_then(|s| proton_prefix(s)).is_some()
+                let running = w.slot(&game).ok().and_then(|s| wanted_overrides(s)).is_some()
                     && crate::system::game_running(&game.install_dir) == Some(true);
                 if running {
                     put_back(w);
@@ -1160,11 +1305,23 @@ impl qobject::Turbine {
                 }
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
                 crate::actions::sync_order(w, &game);
+                if result.is_ok() {
+                    witcher_sync(w, &game, true);
+                }
                 // The loader may have just been put in place by apply, so this comes after it.
-                let note = match w.slot(&game).ok().and_then(|s| proton_prefix(s)) {
+                let what = w.slot(&game).map(|s| overrides_for(s)).unwrap_or("mods");
+                let note = match w.slot(&game).ok().and_then(|s| wanted_overrides(s)) {
                     None => None,
-                    Some(None) => Some(proton::NOT_STARTED.to_string()),
-                    Some(Some(p)) => proton::ensure_override(&p, "winhttp", proton::BEPINEX_VALUE).err(),
+                    Some((None, _)) => Some(proton::NOT_STARTED.to_string()),
+                    Some((Some(p), wanted)) => match proton::ensure_overrides(&p, &wanted) {
+                        Ok(changed) => {
+                            if !changed.is_empty() {
+                                crate::log::line("engine", &format!("Proton settings for {}: set {} to native,builtin", game.name, changed.join(", ")));
+                            }
+                            None
+                        }
+                        Err(e) => Some(e),
+                    },
                 };
                 match result {
                     Ok(r) => {
@@ -1178,7 +1335,7 @@ impl qobject::Turbine {
                             }
                         }
                         match note {
-                            Some(e) => w.say(format!("Started without BepInEx this time. {e}"), "warn"),
+                            Some(e) => w.say(format!("Started without {what} this time. {e}"), "warn"),
                             None => w.say(applied_words(&r, &game), "ok"),
                         }
                         launch(w, &game);
@@ -1327,6 +1484,9 @@ fn apply_job(game: Game, n: i32) -> Job {
     Box::new(move |w: &mut Worker| {
         let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
         crate::actions::sync_order(w, &game);
+        if result.is_ok() {
+            witcher_sync(w, &game, false);
+        }
         match result {
             Ok(r) => {
                 w.note(&game, &r);

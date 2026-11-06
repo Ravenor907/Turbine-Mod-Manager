@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+body { margin: 0; width: 340px; background: #0B0A08; color: #EADFC6; font: 17px/1.35 Barlow, "Segoe UI", Roboto, Ubuntu, Arial, sans-serif; }
+header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #1A150D; border-bottom: 1px solid #45381F; }
+h1 { margin: 0; font: 700 20px Cinzel, Georgia, serif; color: #EDC87A; letter-spacing: .04em; }
+h2 { margin: 0 0 6px; font-size: 17px; color: #EDC87A; }
+section { padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+section[hidden] { display: none; }
+.help { border-top: 1px solid #45381F; }
+p { margin: 0 0 8px; }
+.muted { color: #A08C68; font-size: 15px; }
+.line { display: flex; align-items: center; gap: 10px; }
+.dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: #6B5A3E; }
+.dot.ok { background: #7FA35A; } .dot.busy { background: #C99E52; } .dot.warn { background: #E0A33A; } .dot.stop { background: #C8553D; }
+.bar { height: 10px; border-radius: 6px; background: #2A2216; overflow: hidden; }
+.bar > div { height: 100%; background: #C99E52; width: 0; }
+button { min-height: 44px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; background: #C99E52; color: #0B0A08; border: 1px solid #EDC87A; }
+button:hover { background: #EDC87A; }
+button:focus-visible { outline: 3px solid #EDC87A; outline-offset: 2px; }

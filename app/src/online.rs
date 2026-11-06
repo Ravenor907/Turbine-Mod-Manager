@@ -19,6 +19,31 @@ use turbine_engine::nexus::{self, Account, Nexus};
 use turbine_engine::thunderstore::{self, Package, Query, Sort};
 use turbine_engine::{loaders, selfupdate, updates};
 
+/// The player's Nexus key for work outside the download lane (identifying files, the Downloads watcher's file
+/// lists). None without a key and always in the build's screenshot checks (recorded samples, no internet).
+fn shared_key() -> std::sync::MutexGuard<'static, Option<String>> {
+    static K: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+    K.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+}
+static SAMPLES: AtomicBool = AtomicBool::new(false);
+
+pub fn nexus_key() -> Option<String> {
+    if SAMPLES.load(Ordering::SeqCst) {
+        return None;
+    }
+    shared_key().clone()
+}
+
+/// Where downloads and API answers go while they are read (the same folder the download lane uses).
+pub fn temp_dir() -> PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| turbine_engine::home_dir().join(".cache"))
+        .join("turbine-mod-manager")
+        .join("downloads")
+}
+
 /// A downloaded file ready for the mod worker.
 pub struct Fetched {
     pub path: PathBuf,
@@ -167,6 +192,7 @@ impl Net {
         if let Some(k) = &key {
             crate::log::secret(k);
         }
+        *shared_key() = key.clone();
         Net {
             client: Client::new(version, &temp),
             cache: cache.to_path_buf(),
@@ -184,6 +210,7 @@ impl Net {
     pub fn use_samples(&mut self, dir: &Path) {
         self.sample = Some(dir.to_path_buf());
         self.indexes.clear();
+        SAMPLES.store(true, Ordering::SeqCst);
     }
 
     fn sample_text(&self, name: &str) -> Option<Result<String, String>> {
@@ -466,6 +493,9 @@ impl Net {
         if self.sample.is_none() {
             nexus::save_key(&self.key_file, &key).map_err(|e| format!("The key works, but couldn't be saved ({e})."))?;
         }
+        if self.sample.is_none() {
+            *shared_key() = Some(key.clone());
+        }
         self.key = Some(key);
         self.account = Some(account);
         Ok(self.account_json("ok", ""))
@@ -475,6 +505,7 @@ impl Net {
         let _ = fs::remove_file(&self.key_file);
         self.key = None;
         self.account = None;
+        *shared_key() = None;
         self.account_json("none", "Signed out. The key was deleted from this device.")
     }
 

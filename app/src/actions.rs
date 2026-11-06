@@ -141,41 +141,173 @@ fn remove_download(path: &Path) {
 
 // ---------------------------------------------------------------------------------------------------- mod worker side
 
+/// What adding an archive came to (catch.rs tells the overlay and the browser helper).
+pub(crate) enum Outcome {
+    Added { name: String, notes: Vec<String> },
+    Choices { name: String },
+    Failed(String),
+}
+
+/// Install notes the player may want to act on (settings lines to add by hand, menus, REDmod): shown after adding.
+fn show_notes(w: &Worker, name: &str, notes: &[String]) {
+    let notes: Vec<String> = notes.iter().filter(|n| !n.trim().is_empty()).cloned().collect();
+    if notes.is_empty() {
+        return;
+    }
+    let j = format!("[{}]", notes.iter().map(|n| quote(n)).collect::<Vec<_>>().join(","));
+    let name = name.to_string();
+    w.post(move |t| t.added(QString::from(name.as_str()), QString::from(j.as_str())));
+}
+
 /// Adds (or, with `replaces`, updates) a mod from an archive. An installer with choices waits for the player.
-pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: SourceInfo, replaces: Option<String>, label: &str) {
+pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: SourceInfo, replaces: Option<String>, label: &str) -> Outcome {
     let result = w.slot(game).and_then(|s| match &replaces {
         Some(id) => s.store.replace_mod(id, path, source),
         None => s.store.import_archive(path, source),
     });
-    match result {
+    let out = match result {
         Ok(Import::Added(done)) => {
             for n in &done.notes {
                 crate::log::line("engine", &format!("{}: {n}", done.item.name));
             }
             let verb = if replaces.is_some() { "Updated" } else { "Added" };
             w.say(format!("{verb} {}", done.item.name), "ok");
+            show_notes(w, &done.item.name, &done.notes);
             if let Some(id) = replaces {
                 let gid = game.id();
                 w.post(move |t| t.drop_update(&gid, &id));
             }
+            Outcome::Added { name: done.item.name.clone(), notes: done.notes.clone() }
         }
         Ok(Import::NeedsChoices(p)) => {
+            let name = p.name.clone();
             w.say(format!("{} has installer choices", p.name), "work");
-            w.pending.push_back((game.id(), *p));
+            w.next_session += 1;
+            let sid = w.next_session;
+            w.pending.push_back((game.id(), *p, sid));
             if w.pending.len() == 1 {
                 post_fomod(w);
             }
+            Outcome::Choices { name }
         }
-        Err(e) => w.say(if e.contains(label) { e } else { format!("Couldn't add {label}: {e}") }, "error"),
-    }
+        Err(e) => {
+            let e = if e.contains(label) { e } else { format!("Couldn't add {label}: {e}") };
+            w.say(e.clone(), "error");
+            Outcome::Failed(e)
+        }
+    };
     w.show(game, true);
+    out
+}
+
+/// A picture for the browser helper's choices panel, as a data: URL (small ones only).
+fn data_url(p: &turbine_engine::store::Pending, archive_path: &str) -> Option<String> {
+    let f = p.image_file(archive_path)?;
+    let m = std::fs::metadata(&f).ok()?;
+    if m.len() > 400 * 1024 {
+        return None;
+    }
+    let lc = archive_path.to_ascii_lowercase();
+    let mime = if lc.ends_with(".png") {
+        "png"
+    } else if lc.ends_with(".jpg") || lc.ends_with(".jpeg") {
+        "jpeg"
+    } else if lc.ends_with(".gif") {
+        "gif"
+    } else if lc.ends_with(".webp") {
+        "webp"
+    } else if lc.ends_with(".bmp") {
+        "bmp"
+    } else {
+        return None;
+    };
+    let bytes = std::fs::read(&f).ok()?;
+    Some(format!("data:image/{mime};base64,{}", crate::bridge::base64(&bytes)))
+}
+
+/// The installer's current step for the browser helper ("choices"); option ids are "g<group>o<option>".
+fn choices_message(p: &turbine_engine::store::Pending, sid: u64) -> Option<String> {
+    let v = p.session.current()?;
+    let groups: Vec<String> = v
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(gi, g)| {
+            let kind = match g.kind {
+                turbine_engine::fomod::GroupKind::ExactlyOne => "one",
+                turbine_engine::fomod::GroupKind::AtMostOne => "atmostone",
+                turbine_engine::fomod::GroupKind::AtLeastOne => "atleastone",
+                turbine_engine::fomod::GroupKind::All => "all",
+                turbine_engine::fomod::GroupKind::Any => "any",
+            };
+            let options: Vec<String> = g
+                .options
+                .iter()
+                .enumerate()
+                .map(|(oi, o)| {
+                    let state = if o.kind == turbine_engine::fomod::PluginType::NotUsable {
+                        "disabled"
+                    } else if !o.can_change && o.selected {
+                        "required"
+                    } else if !o.can_change {
+                        "disabled"
+                    } else if o.selected {
+                        "selected"
+                    } else {
+                        "available"
+                    };
+                    let image = o.image.as_deref().and_then(|i| p.session.archive_path(i)).and_then(|a| data_url(p, &a));
+                    format!(
+                        "{{\"id\":{},\"name\":{},\"description\":{},\"image\":{},\"state\":{}}}",
+                        quote(&crate::catch::option_id(gi, oi)),
+                        quote(&o.name),
+                        quote(&o.description),
+                        image.as_deref().map(quote).unwrap_or_else(|| "null".into()),
+                        quote(state)
+                    )
+                })
+                .collect();
+            format!("{{\"title\":{},\"kind\":{},\"options\":[{}]}}", quote(&g.name), quote(kind), options.join(","))
+        })
+        .collect();
+    Some(format!(
+        "{{\"type\":\"choices\",\"sessionId\":{},\"modName\":{},\"stepTitle\":{},\"stepIndex\":{},\"stepCount\":{},\"groups\":[{}]}}",
+        quote(&sid.to_string()),
+        quote(&p.name),
+        quote(&v.name),
+        v.number.saturating_sub(1),
+        if v.is_last { v.number } else { v.number + 1 },
+        groups.join(",")
+    ))
+}
+
+/// Tells the browser helper about the installer on screen (or that the last one is done).
+fn send_choices(w: &mut Worker) {
+    let front = w.pending.front().map(|(_, p, sid)| (*sid, choices_message(p, *sid)));
+    if let Some(prev) = w.fomod_sent {
+        if front.as_ref().map(|(s, _)| *s) != Some(prev) {
+            crate::bridge::broadcast(&format!("{{\"type\":\"choices.done\",\"sessionId\":{}}}", quote(&prev.to_string())));
+            w.fomod_sent = None;
+        }
+    }
+    if let Some((sid, Some(m))) = front {
+        crate::bridge::broadcast(&m);
+        w.fomod_sent = Some(sid);
+    }
+}
+
+/// The helper just connected: the installer waiting now, if any.
+pub(crate) fn resend_fomod(w: &mut Worker) {
+    w.fomod_sent = None;
+    send_choices(w);
 }
 
 /// Puts the first waiting installer on screen (or takes the installer screen away when none is left).
-fn post_fomod(w: &Worker) {
+fn post_fomod(w: &mut Worker) {
+    send_choices(w);
     let json = match w.pending.front() {
         None => String::new(),
-        Some((gid, p)) => {
+        Some((gid, p, _)) => {
             let data = p.to_json();
             let mut paths: Vec<String> = Vec::new();
             if let Ok(j) = json::parse(&data) {
@@ -206,6 +338,110 @@ fn post_fomod(w: &Worker) {
         }
     };
     w.post(move |t| t.set_fomod_json(QString::from(json.as_str())));
+}
+
+/// Next on the installer: the next step, or the install when this was the last one. Returns the installer when it
+/// is still running.
+fn installer_next(w: &mut Worker, game: &Game, mut p: turbine_engine::store::Pending) -> Option<turbine_engine::store::Pending> {
+    match p.session.next() {
+        Ok(true) => Some(p),
+        Ok(false) => {
+            let name = p.name.clone();
+            let r = w.slot(game).and_then(|s| s.store.finish_install(p));
+            match r {
+                Ok(done) => {
+                    for n in &done.notes {
+                        crate::log::line("engine", &format!("{name}: {n}"));
+                    }
+                    w.say(format!("Added {}", done.item.name), "ok");
+                    show_notes(w, &done.item.name, &done.notes);
+                    let (g, m, notes) = (game.name.clone(), done.item.name.clone(), done.notes.clone());
+                    w.post(move |t| t.caught_added(&g, &m, notes, true));
+                }
+                Err(e) => {
+                    let g = game.name.clone();
+                    let e2 = e.clone();
+                    w.post(move |mut t| {
+                        if t.rust().catching.busy {
+                            t.as_mut().set_status(&e2, "stop", None, &g, "", true, "");
+                        }
+                    });
+                    w.say(e, "error")
+                }
+            }
+            w.show(game, true);
+            None
+        }
+        Err(e) => {
+            w.say(e.clone(), "warn");
+            crate::bridge::broadcast(&format!("{{\"type\":\"error\",\"text\":{}}}", quote(&e)));
+            Some(p)
+        }
+    }
+}
+
+/// Installer choices from the browser helper's panel. They count only for the installer and step on screen: when
+/// the player already answered in Turbine, the helper just gets the current step again.
+pub(crate) fn bridge_choice(w: &mut Worker, what: &str, session: &str, step: usize, selected: &[String]) {
+    let Some((gid, mut p, sid)) = w.pending.pop_front() else {
+        return send_choices(w);
+    };
+    let current = p.session.current();
+    let stale = sid.to_string() != session || (what == "choice" && current.as_ref().map(|v| v.number.saturating_sub(1)) != Some(step));
+    let Some(game) = game_of(w, &gid).filter(|_| !stale) else {
+        w.pending.push_front((gid, p, sid));
+        w.fomod_sent = None;
+        return send_choices(w);
+    };
+    let back = match what {
+        "choice.back" => {
+            p.session.back();
+            Some(p)
+        }
+        "choice.cancel" => {
+            let name = p.name.clone();
+            if let Ok(s) = w.slot(&game) {
+                s.store.cancel_install(p);
+            }
+            w.say(format!("{name} wasn't added"), "ok");
+            let g = game.name.clone();
+            w.post(move |t| t.set_status(&format!("{name} wasn't added"), "warn", None, &g, "", true, ""));
+            None
+        }
+        _ => {
+            let view = current.expect("checked above");
+            let mut err = None;
+            for (gi, g) in view.groups.iter().enumerate() {
+                for (oi, o) in g.options.iter().enumerate() {
+                    if selected.iter().any(|x| *x == crate::catch::option_id(gi, oi)) && !o.selected {
+                        if let Err(e) = p.session.select(gi, oi) {
+                            err = Some(e);
+                        }
+                    }
+                }
+            }
+            for (gi, g) in view.groups.iter().enumerate() {
+                for (oi, o) in g.options.iter().enumerate() {
+                    if !selected.iter().any(|x| *x == crate::catch::option_id(gi, oi)) && o.selected && o.can_change {
+                        let _ = p.session.deselect(gi, oi);
+                    }
+                }
+            }
+            match err {
+                Some(e) => {
+                    crate::bridge::broadcast(&format!("{{\"type\":\"error\",\"text\":{}}}", quote(&e)));
+                    Some(p)
+                }
+                None => installer_next(w, &game, p),
+            }
+        }
+    };
+    if let Some(p) = back {
+        w.pending.push_front((gid, p, sid));
+        // The same session again: the helper gets the new step.
+        w.fomod_sent = None;
+    }
+    post_fomod(w);
 }
 
 fn game_of(w: &Worker, gid: &str) -> Option<Game> {
@@ -715,10 +951,12 @@ impl qobject::Turbine {
             name,
             false,
             Box::new(move |w: &mut Worker| {
-                let Some((gid, p)) = w.pending.pop_front() else { return };
+                let Some((gid, p, sid)) = w.pending.pop_front() else { return };
                 let Some(game) = game_of(w, &gid) else { return };
                 if let Some(back) = f(w, &game, p) {
-                    w.pending.push_front((gid, back));
+                    w.pending.push_front((gid, back, sid));
+                    // Same installer, new step or choices: the helper's panel follows.
+                    w.fomod_sent = None;
                 }
                 post_fomod(w);
             }),
@@ -736,28 +974,7 @@ impl qobject::Turbine {
     }
 
     pub fn fomod_next(self: Pin<&mut Self>) {
-        self.fomod_job("Installer next step", move |w, game, mut p| match p.session.next() {
-            Ok(true) => Some(p),
-            Ok(false) => {
-                let name = p.name.clone();
-                let r = w.slot(game).and_then(|s| s.store.finish_install(p));
-                match r {
-                    Ok(done) => {
-                        for n in &done.notes {
-                            crate::log::line("engine", &format!("{name}: {n}"));
-                        }
-                        w.say(format!("Added {}", done.item.name), "ok");
-                    }
-                    Err(e) => w.say(e, "error"),
-                }
-                w.show(game, true);
-                None
-            }
-            Err(e) => {
-                w.say(e, "warn");
-                Some(p)
-            }
-        });
+        self.fomod_job("Installer next step", installer_next);
     }
 
     pub fn fomod_back(self: Pin<&mut Self>) {
@@ -774,6 +991,12 @@ impl qobject::Turbine {
                 s.store.cancel_install(p);
             }
             w.say(format!("{name} wasn't added"), "ok");
+            let g = game.name.clone();
+            w.post(move |mut t| {
+                if t.rust().catching.busy {
+                    t.as_mut().set_status(&format!("{name} wasn't added"), "warn", None, &g, "", true, "");
+                }
+            });
             None
         });
     }
