@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Builds a fake SteamOS home folder for the build's screenshot checks: an internal Steam library, an SD card library
-and Heroic (Flatpak) with Epic, GOG and a game added by hand. Cover art is plain generated pictures, never real art.
+"""Builds a fake SteamOS home folder for the build's screenshot checks: an internal Steam library, an SD card library,
+Heroic (Flatpak) with Epic, GOG and a game added by hand, and a few small test mods as zip files in Downloads. Cover art
+is plain generated pictures, never real art, and the mods are made up (their "code" is a few placeholder bytes).
 Usage: fake-home.py <folder>"""
+import json
 import os
 import struct
 import sys
+import time
+import zipfile
 import zlib
 
 
@@ -61,6 +65,51 @@ def main(home):
     write(os.path.join(heroic, "gog_store/installed.json"),
           '{"installed": [{"appName": "1453375253", "install_path": "%s", "platform": "linux", "version": "1.6.15"}]}' % sv)
     write(os.path.join(heroic, "store_cache/gog_library.json"), '{"games": [{"app_name": "1453375253", "title": "Stardew Valley"}]}')
+
+    downloads(os.path.join(home, "Downloads"))
+
+
+def zip_file(path, files, when):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    os.utime(path, (when, when))
+
+
+def downloads(folder):
+    """Test mods, one per kind of game rules. Each is listed in the screenshot step by file name."""
+    now = int(time.time())
+    fake_dll = b"MZ" + b"\0" * 62 + b"placeholder, never run"
+    # Skyrim: loose files, the way most Skyrim mods are packed (meshes and textures at the top of the zip).
+    zip_file(os.path.join(folder, "Brighter Lanterns 1.2.zip"), {
+        "meshes/lanterns/lantern01.nif": b"nif" * 40,
+        "textures/lanterns/lantern01.dds": b"DDS " + b"\0" * 124,
+        "textures/lanterns/lantern01_n.dds": b"DDS " + b"\0" * 124,
+        "readme.txt": "Brighter lanterns for the roads of Skyrim.\n",
+    }, now - 3600)
+    # Skyrim: a mod with an SKSE plugin, so it needs the script loader.
+    zip_file(os.path.join(folder, "Lantern Glow SKSE 2.0.zip"), {
+        "Data/SKSE/Plugins/LanternGlow.dll": fake_dll,
+        "Data/SKSE/Plugins/LanternGlow.ini": "[General]\nGlow=1.5\n",
+        "Data/LanternGlow.esp": b"TES4" + b"\0" * 60,
+    }, now - 7200)
+    # Thunderstore package for a BepInEx game: manifest, icon and readme at the top, the plugin in plugins/.
+    zip_file(os.path.join(folder, "TurbineTest-Bigger_Pockets-1.0.3.zip"), {
+        "manifest.json": json.dumps({"name": "Bigger_Pockets", "version_number": "1.0.3",
+                                     "website_url": "", "description": "Carry more.",
+                                     "dependencies": ["BepInEx-BepInExPack-5.4.2100"]}),
+        "icon.png": b"\x89PNG\r\n\x1a\n",
+        "README.md": "# Bigger Pockets\nCarry more.\n",
+        "plugins/BiggerPockets.dll": fake_dll,
+    }, now - 86400)
+    # Stardew Valley: a SMAPI mod is one folder with a manifest.json and its code.
+    zip_file(os.path.join(folder, "Quiet Rooster 1.4.zip"), {
+        "QuietRooster/manifest.json": json.dumps({"Name": "Quiet Rooster", "Author": "TurbineTest", "Version": "1.4.0",
+                                                  "UniqueID": "TurbineTest.QuietRooster", "EntryDll": "QuietRooster.dll",
+                                                  "MinimumApiVersion": "4.0.0"}),
+        "QuietRooster/QuietRooster.dll": fake_dll,
+    }, now - 2 * 86400)
 
 
 if __name__ == "__main__":

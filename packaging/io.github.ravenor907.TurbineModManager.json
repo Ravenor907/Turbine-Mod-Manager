@@ -10,12 +10,13 @@
         "--socket=wayland",
         "--socket=fallback-x11",
         "--device=all",
-        "--filesystem=~/.local/share/Steam:ro",
+        "--filesystem=~/.local/share/Steam",
         "--filesystem=~/.steam:ro",
-        "--filesystem=/run/media:ro",
-        "--filesystem=~/.var/app/com.heroicgameslauncher.hgl:ro",
+        "--filesystem=/run/media",
+        "--filesystem=~/.var/app/com.heroicgameslauncher.hgl",
         "--filesystem=~/.config/heroic:ro",
-        "--filesystem=~/Games:ro"
+        "--filesystem=~/Games",
+        "--filesystem=xdg-download:ro"
     ],
     "modules": [
         {

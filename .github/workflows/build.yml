@@ -98,7 +98,7 @@ jobs:
           VERSION: ${{ needs.rules.outputs.version }}
         run: |
           m=packaging/io.github.ravenor907.TurbineModManager.json
-          sed -i "s|\"TURBINE_VERSION\": \"0.1\"|\"TURBINE_VERSION\": \"$VERSION\"|" "$m"
+          sed -i -E "s|\"TURBINE_VERSION\": \"[0-9.]+\"|\"TURBINE_VERSION\": \"$VERSION\"|" "$m"
           grep -q "\"TURBINE_VERSION\": \"$VERSION\"" "$m" || { echo "::error::The version didn't go into the Flatpak manifest"; exit 1; }
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
@@ -133,20 +133,37 @@ jobs:
         shell: bash
         run: |
           flatpak install --user -y --noninteractive TurbineModManager.flatpak > /dev/null
-          mkdir -p shots home empty
+          mkdir -p shots home empty data
           python3 tools/fake-home.py "$PWD/home"
           fail=0
-          shoot() {   # shoot <name> <WxH> <page> <home>
-            out="$PWD/shots/$1.png"
+          shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
+            name=$1 size=$2 page=$3 home=$4
+            shift 4
+            out="$PWD/shots/$name.png"
+            # Each picture gets its own mod store, so imports never pile up between pictures.
             timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
-              --env=TURBINE_HOME="$4" --filesystem="$PWD/shots" --filesystem="$4" \
-              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$2" --page="$3" > "shots/$1.log" 2>&1
-            if [ ! -s "$out" ]; then echo "::error title=No screenshot::$1"; cat "shots/$1.log"; fail=1; fi
-            if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$1.log"; then echo "::error title=QML problem::$1"; fail=1; fi
+              --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$PWD/data/$name" \
+              --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" \
+              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" "$@" > "shots/$name.log" 2>&1
+            if [ ! -s "$out" ]; then echo "::error title=No screenshot::$name"; cat "shots/$name.log"; fail=1; fi
+            if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
+            # The engine answers "not ready" while parts of it are unfinished; say so without failing the build.
+            if grep -q "not yet implemented" "shots/$name.log"; then echo "::warning title=Engine not finished::$name"; fi
           }
+          dl="$PWD/home/Downloads"
+          skyrim=steam:489830
           for size in 1280x800 1920x1080; do
             for page in game settings details perf notice; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
             shoot "nogames-$size" "$size" game "$PWD/empty"
+            shoot "mods-skyrim-$size" "$size" mods "$PWD/home" --game=$skyrim \
+              "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+            shoot "mods-valheim-$size" "$size" mods "$PWD/home" --game=steam:892970 "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
+            shoot "mods-stardew-$size" "$size" mods "$PWD/home" --game=gog:1453375253 "--selftest-import=$dl/Quiet Rooster 1.4.zip"
+            shoot "menu-$size" "$size" menu "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
+            shoot "gamemenu-$size" "$size" gamemenu "$PWD/home" --game=$skyrim
+            shoot "check-$size" "$size" check "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
+            shoot "add-$size" "$size" add "$PWD/home" --game=$skyrim
+            shoot "loader-$size" "$size" loader "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
           done
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.

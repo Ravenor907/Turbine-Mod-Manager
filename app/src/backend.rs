@@ -1,4 +1,8 @@
 //! The bridge between the QML interface and the engine: one object, `Turbine`, available to QML as a singleton.
+//!
+//! Everything that touches a game's mods runs on one worker thread, in the order it was asked for, so the interface
+//! never freezes while a zip is unpacked or files are placed. Results come back to the interface thread through
+//! cxx-qt's thread queue and land in the properties below; plain sentences for the status line arrive as `message`.
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -17,6 +21,12 @@ pub mod qobject {
         #[qproperty(bool, steamos)]
         #[qproperty(bool, gamemode)]
         #[qproperty(bool, pads)]
+        #[qproperty(QString, mods_json, cxx_name = "modsJson")]
+        #[qproperty(QString, rules_json, cxx_name = "rulesJson")]
+        #[qproperty(QString, downloads_json, cxx_name = "downloadsJson")]
+        #[qproperty(QString, check_json, cxx_name = "checkJson")]
+        #[qproperty(bool, busy)]
+        #[qproperty(i32, pending)]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -27,17 +37,99 @@ pub mod qobject {
         #[qinvokable]
         fn poll(self: Pin<&mut Self>);
 
+        /// Shows this game's mods and rules (opens its store the first time).
+        #[qinvokable]
+        fn select(self: Pin<&mut Self>, game_id: &QString);
+
+        /// Adds a mod from a zip file to the current game.
+        #[qinvokable]
+        #[cxx_name = "importZip"]
+        fn import_zip(self: Pin<&mut Self>, path: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "setEnabled"]
+        fn set_enabled(self: Pin<&mut Self>, id: &QString, on: bool);
+
+        #[qinvokable]
+        #[cxx_name = "moveTo"]
+        fn move_to(self: Pin<&mut Self>, id: &QString, index: i32);
+
+        #[qinvokable]
+        #[cxx_name = "removeMod"]
+        fn remove_mod(self: Pin<&mut Self>, id: &QString);
+
+        #[qinvokable]
+        #[cxx_name = "undoRemove"]
+        fn undo_remove(self: Pin<&mut Self>, id: &QString);
+
+        /// Applies waiting changes to the game now (does nothing when there are none).
+        #[qinvokable]
+        #[cxx_name = "applyNow"]
+        fn apply_now(self: Pin<&mut Self>);
+
+        /// Applies waiting changes and waits for it to finish. Only for when Turbine closes.
+        #[qinvokable]
+        fn finish(self: Pin<&mut Self>);
+
+        /// Takes every mod file out of the current game, then starts it.
+        #[qinvokable]
+        #[cxx_name = "playOriginal"]
+        fn play_original(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[cxx_name = "restoreSetup"]
+        fn restore_setup(self: Pin<&mut Self>, id: &QString);
+
+        /// The check before Play for the current game. The answer arrives as `checked`.
+        #[qinvokable]
+        fn check(self: Pin<&mut Self>);
+
+        /// Applies, then asks QML to open the game's launch link (`launch`).
+        #[qinvokable]
+        fn play(self: Pin<&mut Self>, game_id: &QString);
+
+        /// Reads the zip files in Downloads into `downloadsJson`.
+        #[qinvokable]
+        #[cxx_name = "listDownloads"]
+        fn list_downloads(self: Pin<&mut Self>);
+
         /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
         /// "up", "down", "left", "right" (D-pad and left stick).
         #[qsignal]
         fn pad(self: Pin<&mut Self>, button: QString, pressed: bool);
+
+        /// A sentence for the status line. level: "work" (in progress), "ok", "warn" or "error".
+        #[qsignal]
+        fn message(self: Pin<&mut Self>, text: QString, level: QString);
+
+        /// The check before Play finished; the same JSON as `checkJson`.
+        #[qsignal]
+        fn checked(self: Pin<&mut Self>, json: QString);
+
+        /// Open this link to start the game (steam://... or Heroic's link).
+        #[qsignal]
+        fn launch(self: Pin<&mut Self>, url: QString);
     }
+
+    impl cxx_qt::Threading for Turbine {}
 }
 
 use crate::pad::Pads;
 use core::pin::Pin;
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use std::collections::HashMap;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::time::Duration;
+use turbine_engine::json::quote;
+use turbine_engine::rules::{self, GameRules, Kind};
+use turbine_engine::store::{self, Store};
+use turbine_engine::Game;
+
+/// Said when a part of the engine isn't finished in this build (it panics instead of answering).
+const NOT_READY: &str = "Not ready yet: this part of Turbine isn't finished in this build.";
 
 pub struct TurbineRust {
     games: QString,
@@ -46,7 +138,22 @@ pub struct TurbineRust {
     steamos: bool,
     gamemode: bool,
     pads: bool,
+    mods_json: QString,
+    rules_json: QString,
+    downloads_json: QString,
+    check_json: QString,
+    busy: bool,
+    pending: i32,
     reader: Option<Pads>,
+    /// The games from the last scan, to hand to the worker.
+    found: Vec<Game>,
+    /// The game on screen.
+    current: String,
+    /// The game the waiting changes belong to.
+    dirty: String,
+    /// Long jobs (import, apply, play) not finished yet.
+    inflight: i32,
+    jobs: Option<Sender<Task>>,
 }
 
 impl Default for TurbineRust {
@@ -58,17 +165,193 @@ impl Default for TurbineRust {
             steamos: crate::system::is_steamos(),
             gamemode: crate::system::in_game_mode(),
             pads: false,
+            mods_json: QString::default(),
+            rules_json: QString::default(),
+            downloads_json: QString::from("[]"),
+            check_json: QString::from("[]"),
+            busy: false,
+            pending: 0,
             reader: None,
+            found: Vec::new(),
+            current: String::new(),
+            dirty: String::new(),
+            inflight: 0,
+            jobs: None,
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------------- worker thread
+
+struct Slot {
+    game: Game,
+    rules: GameRules,
+    store: Store,
+}
+
+struct Worker {
+    data_home: PathBuf,
+    slots: HashMap<String, Slot>,
+    qt: CxxQtThread<qobject::Turbine>,
+}
+
+type Job = Box<dyn FnOnce(&mut Worker) + Send>;
+
+struct Task {
+    /// The game this job works on; its store is dropped (and opened again next time) if the job panics.
+    game: Option<String>,
+    long: bool,
+    run: Job,
+}
+
+impl Worker {
+    fn post<F>(&self, f: F)
+    where
+        F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
+    {
+        let _ = self.qt.queue(f);
+    }
+
+    fn say(&self, text: impl Into<String>, level: &'static str) {
+        let text = text.into();
+        self.post(move |t| t.message(QString::from(text.as_str()), QString::from(level)));
+    }
+
+    /// The game's store and rules, opened the first time they're needed.
+    fn slot(&mut self, game: &Game) -> Result<&mut Slot, String> {
+        let key = game.id();
+        if !self.slots.contains_key(&key) {
+            let rules = GameRules::for_game(game);
+            let store = Store::open(game, &self.data_home).map_err(|e| format!("Couldn't open {}'s mods: {e}", game.name))?;
+            self.slots.insert(key.clone(), Slot { game: game.clone(), rules, store });
+        }
+        Ok(self.slots.get_mut(&key).expect("just inserted"))
+    }
+
+    /// Sends the game's mods (and rules) to the interface if it's still the game on screen.
+    fn show(&mut self, game: &Game, with_rules: bool) {
+        let key = game.id();
+        let Some(slot) = self.slots.get(&key) else { return };
+        let mods = slot.store.to_json();
+        let rules = with_rules.then(|| rules_json(slot));
+        self.post(move |mut t| {
+            if t.rust().current != key {
+                return;
+            }
+            if let Some(r) = rules {
+                t.as_mut().set_rules_json(QString::from(r.as_str()));
+            }
+            t.as_mut().set_mods_json(QString::from(mods.as_str()));
+        });
+    }
+}
+
+fn rules_json(slot: &Slot) -> String {
+    let r = &slot.rules;
+    let kind = match r.kind {
+        Kind::Bethesda => "bethesda",
+        Kind::BepInEx => "bepinex",
+        Kind::Smapi => "smapi",
+        Kind::Generic => "generic",
+    };
+    let (loader, installed) = match &r.loader {
+        Some(l) => (
+            format!(
+                "{{\"name\":{},\"explain\":{},\"source\":{}}}",
+                quote(&l.name),
+                quote(&l.explain),
+                quote(&l.source)
+            ),
+            r.loader_installed(&slot.game),
+        ),
+        None => ("null".to_string(), false),
+    };
+    format!(
+        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{}}}",
+        quote(kind),
+        r.ordered,
+        r.plugins,
+        quote(&r.mod_root),
+        quote(&r.support),
+        loader,
+        installed
+    )
+}
+
+fn checks_json(checks: &[rules::Check]) -> String {
+    let items: Vec<String> = checks
+        .iter()
+        .map(|c| format!("{{\"level\":{},\"title\":{},\"detail\":{}}}", quote(&c.level), quote(&c.title), quote(&c.detail)))
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+fn downloads_json(home: &Path) -> String {
+    let items: Vec<String> = store::downloads(home)
+        .iter()
+        .map(|p| {
+            let meta = std::fs::metadata(p).ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            format!(
+                "{{\"name\":{},\"path\":{},\"size\":{},\"modified\":{}}}",
+                quote(&name),
+                quote(&p.to_string_lossy()),
+                size,
+                modified
+            )
+        })
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+fn changes(n: i32) -> String {
+    if n == 1 {
+        "1 change".into()
+    } else {
+        format!("{n} changes")
+    }
+}
+
+/// Where Turbine keeps mods on internal storage. TURBINE_DATA moves it for the build's screenshot checks.
+fn data_home() -> PathBuf {
+    for key in ["TURBINE_DATA", "XDG_DATA_HOME"] {
+        if let Some(v) = std::env::var_os(key).filter(|v| !v.is_empty()) {
+            return v.into();
+        }
+    }
+    turbine_engine::home_dir().join(".local/share")
+}
+
+/// What an apply-like job did, for the status line.
+fn applied_words(report: &turbine_engine::deploy::Report) -> String {
+    let mut s = String::from("Ready to play");
+    if !report.changed_by_others.is_empty() {
+        let n = report.changed_by_others.len();
+        s.push_str(&format!(
+            ". {n} mod file{} changed by something else {} left alone.",
+            if n == 1 { "" } else { "s" },
+            if n == 1 { "was" } else { "were" }
+        ));
+    }
+    s
+}
+
+// ---------------------------------------------------------------------------------------------------- the object
 
 impl qobject::Turbine {
     pub fn scan(self: Pin<&mut Self>) {
         let scan = turbine_engine::scan_games(&turbine_engine::home_dir());
         let mut this = self;
         this.as_mut().set_problems(QString::from(scan.problems.join("\n").as_str()));
-        this.as_mut().set_games(QString::from(scan.games_json().as_str()));
+        let json = scan.games_json();
+        this.as_mut().rust_mut().found = scan.games;
+        this.as_mut().set_games(QString::from(json.as_str()));
     }
 
     pub fn poll(mut self: Pin<&mut Self>) {
@@ -86,5 +369,328 @@ impl qobject::Turbine {
         for (button, pressed) in events {
             self.as_mut().pad(QString::from(button), pressed);
         }
+    }
+
+    fn find(&self, id: &str) -> Option<Game> {
+        self.rust().found.iter().find(|g| g.id() == id).cloned()
+    }
+
+    fn current_game(&self) -> Option<Game> {
+        self.find(&self.rust().current)
+    }
+
+    /// Queues a job for the worker thread (started the first time).
+    fn send(mut self: Pin<&mut Self>, game: Option<String>, long: bool, run: Job) {
+        if self.rust().jobs.is_none() {
+            let (tx, rx) = mpsc::channel::<Task>();
+            let qt = self.qt_thread();
+            let spawned = std::thread::Builder::new().name("turbine-worker".into()).spawn(move || {
+                // Stores are made and used on this thread only.
+                let mut worker = Worker { data_home: data_home(), slots: HashMap::new(), qt };
+                while let Ok(task) = rx.recv() {
+                    let long = task.long;
+                    let failed = catch_unwind(AssertUnwindSafe(|| (task.run)(&mut worker))).is_err();
+                    if failed {
+                        if let Some(key) = task.game {
+                            worker.slots.remove(&key);
+                        }
+                        worker.say(NOT_READY, "error");
+                    }
+                    if long {
+                        worker.post(|mut t| {
+                            let left = (t.rust().inflight - 1).max(0);
+                            t.as_mut().rust_mut().inflight = left;
+                            t.as_mut().set_busy(left > 0);
+                        });
+                    }
+                }
+            });
+            if spawned.is_err() {
+                self.as_mut().message(QString::from("Turbine couldn't start its worker. Close it and open it again."), QString::from("error"));
+                return;
+            }
+            self.as_mut().rust_mut().jobs = Some(tx);
+        }
+        if long {
+            let n = self.rust().inflight + 1;
+            self.as_mut().rust_mut().inflight = n;
+            self.as_mut().set_busy(true);
+        }
+        let sent = self.rust().jobs.as_ref().map(|tx| tx.send(Task { game, long, run }).is_ok()).unwrap_or(false);
+        if !sent && long {
+            let n = (self.rust().inflight - 1).max(0);
+            self.as_mut().rust_mut().inflight = n;
+            self.as_mut().set_busy(n > 0);
+        }
+    }
+
+    fn say(self: Pin<&mut Self>, text: &str, level: &str) {
+        self.message(QString::from(text), QString::from(level));
+    }
+
+    pub fn select(mut self: Pin<&mut Self>, game_id: &QString) {
+        let id = game_id.to_string();
+        if self.rust().current == id {
+            return;
+        }
+        // Changes made to the game being left go into it first.
+        self.as_mut().apply_now();
+        self.as_mut().rust_mut().current = id.clone();
+        self.as_mut().set_mods_json(QString::default());
+        self.as_mut().set_rules_json(QString::default());
+        let Some(game) = self.find(&id) else { return };
+        self.send(
+            Some(id),
+            false,
+            Box::new(move |w: &mut Worker| match w.slot(&game) {
+                Ok(_) => w.show(&game, true),
+                Err(e) => w.say(e, "error"),
+            }),
+        );
+    }
+
+    /// Notes one more change waiting to be applied to the current game.
+    fn edited(mut self: Pin<&mut Self>) {
+        let cur = self.rust().current.clone();
+        if self.rust().dirty != cur && *self.pending() > 0 {
+            // Changes for another game are still waiting; put them in before starting on this one.
+            self.as_mut().apply_now();
+        }
+        self.as_mut().rust_mut().dirty = cur;
+        let n = *self.pending() + 1;
+        self.as_mut().set_pending(n);
+    }
+
+    /// Runs a quick change to one mod on the worker, then shows the new list.
+    fn change<F>(mut self: Pin<&mut Self>, f: F)
+    where
+        F: FnOnce(&mut Store) -> Result<(), String> + Send + 'static,
+    {
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().edited();
+        self.send(
+            Some(game.id()),
+            false,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| f(&mut s.store));
+                if let Err(e) = result {
+                    w.say(e, "error");
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
+    pub fn import_zip(mut self: Pin<&mut Self>, path: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let path = PathBuf::from(path.to_string());
+        let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.as_mut().say(&format!("Adding {file}..."), "work");
+        self.as_mut().edited();
+        self.send(
+            Some(game.id()),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| s.store.import_zip(&path));
+                match result {
+                    Ok(m) => w.say(format!("Added {}", m.name), "ok"),
+                    Err(e) => w.say(format!("Couldn't add {file}: {e}"), "error"),
+                }
+                w.show(&game, true);
+            }),
+        );
+    }
+
+    pub fn set_enabled(self: Pin<&mut Self>, id: &QString, on: bool) {
+        let id = id.to_string();
+        self.change(move |s| s.set_enabled(&id, on).map_err(|e| format!("Couldn't change that mod: {e}")));
+    }
+
+    pub fn move_to(self: Pin<&mut Self>, id: &QString, index: i32) {
+        let id = id.to_string();
+        let index = index.max(0) as usize;
+        self.change(move |s| s.move_to(&id, index).map_err(|e| format!("Couldn't move that mod: {e}")));
+    }
+
+    pub fn remove_mod(self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.change(move |s| s.remove(&id).map_err(|e| format!("Couldn't uninstall that mod: {e}")));
+    }
+
+    pub fn undo_remove(self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {e}")));
+    }
+
+    /// Takes the waiting changes off the count before the job runs (so leaving the window right after Play doesn't
+    /// apply them twice) and puts them back if it fails. Returns the game they belong to and how many there were.
+    fn take_pending(mut self: Pin<&mut Self>) -> (Option<Game>, i32) {
+        let n = *self.pending();
+        if n == 0 {
+            return (None, 0);
+        }
+        self.as_mut().set_pending(0);
+        let dirty = self.rust().dirty.clone();
+        (self.find(&dirty), n)
+    }
+
+    pub fn apply_now(mut self: Pin<&mut Self>) {
+        let (Some(game), n) = self.as_mut().take_pending() else { return };
+        self.as_mut().say(&format!("Applying {} to the game...", changes(n)), "work");
+        self.send(Some(game.id()), true, apply_job(game, n));
+    }
+
+    pub fn finish(mut self: Pin<&mut Self>) {
+        let (Some(game), n) = self.as_mut().take_pending() else { return };
+        let (tx, rx) = mpsc::channel::<()>();
+        let job = apply_job(game.clone(), n);
+        self.send(
+            Some(game.id()),
+            false,
+            Box::new(move |w: &mut Worker| {
+                // Signal the wait below even if apply panics.
+                struct Done(Sender<()>);
+                impl Drop for Done {
+                    fn drop(&mut self) {
+                        let _ = self.0.send(());
+                    }
+                }
+                let _done = Done(tx);
+                job(w);
+            }),
+        );
+        let _ = rx.recv_timeout(Duration::from_secs(60));
+    }
+
+    pub fn play_original(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        // Waiting changes would only be undone by this; they stay in Turbine and go in at the next Play.
+        let (_, n) = self.as_mut().take_pending();
+        self.as_mut().say("Taking the mods out of the game...", "work");
+        self.send(
+            Some(game.id()),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| s.store.play_original().map_err(|e| e.to_string()));
+                match result {
+                    Ok(_) => {
+                        w.say("Starting the game with no mods. Your mods are kept.", "ok");
+                        launch(w, &game);
+                    }
+                    Err(e) => {
+                        w.post(move |mut t| {
+                            let p = *t.pending() + n;
+                            t.as_mut().set_pending(p);
+                        });
+                        w.say(format!("Couldn't take the mods out: {e}"), "error");
+                    }
+                }
+            }),
+        );
+    }
+
+    pub fn restore_setup(mut self: Pin<&mut Self>, id: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let setup = id.to_string();
+        let _ = self.as_mut().take_pending();
+        self.as_mut().say("Putting back the saved setup...", "work");
+        self.send(
+            Some(game.id()),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| s.store.restore(&setup).map_err(|e| e.to_string()));
+                match result {
+                    Ok(r) => w.say(applied_words(&r), "ok"),
+                    Err(e) => w.say(format!("Couldn't put that setup back: {e}"), "error"),
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
+    pub fn check(self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.send(
+            Some(game.id()),
+            false,
+            Box::new(move |w: &mut Worker| {
+                let json = match w.slot(&game) {
+                    Ok(s) => {
+                        let needs = s.store.mods().iter().any(|m| m.enabled && m.needs_loader);
+                        let free = crate::system::free_bytes(&s.game.install_dir);
+                        let last = s.store.last_build();
+                        checks_json(&rules::pre_play(&s.game, &s.rules, last.as_deref(), needs, free))
+                    }
+                    Err(e) => checks_json(&[rules::Check { level: "stop".into(), title: "Mods couldn't be read".into(), detail: e }]),
+                };
+                w.post(move |mut t| {
+                    t.as_mut().set_check_json(QString::from(json.as_str()));
+                    t.as_mut().checked(QString::from(json.as_str()));
+                });
+            }),
+        );
+    }
+
+    pub fn play(mut self: Pin<&mut Self>, game_id: &QString) {
+        let Some(game) = self.find(&game_id.to_string()) else { return };
+        let (_, n) = self.as_mut().take_pending();
+        self.as_mut().say("Getting the game ready...", "work");
+        self.send(
+            Some(game.id()),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
+                match result {
+                    Ok(r) => {
+                        w.say(applied_words(&r), "ok");
+                        launch(w, &game);
+                    }
+                    Err(e) => {
+                        w.post(move |mut t| {
+                            let p = *t.pending() + n;
+                            t.as_mut().set_pending(p);
+                        });
+                        w.say(format!("Couldn't get the mods in place, so the game wasn't started: {e}"), "error");
+                    }
+                }
+            }),
+        );
+    }
+
+    pub fn list_downloads(self: Pin<&mut Self>) {
+        let home = turbine_engine::home_dir();
+        self.send(
+            None,
+            false,
+            Box::new(move |w: &mut Worker| {
+                let json = downloads_json(&home);
+                w.post(move |t| t.set_downloads_json(QString::from(json.as_str())));
+            }),
+        );
+    }
+}
+
+/// Applies a game's waiting changes; `n` of them go back on the count if it fails.
+fn apply_job(game: Game, n: i32) -> Job {
+    Box::new(move |w: &mut Worker| {
+        let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
+        match result {
+            Ok(r) => w.say(applied_words(&r), "ok"),
+            Err(e) => {
+                w.post(move |mut t| {
+                    let p = *t.pending() + n;
+                    t.as_mut().set_pending(p);
+                });
+                w.say(format!("Couldn't apply the changes: {e}. Nothing was lost; Turbine tries again after the next change."), "error");
+            }
+        }
+        w.show(&game, false);
+    })
+}
+
+fn launch(w: &Worker, game: &Game) {
+    match rules::launch_url(game) {
+        Some(url) => w.post(move |t| t.launch(QString::from(url.as_str()))),
+        None => w.say(format!("Turbine doesn't know how to start {} yet. Start it from its launcher.", game.name), "warn"),
     }
 }
