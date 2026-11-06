@@ -118,7 +118,7 @@ Item {
         }
         Row {
             width: parent.width
-            height: parent.height - fs.ui.px(44 + 44 + 16) - fs.ui.px(50)
+            height: parent.height - fs.ui.px(44 + 44 + 16)
             spacing: fs.ui.px(14)
             Column {
                 width: parent.width * 0.58
