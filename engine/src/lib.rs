@@ -1,15 +1,27 @@
 //! Turbine Mod Manager's engine. It has no interface of its own: the app calls into it.
 
+pub mod archives;
 pub mod deploy;
+pub mod fomod;
 pub mod games;
 pub mod heroic;
 pub mod inflate;
 pub mod json;
+pub mod loaders;
+pub mod net;
+pub mod nexus;
+pub mod plugins;
+pub mod profiles;
 pub mod proton;
 pub mod rules;
+pub mod selfupdate;
+pub mod sha256;
 pub mod steam;
 pub mod store;
+pub mod thunderstore;
+pub mod updates;
 pub mod vdf;
+pub mod xml;
 pub mod zip;
 
 pub use games::{Game, Runtime, Scan, Store};

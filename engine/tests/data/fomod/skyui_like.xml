@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An installer in the shape of SkyUI-era mods: one page, pick one main file, fixed interface files. -->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+	<moduleName>SkyUI</moduleName>
+	<moduleImage path="fomod\images\header.png" />
+	<moduleDependencies operator="And">
+		<fileDependency file="Skyrim.esm" state="Active"/>
+	</moduleDependencies>
+	<requiredInstallFiles>
+		<folder source="Interface" destination="Interface" />
+		<file source="SkyUI_SE.bsa" destination="SkyUI_SE.bsa" />
+	</requiredInstallFiles>
+	<installSteps order="Explicit">
+		<installStep name="Main">
+			<optionalFileGroups order="Explicit">
+				<group name="Plugin" type="SelectExactlyOne">
+					<plugins order="Explicit">
+						<plugin name="Full (recommended)">
+							<description><![CDATA[Everything, including the mod configuration menu & <its> settings.]]></description>
+							<image path="fomod/images/full.png" />
+							<files>
+								<file source="Plugins\SkyUI_SE.esp" destination="SkyUI_SE.esp" priority="0" />
+							</files>
+							<typeDescriptor>
+								<type name="Recommended"/>
+							</typeDescriptor>
+						</plugin>
+						<plugin name="No configuration menu">
+							<description>Only the new menus. Tom &amp; Jerry&#39;s &#x2764; test &unknown; stays.</description>
+							<files>
+								<file source="Plugins/SkyUI_SE_NoMCM.esp" destination="SkyUI_SE.esp" />
+							</files>
+							<typeDescriptor>
+								<type name="Optional"/>
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+	</installSteps>
+</config>

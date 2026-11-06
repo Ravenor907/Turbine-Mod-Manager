@@ -161,22 +161,27 @@ fn data_wrapped_mod_any_case() {
 
 #[test]
 fn skse_package_splits_game_folder_and_data() {
-    let d = dests(
-        &skyrim(),
-        &[
-            "skse64_2_02_06/skse64_loader.exe",
-            "skse64_2_02_06/skse64_1_6_1170.dll",
-            "skse64_2_02_06/skse64_readme.txt",
-            "skse64_2_02_06/skse64_whatsnew.txt",
-            "skse64_2_02_06/Data/Scripts/Actor.pex",
-            "skse64_2_02_06/Data/Scripts/Source/Actor.psc",
-            "skse64_2_02_06/src/skse64/skse64/main.cpp",
-        ],
-        "SKSE",
-    );
+    let files = list(&[
+        "skse64_2_02_06/skse64_loader.exe",
+        "skse64_2_02_06/skse64_1_6_1170.dll",
+        "skse64_2_02_06/skse64_readme.txt",
+        "skse64_2_02_06/skse64_whatsnew.txt",
+        "skse64_2_02_06/Data/Scripts/Actor.pex",
+        "skse64_2_02_06/Data/Scripts/Source/Actor.psc",
+        "skse64_2_02_06/src/skse64/skse64/main.cpp",
+    ]);
+    let mut d: Vec<String> = skyrim().map_archive(&files, "SKSE").unwrap().into_iter().map(|(_, to)| to).collect();
+    d.sort();
+    // The loader also goes in as the launcher Steam's Play starts.
     assert_eq!(
         d,
-        vec!["Data/Scripts/Actor.pex", "Data/Scripts/Source/Actor.psc", "skse64_1_6_1170.dll", "skse64_loader.exe"]
+        vec![
+            "Data/Scripts/Actor.pex",
+            "Data/Scripts/Source/Actor.psc",
+            "SkyrimSELauncher.exe",
+            "skse64_1_6_1170.dll",
+            "skse64_loader.exe"
+        ]
     );
 }
 
@@ -211,7 +216,8 @@ fn fomod_only_archive_is_a_clear_error() {
             "x",
         )
         .unwrap_err();
-    assert_eq!(err, "This mod has an installer with choices. Installers come in a later build.");
+    // The store opens installers before mapping; only an installer folder without its file gets here.
+    assert!(err.contains("installer") && !err.contains("later build"), "{err}");
     // Wrapped in a folder: the same.
     assert!(skyrim().map_archive(&list(&["Mod/fomod/ModuleConfig.xml", "Mod/Core/a.esp"]), "x").is_err());
 }

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE config [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+	<moduleName>Better Armor Pack &xxe;</moduleName>
+	<requiredInstallFiles>
+		<folder source="00 Core" destination="" priority="0"/>
+	</requiredInstallFiles>
+	<installSteps order="Explicit">
+		<installStep name="Body">
+			<optionalFileGroups>
+				<group name="Body type" type="SelectExactlyOne">
+					<plugins>
+						<!-- Default order is by name: CBBE before UNP whatever the file says. -->
+						<plugin name="UNP">
+							<description>For UNP bodies.</description>
+							<image path="fomod\unp.jpg"/>
+							<conditionFlags><flag name="body">UNP</flag></conditionFlags>
+							<typeDescriptor><type name="Optional"/></typeDescriptor>
+						</plugin>
+						<plugin name="CBBE">
+							<description>For CBBE bodies.</description>
+							<conditionFlags><flag name="body">CBBE</flag></conditionFlags>
+							<typeDescriptor><type name="Optional"/></typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+		<installStep name="CBBE extras">
+			<visible>
+				<flagDependency flag="body" value="CBBE"/>
+			</visible>
+			<optionalFileGroups order="Explicit">
+				<group name="Extras" type="SelectAny">
+					<plugins order="Explicit">
+						<plugin name="High heels">
+							<description>Heel sounds.</description>
+							<files><folder source="10 Heels" destination="" priority="1"/></files>
+							<conditionFlags><flag name="heels">On</flag></conditionFlags>
+							<typeDescriptor><type name="Recommended"/></typeDescriptor>
+						</plugin>
+						<plugin name="Physics">
+							<description>Needs a physics framework.</description>
+							<files>
+								<file source="11 Physics\BAP Physics.esp" destination="BAP Physics.esp"/>
+								<file source="11 Physics\readme physics.txt" destination="docs/" alwaysInstall="true"/>
+							</files>
+							<typeDescriptor>
+								<dependencyType>
+									<defaultType name="NotUsable"/>
+									<patterns>
+										<pattern>
+											<dependencies operator="Or">
+												<fileDependency file="CBPC.esp" state="Active"/>
+												<fileDependency file="data\FSMP.esp" state="Active"/>
+											</dependencies>
+											<type name="Optional"/>
+										</pattern>
+									</patterns>
+								</dependencyType>
+							</typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+		<installStep name="Patches">
+			<optionalFileGroups>
+				<group name="Patches" type="SelectAny">
+					<plugins>
+						<plugin name="Unofficial Patch">
+							<description>For the unofficial patch.</description>
+							<files><file source="20 Patches\BAP - USSEP.esp" destination="BAP - USSEP.esp"/></files>
+							<typeDescriptor>
+								<dependencyType>
+									<defaultType name="Optional"/>
+									<patterns>
+										<pattern>
+											<dependencies><fileDependency file="unofficial skyrim special edition patch.esp" state="Active"/></dependencies>
+											<type name="Recommended"/>
+										</pattern>
+										<pattern>
+											<dependencies><fileDependency file="Unofficial Skyrim Special Edition Patch.esp" state="Missing"/></dependencies>
+											<type name="NotUsable"/>
+										</pattern>
+									</patterns>
+								</dependencyType>
+							</typeDescriptor>
+						</plugin>
+						<plugin name="Leveled lists">
+							<description>Adds the armor to lists.</description>
+							<files><file source="20 Patches/BAP - Lists.esp" destination="BAP - Lists.esp" installIfUsable="true"/></files>
+							<typeDescriptor><type name="Required"/></typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+				<group name="Texture size" type="SelectAtMostOne">
+					<plugins>
+						<plugin name="2K">
+							<description>Smaller textures.</description>
+							<conditionFlags><flag name="tex">2K</flag></conditionFlags>
+							<typeDescriptor><type name="Optional"/></typeDescriptor>
+						</plugin>
+					</plugins>
+				</group>
+			</optionalFileGroups>
+		</installStep>
+	</installSteps>
+	<conditionalFileInstalls>
+		<patterns>
+			<pattern>
+				<dependencies operator="And">
+					<flagDependency flag="body" value="CBBE"/>
+				</dependencies>
+				<files><folder source="30 Bodies\CBBE" destination="meshes\armor\bap" priority="5"/></files>
+			</pattern>
+			<pattern>
+				<dependencies><flagDependency flag="body" value="UNP"/></dependencies>
+				<files><folder source="30 Bodies\UNP" destination="meshes\armor\bap" priority="5"/></files>
+			</pattern>
+			<pattern>
+				<dependencies operator="And">
+					<flagDependency flag="body" value="CBBE"/>
+					<flagDependency flag="tex" value=""/>
+				</dependencies>
+				<files><file source="40 Textures\4K\armor.dds" destination="textures\bap\armor.dds"/></files>
+			</pattern>
+			<pattern>
+				<dependencies><flagDependency flag="tex" value="2K"/></dependencies>
+				<files><file source="40 Textures\2K\armor.dds" destination="textures\bap\armor.dds"/></files>
+			</pattern>
+		</patterns>
+	</conditionalFileInstalls>
+</config>

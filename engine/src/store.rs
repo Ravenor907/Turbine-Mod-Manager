@@ -8,17 +8,25 @@
 //! - `removed/<id>/...`   mods in Recently removed (kept 7 days)
 //! - `state.json`         order, on/off, names, Recently removed, setups, last build (written atomically)
 //! - `deploy/`            the deploy record, plan and backups of game files mods replace
-//! - `tmp/`               archives being unpacked (cleared on open)
+//! - `tmp/`               archives being unpacked and installers waiting for choices (cleared on open)
+//!
+//! Every archive kind goes through `archives::unpack` (zip, 7z, rar). An archive with a FOMOD installer
+//! (fomod/ModuleConfig.xml) returns `Import::NeedsChoices` with a session the app drives step by step; `finish_install`
+//! then stages the chosen files. SMAPI's installer zip is set up from the bundle inside it, without running anything.
+//! Each mod keeps where it came from (`SourceInfo`) for update checks and share files.
 //!
 //! The store sits on the game's own library (a hidden folder at its top) so deploy can hard link instead of copying:
 //! inside the Flatpak, the app's data folder is a separate mount, and links from it into a game always fail.
 
+use crate::archives::{self, Format};
 use crate::deploy::{self, Paths, Record, Report};
+use crate::fomod;
 use crate::games::Game;
 use crate::json::{self, quote, Json};
-use crate::rules::GameRules;
-use crate::zip::{self, Limits, Zip};
-use std::collections::HashSet;
+use crate::plugins;
+use crate::rules::{self, GameRules};
+use crate::zip::{self, Limits};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::MetadataExt;
@@ -56,10 +64,39 @@ pub struct Setup {
     pub played: bool,
 }
 
+/// Where an installed mod came from (kind "thunderstore", "nexus", "zip" or "loader", its ID there, version, the
+/// download's address and SHA-256 when known, and the IDs of what it needs).
+pub use crate::net::SourceInfo;
+
 /// The parts of a game's rules the store needs. `GameRules` is the real one; tests may pass their own.
+/// Only the first two are required; the rest have defaults that do nothing.
 pub trait ModRules: Send {
     fn map_archive(&self, files: &[String], mod_name: &str) -> Result<Vec<(String, String)>, String>;
     fn needs_loader(&self, game_files: &[String]) -> bool;
+    /// An archive inside this one to install from instead (SMAPI's install.dat), as its path in `files`.
+    fn inner_archive(&self, _files: &[String]) -> Option<String> {
+        None
+    }
+    /// Maps the inner archive's files (see `inner_archive`).
+    fn map_inner(&self, _files: &[String]) -> Result<Vec<(String, String)>, String> {
+        Err("This archive can't be installed.".into())
+    }
+    /// Files copied from the game folder into the mod as it is added: (game file, path in the mod).
+    fn game_copies(&self, _game_files: &[String]) -> Vec<(String, String)> {
+        Vec::new()
+    }
+    /// Files of the mod (game-relative) to mark executable (never run by Turbine).
+    fn executables(&self, _game_files: &[String]) -> Vec<String> {
+        Vec::new()
+    }
+    /// The folder FOMOD installers install into, relative to the game folder ("Data" for Bethesda games).
+    fn mod_root(&self) -> String {
+        String::new()
+    }
+    /// The game has plugins (FOMOD conditions can look at which are turned on).
+    fn has_plugins(&self) -> bool {
+        false
+    }
 }
 
 impl ModRules for GameRules {
@@ -69,6 +106,84 @@ impl ModRules for GameRules {
     fn needs_loader(&self, game_files: &[String]) -> bool {
         GameRules::needs_loader(self, game_files)
     }
+    fn inner_archive(&self, files: &[String]) -> Option<String> {
+        self.smapi_bundle(files)
+    }
+    fn map_inner(&self, files: &[String]) -> Result<Vec<(String, String)>, String> {
+        self.map_smapi_bundle(files)
+    }
+    fn game_copies(&self, game_files: &[String]) -> Vec<(String, String)> {
+        GameRules::game_copies(self, game_files)
+    }
+    fn executables(&self, game_files: &[String]) -> Vec<String> {
+        GameRules::executables(self, game_files)
+    }
+    fn mod_root(&self) -> String {
+        self.mod_root.clone()
+    }
+    fn has_plugins(&self) -> bool {
+        self.plugins
+    }
+}
+
+/// A mod added (or updated), with notes for the activity log (installer files that were missing, files copied from
+/// the game, and so on).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Installed {
+    pub item: Mod,
+    pub notes: Vec<String>,
+}
+
+/// What adding an archive led to.
+#[derive(Debug)]
+pub enum Import {
+    Added(Installed),
+    /// The mod has an installer with choices: drive `Pending::session`, then call `Store::finish_install` (or
+    /// `Store::cancel_install`).
+    NeedsChoices(Box<Pending>),
+}
+
+/// An installer waiting for the player's choices. Its unpacked files wait in the store's tmp folder.
+#[derive(Debug)]
+pub struct Pending {
+    pub session: fomod::Session,
+    /// What the installer's info.xml says (name, author, version, website, description).
+    pub info: fomod::Info,
+    /// The name the mod will get.
+    pub name: String,
+    target: Target,
+    unpacked: PathBuf,
+}
+
+impl Pending {
+    /// The real file for a path inside the archive (an option's image: `fomod::Session::archive_path`), if it's there.
+    pub fn image_file(&self, archive_path: &str) -> Option<PathBuf> {
+        let rel = zip::safe_relative(archive_path).ok()?;
+        let p = self.unpacked.join(rel);
+        p.is_file().then_some(p)
+    }
+
+    /// The installer as JSON for the interface (see `fomod::Session::to_json`), with "name" added.
+    pub fn to_json(&self) -> String {
+        let s = self.session.to_json();
+        format!("{{\"name\":{},{}", quote(&self.name), &s[1..])
+    }
+}
+
+/// Where an import goes, worked out before unpacking.
+#[derive(Debug, Clone)]
+struct Target {
+    id: String,
+    /// Index in `mods` of the mod being replaced.
+    existing: Option<usize>,
+    name: String,
+    version: Option<String>,
+    file_name: String,
+    shown: String,
+    source: SourceInfo,
+    format_label: String,
+    /// Set by `replace_mod`: keep the mod's own name.
+    keep_name: bool,
 }
 
 /// How long Recently removed keeps a mod.
@@ -100,10 +215,16 @@ pub struct Store {
     archives: Vec<String>,
     removed_list: Vec<Removed>,
     removed_extra: Vec<RemovedEntry>,
+    /// Where each mod (installed or in Recently removed) came from, by mod ID.
+    sources: HashMap<String, SourceInfo>,
+    /// Each mod's installer choices ("step/group/option"), by mod ID, to start from when it's updated.
+    choices: HashMap<String, Vec<String>>,
     setup_list: Vec<Setup>,
     saved: Vec<SavedSetup>,
     last_build: Option<String>,
     clock: Option<u64>,
+    /// The 7z/rar reader; None means the real bsdtar.
+    tar: Option<Box<dyn archives::Tar + Send>>,
 }
 
 fn now_secs() -> u64 {
@@ -290,6 +411,67 @@ fn mod_json(m: &Mod) -> String {
     )
 }
 
+fn source_from(v: &Json) -> SourceInfo {
+    SourceInfo {
+        kind: v.str_at("kind").unwrap_or("zip").to_string(),
+        id: v.str_at("id").unwrap_or("").to_string(),
+        version: v.str_at("version").map(String::from),
+        url: v.str_at("url").map(String::from),
+        sha256: v.str_at("sha256").map(String::from),
+        needs: v.get("needs").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|n| n.as_str().map(String::from)).collect(),
+    }
+}
+
+/// A source as JSON (also used by share files).
+pub fn source_json(s: &SourceInfo) -> String {
+    format!(
+        "{{\"kind\":{},\"id\":{},\"version\":{},\"url\":{},\"sha256\":{},\"needs\":[{}]}}",
+        quote(&s.kind),
+        quote(&s.id),
+        opt(&s.version),
+        opt(&s.url),
+        opt(&s.sha256),
+        s.needs.iter().map(|n| quote(n)).collect::<Vec<_>>().join(",")
+    )
+}
+
+/// Plain words for where a mod came from.
+fn source_label(kind: &str, format: &str) -> String {
+    match kind {
+        "thunderstore" => "Thunderstore".into(),
+        "nexus" => "Nexus Mods".into(),
+        "loader" => "Official download".into(),
+        _ => match format {
+            "7z" => "7z file".into(),
+            "rar" => "Rar file".into(),
+            _ => "Zip file".into(),
+        },
+    }
+}
+
+fn join_rel(root: &str, rest: &str) -> String {
+    match (root.is_empty(), rest.is_empty()) {
+        (true, _) => rest.to_string(),
+        (_, true) => root.to_string(),
+        _ => format!("{root}/{rest}"),
+    }
+}
+
+fn rel_of(p: &Path) -> String {
+    p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+}
+
+/// Largest installer file read (ModuleConfig.xml, info.xml).
+const MAX_INSTALLER_FILE: u64 = 8 << 20;
+
+fn read_small(path: &Path) -> Result<Vec<u8>, String> {
+    let m = fs::metadata(path).map_err(|e| e.to_string())?;
+    if m.len() > MAX_INSTALLER_FILE {
+        return Err("its installer file is far too large".into());
+    }
+    fs::read(path).map_err(|e| e.to_string())
+}
+
 impl Store {
     /// Opens (or creates) the store for a game. Mods are staged on the same drive as the game so they can be hard
     /// linked: under `data_home` for internal storage, in a hidden folder on the SD card or other drive otherwise.
@@ -339,10 +521,13 @@ impl Store {
             archives: Vec::new(),
             removed_list: Vec::new(),
             removed_extra: Vec::new(),
+            sources: HashMap::new(),
+            choices: HashMap::new(),
             setup_list: Vec::new(),
             saved: Vec::new(),
             last_build: None,
             clock: None,
+            tar: None,
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -361,6 +546,19 @@ impl Store {
     #[doc(hidden)]
     pub fn set_clock(&mut self, now: u64) {
         self.clock = Some(now);
+    }
+
+    /// Uses another 7z/rar reader instead of bsdtar, for tests. Not used by the app.
+    #[doc(hidden)]
+    pub fn set_tar(&mut self, tar: Box<dyn archives::Tar + Send>) {
+        self.tar = Some(tar);
+    }
+
+    fn unpack(&self, archive: &Path, dest: &Path) -> Result<Vec<String>, String> {
+        match &self.tar {
+            Some(t) => archives::unpack_with(archive, dest, &Limits::default(), t.as_ref()),
+            None => archives::unpack(archive, dest, &Limits::default()),
+        }
     }
 
     fn now(&self) -> u64 {
@@ -438,6 +636,12 @@ impl Store {
                 },
                 order,
             });
+        }
+        for (id, src) in v.get("sources").map(Json::entries).unwrap_or(&[]) {
+            self.sources.insert(id.clone(), source_from(src));
+        }
+        for (id, list) in v.get("choices").map(Json::entries).unwrap_or(&[]) {
+            self.choices.insert(id.clone(), list.as_array().iter().filter_map(|c| c.as_str().map(String::from)).collect());
         }
         self.last_build = v.str_at("lastBuild").map(String::from);
         self.sync_lists();
@@ -535,11 +739,30 @@ impl Store {
                 )
             })
             .collect();
+        // Sources and choices only for mods that are still somewhere.
+        let known: HashSet<&str> =
+            self.mods.iter().map(|m| m.id.as_str()).chain(self.removed_extra.iter().map(|r| r.removed.item.id.as_str())).collect();
+        let mut sources: Vec<String> = self
+            .sources
+            .iter()
+            .filter(|(id, _)| known.contains(id.as_str()))
+            .map(|(id, src)| format!("{}:{}", quote(id), source_json(src)))
+            .collect();
+        sources.sort();
+        let mut choices: Vec<String> = self
+            .choices
+            .iter()
+            .filter(|(id, _)| known.contains(id.as_str()))
+            .map(|(id, list)| format!("{}:[{}]", quote(id), list.iter().map(|c| quote(c)).collect::<Vec<_>>().join(",")))
+            .collect();
+        choices.sort();
         let text = format!(
-            "{{\"version\":1,\n\"mods\":[\n{}\n],\n\"removed\":[\n{}\n],\n\"setups\":[\n{}\n],\n\"lastBuild\":{}}}\n",
+            "{{\"version\":1,\n\"mods\":[\n{}\n],\n\"removed\":[\n{}\n],\n\"setups\":[\n{}\n],\n\"sources\":{{\n{}\n}},\n\"choices\":{{\n{}\n}},\n\"lastBuild\":{}}}\n",
             mods.join(",\n"),
             removed.join(",\n"),
             setups.join(",\n"),
+            sources.join(",\n"),
+            choices.join(",\n"),
             opt(&self.last_build)
         );
         write_atomic(&self.state_path(), &text)
@@ -578,60 +801,293 @@ impl Store {
 
     /// Adds a mod from a zip file. Returns the new mod (enabled, at the end of the order).
     /// The same download added again replaces the old one's files and keeps its place and on/off state.
+    /// A mod with an installer is installed with the installer's own suggestions (or the choices made last time);
+    /// use `import_archive` to let the player choose.
     pub fn import_zip(&mut self, archive: &Path) -> Result<Mod, String> {
+        let source = SourceInfo { kind: "zip".into(), ..SourceInfo::default() };
+        match self.import_archive(archive, source)? {
+            Import::Added(done) => Ok(done.item),
+            Import::NeedsChoices(p) => self.finish_install(*p).map(|d| d.item),
+        }
+    }
+
+    /// Adds a mod from an archive (zip, 7z or rar) and records where it came from.
+    /// The same download (same file name, or the same package from the same source) added again replaces the old
+    /// one's files and keeps its place and on/off state.
+    pub fn import_archive(&mut self, archive: &Path, source: SourceInfo) -> Result<Import, String> {
+        let target = self.target_for(archive, source, None)?;
+        self.begin(archive, target)
+    }
+
+    /// Replaces a mod's files with a new download (an update), keeping its place, on/off state and name.
+    /// Installer choices made last time are the starting point if the new version has an installer.
+    pub fn replace_mod(&mut self, id: &str, archive: &Path, source: SourceInfo) -> Result<Import, String> {
+        self.index_of(id).map_err(|e| e.to_string())?;
+        let target = self.target_for(archive, source, Some(id))?;
+        self.begin(archive, target)
+    }
+
+    /// Where each installed mod came from, in order, for the update checker.
+    pub fn installed_sources(&self) -> Vec<(String, SourceInfo)> {
+        self.mods.iter().map(|m| (m.id.clone(), self.source_of(&m.id))).collect()
+    }
+
+    /// Where a mod came from (a zip file with no ID when Turbine doesn't know).
+    pub fn source_of(&self, id: &str) -> SourceInfo {
+        self.sources.get(id).cloned().unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..SourceInfo::default() })
+    }
+
+    /// Stages the files an installer's choices pick and adds (or updates) the mod.
+    pub fn finish_install(&mut self, pending: Pending) -> Result<Installed, String> {
+        let Pending { session, target, unpacked, .. } = pending;
+        let fail = |what: String| format!("{} couldn't be added: {what}.", target.shown);
+        let result = (|| {
+            let done = session.finish().map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            let root = self.rules.mod_root();
+            let map: Vec<(String, String)> = done.files.iter().map(|(from, to)| (from.clone(), join_rel(&root, to))).collect();
+            if map.is_empty() {
+                return Err(fail("the choices made don't install any files".into()));
+            }
+            let mut notes: Vec<String> = done.missing.iter().map(|m| format!("The installer names {m}, which isn't in the archive.")).collect();
+            if !done.flags.is_empty() {
+                notes.push(format!(
+                    "Installer choices: {}",
+                    done.flags.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            let choices = session.choices();
+            let mut out = self.stage_and_commit(&unpacked, &map, &target, notes)?;
+            if choices.is_empty() {
+                self.choices.remove(&out.item.id);
+            } else {
+                self.choices.insert(out.item.id.clone(), choices);
+            }
+            self.save().map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
+            out.notes.retain(|n| !n.is_empty());
+            Ok(out)
+        })();
+        let _ = remove_dir(&unpacked);
+        result
+    }
+
+    /// Drops an installer the player backed out of.
+    pub fn cancel_install(&mut self, pending: Pending) {
+        let _ = remove_dir(&pending.unpacked);
+    }
+
+    fn target_for(&self, archive: &Path, source: SourceInfo, replace: Option<&str>) -> Result<Target, String> {
         let file_name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let shown = if file_name.is_empty() { archive.to_string_lossy().into_owned() } else { file_name.clone() };
-        let fail = |what: String| format!("{shown} couldn't be added: {what}.");
-        let io_fail = |e: io::Error| fail(format!("couldn't read or write a file ({e})"));
-
-        let (name, version) = clean_name(&file_name);
-        let existing = if file_name.is_empty() { None } else { self.archives.iter().position(|a| *a == file_name) };
+        let format = archives::detect(archive)
+            .map_err(|e| format!("{shown} couldn't be added: couldn't read the file ({e})."))?
+            .ok_or_else(|| format!("{shown} couldn't be added: it isn't a zip, 7z or rar archive."))?;
+        let (mut name, mut version) = clean_name(&file_name);
+        if source.version.is_some() {
+            version = source.version.clone();
+        }
+        if source.kind == "thunderstore" && !source.id.is_empty() {
+            // "Owner-Package_Name": the package part reads better.
+            name = source.id.rsplit_once('-').map(|(_, n)| n).unwrap_or(&source.id).replace('_', " ");
+        }
+        let existing = match replace {
+            Some(id) => self.mods.iter().position(|m| m.id == id),
+            None => {
+                let same_source = (!source.id.is_empty() && source.kind != "zip")
+                    .then(|| self.mods.iter().position(|m| self.sources.get(&m.id).is_some_and(|s| s.kind == source.kind && s.id == source.id)))
+                    .flatten();
+                same_source.or_else(|| if file_name.is_empty() { None } else { self.archives.iter().position(|a| *a == file_name) })
+            }
+        };
         let id = match existing {
             Some(i) => self.mods[i].id.clone(),
             None => self.new_id(&name),
         };
+        Ok(Target {
+            id,
+            existing,
+            name,
+            version,
+            file_name,
+            shown,
+            source,
+            format_label: match format {
+                Format::Zip => "zip",
+                Format::SevenZip => "7z",
+                Format::Rar => "rar",
+            }
+            .into(),
+            keep_name: replace.is_some(),
+        })
+    }
 
+    /// Plugins the player has and whether they're on, for installer conditions: the game's Data folder (with the
+    /// load order) and the plugins of the mods turned on now.
+    fn plugin_env(&self) -> fomod::Env {
+        let mut list: Vec<(String, bool)> = Vec::new();
+        if self.rules.has_plugins() {
+            if let Ok(order) = plugins::LoadOrder::read(&self.game) {
+                list.extend(order.states());
+            }
+            let root = self.rules.mod_root();
+            for m in self.mods.iter().filter(|m| m.enabled) {
+                let dir = if root.is_empty() { self.mod_dir(&m.id) } else { self.mod_dir(&m.id).join(&root) };
+                if let Ok(rd) = fs::read_dir(dir) {
+                    for e in rd.flatten() {
+                        let n = e.file_name().to_string_lossy().into_owned();
+                        if plugins::is_plugin_name(&n) && !list.iter().any(|(x, _)| x.eq_ignore_ascii_case(&n)) {
+                            list.push((n, true));
+                        }
+                    }
+                }
+            }
+        }
+        // The game's version isn't known here, so version conditions count as met.
+        fomod::Env::with_plugins(&list)
+    }
+
+    /// Unpacks and works out where the files go; stages them, or hands back an installer waiting for choices.
+    fn begin(&mut self, archive: &Path, target: Target) -> Result<Import, String> {
+        let fail = |what: String| format!("{} couldn't be added: {what}.", target.shown);
         let tmp = self.root.join("tmp");
-        fs::create_dir_all(&tmp).map_err(io_fail)?;
-        let unpacked = tmp.join(format!("{id}.unpacked"));
-        let staged = tmp.join(format!("{id}.staged"));
+        fs::create_dir_all(&tmp).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let unpacked = tmp.join(format!("{}-{stamp}.unpacked", target.id));
         let _ = remove_dir(&unpacked);
+        let result = (|| -> Result<Import, String> {
+            let mut files = self.unpack(archive, &unpacked).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            if files.is_empty() {
+                return Err(fail(format!("the {} file is empty", target.format_label)));
+            }
+            let mut work = unpacked.clone();
+            let mut notes = Vec::new();
+
+            // An installer that carries its files in an archive of their own (SMAPI): open that one instead.
+            if let Some(inner) = self.rules.inner_archive(&files) {
+                let inner_path = unpacked.join(zip::safe_relative(&inner).map_err(|e| fail(e.to_string()))?);
+                let inner_dir = unpacked.join(".inner");
+                files = self.unpack(&inner_path, &inner_dir)
+                    .map_err(|e| fail(format!("the files inside its installer can't be opened ({})", e.trim_end_matches('.'))))?;
+                work = inner_dir;
+                let map = self.rules.map_inner(&files).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+                notes.push(format!("Set up from {inner} inside the installer; the installer itself was not run."));
+                return self.stage_and_commit(&work, &map, &target, notes).map(Import::Added);
+            }
+
+            // A FOMOD installer.
+            if let Some(found) = fomod::find(&files) {
+                let info = match &found.info {
+                    Some(p) => fomod::parse_info(&read_small(&work.join(zip::safe_relative(p).map_err(|e| fail(e.to_string()))?)).unwrap_or_default()),
+                    None => fomod::Info::default(),
+                };
+                if let Some(cfg_path) = &found.config {
+                    let bytes = read_small(&work.join(zip::safe_relative(cfg_path).map_err(|e| fail(e.to_string()))?))
+                        .map_err(|e| fail(format!("its installer file can't be read ({e})")))?;
+                    let config = fomod::parse(&bytes).map_err(fail)?;
+                    let mut session = fomod::Session::new(config, self.plugin_env(), &files, &found.root);
+                    if let Some(prev) = self.choices.get(&target.id) {
+                        session.apply_choices(prev);
+                    }
+                    let mut target = target.clone();
+                    if target.existing.is_none() {
+                        if let Some(n) = info.name.clone().filter(|n| !n.trim().is_empty()).or_else(|| {
+                            Some(session.module_name().to_string()).filter(|n| !n.trim().is_empty())
+                        }) {
+                            target.name = n.trim().to_string();
+                        }
+                    }
+                    if target.version.is_none() {
+                        target.version = info.version.clone();
+                    }
+                    let name = if target.keep_name { self.mods[target.existing.unwrap_or(0)].name.clone() } else { target.name.clone() };
+                    let pending = Pending { session, info, name, target, unpacked: unpacked.clone() };
+                    if pending.session.has_choices() {
+                        return Ok(Import::NeedsChoices(Box::new(pending)));
+                    }
+                    // No steps: only fixed files.
+                    return self.finish_install(pending).map(Import::Added);
+                }
+            }
+
+            let map = self.rules.map_archive(&files, &folder_safe(&target.name)).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            self.stage_and_commit(&work, &map, &target, notes).map(Import::Added)
+        })();
+        // An installer waiting for choices keeps its files; everything else is cleaned up.
+        if !matches!(result, Ok(Import::NeedsChoices(_))) {
+            let _ = remove_dir(&unpacked);
+        }
+        result
+    }
+
+    /// Moves the mapped files from `work` into the mod's folder (replacing an earlier copy) and records the mod.
+    fn stage_and_commit(&mut self, work: &Path, map: &[(String, String)], target: &Target, mut notes: Vec<String>) -> Result<Installed, String> {
+        let shown = &target.shown;
+        let fail = |what: String| format!("{shown} couldn't be added: {what}.");
+        let io_fail = |e: io::Error| fail(format!("couldn't read or write a file ({e})"));
+        if map.is_empty() {
+            return Err(fail("none of its files is something Turbine knows where to put".into()));
+        }
+        let id = target.id.clone();
+        let tmp = self.root.join("tmp");
+        let staged = tmp.join(format!("{id}.staged"));
         let _ = remove_dir(&staged);
         let result = (|| -> Result<(Vec<String>, usize), String> {
-            let mut z = Zip::open(archive).map_err(|e| fail(e.to_string()))?;
-            let written = z.extract_all(&unpacked, &Limits::default()).map_err(|e| fail(e.to_string()))?;
-            let files: Vec<String> = written
-                .iter()
-                .map(|p| p.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"))
-                .collect();
-            if files.is_empty() {
-                return Err(fail("the zip file is empty".into()));
-            }
-            let map = self.rules.map_archive(&files, &folder_safe(&name)).map_err(|e| {
-                let e = e.trim_end_matches('.').to_string();
-                fail(e)
-            })?;
-            if map.is_empty() {
-                return Err(fail("none of its files is something Turbine knows where to put".into()));
-            }
             fs::create_dir_all(&staged).map_err(io_fail)?;
             let mut game_files = Vec::new();
-            for (from, to) in &map {
+            // A source used twice (a loader that's also the launcher, an installer file in two places) is copied
+            // from where it was first put.
+            let mut moved: HashMap<String, PathBuf> = HashMap::new();
+            for (from, to) in map {
                 let from_rel = zip::safe_relative(from).map_err(|e| fail(e.to_string()))?;
                 let to_rel = zip::safe_relative(to).map_err(|e| fail(e.to_string()))?;
                 if to_rel.as_os_str().is_empty() {
-                    continue;
-                }
-                let src = unpacked.join(&from_rel);
-                if !src.is_file() {
                     continue;
                 }
                 let dest = staged.join(&to_rel);
                 if let Some(p) = dest.parent() {
                     fs::create_dir_all(p).map_err(io_fail)?;
                 }
-                fs::rename(&src, &dest).map_err(io_fail)?;
-                game_files.push(to_rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"));
+                let key = from_rel.to_string_lossy().to_lowercase();
+                if let Some(first) = moved.get(&key) {
+                    if first != &dest {
+                        fs::copy(first, &dest).map_err(io_fail)?;
+                    }
+                } else {
+                    let src = work.join(&from_rel);
+                    if !fs::symlink_metadata(&src).map(|m| m.is_file()).unwrap_or(false) {
+                        continue;
+                    }
+                    if dest.exists() {
+                        fs::remove_file(&dest).map_err(io_fail)?;
+                    }
+                    fs::rename(&src, &dest).map_err(io_fail)?;
+                    moved.insert(key, dest.clone());
+                }
+                let rel = rel_of(&to_rel);
+                if !game_files.iter().any(|g: &String| g.eq_ignore_ascii_case(&rel)) {
+                    game_files.push(rel);
+                }
+            }
+            // Files the mod needs from the game's own folder.
+            for (game_rel, to) in self.rules.game_copies(&game_files) {
+                let to_rel = zip::safe_relative(&to).map_err(|e| fail(e.to_string()))?;
+                match rules::find_ci(&self.game.install_dir, &game_rel).filter(|p| p.is_file()) {
+                    Some(src) => {
+                        let dest = staged.join(&to_rel);
+                        fs::copy(&src, &dest).map_err(io_fail)?;
+                        game_files.push(rel_of(&to_rel));
+                        notes.push(format!("Copied the game's {game_rel} as {to}."));
+                    }
+                    None => notes.push(format!("The game's {game_rel} wasn't found, so {to} wasn't made.")),
+                }
+            }
+            for exe in self.rules.executables(&game_files) {
+                if let Ok(rel) = zip::safe_relative(&exe) {
+                    let p = staged.join(rel);
+                    if p.is_file() {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).map_err(io_fail)?;
+                    }
+                }
             }
             let count = walk_files(&staged).len();
             if count == 0 {
@@ -639,7 +1095,6 @@ impl Store {
             }
             Ok((game_files, count))
         })();
-        let _ = remove_dir(&unpacked);
         let (game_files, count) = match result {
             Ok(r) => r,
             Err(e) => {
@@ -668,25 +1123,40 @@ impl Store {
         }
 
         let now = self.now();
-        let item = match existing {
+        let label = source_label(&target.source.kind, &target.format_label);
+        let mut source = target.source.clone();
+        if source.kind.is_empty() {
+            source.kind = "zip".into();
+        }
+        if source.version.is_none() {
+            source.version = target.version.clone();
+        }
+        let item = match target.existing {
             Some(i) => {
                 let m = &mut self.mods[i];
-                m.name = name;
-                m.version = version;
+                if !target.keep_name {
+                    m.name = target.name.clone();
+                }
+                m.version = target.version.clone();
                 m.files = count;
                 m.needs_loader = needs_loader;
                 m.added = now;
+                m.source = label;
+                if !target.file_name.is_empty() {
+                    self.archives[i] = target.file_name.clone();
+                }
                 m.clone()
             }
             None => {
-                let m = Mod { id, name, enabled: true, version, source: "Zip file".into(), files: count, needs_loader, added: now };
+                let m = Mod { id: id.clone(), name: target.name.clone(), enabled: true, version: target.version.clone(), source: label, files: count, needs_loader, added: now };
                 self.mods.push(m.clone());
-                self.archives.push(file_name);
+                self.archives.push(target.file_name.clone());
                 m
             }
         };
+        self.sources.insert(id, source);
         self.save().map_err(io_fail)?;
-        Ok(item)
+        Ok(Installed { item, notes })
     }
 
     pub fn set_enabled(&mut self, id: &str, on: bool) -> io::Result<()> {
@@ -883,9 +1353,21 @@ impl Store {
             .find(|s| s.setup.id == setup_id)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "That saved setup isn't there any more."))?;
         let order = s.order.clone();
+        self.set_order(&order)?;
+        self.apply()
+    }
+
+    /// The mods in order with their on/off state.
+    pub fn order(&self) -> Vec<(String, bool)> {
+        self.current_order()
+    }
+
+    /// Puts the mods in this order with this on/off state (profiles use it). Mods not listed are turned off and kept
+    /// after the others; IDs that aren't here are skipped. The game changes at the next `apply`.
+    pub fn set_order(&mut self, order: &[(String, bool)]) -> io::Result<()> {
         let mut mods = Vec::new();
         let mut archives = Vec::new();
-        for (id, on) in &order {
+        for (id, on) in order {
             if let Some(i) = self.mods.iter().position(|m| m.id == *id) {
                 let mut m = self.mods.remove(i);
                 m.enabled = *on;
@@ -900,8 +1382,12 @@ impl Store {
         archives.append(&mut self.archives);
         self.mods = mods;
         self.archives = archives;
-        self.save()?;
-        self.apply()
+        self.save()
+    }
+
+    /// The game this store is for.
+    pub fn game(&self) -> &Game {
+        &self.game
     }
 
     /// The way back when something went wrong: takes out every mod file Turbine knows it placed and puts the game's
@@ -932,7 +1418,14 @@ impl Store {
 
     /// Everything the interface shows, as one JSON object: {"mods":[...],"removed":[...],"setups":[...]}.
     pub fn to_json(&self) -> String {
-        let mods: Vec<String> = self.mods.iter().map(|m| format!("{{{}}}", mod_json(m))).collect();
+        let mods: Vec<String> = self
+            .mods
+            .iter()
+            .map(|m| {
+                let src = self.source_of(&m.id);
+                format!("{{{},\"sourceKind\":{},\"sourceId\":{}}}", mod_json(m), quote(&src.kind), quote(&src.id))
+            })
+            .collect();
         let removed: Vec<String> = self
             .removed_list
             .iter()
@@ -953,13 +1446,13 @@ impl Store {
     }
 }
 
-/// Zip files in the Downloads folder, newest first.
+/// Mod archives (zip, 7z, rar) in the Downloads folder, newest first.
 pub fn downloads(home: &Path) -> Vec<PathBuf> {
     let Ok(rd) = fs::read_dir(home.join("Downloads")) else { return Vec::new() };
     let mut found: Vec<(SystemTime, PathBuf)> = rd
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("zip")))
+        .filter(|p| p.file_name().is_some_and(|n| archives::is_archive_name(&n.to_string_lossy())))
         .filter_map(|p| {
             let m = fs::metadata(&p).ok()?;
             m.is_file().then(|| (m.modified().unwrap_or(UNIX_EPOCH), p))

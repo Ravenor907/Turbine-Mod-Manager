@@ -6,7 +6,8 @@
 //! The known games and loaders are plain data in the GAMES and LOADERS tables below. They only hold strings, numbers
 //! and switches, so a later version can read the same shape from data files and add games without new code.
 
-use crate::games::{Game, Store};
+use crate::games::{Game, Runtime, Store};
+use crate::plugins::{self, MissingMaster};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +50,16 @@ pub struct GameRules {
     /// A shorter name for tight places such as the page header, when the store's name is long
     /// ("Skyrim Special Edition" for "The Elder Scrolls V: Skyrim Special Edition"). None: use the game's own name.
     pub short_name: Option<String>,
+    /// How the detected copy of the game runs (Unknown for rules made from the table alone).
+    pub runtime: Runtime,
+    /// The loader's file and the game file it is also installed as, so the launcher's Play starts the loader
+    /// (Skyrim on Steam: skse64_loader.exe also goes in as SkyrimSELauncher.exe; deploy keeps the original launcher
+    /// in its backup folder and puts it back when the loader goes).
+    pub launcher_swap: Option<(String, String)>,
+    /// Text the player types once into the game's Launch Options in Steam for the loader to start, exactly as shown.
+    pub launch_option: Option<String>,
+    /// Plain words on why and how, shown with `launch_option` (or alone when there's nothing to type).
+    pub launch_help: Option<String>,
 }
 
 /// One line of the check before Play.
@@ -80,6 +91,8 @@ pub struct GameDef {
     pub loader: Option<&'static str>,
     /// Where this game's build of the loader comes from, when it differs from the loader's own page.
     pub loader_source: Option<&'static str>,
+    /// For the game's native Linux build: the Launch Option its loader needs, and why.
+    pub native_launch: Option<(&'static str, &'static str)>,
 }
 
 /// One script loader. Data only.
@@ -90,8 +103,10 @@ pub struct LoaderDef {
     pub explain: &'static str,
     pub detect: &'static [&'static str],
     pub source: &'static str,
-    /// How it hooks into the game, for the install step in a later build.
+    /// How it hooks into the game, in words.
     pub hook: &'static str,
+    /// (loader file, launcher file): the loader is also installed under the launcher's name (Steam only).
+    pub launcher_swap: Option<(&'static str, &'static str)>,
 }
 
 pub const GAMES: &[GameDef] = &[
@@ -106,6 +121,7 @@ pub const GAMES: &[GameDef] = &[
         ordered: true,
         loader: Some("skse"),
         loader_source: None,
+        native_launch: None,
     },
     GameDef {
         name: "Stardew Valley",
@@ -117,6 +133,7 @@ pub const GAMES: &[GameDef] = &[
         ordered: false,
         loader: Some("smapi"),
         loader_source: None,
+        native_launch: None,
     },
     GameDef {
         name: "Valheim",
@@ -130,6 +147,14 @@ pub const GAMES: &[GameDef] = &[
         ordered: false,
         loader: Some("bepinex"),
         loader_source: Some("https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/"),
+        // The pack's start_game_bepinex.sh starts the game with BepInEx (Doorstop) loaded; Steam only runs it when the
+        // Launch Option points at it.
+        native_launch: Some((
+            "./start_game_bepinex.sh %command%",
+            "Valheim runs its Linux version here, and BepInEx (the mod loader) starts through a script that comes with \
+             it. Steam only runs that script when you ask it to: in Steam, open Valheim's Properties, and under Launch \
+             Options type exactly the line below. You only do this once. Without it, the game starts without mods.",
+        )),
     },
     GameDef {
         name: "Lethal Company",
@@ -141,6 +166,7 @@ pub const GAMES: &[GameDef] = &[
         ordered: false,
         loader: Some("bepinex"),
         loader_source: Some("https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/"),
+        native_launch: None,
     },
     GameDef {
         name: "Risk of Rain 2",
@@ -152,6 +178,7 @@ pub const GAMES: &[GameDef] = &[
         ordered: false,
         loader: Some("bepinex"),
         loader_source: Some("https://thunderstore.io/c/riskofrain2/p/bbepis/BepInExPack/"),
+        native_launch: None,
     },
 ];
 
@@ -165,6 +192,7 @@ pub const LOADERS: &[LoaderDef] = &[
         // Steam starts SkyrimSELauncher.exe, not the loader, so a later build swaps the launcher for the loader
         // (keeping the original in the backup folder).
         hook: "launcher swap: SkyrimSELauncher.exe is replaced by skse64_loader.exe",
+        launcher_swap: Some(("skse64_loader.exe", "SkyrimSELauncher.exe")),
     },
     LoaderDef {
         key: "bepinex",
@@ -173,6 +201,7 @@ pub const LOADERS: &[LoaderDef] = &[
         detect: &["winhttp.dll", "BepInEx/core"],
         source: "https://github.com/BepInEx/BepInEx/releases",
         hook: "Windows builds: winhttp.dll override in the prefix; native builds: the pack's start script",
+        launcher_swap: None,
     },
     LoaderDef {
         key: "smapi",
@@ -180,7 +209,8 @@ pub const LOADERS: &[LoaderDef] = &[
         explain: "SMAPI is the mod loader for Stardew Valley; mods in the Mods folder only work through it.",
         detect: &["StardewModdingAPI|StardewModdingAPI.exe"],
         source: "https://smapi.io/",
-        hook: "own installer, then the game starts StardewModdingAPI instead of the game",
+        hook: "installed from the installer's own bundle (never run); its launcher takes the game's launcher's place",
+        launcher_swap: None,
     },
 ];
 
@@ -197,7 +227,28 @@ impl GameRules {
     /// Rules for a detected game (known games by store ID; everything else Generic).
     pub fn for_game(game: &Game) -> GameRules {
         match find_def(game.store, &game.store_id) {
-            Some(def) => GameRules::from_def(def),
+            Some(def) => {
+                let mut r = GameRules::from_def(def);
+                r.runtime = game.runtime;
+                // Only Steam's Play starts SkyrimSELauncher.exe; other stores' builds start differently.
+                if game.store != Store::Steam {
+                    r.launcher_swap = None;
+                }
+                let native = game.runtime != Runtime::Windows;
+                if !native || !matches!(game.store, Store::Steam) {
+                    r.launch_option = None;
+                    r.launch_help = None;
+                }
+                if r.kind == Kind::Smapi && game.runtime == Runtime::Windows {
+                    r.launch_help = Some(
+                        "This copy of Stardew Valley is the Windows version. Turbine sets SMAPI up from its Windows \
+                         files, but Steam still starts the game itself: follow SMAPI's own guide at smapi.io/install \
+                         for the Launch Option that starts StardewModdingAPI.exe instead."
+                            .into(),
+                    );
+                }
+                r
+            }
             None => GameRules {
                 kind: Kind::Generic,
                 mod_root: String::new(),
@@ -206,6 +257,10 @@ impl GameRules {
                 loader: None,
                 support: "Works generically".into(),
                 short_name: None,
+                runtime: game.runtime,
+                launcher_swap: None,
+                launch_option: None,
+                launch_help: None,
             },
         }
     }
@@ -226,6 +281,14 @@ impl GameRules {
             loader,
             support: "Verified".into(),
             short_name: def.short_name.map(Into::into),
+            runtime: Runtime::Unknown,
+            launcher_swap: def
+                .loader
+                .and_then(find_loader)
+                .and_then(|l| l.launcher_swap)
+                .map(|(a, b)| (a.to_string(), b.to_string())),
+            launch_option: def.native_launch.map(|(o, _)| o.to_string()),
+            launch_help: def.native_launch.map(|(_, h)| h.to_string()),
         }
     }
 
@@ -236,7 +299,7 @@ impl GameRules {
         let entries = normalize(files)?;
         let name = safe_name(mod_name);
         let out = match self.kind {
-            Kind::Bethesda => map_bethesda(&entries, &self.mod_root)?,
+            Kind::Bethesda => map_bethesda(&entries, &self.mod_root, self.launcher_swap.as_ref())?,
             Kind::BepInEx => map_bepinex(&entries, &name),
             Kind::Smapi => map_smapi(&entries, &self.mod_root, &name)?,
             Kind::Generic => map_generic(&entries, &self.mod_root),
@@ -249,6 +312,19 @@ impl GameRules {
 
     /// Does this mod (its game-relative files) need the game's script loader?
     pub fn needs_loader(&self, game_files: &[String]) -> bool {
+        // The loader itself doesn't need the loader.
+        if let Some(l) = &self.loader {
+            let has = |name: &str| {
+                let name = name.to_lowercase();
+                game_files.iter().any(|f| {
+                    let f = f.replace('\\', "/").trim_start_matches('/').to_lowercase();
+                    f == name || f.starts_with(&format!("{name}/"))
+                })
+            };
+            if l.detect.iter().all(|d| d.split('|').any(has)) {
+                return false;
+            }
+        }
         game_files.iter().any(|f| {
             let p = f.replace('\\', "/").trim_start_matches('/').to_lowercase();
             match self.kind {
@@ -439,7 +515,7 @@ fn is_data_item(e: &Entry) -> bool {
     }
 }
 
-fn map_bethesda(entries: &[Entry], data_root: &str) -> Result<Vec<(String, String)>, String> {
+fn map_bethesda(entries: &[Entry], data_root: &str, swap: Option<&(String, String)>) -> Result<Vec<(String, String)>, String> {
     let mut entries = entries.to_vec();
     // Take off wrapper folders ("SkyUI_5_2_SE/SkyUI/...") until something meaningful is at the top.
     let keep = |top: &str| top == "data" || top == "fomod" || DATA_FOLDERS.contains(&top);
@@ -469,6 +545,12 @@ fn map_bethesda(entries: &[Entry], data_root: &str) -> Result<Vec<(String, Strin
             out.push((e.src.clone(), join(data_root, &e.rest(1))));
         } else if is_game_folder_item(e) || ((has_data_folder || has_top_binary) && e.is_top_file() && ext(&lc) == "ini") {
             out.push((e.src.clone(), e.rest(0)));
+            // The script extender's loader also goes in as the launcher Steam starts.
+            if let Some((loader, launcher)) = swap {
+                if e.is_top_file() && lc.eq_ignore_ascii_case(loader) {
+                    out.push((e.src.clone(), launcher.clone()));
+                }
+            }
         } else if has_fomod && !is_data_item(e) {
             // Option folders of an installer: chosen in the installer, not installed by default.
             continue;
@@ -480,7 +562,9 @@ fn map_bethesda(entries: &[Entry], data_root: &str) -> Result<Vec<(String, Strin
         }
     }
     if has_fomod && out.is_empty() {
-        return Err("This mod has an installer with choices. Installers come in a later build.".into());
+        // The store opens FOMOD installers before it gets here; this is only reached when the installer file itself
+        // is missing or can't be read.
+        return Err("This mod has an installer folder (fomod), but its installer file is missing, so Turbine can't tell which files to use.".into());
     }
     Ok(out)
 }
@@ -577,9 +661,9 @@ fn is_smapi_installer(entries: &[Entry]) -> bool {
 
 fn map_smapi(entries: &[Entry], mods_root: &str, name: &str) -> Result<Vec<(String, String)>, String> {
     if is_smapi_installer(entries) {
-        return Err("This is SMAPI's own installer. For now, install SMAPI by running its installer (see smapi.io); \
-                    Turbine will do this in a later build."
-            .into());
+        // The store sets SMAPI up from the bundle inside its installer (see `smapi_bundle`); this is only reached
+        // when that bundle is missing.
+        return Err("This looks like SMAPI's installer, but the files it installs (install.dat) aren't in it.".into());
     }
     // Every folder holding a manifest.json is one mod; a manifest inside another mod's folder is just its content.
     let mut folders: Vec<Vec<String>> = entries
@@ -609,6 +693,107 @@ fn map_smapi(entries: &[Entry], mods_root: &str, name: &str) -> Result<Vec<(Stri
     Ok(out)
 }
 
+// ----- SMAPI's installer, without running it -------------------------------------------------------------------
+//
+// SMAPI's release zip ("SMAPI <version> installer") holds an installer program and, per system, the files it
+// installs: internal/<linux|macOS|windows>/install.dat, a zip of the "bundle" (SMAPI's
+// build/scripts/finalize-install-package.sh lines 43 to 50 zip each internal/<system>/bundle folder into
+// install.dat). Turbine never runs the installer or any script; it reads install.dat and lays the files out the way
+// the installer would, as ordinary mod files. From Pathoschild/SMAPI, src/SMAPI.Installer (commit e5b8bf3, Sep 2026):
+// - Program.cs:34 and :45: the installer unzips install.dat from its own folder into a temporary bundle folder.
+// - InteractiveInstaller.cs:378-387: every top-level entry of the bundle is copied into the game folder, except
+//   what ShouldCopy (InteractiveInstaller.cs:889-897) leaves out: "mcs" (a macOS link) and "Mods" (handled apart).
+// - InteractiveInstaller.cs:389-404 with Framework/InstallerPaths.cs:79-81: on Linux and macOS the game's launcher
+//   "StardewValley" is moved to "StardewValley-original" and the bundle's "unix-launcher.sh" is moved into its
+//   place, so Steam's Play starts SMAPI. Turbine installs unix-launcher.sh as "StardewValley"; deploy keeps the
+//   game's own launcher in its backup folder and puts it back when SMAPI goes.
+// - InteractiveInstaller.cs:406-421: "StardewValley" (the new launcher) and "StardewModdingAPI"
+//   (InstallerPaths.cs:82) are made executable. Turbine sets the same two as executable in its staged copy.
+// - InteractiveInstaller.cs:423-428: the game's "Stardew Valley.deps.json" is copied to "StardewModdingAPI.deps.json"
+//   (needed to find native libraries). Turbine copies it from the game folder into the staged mod.
+// - InteractiveInstaller.cs:437-500: the bundled mods (Mods/ConsoleCommands, Mods/SaveBackup; IDs at line 32) go
+//   into the game's Mods folder. Turbine stages them under Mods/ as part of SMAPI.
+
+/// SMAPI's launcher in its bundle, and the game launcher it replaces (InstallerPaths.cs:79-80).
+pub const SMAPI_LAUNCHER: (&str, &str) = ("unix-launcher.sh", "StardewValley");
+
+impl GameRules {
+    /// For SMAPI's installer zip: the path (as in `files`) of the install.dat to install from, for this copy of the
+    /// game (the Windows one when the game runs through Proton, the Linux one otherwise). None for anything else.
+    pub fn smapi_bundle(&self, files: &[String]) -> Option<String> {
+        if self.kind != Kind::Smapi {
+            return None;
+        }
+        let entries = normalize(files).ok()?;
+        if !is_smapi_installer(&entries) {
+            return None;
+        }
+        let system = if self.runtime == Runtime::Windows { "windows" } else { "linux" };
+        entries
+            .iter()
+            .find(|e| {
+                let n = e.parts.len();
+                n >= 3
+                    && e.file_lc() == "install.dat"
+                    && e.parts[n - 2].eq_ignore_ascii_case(system)
+                    && e.parts[n - 3].eq_ignore_ascii_case("internal")
+            })
+            .map(|e| e.src.clone())
+    }
+
+    /// Lays out the files of SMAPI's bundle (the contents of install.dat) in the game folder, as its installer
+    /// would (see the notes above).
+    pub fn map_smapi_bundle(&self, files: &[String]) -> Result<Vec<(String, String)>, String> {
+        let entries = normalize(files)?;
+        if !entries.iter().any(|e| e.is_top_file() && e.file_lc() == "stardewmoddingapi.dll") {
+            return Err("SMAPI's installer doesn't have the files it should (StardewModdingAPI.dll is missing).".into());
+        }
+        let mut out = Vec::new();
+        for e in &entries {
+            let lc = e.top_lc();
+            if lc == "mcs" {
+                continue;
+            }
+            if e.is_top_file() && lc == SMAPI_LAUNCHER.0 {
+                if self.runtime != Runtime::Windows {
+                    out.push((e.src.clone(), SMAPI_LAUNCHER.1.to_string()));
+                }
+                continue;
+            }
+            if lc == "mods" && !e.is_top_file() {
+                out.push((e.src.clone(), join(&self.mod_root, &e.rest(1))));
+                continue;
+            }
+            out.push((e.src.clone(), e.rest(0)));
+        }
+        Ok(out)
+    }
+
+    /// Files to copy from the game's own folder into a mod as it is added: (game file, path in the mod).
+    /// SMAPI needs a copy of the game's deps.json under its own name.
+    pub fn game_copies(&self, game_files: &[String]) -> Vec<(String, String)> {
+        let has = |name: &str| game_files.iter().any(|f| f.eq_ignore_ascii_case(name));
+        if self.kind == Kind::Smapi && has("StardewModdingAPI.dll") {
+            return vec![("Stardew Valley.deps.json".into(), "StardewModdingAPI.deps.json".into())];
+        }
+        Vec::new()
+    }
+
+    /// Files of a mod (game-relative) that must be executable for the game's launcher to start them: SMAPI's
+    /// launcher and program, BepInEx's Linux start scripts. Turbine only marks them; it never runs them.
+    pub fn executables(&self, game_files: &[String]) -> Vec<String> {
+        let wanted: &[&str] = match self.kind {
+            Kind::Smapi if self.runtime != Runtime::Windows => &["StardewValley", "StardewModdingAPI"],
+            Kind::BepInEx => &["start_game_bepinex.sh", "start_server_bepinex.sh", "run_bepinex.sh"],
+            _ => &[],
+        };
+        if self.kind == Kind::Smapi && !game_files.iter().any(|f| f.eq_ignore_ascii_case("StardewModdingAPI.dll")) {
+            return Vec::new();
+        }
+        game_files.iter().filter(|f| wanted.iter().any(|w| f.eq_ignore_ascii_case(w))).cloned().collect()
+    }
+}
+
 // ----- Generic ----------------------------------------------------------------------------------------------
 
 fn map_generic(entries: &[Entry], root: &str) -> Vec<(String, String)> {
@@ -630,7 +815,56 @@ pub fn pre_play(game: &Game, rules: &GameRules, last_build: Option<&str>, needs_
     let dir = game.install_dir.canonicalize().unwrap_or_else(|_| game.install_dir.clone());
     let fs = fs_type_for(&mounts, &dir.to_string_lossy());
     let loader_ok = rules.loader.is_none() || rules.loader_installed(game);
-    pre_play_with(game, rules, last_build, needs_loader, free_bytes, fs.as_deref(), loader_ok)
+    let mut checks = pre_play_with(game, rules, last_build, needs_loader, free_bytes, fs.as_deref(), loader_ok);
+    if rules.plugins {
+        if let Ok(order) = plugins::LoadOrder::read(game) {
+            add_checks(&mut checks, master_checks(&order.missing_masters()));
+        }
+    }
+    checks
+}
+
+/// Adds checks to a list, dropping "Ready to play" when there's something to say.
+pub fn add_checks(checks: &mut Vec<Check>, more: Vec<Check>) {
+    if more.is_empty() {
+        return;
+    }
+    checks.retain(|c| c.level != "ok");
+    checks.extend(more);
+}
+
+/// One "Missing master" stop line per plugin whose masters (plugins it is built on) are missing or turned off.
+/// The game crashes at start with such a plugin turned on.
+pub fn master_checks(missing: &[MissingMaster]) -> Vec<Check> {
+    let mut plugins: Vec<&str> = Vec::new();
+    for m in missing {
+        if !plugins.contains(&m.plugin.as_str()) {
+            plugins.push(&m.plugin);
+        }
+    }
+    plugins
+        .into_iter()
+        .map(|p| {
+            let gone: Vec<&str> = missing.iter().filter(|m| m.plugin == p && !m.turned_off).map(|m| m.master.as_str()).collect();
+            let off: Vec<&str> = missing.iter().filter(|m| m.plugin == p && m.turned_off).map(|m| m.master.as_str()).collect();
+            let mut detail = Vec::new();
+            if !gone.is_empty() {
+                let (is, it) = if gone.len() > 1 { ("aren't", "them") } else { ("isn't", "it") };
+                detail.push(format!(
+                    "{p} needs {}, which {is} in the game's Data folder. Add the mod that has {it}, or turn off {p}.",
+                    gone.join(" and ")
+                ));
+            }
+            if !off.is_empty() {
+                let (is, it) = if off.len() > 1 { ("are", "them") } else { ("is", "it") };
+                detail.push(format!(
+                    "{p} needs {}, which {is} turned off. Turn {it} on in the Load order tab, or turn off {p}.",
+                    off.join(" and ")
+                ));
+            }
+            Check { level: "stop".into(), title: "Missing master".into(), detail: detail.join(" ") }
+        })
+        .collect()
 }
 
 /// The same check with the drive's file system type and loader state given, so it can be tested without a real

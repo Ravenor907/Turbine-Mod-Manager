@@ -531,6 +531,7 @@ fn downloads_lists_zips_newest_first() {
     fs::create_dir_all(dl.join("folder.zip")).unwrap();
     write(&dl.join("sub/deep.zip"), "x");
     let names: Vec<String> = downloads(&w.root).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-    assert_eq!(names, ["new.ZIP", "mid.zip", "old.zip"]);
+    // 7z and rar are offered too (0.3).
+    assert_eq!(names, ["archive.7z", "new.ZIP", "mid.zip", "old.zip"]);
     assert!(downloads(&w.root.join("nobody")).is_empty());
 }

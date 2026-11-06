@@ -177,5 +177,89 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                 );
             }
         }
+        fill_art(&root, scan);
+    }
+}
+
+// ---- Cover art from Heroic's image cache ----
+//
+// Heroic shows store art through its own "imagecache://" protocol and keeps each image in <config>/heroic/images-cache
+// under the SHA-256 (hex) of the image's URL: HeroicGamesLauncher src/backend/images_cache.ts:8 (the folder) and :27
+// (the digest of the URL, which :25 decodes from the imagecache:// address built in
+// src/frontend/components/UI/CachedImage/index.tsx:47). The library grid asks for art_square
+// (src/frontend/screens/Library/components/GameCard/index.tsx:129-130 and :486), and for Epic games adds
+// "?h=400&resize=1&w=300" to it first (GameCard/constants.ts:9-10); art_cover is the wide picture. The URLs come
+// from the library caches: store_cache/legendary_library.json under "library"
+// (src/backend/storeManagers/legendary/electronStores.ts:8-11, library.ts:184), store_cache/gog_library.json under
+// "games" (gog/electronStores.ts:23, gog/library.ts:581) and sideload_apps/library.json under "games".
+// Checked against Heroic's main branch at commit 4737fdb3.
+
+/// The suffix Heroic adds to Epic art URLs on library cards.
+pub const EPIC_CARD_SUFFIX: &str = "?h=400&resize=1&w=300";
+
+/// The file Heroic keeps a cached image in.
+pub fn image_cache_file(root: &Path, url: &str) -> PathBuf {
+    root.join("images-cache").join(crate::sha256::digest_hex(url.as_bytes()))
+}
+
+fn quiet_json(path: &Path) -> Option<Json> {
+    let text = fs::read_to_string(path).ok()?;
+    json::parse(&text).ok()
+}
+
+/// (store, app name, art_square, art_cover) for every game in Heroic's library caches under `root`.
+pub fn library_art(root: &Path) -> Vec<(Store, String, String, String)> {
+    let mut out = Vec::new();
+    let lists = [
+        (Store::Epic, "store_cache/legendary_library.json", "library"),
+        (Store::Gog, "store_cache/gog_library.json", "games"),
+        (Store::Sideload, "sideload_apps/library.json", "games"),
+    ];
+    for (store, rel, key) in lists {
+        let Some(v) = quiet_json(&root.join(rel)) else { continue };
+        for g in v.get(key).map(Json::as_array).unwrap_or(&[]) {
+            let Some(id) = g.str_at("app_name") else { continue };
+            let square = g.str_at("art_square").unwrap_or("").to_string();
+            let cover = g.str_at("art_cover").unwrap_or("").to_string();
+            out.push((store, id.to_string(), square, cover));
+        }
+    }
+    out
+}
+
+/// The cached tall and wide pictures for one game, when Heroic has them on disk.
+pub fn cached_art(root: &Path, store: Store, square: &str, cover: &str) -> (Option<PathBuf>, Option<PathBuf>) {
+    let found = |url: &str| -> Option<PathBuf> {
+        if !url.starts_with("http") {
+            return None;
+        }
+        let p = image_cache_file(root, url);
+        fs::metadata(&p).ok().filter(|m| m.is_file() && m.len() > 0).map(|_| p)
+    };
+    let mut tall = Vec::new();
+    if store == Store::Epic && !square.is_empty() {
+        tall.push(format!("{square}{EPIC_CARD_SUFFIX}"));
+    }
+    tall.push(square.to_string());
+    let tall = tall.iter().find_map(|u| found(u));
+    let wide = found(cover).or_else(|| if store == Store::Epic && !cover.is_empty() { found(&format!("{cover}{EPIC_CARD_SUFFIX}")) } else { None });
+    (tall, wide)
+}
+
+/// Fills cover and header for Heroic games found so far from `root`'s image cache.
+fn fill_art(root: &Path, scan: &mut Scan) {
+    if !root.join("images-cache").is_dir() {
+        return;
+    }
+    let art = library_art(root);
+    for g in scan.games.iter_mut().filter(|g| g.store != Store::Steam && (g.cover.is_none() || g.header.is_none())) {
+        let Some((_, _, square, cover)) = art.iter().find(|(s, id, _, _)| *s == g.store && *id == g.store_id) else { continue };
+        let (tall, wide) = cached_art(root, g.store, square, cover);
+        if g.cover.is_none() {
+            g.cover = tall;
+        }
+        if g.header.is_none() {
+            g.header = wide;
+        }
     }
 }
