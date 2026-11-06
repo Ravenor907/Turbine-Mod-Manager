@@ -149,6 +149,8 @@ jobs:
             shoot "nogames-$size" "$size" game "$PWD/empty"
           done
           ls -la shots
+          # Also into the log, so the pictures can be checked where artifacts can't be downloaded.
+          for f in shots/*.png; do echo "SHOT $(basename "$f") $(base64 -w0 "$f")"; done
           exit $fail
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
