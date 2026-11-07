@@ -352,7 +352,7 @@ jobs:
         with:
           tag_name: v${{ needs.rules.outputs.version }}
           name: Turbine Mod Manager ${{ needs.rules.outputs.version }}
-          prerelease: ${{ startsWith(needs.rules.outputs.version, '0.') }}
+          prerelease: false
           files: TurbineModManager.flatpak
           body: |
             Test build for SteamOS handhelds. Download TurbineModManager.flatpak in Desktop Mode and open it to install.
