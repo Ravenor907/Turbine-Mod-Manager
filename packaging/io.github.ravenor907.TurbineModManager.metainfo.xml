@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.52" date="2026-11-07" type="development">
+      <description>
+        <p>Round three, from the game testers:</p>
+        <ul>
+          <li>A runs the highlighted button everywhere, and the controls legend matches each screen</li>
+          <li>SKSE can be installed from the mod menu, the game menu and the check before Play</li>
+          <li>Trending works in Get mods; Sort and Category open as lists; B keeps your place</li>
+          <li>Interface size ends at the largest size that fits</li>
+          <li>Kingdom Come: warnings for mods made for the other game, and Put back my mod_order.txt</li>
+          <li>Loadouts, and Go back to an earlier setup</li>
+          <li>Keyboard and mouse hints in Desktop Mode</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.51" date="2026-11-07" type="development">
       <description>
         <p>Round two:</p>
