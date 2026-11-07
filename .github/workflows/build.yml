@@ -96,11 +96,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-      - name: Ask Nexus's public GraphQL the questions Get mods and updates ask, with no key
+      - name: Send Nexus's public GraphQL the exact requests Turbine sends, with no key
         shell: bash
         run: |
-          # Said as notices and warnings only: Nexus being down must never fail the build.
-          sh tools/nexus-live.sh || echo "::warning title=Nexus live check::It couldn't finish"
+          # The bodies come from the engine itself; said as notices and warnings only (Nexus being down must
+          # never fail the build).
+          rustup toolchain install 1.97.0 --profile minimal > /dev/null
+          (cd engine && TURBINE_QUERY_OUT=/tmp/nexus-queries cargo +1.97.0 test --release -q --test complexity) || echo "::warning title=Nexus live check::The query bodies couldn't be made"
+          sh tools/nexus-live.sh /tmp/nexus-queries || echo "::warning title=Nexus live check::It couldn't finish"
 
   vendor:
     name: Rust crates for the offline Flatpak build
@@ -215,6 +218,8 @@ jobs:
           }
           dl="$PWD/home/Downloads"
           skyrim=steam:489830
+          # A copy of the home for pictures whose mod store sits in the game's library.
+          fresh() { rm -rf "$PWD/fh/$1" && mkdir -p "$PWD/fh" && cp -a "$PWD/home" "$PWD/fh/$1"; }
           for size in 1280x800 1920x1080; do
             for page in game settings details perf notice; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
             shoot "nogames-$size" "$size" game "$PWD/empty"
@@ -267,6 +272,11 @@ jobs:
             shoot "checkend-cyberpunk-$size" "$size" checkend "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
             shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"
             shoot "notes-witcher-$size" "$size" mods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
+            # 0.51: Kingdom Come: Deliverance I and II (a mod folder, a bare pak; a mod named for the other game).
+            fresh "kcd-$size"; h="$PWD/fh/kcd-$size"
+            shoot "mods-kcd1-$size" "$size" mods "$h" --game=steam:379430 "--selftest-import=$h/Downloads/Better Lockpicking 1.0.zip,$h/Downloads/Unlimited Saving 3.0.zip"
+            shoot "mods-kcd2-$size" "$size" mods "$h" --game=steam:1771300 "--selftest-import=$h/Downloads/Herb Picking II 1.5.zip,$h/Downloads/Fast Travel KCD1 2.0.zip"
+            shoot "check-kcd2-$size" "$size" check "$h" --game=steam:1771300 "--selftest-import=$h/Downloads/Herb Picking II 1.5.zip,$h/Downloads/Fast Travel KCD1 2.0.zip"
             # The controller pointer: shown over the mod list and clicked on the second mod's ON pill through the same
             # mouse events the right stick and RT make; wheel steps (the left stick) on the 2,000 row list.
             shoot "pointer-$size" "$size" pointer "$PWD/home" --game=$skyrim \
@@ -279,7 +289,6 @@ jobs:
             # 0.5: Get mods without a key (grid, the fallback, a mod page free and Premium, back to the same search),
             # a game with no mods, Removed mods, a new mod arriving, opening Nexus, the rail, Look and the waiting pill.
             # Each of these gets its own copy of the home (the mod store sits in the game's library).
-            fresh() { rm -rf "$PWD/fh/$1" && mkdir -p "$PWD/fh" && cp -a "$PWD/home" "$PWD/fh/$1"; }
             fresh "getmods-$size"; h="$PWD/fh/getmods-$size"
             shoot "getmods-start-$size" "$size" getmods "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
             shoot "getmods-fallback-$size" "$size" getmodsfallback "$PWD/home" --game=$skyrim

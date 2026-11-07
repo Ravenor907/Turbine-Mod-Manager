@@ -232,7 +232,13 @@ pub struct Store {
     clock: Option<u64>,
     /// The 7z/rar reader; None means the real bsdtar.
     tar: Option<Box<dyn archives::Tar + Send>>,
+    /// Each staged folder's files (game-relative), by folder, with the folder's inode and time when read: a mod's
+    /// folder is made anew when its files change, so the list is read again only then.
+    files_cache: std::sync::Mutex<FilesCache>,
 }
+
+/// A staged folder's files by folder, with its inode and modification time when read.
+type FilesCache = HashMap<PathBuf, (u64, i64, Vec<String>)>;
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -549,6 +555,7 @@ impl Store {
             last_build: None,
             clock: None,
             tar: None,
+            files_cache: std::sync::Mutex::new(HashMap::new()),
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -792,15 +799,37 @@ impl Store {
     /// Every mod's files in the game (game-relative), in Turbine's order, then the Recently removed ones (turned off),
     /// for the checks before Play (rules::mod_checks) and The Witcher 3's mods.settings.
     pub fn mod_files(&self) -> Vec<rules::ModFiles> {
-        let files = |id: &str| walk_files(&self.mod_dir(id)).into_iter().map(|(rel, _)| rel).collect::<Vec<String>>();
-        let mut out: Vec<rules::ModFiles> =
-            self.mods.iter().map(|m| rules::ModFiles { id: m.id.clone(), name: m.name.clone(), enabled: m.enabled, files: files(&m.id) }).collect();
+        let mut out: Vec<rules::ModFiles> = self
+            .mods
+            .iter()
+            .map(|m| rules::ModFiles { id: m.id.clone(), name: m.name.clone(), enabled: m.enabled, files: self.staged_files(&self.mod_dir(&m.id)) })
+            .collect();
         for r in &self.removed_extra {
             let m = &r.removed.item;
-            let files = walk_files(&self.removed_dir(&m.id)).into_iter().map(|(rel, _)| rel).collect();
+            let files = self.staged_files(&self.removed_dir(&m.id));
             out.push(rules::ModFiles { id: m.id.clone(), name: m.name.clone(), enabled: false, files });
         }
         out
+    }
+
+    /// The files in one staged folder (game-relative), read again only when the folder was made anew.
+    fn staged_files(&self, dir: &Path) -> Vec<String> {
+        let Ok(meta) = fs::metadata(dir) else { return Vec::new() };
+        let stamp = (meta.ino(), meta.mtime() * 1_000_000_000 + meta.mtime_nsec());
+        let mut cache = self.files_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((ino, mtime, list)) = cache.get(dir) {
+            if (*ino, *mtime) == stamp {
+                return list.clone();
+            }
+        }
+        let list: Vec<String> = walk_files(dir).into_iter().map(|(rel, _)| rel).collect();
+        cache.insert(dir.to_path_buf(), (stamp.0, stamp.1, list.clone()));
+        list
+    }
+
+    /// Who wins when turned-on mods change the same file (later in the list wins).
+    pub fn overlaps(&self) -> Vec<crate::overlaps::Overlap> {
+        crate::overlaps::overlaps(&self.mod_files())
     }
 
     pub fn mods(&self) -> &[Mod] {

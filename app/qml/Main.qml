@@ -583,7 +583,10 @@ Window {
             else if (app.getArea === "fallback") { app.getArea = "bar"; app.getIndex = 0 }
         }
         function onDetailsJsonChanged() {
-            app.detailsData = app.parse(Turbine.detailsJson, null)
+            let d = app.parse(Turbine.detailsJson, null)
+            // A page that couldn't be read still shows: what the card knew, the reason in one line, Open on Nexus.
+            if (d && d.error && app.detailsItem) d = app.partialPage(app.detailsItem, d.error)
+            app.detailsData = d
             if (app.detailsData && app.detailsData.name && app.detailsItem) app.rememberViewed(app.detailsItem, app.detailsData)
             if ((shot.page === "versions" || shot.page === "nexusversions") && app.otherVersions.length > 0) app.openVersions()
         }
@@ -1583,13 +1586,22 @@ Window {
         pageIndex = 0
         Turbine.details(String(item.id), item.source || srcNow)
     }
+    function partialPage(item, problem) {
+        const src = item.source || srcNow
+        const page = src === "nexus" && rules && rules.domain ? "https://www.nexusmods.com/" + rules.domain + "/mods/" + item.id : (item.page || "")
+        note("net", "Mod page read only in part: " + problem)
+        return { source: src, id: String(item.id), name: item.name || "", owner: item.owner || "", summary: item.summary || "", icon: item.icon || "",
+                 version: item.version || "", downloads: item.downloads || 0, rating: item.rating || 0, updated: item.updated || "",
+                 premium: false, page: page, filePage: page, partial: true, problem: problem, versions: [], needs: null }
+    }
     onDetailsDataChanged: if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails() }
     readonly property bool pageInstalled: !!detailsData && (detailsData.installed === true || (detailsItem && detailsItem.installed === true))
-    readonly property string mainLabel: !detailsData || detailsData.loading ? "" : detailsData.error ? "" : pageInstalled ? "Installed · On"
+    readonly property string mainLabel: !detailsData || detailsData.loading ? "" : detailsData.error ? "" : detailsData.partial ? (detailsData.page ? "Open on Nexus" : "") : pageInstalled ? "Installed · On"
         : busyHere ? (dl.active ? "Installing " + Math.round(Math.max(0, dlPart) * 100) + "%" : "Installing...")
         : detailsData.source === "nexus" && detailsData.premium === false ? (nexusFallback ? "Open on Nexus" : "Get it on Nexus")
         : "Install"
     readonly property string mainLine: !detailsData || detailsData.loading || detailsData.error ? ""
+        : detailsData.partial ? "Turbine couldn't read the rest of this page. " + detailsData.problem
         : pageInstalled ? "Already in your mods. X: Other files"
         : detailsData.source === "nexus" && detailsData.premium === false ? "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself."
         : ""
@@ -1643,6 +1655,7 @@ Window {
     }
     function installFromDetails() {
         if (!detailsData || detailsData.loading || detailsData.error) return
+        if (detailsData.partial) { if (detailsData.page) openNexus(detailsData.page); return }
         if (pageInstalled) { toast.info("Already in your mods. X: Other files"); return }
         if (detailsData.source === "nexus" && detailsData.premium === false) {
             const url = detailsData.filePage || detailsData.page

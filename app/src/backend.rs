@@ -657,7 +657,7 @@ pub(crate) struct Worker {
 
 pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 
-struct Task {
+pub(crate) struct Task {
     /// The game this job works on; its store is dropped (and opened again next time) if the job panics.
     game: Option<String>,
     /// What it is, for the activity log.
@@ -864,6 +864,10 @@ fn proton_checks(slot: &Slot) -> Vec<rules::Check> {
 /// the game is closed (it rewrites the file when it quits). `say` puts a plain message on the status line.
 fn witcher_sync(w: &mut Worker, game: &Game, say: bool) {
     let Ok(slot) = w.slot(game) else { return };
+    if matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) {
+        kcd_sync(w, game, say);
+        return;
+    }
     if slot.rules.family != rules::Family::Witcher3 {
         return;
     }
@@ -891,9 +895,31 @@ fn witcher_sync(w: &mut Worker, game: &Game, say: bool) {
     }
 }
 
+/// Kingdom Come: Deliverance I and II: writes Mods/mod_order.txt (the mods' order and which load). Only while the
+/// game is closed.
+fn kcd_sync(w: &mut Worker, game: &Game, say: bool) {
+    let Ok(slot) = w.slot(game) else { return };
+    if crate::system::game_running(&game.install_dir) == Some(true) {
+        crate::log::line("engine", &format!("{} is running: mod_order.txt left for later", game.name));
+        return;
+    }
+    let mods = slot.store.mod_files();
+    let keep = slot.store.root().to_path_buf();
+    let list: Vec<(&[String], bool)> = mods.iter().map(|m| (m.files.as_slice(), m.enabled)).collect();
+    match turbine_engine::kcd::sync_mod_order(&game.install_dir, &keep, &list) {
+        Ok(changed) => crate::log::line("engine", &format!("{} mod_order.txt {}", game.name, if changed { "written" } else { "already up to date" })),
+        Err(e) => {
+            crate::log::line("engine", &format!("{} mod_order.txt not written: {e}", game.name));
+            if say {
+                w.say(format!("The mods' order for {} couldn't be saved ({e}).", game.name), "warn");
+            }
+        }
+    }
+}
+
 fn checks_json(checks: &[rules::Check]) -> String {
     // Lines the player needs to read only once per game (the interface hides them after that).
-    let once = |t: &str| t == turbine_engine::cyberpunk::REDMOD_TITLE || t == LAUNCH_OPTION_TITLE;
+    let once = |t: &str| t == turbine_engine::cyberpunk::REDMOD_TITLE || t == LAUNCH_OPTION_TITLE || t == turbine_engine::kcd::DEVMODE_TITLE;
     let items: Vec<String> = checks
         .iter()
         .map(|c| format!("{{\"level\":{},\"title\":{},\"detail\":{},\"once\":{}}}", quote(&c.level), quote(&c.title), quote(&c.detail), once(&c.title)))
@@ -1528,6 +1554,25 @@ impl qobject::Turbine {
                                     detail: format!("{help}\n{option}"),
                                 });
                             }
+                        }
+                        // Kingdom Come: the first game's one-time note on developer mode (a few mods need it), and
+                        // mods that came from the other game's Nexus pages.
+                        if matches!(s.rules.family, rules::Family::Kcd | rules::Family::Kcd2) {
+                            let second = s.rules.family == rules::Family::Kcd2;
+                            let any_on = s.store.mods().iter().any(|m| m.enabled);
+                            if !second && any_on {
+                                extra.push(turbine_engine::kcd::devmode_check(s.game.store == turbine_engine::games::Store::Steam));
+                            }
+                            let other_domain = if second { "kingdomcomedeliverance" } else { "kingdomcomedeliverance2" };
+                            let named: Vec<String> = s
+                                .store
+                                .mods()
+                                .iter()
+                                .filter(|m| m.enabled && !turbine_engine::kcd::name_says_other(&m.name, second))
+                                .filter(|m| turbine_engine::nexus::source_mod(&s.store.source_of(&m.id)).is_some_and(|(d, _)| d == other_domain))
+                                .map(|m| m.name.clone())
+                                .collect();
+                            extra.extend(turbine_engine::kcd::checks(&[], second, &named));
                         }
                         if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
                             list.clear(); // "Everything checks out" no longer says it all

@@ -29,6 +29,11 @@ pub const GAMES: &[(&str, &str, &str)] = &[
     ("292030", "witcher3", "The Witcher 3"),
     ("1207664643", "witcher3", "The Witcher 3"),
     ("1495134320", "witcher3", "The Witcher 3"),
+    // nexusmods.com/kingdomcomedeliverance and nexusmods.com/kingdomcomedeliverance2 (checked Nov 7 2026).
+    ("379430", "kingdomcomedeliverance", "Kingdom Come: Deliverance"),
+    ("1719198803", "kingdomcomedeliverance", "Kingdom Come: Deliverance"),
+    ("1771300", "kingdomcomedeliverance2", "Kingdom Come: Deliverance II"),
+    ("1248083010", "kingdomcomedeliverance2", "Kingdom Come: Deliverance II"),
 ];
 
 pub fn domain_for_store_id(store_id: &str) -> Option<&'static str> {
@@ -560,9 +565,12 @@ impl SearchSort {
     }
 }
 
+// facetsData with `facets: {categoryName: []}` lists the categories of everything the filter matches, with counts;
+// `categoryName` in the filter keeps one of them (both answered without a key: the build's live check, Nov 7 2026).
 const SEARCH_QUERY: &str = "query TurbineMods($filter: ModsFilter, $sort: [ModsSort!], $offset: Int, $count: Int) { \
-mods(filter: $filter, sort: $sort, offset: $offset, count: $count) { totalCount nodes { modId name summary version \
-author endorsements downloads pictureUrl thumbnailUrl adultContent updatedAt } } }";
+mods(filter: $filter, sort: $sort, offset: $offset, count: $count, facets: {categoryName: []}) { totalCount facetsData \
+nodes { modId name summary version author endorsements downloads pictureUrl thumbnailUrl adultContent updatedAt \
+category } } }";
 
 /// The JSON body for a search: mods for one game, optionally by name (wildcard match), adult mods left out unless
 /// asked for, sorted (most endorsed first by default).
@@ -592,10 +600,19 @@ pub fn iso_day(secs: u64) -> String {
 
 /// `search_body` with the time given (Trending's 30 days are counted back from `now`).
 pub fn search_body_at(domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool, now: u64) -> String {
+    search_body_in(domain, text, "", sort, offset, count, adult, now)
+}
+
+/// `search_body_at` that keeps one category ("" for all).
+#[allow(clippy::too_many_arguments)]
+pub fn search_body_in(domain: &str, text: &str, category: &str, sort: SearchSort, offset: u32, count: u32, adult: bool, now: u64) -> String {
     let mut filter = format!("\"op\":\"AND\",\"gameDomainName\":[{{\"value\":{},\"op\":\"EQUALS\"}}]", quote(domain));
     let t = text.trim();
     if !t.is_empty() {
         filter.push_str(&format!(",\"name\":[{{\"value\":{},\"op\":\"WILDCARD\"}}]", quote(t)));
+    }
+    if !category.trim().is_empty() {
+        filter.push_str(&format!(",\"categoryName\":[{{\"value\":{},\"op\":\"EQUALS\"}}]", quote(category.trim())));
     }
     if !adult {
         filter.push_str(",\"adultContent\":[{\"value\":false,\"op\":\"EQUALS\"}]");
@@ -625,12 +642,16 @@ pub struct SearchMod {
     pub thumbnail_url: String,
     pub adult: bool,
     pub updated_at: String,
+    /// Its Nexus category ("Gameplay"); "" when not given.
+    pub category: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct SearchPage {
     pub total: u64,
     pub mods: Vec<SearchMod>,
+    /// The categories of everything the search matches, most mods first: (name, how many).
+    pub categories: Vec<(String, u64)>,
     /// Nexus refused the asked-for sort (Trending or Newest) and this page is Most endorsed instead.
     pub relaxed: bool,
 }
@@ -645,8 +666,19 @@ pub fn parse_search(text: &str) -> Result<SearchPage, String> {
         }
     }
     let mods = j.get("data").and_then(|d| d.get("mods")).ok_or("Nexus's answer has no results")?;
+    let mut categories: Vec<(String, u64)> = mods
+        .get("facetsData")
+        .and_then(|f| f.get("categoryName"))
+        .map(Json::entries)
+        .unwrap_or(&[])
+        .iter()
+        .map(|(k, v)| (k.trim().to_string(), n(Some(v)) as u64))
+        .filter(|(k, c)| !k.is_empty() && *c > 0)
+        .collect();
+    categories.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     Ok(SearchPage {
         relaxed: false,
+        categories,
         total: n(mods.get("totalCount")) as u64,
         mods: mods
             .get("nodes")
@@ -667,6 +699,7 @@ pub fn parse_search(text: &str) -> Result<SearchPage, String> {
                     thumbnail_url: s(m, "thumbnailUrl"),
                     adult: b(m, "adultContent"),
                     updated_at: s(m, "updatedAt"),
+                    category: s(m, "category"),
                 })
             })
             .collect(),
@@ -731,10 +764,15 @@ pub struct Requirement {
     pub external: bool,
 }
 
+// Nexus refuses a query whose complexity is over 10000 (the owner's device, Nov 7 2026: the details query with
+// requirements in it came to 18440). Each query here asks for one thing, with small list counts; the build's live
+// Nexus check sends these exact bodies and prints Nexus's answer. `MAX_REQUIREMENTS` keeps the list short.
+pub const MAX_REQUIREMENTS: u32 = 20;
+
 const REQUIREMENTS_QUERY: &str = "query TurbineRequirements($ids: [CompositeDomainWithIdInput!]!) { \
-legacyModsByDomain(ids: $ids) { nodes { modId name game { id domainName } modRequirements { \
-nexusRequirements(count: 100) { totalCount nodes { id modId modName gameId url notes externalRequirement } } \
-dlcRequirements { notes gameExpansion { id name } } } } } }";
+legacyModsByDomain(ids: $ids) { nodes { game { id domainName } modRequirements { \
+nexusRequirements(count: 20) { nodes { modId modName gameId url notes externalRequirement } } \
+dlcRequirements { notes gameExpansion { name } } } } } }";
 
 /// The JSON body asking for a mod's requirements.
 pub fn requirements_body(domain: &str, mod_id: u64) -> String {
@@ -817,22 +855,20 @@ pub fn parse_requirements(text: &str, domain: &str) -> Result<Vec<Requirement>, 
 
 // ---- A mod's details and files without a key (v2 GraphQL) ----
 //
-// legacyModsByDomain answers a mod's page facts and, in the same request, its requirements (the same node
-// parse_requirements reads). modFiles needs the game's numeric id, which the details answer carries (game.id).
+// legacyModsByDomain answers a mod's page facts; its requirements are a request of their own (requirements_body),
+// so neither query comes near Nexus's complexity limit. modFiles needs the game's numeric id, which the details answer carries (game.id).
 // Field names follow Nexus's published v2 schema (api.nexusmods.com/v2/graphql): ModFile has fileId, name, version,
 // category (MAIN, UPDATE, OPTIONAL, OLD_VERSION, MISCELLANEOUS, ARCHIVED, REMOVED), date (seconds since 1970),
 // size (KB), sizeInBytes (a string) and primary.
 
 const DETAILS_QUERY: &str = "query TurbineMod($ids: [CompositeDomainWithIdInput!]!) { \
 legacyModsByDomain(ids: $ids) { nodes { modId name summary version author pictureUrl thumbnailUrl endorsements \
-downloads adultContent status updatedAt game { id domainName } modRequirements { \
-nexusRequirements(count: 100) { totalCount nodes { id modId modName gameId url notes externalRequirement } } \
-dlcRequirements { notes gameExpansion { id name } } } } } }";
+downloads adultContent status updatedAt game { id domainName } } } }";
 
 const FILES_QUERY: &str = "query TurbineFiles($modId: ID!, $gameId: ID!) { modFiles(modId: $modId, gameId: $gameId) { \
 fileId name version category date size sizeInBytes primary description } }";
 
-/// The JSON body asking for a mod's details and requirements in one request.
+/// The JSON body asking for a mod's details (requirements are asked apart: `requirements_body`).
 pub fn details_body(domain: &str, mod_id: u64) -> String {
     format!("{{\"query\":{},\"variables\":{{\"ids\":[{{\"gameDomain\":{},\"modId\":{mod_id}}}]}}}}", quote(DETAILS_QUERY), quote(domain))
 }
@@ -848,6 +884,49 @@ fn graphql_error(j: &Json, what: &str) -> Option<String> {
 }
 
 /// Seconds since 1970 for "2025-01-01T00:00:00Z" (the date part and the time; 0 when it can't be read).
+/// One mod's current version and last change, from `legacyModsByDomain`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModStamp {
+    pub mod_id: u64,
+    pub name: String,
+    pub version: String,
+    /// Seconds since 1970 (0 when not given).
+    pub updated: u64,
+    /// Nexus's number for the game (for the files query).
+    pub game_id: u64,
+}
+
+/// `legacyModsByDomain(ids: [{gameDomain, modId}])` answers with those mods (checked live without a key in the
+/// build's Nexus check, Nov 7 2026).
+pub fn by_id_body(domain: &str, ids: &[u64]) -> String {
+    let list: Vec<String> = ids.iter().map(|id| format!("{{gameDomain: {}, modId: {id}}}", quote(domain))).collect();
+    let q = format!("{{ legacyModsByDomain(ids: [{}]) {{ nodes {{ modId name version updatedAt gameId }} }} }}", list.join(", "));
+    format!("{{\"query\":{}}}", quote(&q))
+}
+
+pub fn parse_by_id(text: &str) -> Result<Vec<ModStamp>, String> {
+    let j = parse(text)?;
+    let nodes = j.get("data").and_then(|d| d.get("legacyModsByDomain")).and_then(|m| m.get("nodes"));
+    let Some(nodes) = nodes else {
+        let msg = j.get("errors").map(Json::as_array).and_then(|e| e.first()).and_then(|e| e.str_at("message")).unwrap_or("no answer");
+        return Err(format!("Nexus couldn't look those mods up ({msg})"));
+    };
+    Ok(nodes
+        .as_array()
+        .iter()
+        .filter_map(|m| {
+            let mod_id = n(m.get("modId")) as u64;
+            (mod_id > 0).then(|| ModStamp {
+                mod_id,
+                name: s(m, "name"),
+                version: s(m, "version"),
+                updated: iso_secs(&s(m, "updatedAt")),
+                game_id: n(m.get("gameId")) as u64,
+            })
+        })
+        .collect())
+}
+
 pub fn iso_secs(t: &str) -> u64 {
     let b = t.as_bytes();
     let num = |a: usize, z: usize| t.get(a..z).and_then(|x| x.parse::<i64>().ok());
@@ -1344,18 +1423,37 @@ impl Nexus {
     /// Browses mods for a game through GraphQL. Trending and Newest that Nexus refuses (a GraphQL error) are asked
     /// again as Most endorsed, with `relaxed` set; any other failure is returned.
     pub fn search(&self, domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> Result<SearchPage, NetError> {
+        self.search_in(domain, text, "", sort, offset, count, adult)
+    }
+
+    /// `search` in one category ("" for all).
+    #[allow(clippy::too_many_arguments)]
+    pub fn search_in(&self, domain: &str, text: &str, category: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> Result<SearchPage, NetError> {
         Self::check_domain(domain)?;
-        let answer = self.graphql(&search_body(domain, text, sort, offset, count, adult))?;
+        let now = net_now();
+        let answer = self.graphql(&search_body_in(domain, text, category, sort, offset, count, adult, now))?;
         match parse_search(&answer) {
             Ok(p) => Ok(p),
             Err(_) if matches!(sort, SearchSort::Trending | SearchSort::Newest) => {
-                let again = self.graphql(&search_body(domain, text, SearchSort::Endorsements, offset, count, adult))?;
+                let again = self.graphql(&search_body_in(domain, text, category, SearchSort::Endorsements, offset, count, adult, now))?;
                 let mut p = parse_search(&again).map_err(|e| NetError::Failed(format!("{e}.")))?;
                 p.relaxed = true;
                 Ok(p)
             }
             Err(e) => Err(NetError::Failed(format!("{e}."))),
         }
+    }
+
+    /// Version and last change of many mods of one game in one GraphQL request (no key needed), for update checks.
+    /// Asked 50 at a time.
+    pub fn mods_by_id(&self, domain: &str, ids: &[u64]) -> Result<Vec<ModStamp>, NetError> {
+        Self::check_domain(domain)?;
+        let mut out = Vec::new();
+        for chunk in ids.chunks(50) {
+            let text = self.graphql(&by_id_body(domain, chunk))?;
+            out.extend(parse_by_id(&text).map_err(|e| NetError::Failed(format!("{e}.")))?);
+        }
+        Ok(out)
     }
 
     /// A mod's page facts and its requirements, in one GraphQL request (no key needed).

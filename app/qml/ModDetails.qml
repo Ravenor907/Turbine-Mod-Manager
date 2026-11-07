@@ -67,6 +67,7 @@ Item {
     onInfoChanged: view.contentY = 0
 
     Text {
+        // Only while reading: a page that couldn't be read is still shown (Main.qml fills it from the card).
         visible: md.loading || !!(md.info && md.info.error)
         anchors.centerIn: parent
         width: Math.min(parent.width, md.ui.px(520))
@@ -197,6 +198,15 @@ Item {
                 wrapMode: Text.WordWrap
                 text: md.info && md.info.mainLine ? md.info.mainLine : ""
                 color: md.ui.c.text
+                font.family: md.ui.bodyFont
+                font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                visible: !!md.info && !!md.info.filesNote
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: md.info && md.info.filesNote ? md.info.filesNote : ""
+                color: md.ui.c.soft
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.px(14)
             }

@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 /// Set by Cancel (from the interface thread); the download under way stops at its next progress report.
 pub static CANCEL: AtomicBool = AtomicBool::new(false);
-use turbine_engine::json::{self, quote, Json};
+use turbine_engine::json::quote;
 use turbine_engine::net::{self, Client, Download, NetError, SourceInfo};
 use turbine_engine::nexus::{self, Account, Nexus};
 use turbine_engine::thunderstore::{self, Package, Query, Sort};
@@ -705,7 +705,15 @@ impl Net {
             let (d, _) = self.nexus_any().details(&domain, mod_id).map_err(err)?;
             (d.info, Some(d.game_id))
         };
-        let files = self.nexus_files_for(&domain, mod_id, game_id)?;
+        // Each part of the page stands alone: files that can't be read only leave the file lines empty (the note
+        // says why); the page itself, its picture and Open on Nexus still show.
+        let (files, files_note) = match self.nexus_files_for(&domain, mod_id, game_id) {
+            Ok(f) => (f, String::new()),
+            Err(e) => {
+                crate::log::line("net", &format!("Files of {domain} {mod_id}: {e}"));
+                (nexus::FileList::default(), format!("Turbine couldn't read its files ({e}). Open on Nexus shows them."))
+            }
+        };
         let main = files.newest_main().cloned();
         let premium = self.key.is_some() && self.account().map(|a| a.is_premium).unwrap_or(false);
         let pick = main
@@ -756,7 +764,8 @@ impl Net {
             .unwrap_or_default();
         let updated = if info.updated_timestamp > 0 { date_of(info.updated_timestamp) } else { String::new() };
         let detail_json = format!(
-            ",\"filePage\":{},\"fileId\":{},\"mainLine\":{},\"updatedText\":{},\"author\":{},\"endorsements\":{},\"installed\":{},\"picture\":{}",
+            ",\"filesNote\":{},\"filePage\":{},\"fileId\":{},\"mainLine\":{},\"updatedText\":{},\"author\":{},\"endorsements\":{},\"installed\":{},\"picture\":{}",
+            quote(&files_note),
             quote(&file_page),
             quote(&main.as_ref().map(|f| f.file_id.to_string()).unwrap_or_default()),
             quote(&main_line),
@@ -786,7 +795,7 @@ impl Net {
             quote(&needs_note),
             others.join(","),
             quote(&have.and_then(|f| files.file(f)).map(|f| f.version.clone()).unwrap_or_default()),
-            quote(if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it by itself." })
+            quote(if !files_note.is_empty() { files_note.as_str() } else if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it by itself." })
         );
         Ok(format!("{}{}}}", &out[..out.len() - 1], detail_json))
     }
@@ -1163,17 +1172,10 @@ pub fn release_json(state: &str, r: Option<&selfupdate::Release>, message: &str)
     )
 }
 
-/// Reads a JSON string list helper for the interface's needs.
-pub fn strings(text: &str, key: &str) -> Vec<String> {
-    json::parse(text)
-        .ok()
-        .map(|j| j.get(key).map(Json::as_array).unwrap_or(&[]).iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use turbine_engine::json;
 
     fn data() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("engine/tests/data")

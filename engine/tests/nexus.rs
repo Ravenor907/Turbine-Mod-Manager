@@ -88,7 +88,7 @@ fn rate_limits_are_respected() {
 fn graphql_search_body_and_answer() {
     let body = nexus::search_body("stardewvalley", "content \"patcher\"", SearchSort::Endorsements, 20, 500, false);
     let j = json::parse(&body).unwrap();
-    assert!(j.str_at("query").unwrap().contains("mods(filter: $filter, sort: $sort, offset: $offset, count: $count)"));
+    assert!(j.str_at("query").unwrap().contains("mods(filter: $filter, sort: $sort, offset: $offset, count: $count, facets: {categoryName: []})"));
     let v = j.get("variables").unwrap();
     let f = v.get("filter").unwrap();
     assert_eq!(f.get("gameDomainName").unwrap().as_array()[0].str_at("value"), Some("stardewvalley"));
@@ -350,7 +350,7 @@ fn req(name: &str, mod_id: u64, domain: &str) -> Requirement {
 fn reads_requirements() {
     let body = json::parse(&nexus::requirements_body("skyrimspecialedition", 12604)).unwrap();
     let q = body.str_at("query").unwrap();
-    for field in ["legacyModsByDomain(ids: $ids)", "modRequirements", "nexusRequirements(count: 100)", "dlcRequirements", "gameExpansion", "externalRequirement"] {
+    for field in ["legacyModsByDomain(ids: $ids)", "modRequirements", "nexusRequirements(count: 20)", "dlcRequirements", "gameExpansion", "externalRequirement"] {
         assert!(q.contains(field), "{field}");
     }
     let id = &body.get("variables").unwrap().get("ids").unwrap().as_array()[0];

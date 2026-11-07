@@ -50,6 +50,9 @@ def main(home):
         # The first Nexus test games: Cyberpunk 2077 and The Witcher 3 (Windows builds run through Proton).
         (steam, "1091500", "Cyberpunk 2077", "Cyberpunk 2077", "bin/x64/Cyberpunk2077.exe", True, (200, 190, 40), (40, 20, 50)),
         (steam, "292030", "The Witcher 3: Wild Hunt", "The Witcher 3", "bin/x64/witcher3.exe", True, (150, 30, 30), (20, 20, 25)),
+        # Kingdom Come: Deliverance I and II (Windows builds through Proton; the second game ships a lower-case mods folder).
+        (steam, "379430", "Kingdom Come: Deliverance", "KingdomComeDeliverance", "Bin/Win64/KingdomCome.exe", True, (120, 100, 60), (30, 25, 15)),
+        (steam, "1771300", "Kingdom Come: Deliverance II", "KingdomComeDeliverance2", "Bin/Win64MasterMasterSteamPGO/KingdomCome.exe", True, (90, 110, 70), (20, 28, 15)),
     ]
     for lib, app_id, name, folder, exe, proton, top, bottom in games:
         apps = os.path.join(lib, "steamapps")
@@ -65,9 +68,19 @@ def main(home):
     write(os.path.join(sv, "StardewValley"))
     write(os.path.join(heroic, "legendaryConfig/legendary/installed.json"),
           '{"Ginger": {"title": "Cyberpunk 2077", "install_path": "%s", "platform": "Windows", "version": "2.3"}}' % cp)
-    write(os.path.join(heroic, "gog_store/installed.json"),
-          '{"installed": [{"appName": "1453375253", "install_path": "%s", "platform": "linux", "version": "1.6.15"}]}' % sv)
-    write(os.path.join(heroic, "store_cache/gog_library.json"), '{"games": [{"app_name": "1453375253", "title": "Stardew Valley"}]}')
+    k1 = os.path.join(home, "Games/Heroic/Kingdom Come Deliverance")
+    k2 = os.path.join(home, "Games/Heroic/Kingdom Come Deliverance II")
+    write(os.path.join(k1, "Bin/Win64/KingdomCome.exe"))
+    write(os.path.join(k2, "Bin/Win64MasterMasterSteamPGO/KingdomCome.exe"))
+    os.makedirs(os.path.join(steam, "steamapps/common/KingdomComeDeliverance2/mods"), exist_ok=True)
+    write(os.path.join(heroic, "gog_store/installed.json"), json.dumps({"installed": [
+        {"appName": "1453375253", "install_path": sv, "platform": "linux", "version": "1.6.15"},
+        {"appName": "1719198803", "install_path": k1, "platform": "windows", "version": "1.9.6"},
+        {"appName": "1248083010", "install_path": k2, "platform": "windows", "version": "1.5.58"}]}))
+    write(os.path.join(heroic, "store_cache/gog_library.json"), json.dumps({"games": [
+        {"app_name": "1453375253", "title": "Stardew Valley"},
+        {"app_name": "1719198803", "title": "Kingdom Come: Deliverance"},
+        {"app_name": "1248083010", "title": "Kingdom Come: Deliverance II"}]}))
 
     skyrim_plugins(os.path.join(steam, "steamapps/common/Skyrim Special Edition/Data"),
                    os.path.join(steam, "steamapps/compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"))
@@ -235,6 +248,25 @@ def downloads(folder):
     zip_file(os.path.join(folder, "All Quest Objectives On Map-5-1-0-5-1699999999.zip"), {
         "modAllQuestObjectives/content/scripts/game/gui/hud/modules/hudModuleMinimap2.ws": script,
     }, now - 2 * 86400)
+    # Kingdom Come: Deliverance: a mod folder with its manifest and pak, and a bare pak (Turbine makes its folder).
+    manifest = ('<?xml version="1.0" encoding="utf-8"?>\n<kcd_mod><info><name>%s</name><author>TurbineTest</author>'
+                '<version>1.0</version></info><supports><kcd_version>1.*</kcd_version></supports></kcd_mod>\n')
+    pak = b"PK\x05\x06" + b"\0" * 18
+    zip_file(os.path.join(folder, "Better Lockpicking 1.0.zip"), {
+        "BetterLockpicking/mod.manifest": manifest % "Better Lockpicking",
+        "BetterLockpicking/Data/lockpicking.pak": pak,
+        "readme.txt": "Easier lockpicking.\n",
+    }, now - 6 * 86400)
+    zip_file(os.path.join(folder, "Unlimited Saving 3.0.zip"), {"Data/zzz_saving.pak": pak}, now - 6 * 86400)
+    # Kingdom Come: Deliverance II: a mod folder inside Mods, and one named for the first game (a warning before Play).
+    zip_file(os.path.join(folder, "Herb Picking II 1.5.zip"), {
+        "Mods/HerbPicking/mod.manifest": manifest % "Instant Herb Picking II",
+        "Mods/HerbPicking/Data/herbs.pak": pak,
+    }, now - 6 * 86400)
+    zip_file(os.path.join(folder, "Fast Travel KCD1 2.0.zip"), {
+        "FastTravel/mod.manifest": manifest % "Fast Travel",
+        "FastTravel/Data/travel.pak": pak,
+    }, now - 6 * 86400)
     # A profile share file someone sent, for Lethal Company.
     share = {"turbineProfile": 1, "app": "Turbine Mod Manager",
              "game": {"name": "Lethal Company", "store": "steam", "storeId": "1966720"}, "profile": "Friday night",

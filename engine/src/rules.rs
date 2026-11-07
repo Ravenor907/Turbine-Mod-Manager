@@ -32,6 +32,10 @@ pub enum Family {
     Cyberpunk,
     /// The Witcher 3 (next-gen): mods/modXXX, dlc/, menu files, mods.settings priorities.
     Witcher3,
+    /// Kingdom Come: Deliverance: Mods/<mod>/mod.manifest and Data/*.pak, Mods/mod_order.txt (see kcd.rs).
+    Kcd,
+    /// Kingdom Come: Deliverance II: the same layout; every mod folder needs its mod.manifest.
+    Kcd2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +238,38 @@ pub const GAMES: &[GameDef] = &[
         native_launch: None,
         family: Family::Witcher3,
     },
+    GameDef {
+        name: "Kingdom Come: Deliverance",
+        short_name: None,
+        // Steam 379430 (store.steampowered.com/app/379430, "Kingdom Come: Deliverance"); GOG 1719198803 (gogdb.org,
+        // "Kingdom Come: Deliverance", type Game, Windows builds; 1182943037 is the Royal Edition package). Checked
+        // Nov 7 2026. Mods: Mods/<mod>/mod.manifest and Data/*.pak, order in Mods/mod_order.txt (kcd.rs has sources).
+        ids: &[(Store::Steam, "379430"), (Store::Gog, "1719198803")],
+        kind: Kind::Generic,
+        mod_root: "Mods",
+        plugins: false,
+        ordered: true,
+        loader: None,
+        loader_source: None,
+        native_launch: None,
+        family: Family::Kcd,
+    },
+    GameDef {
+        name: "Kingdom Come: Deliverance II",
+        short_name: None,
+        // Steam 1771300 (store.steampowered.com/app/1771300, "Kingdom Come: Deliverance II"); GOG 1248083010
+        // (gogdb.org, "Kingdom Come: Deliverance II", type Game, Windows builds; 1076704248 is its package and
+        // 1141344806 the Expansion Pass package). Checked Nov 7 2026. Mods: Warhorse's own guide (see kcd.rs).
+        ids: &[(Store::Steam, "1771300"), (Store::Gog, "1248083010")],
+        kind: Kind::Generic,
+        mod_root: "Mods",
+        plugins: false,
+        ordered: true,
+        loader: None,
+        loader_source: None,
+        native_launch: None,
+        family: Family::Kcd2,
+    },
 ];
 
 pub const LOADERS: &[LoaderDef] = &[
@@ -357,6 +393,7 @@ impl GameRules {
         let out = match (self.family, self.kind) {
             (Family::Cyberpunk, _) => map_cyberpunk(&entries, &name)?,
             (Family::Witcher3, _) => map_witcher(&entries, &name),
+            (Family::Kcd | Family::Kcd2, _) => map_kcd(&entries, &self.mod_root, &name),
             (_, kind) => match kind {
                 Kind::Bethesda => match map_skse(&entries, &self.mod_root, self.launcher_swap.is_some()) {
                     Some(out) => out,
@@ -378,7 +415,7 @@ impl GameRules {
         match self.family {
             // Any framework it needs and doesn't bring itself (CET mods, RED4ext plugins, .reds, tweaks, .xl).
             Family::Cyberpunk => return !crate::cyberpunk::needs(game_files).is_empty(),
-            Family::Witcher3 => return false,
+            Family::Witcher3 | Family::Kcd | Family::Kcd2 => return false,
             Family::Standard => {}
         }
         // The loader itself doesn't need the loader.
@@ -1073,6 +1110,58 @@ fn map_witcher(entries: &[Entry], name: &str) -> Vec<(String, String)> {
     out
 }
 
+// ----- Kingdom Come: Deliverance I and II ------------------------------------------------------------------
+//
+// Each mod is a folder in Mods holding mod.manifest (and mod.cfg), Data/*.pak and Localization/*.pak (kcd.rs has the
+// sources). Archives come as that folder, as Mods/<folder>, or as its contents (mod.manifest and Data at the top, or
+// only .pak files); the last two get a folder named after the mod.
+
+fn kcd_mod_folder(entries: &[Entry], top: &str) -> bool {
+    entries.iter().any(|e| {
+        e.parts.len() >= 2
+            && e.top_lc() == top
+            && (e.parts.len() == 2 && e.file_lc() == "mod.manifest"
+                || e.parts.len() > 2 && matches!(e.parts[1].to_lowercase().as_str(), "data" | "localization"))
+    })
+}
+
+fn map_kcd(entries: &[Entry], root: &str, name: &str) -> Vec<(String, String)> {
+    let mut entries = entries.to_vec();
+    for _ in 0..4 {
+        let snapshot = entries.clone();
+        let own = |top: &str| matches!(top, "mods" | "data" | "localization") || kcd_mod_folder(&snapshot, top);
+        if !unwrap_once(&mut entries, &own) {
+            break;
+        }
+    }
+    let folder = crate::kcd::folder_name(name);
+    let mut out = Vec::new();
+    for e in &entries {
+        let lc = e.top_lc();
+        let file = e.file_lc();
+        if e.is_top_file() {
+            if lc == "mod.manifest" || lc == "mod.cfg" {
+                out.push((e.src.clone(), join(root, &format!("{folder}/{}", e.top()))));
+            } else if ext(&lc) == "pak" {
+                out.push((e.src.clone(), join(root, &format!("{folder}/Data/{}", e.top()))));
+            } else if lc == "user.cfg" {
+                // Game settings the second game reads from its main folder (with -devmode +exec user.cfg).
+                out.push((e.src.clone(), e.top().to_string()));
+            }
+            continue;
+        }
+        if lc == "mods" && e.parts.len() > 2 {
+            out.push((e.src.clone(), join(root, &e.rest(1))));
+        } else if lc == "data" || lc == "localization" {
+            out.push((e.src.clone(), join(root, &format!("{folder}/{}", e.rest(0)))));
+        } else if kcd_mod_folder(&entries, &lc) && !(is_doc(&file) && e.parts.len() == 2) {
+            out.push((e.src.clone(), join(root, &e.rest(0))));
+        }
+        // Anything else (screenshots, optional extras, readmes) stays out.
+    }
+    out
+}
+
 // ----- Generic ----------------------------------------------------------------------------------------------
 
 fn map_generic(entries: &[Entry], root: &str) -> Vec<(String, String)> {
@@ -1190,7 +1279,12 @@ impl GameRules {
                     Vec::new()
                 }
             }
-            Family::Standard => Vec::new(),
+            Family::Kcd2 if archive_files.iter().any(|f| f.replace('\\', "/").rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("user.cfg"))) => {
+                vec!["This mod has a user.cfg of game settings. Kingdom Come: Deliverance II only reads it with \
+                      -devmode +exec user.cfg in the game's launch options (Steam: Properties, Launch Options)."
+                    .into()]
+            }
+            Family::Standard | Family::Kcd | Family::Kcd2 => Vec::new(),
         }
     }
 
@@ -1237,6 +1331,11 @@ pub fn mod_checks_with(rules: &GameRules, mods: &[ModFiles], game_files: &[Strin
     match (rules.family, rules.kind) {
         (Family::Cyberpunk, _) => crate::cyberpunk::checks(&on, game_files),
         (Family::Witcher3, _) => crate::witcher::conflict_checks(&on),
+        (Family::Kcd | Family::Kcd2, _) => {
+            let second = rules.family == Family::Kcd2;
+            let other: Vec<String> = on.iter().filter(|(n, _)| crate::kcd::name_says_other(n, second)).map(|(n, _)| n.to_string()).collect();
+            crate::kcd::checks(&on, second, &other)
+        }
         (Family::Standard, Kind::Bethesda) => {
             let users: Vec<&str> = on
                 .iter()
