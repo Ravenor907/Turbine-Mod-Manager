@@ -1,29 +1,3 @@
-        // Nexus without a key: one GraphQL lookup for all of the game's Nexus mods (version and last change), then
-        // the files of the ones that changed since they were added.
-        if let Some(domain) = game.domain.clone() {
-            if installed.iter().any(|m| m.kind == "nexus") {
-                let ids = updates::nexus_mod_ids(&domain, &installed);
-                let stamps = if self.sample.is_some() {
-                    match self.sample_text("nexus_graphql_by_id.json") {
-                        Some(Ok(t)) => nexus::parse_by_id(&t).map_err(|e| e.to_string()),
-                        _ => Ok(Vec::new()),
-                    }
-                } else {
-                    self.nexus_any().mods_by_id(&domain, &ids).map_err(err)
-                };
-                match stamps {
-                    Ok(stamps) => {
-                        for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
-                            match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
-                                Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
-                                Err(e) => notes.push(e),
-                            }
-                        }
-                    }
-                    Err(e) => notes.push(e),
-                }
-            }
-        }
 //! The download lane: everything that talks to the internet (Thunderstore, Nexus Mods, the loaders' homes, Turbine's
 //! own releases) runs here, on its own thread, so browsing never waits for a download and the mod worker never waits
 //! for the network. Nothing here touches a game's files: downloads are handed to the mod worker to add.
@@ -1034,18 +1008,29 @@ impl Net {
                 }
             }
         }
-        if let (Some(domain), Some(nx)) = (game.domain.clone(), self.nexus()) {
-            if installed.iter().any(|m| m.kind == "nexus") && self.sample.is_none() {
-                match nx.updated(&domain, nexus::update_period(20 * 86_400).unwrap_or("1m")) {
-                    Ok(list) => {
-                        for (mod_id, m) in updates::nexus_candidates(&domain, &installed, &list) {
-                            match nx.files(&domain, mod_id) {
+        // Nexus without a key: one GraphQL lookup for all of the game's Nexus mods (version and last change), then
+        // the files of the ones that changed since they were added.
+        if let Some(domain) = game.domain.clone() {
+            if installed.iter().any(|m| m.kind == "nexus") {
+                let ids = updates::nexus_mod_ids(&domain, &installed);
+                let stamps = if self.sample.is_some() {
+                    match self.sample_text("nexus_graphql_by_id.json") {
+                        Some(Ok(t)) => nexus::parse_by_id(&t).map_err(|e| e.to_string()),
+                        _ => Ok(Vec::new()),
+                    }
+                } else {
+                    self.nexus_any().mods_by_id(&domain, &ids).map_err(err)
+                };
+                match stamps {
+                    Ok(stamps) => {
+                        for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
+                            match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
                                 Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
-                                Err(e) => notes.push(err(e)),
+                                Err(e) => notes.push(e),
                             }
                         }
                     }
-                    Err(e) => notes.push(err(e)),
+                    Err(e) => notes.push(e),
                 }
             }
         }

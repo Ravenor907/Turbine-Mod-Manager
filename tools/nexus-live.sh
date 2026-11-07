@@ -35,7 +35,7 @@ printf '%s' '{"query":"{ __schema { queryType { fields { name args { name type {
 out=$(curl -sS --max-time 30 -H 'Content-Type: application/json' -H 'Application-Name: TurbineModManager' -H 'Application-Version: 0.51' --data-binary @/tmp/nexus-schema2.json "$api" 2>&1)
 echo "== media query"
 printf '%s' "$out" | grep -o '{"name":"media","args":\[[^]]*\][^}]*}[^}]*}' | head -c 2000; echo
-for t in Media MediaPage Image ImageType MediaFilter; do
+for t in MediaSearchFilter MediaUnionPage ImageCategory; do
   printf '%s' '{"query":"{ __type(name: \"'"$t"'\") { kind fields { name type { name kind ofType { name } } } inputFields { name type { name kind ofType { name } } } enumValues { name } } }"}' > /tmp/nexus-type.json
   post "type $t" /tmp/nexus-type.json
 done
