@@ -128,6 +128,11 @@ pub mod qobject {
         #[cxx_name = "restoreSetup"]
         fn restore_setup(self: Pin<&mut Self>, id: &QString);
 
+        /// Kingdom Come: puts the player's own Mods/mod_order.txt back as it was before Turbine changed it.
+        #[qinvokable]
+        #[cxx_name = "kcdRestore"]
+        fn kcd_restore(self: Pin<&mut Self>);
+
         /// The check before Play for the current game. The answer arrives as `checked`.
         #[qinvokable]
         fn check(self: Pin<&mut Self>);
@@ -748,7 +753,9 @@ impl Worker {
         // Who wins shared files, and requirements both ways, for the list and the mod menu.
         let overlaps = turbine_engine::overlaps::to_json(&slot.store.overlaps());
         let links = turbine_engine::needs::links_json(&turbine_engine::needs::links(&slot.store.installed_sources()));
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links}}}", &mods[..mods.len() - 1]);
+        let warns = mod_warns_json(slot);
+        let restore = matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root());
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore}}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);
@@ -764,6 +771,26 @@ impl Worker {
             t.as_mut().set_mods_json(QString::from(mods.as_str()));
         });
     }
+}
+
+/// A short word for a mod's row when it may not work in this game, the way the check before Play says it
+/// ({"<mod id>": "Made for KCD"}): Kingdom Come mods made for the other game or missing what the game loads.
+fn mod_warns_json(slot: &Slot) -> String {
+    if !matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) {
+        return "{}".into();
+    }
+    let second = slot.rules.family == rules::Family::Kcd2;
+    let other_domain = if second { "kingdomcomedeliverance" } else { "kingdomcomedeliverance2" };
+    let items: Vec<String> = slot
+        .store
+        .mod_files()
+        .iter()
+        .filter_map(|m| {
+            let from_other = turbine_engine::nexus::source_mod(&slot.store.source_of(&m.id)).is_some_and(|(d, _)| d == other_domain);
+            turbine_engine::kcd::mod_badge(&m.name, &m.files, second, from_other).map(|b| format!("{}:{}", quote(&m.id), quote(&b)))
+        })
+        .collect();
+    format!("{{{}}}", items.join(","))
 }
 
 /// Keeps the last 30 warnings and errors for reports.
@@ -796,7 +823,7 @@ fn rules_json(slot: &Slot) -> String {
         None => ("null".to_string(), false),
     };
     format!(
-        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{},\"launchOption\":{},\"launchHelp\":{},\"community\":{},\"domain\":{}}}",
+        "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{},\"launchOption\":{},\"launchHelp\":{},\"community\":{},\"domain\":{},\"kcdRestore\":{}}}",
         quote(kind),
         r.ordered,
         r.plugins,
@@ -808,7 +835,8 @@ fn rules_json(slot: &Slot) -> String {
         r.launch_option.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
         r.launch_help.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
         crate::actions::community(&slot.game).map(quote).unwrap_or_else(|| "null".to_string()),
-        turbine_engine::nexus::domain_for_store_id(&slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string())
+        turbine_engine::nexus::domain_for_store_id(&slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string()),
+        matches!(r.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root())
     )
 }
 
@@ -949,13 +977,51 @@ fn kcd_sync(w: &mut Worker, game: &Game, say: bool) {
 }
 
 fn checks_json(checks: &[rules::Check]) -> String {
+    checks_json_with(checks, &[])
+}
+
+/// `checks_json` with more fields for some lines: (index in `checks`, JSON fields to add, starting with a comma).
+fn checks_json_with(checks: &[rules::Check], extra: &[(usize, String)]) -> String {
     // Lines the player needs to read only once per game (the interface hides them after that).
     let once = |t: &str| t == turbine_engine::cyberpunk::REDMOD_TITLE || t == LAUNCH_OPTION_TITLE || t == turbine_engine::kcd::DEVMODE_TITLE;
     let items: Vec<String> = checks
         .iter()
-        .map(|c| format!("{{\"level\":{},\"title\":{},\"detail\":{},\"once\":{}}}", quote(&c.level), quote(&c.title), quote(&c.detail), once(&c.title)))
+        .enumerate()
+        .map(|(i, c)| {
+            let more = extra.iter().filter(|(j, _)| *j == i).map(|(_, x)| x.as_str()).collect::<String>();
+            format!("{{\"level\":{},\"title\":{},\"detail\":{},\"once\":{}{more}}}", quote(&c.level), quote(&c.title), quote(&c.detail), once(&c.title))
+        })
         .collect();
     format!("[{}]", items.join(","))
+}
+
+/// The Witcher 3's script clashes in the check: for each "Only one of these works" line, the newest-added mod of the
+/// group to offer turning off ("offer") and the scripts' paths (for Game details).
+fn witcher_extras(s: &Slot, list: &[rules::Check]) -> Vec<(usize, String)> {
+    if s.rules.family != rules::Family::Witcher3 {
+        return Vec::new();
+    }
+    let files = s.store.mod_files();
+    let on: Vec<(&str, &[String])> = files.iter().filter(|m| m.enabled).map(|m| (m.name.as_str(), m.files.as_slice())).collect();
+    let groups = turbine_engine::witcher::conflict_groups(&on);
+    let at: Vec<usize> = list.iter().enumerate().filter(|(_, c)| c.title == turbine_engine::witcher::CONFLICT_TITLE).map(|(i, _)| i).collect();
+    let mut out = Vec::new();
+    for (i, (names, scripts)) in at.into_iter().zip(groups) {
+        let newest = s
+            .store
+            .mods()
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.enabled && names.contains(&m.name))
+            .max_by_key(|(n, m)| (m.added, *n))
+            .map(|(_, m)| m);
+        let offer = newest
+            .map(|m| format!(",\"offer\":{{\"key\":\"y\",\"label\":{},\"mod\":{}}}", quote(&format!("Turn off {}", m.name)), quote(&m.id)))
+            .unwrap_or_default();
+        let paths: Vec<String> = scripts.iter().map(|p| quote(p)).collect();
+        out.push((i, format!("{offer},\"paths\":[{}]", paths.join(","))));
+    }
+    out
 }
 
 /// Archives in Downloads and its Game Mods folders. `folder`: the Game Mods folder ("" in Downloads itself);
@@ -1563,6 +1629,27 @@ impl qobject::Turbine {
         );
     }
 
+    pub fn kcd_restore(self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.send(
+            Some(game.id()), "Put back mod_order.txt",
+            false,
+            Box::new(move |w: &mut Worker| {
+                let Ok(keep) = w.slot(&game).map(|s| s.store.root().to_path_buf()) else { return };
+                if crate::system::game_running(&game.install_dir) == Some(true) {
+                    w.say(format!("Close {} first, then put mod_order.txt back.", game.name), "warn");
+                    return;
+                }
+                match turbine_engine::kcd::restore_mod_order(&game.install_dir, &keep) {
+                    Ok(true) => w.say("Your mod_order.txt is back as it was before Turbine. Turbine adds its mods that are on again at the next change or Play.", "ok"),
+                    Ok(false) => w.say("There is no earlier mod_order.txt to put back.", "warn"),
+                    Err(e) => w.say(e, "error"),
+                }
+                w.show(&game, true);
+            }),
+        );
+    }
+
     pub fn check(self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         self.send(
@@ -1610,7 +1697,7 @@ impl qobject::Turbine {
                             list.clear(); // "Everything checks out" no longer says it all
                         }
                         list.extend(extra);
-                        checks_json(&list)
+                        checks_json_with(&list, &witcher_extras(s, &list))
                     }
                     Err(e) => checks_json(&[rules::Check { level: "stop".into(), title: "Mods couldn't be read".into(), detail: e }]),
                 };

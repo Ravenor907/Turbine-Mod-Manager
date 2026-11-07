@@ -222,8 +222,9 @@ pub fn script_conflicts(mods: &[(&str, &[String])]) -> Vec<(String, Vec<String>)
     by_script.into_iter().filter(|(_, _, m, merged)| m.len() > 1 && !merged).map(|(_, shown, m, _)| (shown, m)).collect()
 }
 
-/// The check before Play for script conflicts: one warning per group of mods that change the same scripts.
-pub fn conflict_checks(mods: &[(&str, &[String])]) -> Vec<Check> {
+/// The groups of turned-on mods that change the same scripts: (mod names in load order, the scripts' paths), one per
+/// group, in the order `conflict_checks` gives its warnings.
+pub fn conflict_groups(mods: &[(&str, &[String])]) -> Vec<(Vec<String>, Vec<String>)> {
     let mut groups: Vec<(Vec<String>, Vec<String>)> = Vec::new();
     for (script, names) in script_conflicts(mods) {
         match groups.iter_mut().find(|(n, _)| *n == names) {
@@ -232,23 +233,25 @@ pub fn conflict_checks(mods: &[(&str, &[String])]) -> Vec<Check> {
         }
     }
     groups
+}
+
+pub const CONFLICT_TITLE: &str = "Only one of these works";
+
+/// The check before Play for script conflicts: one warning per group of mods that change the same scripts, in plain
+/// words (the scripts' paths are in Game details).
+pub fn conflict_checks(mods: &[(&str, &[String])]) -> Vec<Check> {
+    conflict_groups(mods)
         .into_iter()
-        .map(|(names, scripts)| {
+        .map(|(names, _)| {
             let who = match names.len() {
                 2 => format!("{} and {}", names[0], names[1]),
                 _ => format!("{} and {}", names[..names.len() - 1].join(", "), names[names.len() - 1]),
             };
-            let what = match scripts.len() {
-                1 => scripts[0].clone(),
-                n => format!("{} and {} more", scripts[0], n - 1),
-            };
+            let one = if names.len() == 2 { "one" } else { "one of them" };
             Check {
                 level: "warn".into(),
-                title: "Scripts need merging".into(),
-                detail: format!(
-                    "{who} change the same game script ({what}), so only one of them works. They need merging with \
-                     Script Merger, a Windows tool Turbine can't run; or turn one of them off."
-                ),
+                title: CONFLICT_TITLE.into(),
+                detail: format!("{who} change the same game script, so only {one} works."),
             }
         })
         .collect()

@@ -587,9 +587,16 @@ pub fn iso_day(secs: u64) -> String {
     format!("{}T00:00:00Z", date_day(secs))
 }
 
-/// "2026-11-07" for seconds since 1970 (UTC). Trending's updatedAt filter sends this form: Nexus puts the value into
-/// a search query as it is, where the ':' of a full time is read as the start of another term and the whole search
-/// is refused with a 400 parse_exception (the build's live check, Nov 7 2026).
+/// Trending's updatedAt filter value: seconds since 1970, at the start of that day (UTC). Nexus puts the value into a
+/// search query as it is: a full time's ':' is read as the start of another term (the whole search refused with a 400
+/// parse_exception), and a plain day ("2026-10-08") is read but matches nothing. Seconds match (the build's live
+/// check, Nov 7 2026: 2,002 Witcher 3 mods updated in 30 days).
+pub fn trending_since(now: u64) -> String {
+    let since = now.saturating_sub(TRENDING_DAYS * 86_400);
+    (since - since % 86_400).to_string()
+}
+
+/// "2026-11-07" for seconds since 1970 (UTC).
 pub fn date_day(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     // Civil date from days since 1970 (Howard Hinnant's algorithm).
@@ -625,7 +632,7 @@ pub fn search_body_in(domain: &str, text: &str, category: &str, sort: SearchSort
         filter.push_str(",\"adultContent\":[{\"value\":false,\"op\":\"EQUALS\"}]");
     }
     if sort == SearchSort::Trending {
-        let since = date_day(now.saturating_sub(TRENDING_DAYS * 86_400));
+        let since = trending_since(now);
         filter.push_str(&format!(",\"updatedAt\":[{{\"value\":{},\"op\":\"GTE\"}}]", quote(&since)));
     }
     let (field, dir) = sort.field();

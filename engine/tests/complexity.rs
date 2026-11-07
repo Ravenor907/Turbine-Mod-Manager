@@ -123,7 +123,7 @@ fn write_bodies_for_the_live_check() {
     let write = |name: &str, body: String| std::fs::write(format!("{dir}/{name}.json"), body).unwrap();
     write("search-witcher3", nexus::search_body("witcher3", "", SearchSort::Trending, 0, 30, false));
     write("search-newest-witcher3", nexus::search_body("witcher3", "", SearchSort::Newest, 0, 30, false));
-    write("search-text-skyrimspecialedition", nexus::search_body("skyrimspecialedition", "lantern", SearchSort::Trending, 0, 30, false));
+    write("search-text-skyrimspecialedition", nexus::search_body("skyrimspecialedition", "lantern", SearchSort::Endorsements, 0, 30, false));
     write("search-category-skyrimspecialedition", nexus::search_body_in("skyrimspecialedition", "", "Weapons", SearchSort::Endorsements, 0, 30, false, 0));
     write("details-witcher3-1021", nexus::details_body("witcher3", 1021));
     write("requirements-skyrimspecialedition-12604", nexus::requirements_body("skyrimspecialedition", 12604));

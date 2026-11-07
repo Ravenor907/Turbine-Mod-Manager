@@ -23,6 +23,12 @@ post() {   # post <label> <file with the JSON body> [strict]
       else
         echo "::warning title=Nexus refused $1::$(printf '%s' "$body" | grep -o '"message":"[^"]*' | head -n1 | cut -c1-300)"
       fi ;;
+    *'"totalCount":0,'*)
+      # A search of Turbine's that finds nothing (a filter Nexus reads but matches nothing with) fails too.
+      case "$1" in
+        search*) if [ "${3:-}" = strict ]; then echo "::error title=Nexus found nothing for Turbine's $1::$code"; failed=1; else echo "::warning title=Nexus found nothing for $1::$code"; fi ;;
+        *) echo "::notice title=Nexus answered $1 without a key::$code" ;;
+      esac ;;
     *'"data"'*) echo "::notice title=Nexus answered $1 without a key::$code" ;;
     *) echo "::warning title=Nexus didn't answer $1::$code" ;;
   esac
@@ -38,11 +44,9 @@ if [ "$n" -eq 0 ]; then echo "::error title=Nexus live check::No request bodies 
 if [ -f "$dir/search-witcher3.json" ]; then
   day=$(grep -o '"updatedAt":\[{"value":"[^"]*"' "$dir/search-witcher3.json" | sed 's/.*"value":"//; s/"$//')
   if [ -n "$day" ]; then
-    secs=$(date -u -d "$day" +%s 2>/dev/null || echo 0)
-    sed "s/\"value\":\"$day\"/\"value\":\"${day}T00:00:00Z\"/" "$dir/search-witcher3.json" > /tmp/nexus-probe-time.json
-    sed "s/\"value\":\"$day\"/\"value\":\"$secs\"/" "$dir/search-witcher3.json" > /tmp/nexus-probe-secs.json
-    post "probe: updatedAt as a full time" /tmp/nexus-probe-time.json
-    post "probe: updatedAt as seconds" /tmp/nexus-probe-secs.json
+    iso=$(date -u -d "@$day" +%Y-%m-%d 2>/dev/null || echo 1970-01-01)
+    sed "s/\"value\":\"$day\"/\"value\":\"${iso}\"/" "$dir/search-witcher3.json" > /tmp/nexus-probe-day.json
+    post "probe: updatedAt as a plain day" /tmp/nexus-probe-day.json
   fi
 fi
 # Search per game domain: each game's own mods.

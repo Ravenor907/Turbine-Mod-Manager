@@ -164,9 +164,14 @@ fn script_conflicts_warn_before_play() {
     let c = m("Icons", &["mods/modIcons/content/blob0.bundle"]);
     let checks = mod_checks_with(&r, &[a.clone(), b.clone(), c.clone()], &[]);
     assert_eq!(checks.len(), 1);
-    assert_eq!((checks[0].level.as_str(), checks[0].title.as_str()), ("warn", "Scripts need merging"));
-    assert!(checks[0].detail.starts_with("Auto Oils and Fast Travel change the same game script (game/player/r4Player.ws and 1 more)"), "{}", checks[0].detail);
-    assert!(checks[0].detail.contains("Script Merger"));
+    assert_eq!((checks[0].level.as_str(), checks[0].title.as_str()), ("warn", witcher::CONFLICT_TITLE));
+    // Plain words: no file path and no outside tool in the check (the paths are in Game details).
+    assert_eq!(checks[0].detail, "Auto Oils and Fast Travel change the same game script, so only one works.");
+    let groups = witcher::conflict_groups(&[("Auto Oils", a.files.as_slice()), ("Fast Travel", b.files.as_slice())]);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].0, vec!["Auto Oils".to_string(), "Fast Travel".to_string()]);
+    assert_eq!(groups[0].1.len(), 2);
+    assert!(groups[0].1.iter().any(|p| p.ends_with("r4Player.ws")));
     // Turned off: no conflict. Merged already (Script Merger's folder has the file): no warning.
     let mut off = b.clone();
     off.enabled = false;

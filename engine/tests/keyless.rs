@@ -167,9 +167,10 @@ fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
     let body = json::parse(&nexus::search_body_at("witcher3", "", SearchSort::Trending, 0, 30, false, now)).unwrap();
     let vars = body.get("variables").unwrap();
     let up = &vars.get("filter").unwrap().get("updatedAt").unwrap().as_array()[0];
-    // A plain day: Nexus reads a full time's ':' as a new search term and refuses the whole search.
-    assert_eq!(up.str_at("value"), Some("2025-10-08"));
-    assert!(!up.str_at("value").unwrap().contains(':'));
+    // Seconds at the start of the day 30 days back: Nexus reads a full time's ':' as a new search term and refuses
+    // the whole search, and a plain day matches nothing.
+    assert_eq!(up.str_at("value"), Some("1759881600"));
+    assert_eq!(nexus::date_day(1_759_881_600), "2025-10-08");
     assert_eq!(vars.get("sort").unwrap().as_array()[0].get("endorsements").unwrap().str_at("direction"), Some("DESC"));
     let newest = json::parse(&nexus::search_body("witcher3", "", SearchSort::Newest, 0, 30, false)).unwrap();
     assert!(newest.get("variables").unwrap().get("sort").unwrap().as_array()[0].get("createdAt").is_some());

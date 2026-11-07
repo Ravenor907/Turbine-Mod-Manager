@@ -6,7 +6,7 @@ mod support;
 use std::fs;
 use support::{game, write_zip, TempDir};
 use turbine_engine::games::Store as Launcher;
-use turbine_engine::kcd::{self, BACKUP_NAME, MADE_MARK, ORDER_FILE};
+use turbine_engine::kcd::{self, BACKUP_NAME, MADE_MARK, ORDER_FILE, SEEN_NAME};
 use turbine_engine::nexus;
 use turbine_engine::rules::{self, mod_checks_with, Family, GameRules, ModFiles};
 use turbine_engine::store::{Import, SourceInfo, Store};
@@ -125,6 +125,81 @@ fn mod_order_file_backup_and_cleanup() {
     assert!(!g3.join("Mods/mod_order.txt").exists() && !keep3.join(MADE_MARK).exists());
     // No Mods folder at all: nothing to do.
     assert!(!kcd::sync_mod_order(&t3.path("none"), &keep3, &[(&a, false)]).unwrap());
+}
+
+#[test]
+fn folders_added_by_hand_later_are_listed() {
+    let a = vec!["Mods/A/Data/a.pak".to_string()];
+    // Turbine made the file: a folder the player drops in later is listed too (it would not load otherwise).
+    let t = TempDir::new("kcd-later");
+    let g = t.path("KCD2");
+    let keep = t.path("turbine");
+    fs::create_dir_all(g.join("Mods/Own")).unwrap();
+    assert!(kcd::sync_mod_order(&g, &keep, &[(&a, true)]).unwrap());
+    assert_eq!(fs::read_to_string(g.join("Mods/mod_order.txt")).unwrap(), "Own\nA\n");
+    fs::create_dir_all(g.join("Mods/Zebra")).unwrap();
+    fs::create_dir_all(g.join("Mods/Bridge")).unwrap();
+    assert!(kcd::sync_mod_order(&g, &keep, &[(&a, true)]).unwrap());
+    assert_eq!(fs::read_to_string(g.join("Mods/mod_order.txt")).unwrap(), "Own\nBridge\nZebra\nA\n");
+    assert!(keep.join(SEEN_NAME).exists());
+
+    // The player's own file: a folder they left out stays out; one added after Turbine's last write goes in.
+    let t2 = TempDir::new("kcd-later2");
+    let g2 = t2.path("KCD");
+    let keep2 = t2.path("turbine");
+    fs::create_dir_all(g2.join("Mods/Left")).unwrap();
+    t2.write("KCD/Mods/Own/mod.manifest", b"<kcd_mod/>");
+    t2.write("KCD/Mods/mod_order.txt", b"Own\n");
+    assert!(kcd::sync_mod_order(&g2, &keep2, &[(&a, true)]).unwrap());
+    assert_eq!(fs::read_to_string(g2.join("Mods/mod_order.txt")).unwrap(), "Own\nA\n", "Left stays out");
+    fs::create_dir_all(g2.join("Mods/Newer")).unwrap();
+    assert!(kcd::sync_mod_order(&g2, &keep2, &[(&a, true)]).unwrap());
+    assert_eq!(fs::read_to_string(g2.join("Mods/mod_order.txt")).unwrap(), "Own\nNewer\nA\n");
+    assert!(!kcd::sync_mod_order(&g2, &keep2, &[(&a, true)]).unwrap(), "nothing new");
+}
+
+#[test]
+fn the_players_mod_order_can_be_put_back() {
+    let a = vec!["Mods/A/Data/a.pak".to_string()];
+    let t = TempDir::new("kcd-restore");
+    let g = t.path("KCD");
+    let keep = t.path("turbine");
+    assert!(!kcd::can_restore(&keep));
+    t.write("KCD/Mods/mod_order.txt", b"Own\r\nSecond\r\n");
+    assert!(kcd::sync_mod_order(&g, &keep, &[(&a, true)]).unwrap());
+    assert!(kcd::can_restore(&keep));
+    // Broken by hand afterwards; put back as it was before Turbine, byte for byte, and the copy stays.
+    fs::write(g.join("Mods/mod_order.txt"), b"garbage\n").unwrap();
+    assert!(kcd::restore_mod_order(&g, &keep).unwrap());
+    assert_eq!(fs::read(g.join("Mods/mod_order.txt")).unwrap(), b"Own\r\nSecond\r\n");
+    assert!(keep.join(BACKUP_NAME).exists() && kcd::can_restore(&keep));
+    // The next write adds Turbine's line again and keeps the copy as it was.
+    assert!(kcd::sync_mod_order(&g, &keep, &[(&a, true)]).unwrap());
+    assert_eq!(fs::read_to_string(g.join("Mods/mod_order.txt")).unwrap(), "Own\r\nSecond\r\nA\r\n");
+    assert_eq!(fs::read(keep.join(BACKUP_NAME)).unwrap(), b"Own\r\nSecond\r\n");
+
+    // A file Turbine made: putting it back means no file, and the mark goes.
+    let t2 = TempDir::new("kcd-restore2");
+    let g2 = t2.path("KCD2");
+    let keep2 = t2.path("turbine");
+    fs::create_dir_all(g2.join("Mods/A")).unwrap();
+    assert!(kcd::sync_mod_order(&g2, &keep2, &[(&a, true)]).unwrap());
+    assert!(kcd::restore_mod_order(&g2, &keep2).unwrap());
+    assert!(!g2.join("Mods/mod_order.txt").exists() && !keep2.join(MADE_MARK).exists() && !kcd::can_restore(&keep2));
+    assert!(!kcd::restore_mod_order(&g2, &keep2).unwrap(), "nothing left to put back");
+}
+
+#[test]
+fn row_badges_say_what_the_check_says() {
+    let good = list(&["Mods/HerbPicking/mod.manifest", "Mods/HerbPicking/Data/herbs.pak"]);
+    let bare = list(&["Mods/FastTravel/Data/travel.pak"]);
+    assert_eq!(kcd::mod_badge("Herb Picking II 1.5", &good, true, false), None);
+    assert_eq!(kcd::mod_badge("Fast Travel KCD1 2.0", &good, true, false).as_deref(), Some("Made for KCD"));
+    assert_eq!(kcd::mod_badge("Herb Picking", &good, true, true).as_deref(), Some("Made for KCD"));
+    assert_eq!(kcd::mod_badge("Better Saving KCD2", &good, false, false).as_deref(), Some("Made for KCD II"));
+    assert_eq!(kcd::mod_badge("Fast Travel", &bare, true, false).as_deref(), Some("May not load"));
+    assert_eq!(kcd::mod_badge("Fast Travel", &bare, false, false), None, "the first game loads paks without a manifest");
+    assert_eq!(kcd::mod_badge("Readme", &list(&["Mods/Readme/readme.txt"]), false, false).as_deref(), Some("May not load"));
 }
 
 fn m(name: &str, files: &[&str]) -> ModFiles {

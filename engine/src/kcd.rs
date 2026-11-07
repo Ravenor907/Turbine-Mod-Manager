@@ -35,6 +35,9 @@ pub const ORDER_FILE: &str = "mod_order.txt";
 pub const BACKUP_NAME: &str = "kcd-mod_order.txt.before";
 /// Marks that Turbine made mod_order.txt itself (in Turbine's folder for the game).
 pub const MADE_MARK: &str = "kcd-mod_order.txt.made";
+/// The Mods folders Turbine saw at its last write (in Turbine's folder for the game), so a folder the player adds by
+/// hand later is listed too (a folder missing from mod_order.txt doesn't load).
+pub const SEEN_NAME: &str = "kcd-mods-seen.txt";
 pub const DEVMODE_TITLE: &str = "One-time setting for some mods";
 
 fn lc(p: &str) -> String {
@@ -71,6 +74,12 @@ pub fn folder_name(name: &str) -> String {
 /// the Mods folder now; `order`: Turbine's turned-on mod folders in its order; `managed`: every folder Turbine places
 /// or may place (on or off).
 pub fn render_mod_order(existing: Option<&str>, on_disk: &[String], order: &[String], managed: &[String]) -> String {
+    render_mod_order_adding(existing, on_disk, order, managed, &[])
+}
+
+/// `render_mod_order` that also lists `add` (the player's own folders that are new since Turbine last looked) after
+/// the player's lines, alphabetically, before Turbine's.
+pub fn render_mod_order_adding(existing: Option<&str>, on_disk: &[String], order: &[String], managed: &[String], add: &[String]) -> String {
     let eol = if existing.is_some_and(|t| t.contains("\r\n")) { "\r\n" } else { "\n" };
     let is_managed = |n: &str| managed.iter().chain(order.iter()).any(|m| m.eq_ignore_ascii_case(n.trim()));
     let mut lines: Vec<String> = Vec::new();
@@ -89,7 +98,9 @@ pub fn render_mod_order(existing: Option<&str>, on_disk: &[String], order: &[Str
             lines.extend(own.into_iter().cloned());
         }
     }
-    for name in order {
+    let mut new_own: Vec<&String> = add.iter().filter(|f| !is_managed(f)).collect();
+    new_own.sort_by_key(|f| f.to_lowercase());
+    for name in new_own.into_iter().chain(order.iter()) {
         if !lines.iter().any(|l| l.trim().eq_ignore_ascii_case(name)) {
             lines.push(name.clone());
         }
@@ -144,20 +155,45 @@ pub fn sync_mod_order(game_dir: &Path, keep: &Path, mods: &[(&[String], bool)]) 
         .map(|rd| rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
         .unwrap_or_default();
     let made = keep.join(MADE_MARK);
-    let text = render_mod_order(old.as_deref(), &on_disk, &order, &managed);
+    // The player's own folders that are new: every one when Turbine made the file (without a file the game loaded
+    // them all), otherwise the ones that weren't there at Turbine's last write (a folder the player left out of their
+    // own file on purpose stays out).
+    let own_now: Vec<String> = on_disk
+        .iter()
+        .filter(|f| !managed.iter().chain(order.iter()).any(|m| m.eq_ignore_ascii_case(f)))
+        .cloned()
+        .collect();
+    let seen_path = keep.join(SEEN_NAME);
+    let seen: Option<Vec<String>> = fs::read_to_string(&seen_path).ok().map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect());
+    let add: Vec<String> = match (&old, &seen) {
+        (None, _) => Vec::new(),
+        (Some(_), _) if made.exists() => own_now.clone(),
+        (Some(_), Some(seen)) => own_now.iter().filter(|f| !seen.iter().any(|s| s.eq_ignore_ascii_case(f))).cloned().collect(),
+        (Some(_), None) => Vec::new(),
+    };
+    let mut seen_text: Vec<String> = own_now.clone();
+    seen_text.sort_by_key(|f| f.to_lowercase());
+    let seen_text = if seen_text.is_empty() { String::new() } else { seen_text.join("\n") + "\n" };
+    let remember = |changed: bool| -> Result<bool, String> {
+        if fs::read_to_string(&seen_path).ok().as_deref() != Some(seen_text.as_str()) && fs::create_dir_all(keep).is_ok() {
+            let _ = write_atomic(&seen_path, seen_text.as_bytes());
+        }
+        Ok(changed)
+    };
+    let text = render_mod_order_adding(old.as_deref(), &on_disk, &order, &managed, &add);
     if text.is_empty() {
         // Nothing to list: a file Turbine made goes again; the player's own stays as it is.
         if old.is_some() && made.exists() {
             fs::remove_file(&path).map_err(fail)?;
             let _ = fs::remove_file(&made);
-            return Ok(true);
+            return remember(true);
         }
         if old.is_none() {
-            return Ok(false);
+            return remember(false);
         }
     }
     if old.as_deref() == Some(text.as_str()) {
-        return Ok(false);
+        return remember(false);
     }
     fs::create_dir_all(keep).map_err(fail)?;
     match &old {
@@ -166,7 +202,39 @@ pub fn sync_mod_order(game_dir: &Path, keep: &Path, mods: &[(&[String], bool)]) 
         _ => {}
     }
     write_atomic(&path, text.as_bytes()).map_err(fail)?;
-    Ok(true)
+    remember(true)
+}
+
+/// Is there a mod_order.txt of the player's to put back? (Turbine kept a copy, or Turbine made the file itself.)
+pub fn can_restore(keep: &Path) -> bool {
+    keep.join(BACKUP_NAME).is_file() || keep.join(MADE_MARK).exists()
+}
+
+/// Puts the player's mod_order.txt back as it was before Turbine first changed it: the kept copy goes back in place
+/// (the copy stays, so this can be done again); a file Turbine made itself is taken away. Turbine's turned-on mods
+/// are written into it again at the next change or Play. Returns true when something was put back.
+pub fn restore_mod_order(game_dir: &Path, keep: &Path) -> Result<bool, String> {
+    let fail = |e: io::Error| format!("Couldn't put back mod_order.txt: {e}");
+    let Some(dir) = crate::rules::find_ci(game_dir, "Mods").filter(|d| d.is_dir()) else {
+        return Ok(false);
+    };
+    let path = crate::rules::find_ci(&dir, ORDER_FILE).unwrap_or_else(|| dir.join(ORDER_FILE));
+    let backup = keep.join(BACKUP_NAME);
+    let made = keep.join(MADE_MARK);
+    if backup.is_file() {
+        let bytes = fs::read(&backup).map_err(fail)?;
+        write_atomic(&path, &bytes).map_err(fail)?;
+        let _ = fs::remove_file(&made);
+        return Ok(true);
+    }
+    if made.exists() {
+        if path.exists() {
+            fs::remove_file(&path).map_err(fail)?;
+        }
+        let _ = fs::remove_file(&made);
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 /// What the files of one mod folder hold.
@@ -227,6 +295,25 @@ pub fn checks(on: &[(&str, &[String])], second: bool, other_game: &[String]) -> 
         });
     }
     out
+}
+
+/// A short word for a mod's row in My mods (shown on it the way the check before Play says it), or None:
+/// "Made for KCD" or "Made for KCD II" (named for, or downloaded from, the other game), "May not load" (no
+/// mod.manifest and no .pak files, or no mod.manifest in the second game). `from_other_game`: it came from the other
+/// game's Nexus pages.
+pub fn mod_badge(name: &str, files: &[String], second: bool, from_other_game: bool) -> Option<String> {
+    if from_other_game || name_says_other(name, second) {
+        return Some(if second { "Made for KCD".into() } else { "Made for KCD II".into() });
+    }
+    let folders = mod_folders(files);
+    let mut flagged = folders.is_empty() && !files.is_empty() && files.iter().all(|f| lc(f).starts_with("mods/"));
+    for f in &folders {
+        let (manifest, paks) = folder_facts(files, f);
+        if (!manifest && !paks) || (!manifest && second) {
+            flagged = true;
+        }
+    }
+    flagged.then(|| "May not load".to_string())
 }
 
 /// The first game's one-time note about developer mode, for players whose mods ask for it. `steam`: the copy runs
