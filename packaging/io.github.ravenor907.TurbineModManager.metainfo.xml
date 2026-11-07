@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.51" date="2026-11-07" type="development">
+      <description>
+        <p>Round two:</p>
+        <ul>
+          <li>Mod pages load from Nexus without errors, and one failing part never hides the page</li>
+          <li>Kingdom Come: Deliverance and Kingdom Come: Deliverance II</li>
+          <li>A prompt when a modded game closes early, with a way back to the setup that worked</li>
+          <li>Which mod wins when two change the same file, and a way to choose</li>
+          <li>Requirements both ways, with a guided list of what is still missing</li>
+          <li>Find, Show and Sort on My mods, and updates without a key</li>
+          <li>Play without the script extender</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.5" date="2026-11-07" type="development">
       <description>
         <p>Getting mods made easy, and a new layout:</p>
