@@ -327,10 +327,10 @@ jobs:
           log="$PWD/data/getmods-start-1280x800/turbine-mod-manager/activity.log"
           if grep -q "categories" "$log"; then echo "::notice title=Get mods categories::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
           else echo "::error title=No categories in Get mods::"; fail=1; fi
-          log="$PWD/data/overlaps/turbine-mod-manager/activity.log"
+          log="$PWD/data/overlaps-1280x800/turbine-mod-manager/activity.log"
           if grep -q "Mod menu: .*Loses 1 file to Lantern Colors" "$log"; then echo "::notice title=Who wins::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
           else echo "::error title=The mod menu didn't say which mod wins the shared file::"; (grep -h "Mod menu\|shot" "$log" | tail -n 5 || true); fail=1; fi
-          log="$PWD/data/quickexit/turbine-mod-manager/activity.log"
+          log="$PWD/data/quickexit-1280x800/turbine-mod-manager/activity.log"
           if grep -q "closed after 12 seconds: offering a way back" "$log"; then echo "::notice title=Closed early::offered"
           else echo "::error title=No closed-early prompt::"; fail=1; fi
           for size in 1280x800 1920x1080; do

@@ -156,7 +156,7 @@ Window {
             }
             else if (page === "getmods" || page === "getmodsback" || page === "desktopgrid" || page === "tv") {
                 // Two seeded Recently viewed mods.
-                app.recentSeed = [{ id: "2", name: "Lantern Glow SKSE", icon: app.fileUrl(arg("selftest-data") + "/thumb2.png"), source: "nexus" }, { id: "3", name: "Quiet Snow", icon: app.fileUrl(arg("selftest-data") + "/thumb3.png"), source: "nexus" }]
+                if (arg("game") === "steam:489830") app.recentSeed = [{ id: "2", name: "Lantern Glow SKSE", icon: app.fileUrl(arg("selftest-data") + "/thumb2.png"), source: "nexus" }, { id: "3", name: "Quiet Snow", icon: app.fileUrl(arg("selftest-data") + "/thumb3.png"), source: "nexus" }]
                 app.tab = 1; app.zone = "main"
             }
             else if (page === "modpagefree" || page === "modpagepremium") {
@@ -1004,7 +1004,7 @@ Window {
         const worked = setups.filter(x => x.played === true && key(x.on || []) !== nowKey).sort((a, b) => b.savedAt - a.savedAt)[0] || null
         const added = worked ? onNow.filter(m => (worked.on || []).indexOf(m.id) < 0) : []
         if (!shot.on) Turbine.markNotWorking()
-        quick = { game: gameId, name: games[i].name, seconds: secs, added: added, worked: worked }
+        quick = { game: gameId, name: gameTitle, seconds: secs, added: added, worked: worked }
         page = "game"; zone = "main"; tab = 0; modPage = false
         if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
     }
@@ -1638,7 +1638,8 @@ Window {
                                    { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }])
         .concat(getCats.length > 0 ? [{ key: "category", label: "Category: " + (getCategory || "All") }] : [])
         .concat(sources.length > 1 ? [{ key: "source", label: "From: " + srcName(srcNow) }] : [])
-        .concat([{ key: "add", label: "Add a file from Downloads" }])
+        // With the Updates chip there too, the last one is shorter so the bar fits a handheld.
+        .concat([{ key: "add", label: updateList.length > 0 && getText === "" ? "Add a file" : "Add a file from Downloads" }])
     // Recently viewed: the last 8 mod pages opened in this game.
     property var recentSeed: null
     readonly property var recentViewed: recentSeed ? recentSeed : (game ? (parse(getSet.recent, {})[game.id] || []).filter(x => x.source === srcNow) : [])
@@ -2064,7 +2065,7 @@ Window {
     }
     property bool pendingNotes: false
     readonly property var infoButtons: sheet === "quick" && quick ? (quick.added.length === 1 ? [{ key: "a", label: "Turn that off and play" }]
-                                                                   : quick.added.length > 1 && quick.worked ? [{ key: "a", label: "Go back to the setup that worked (" + when(quick.worked.savedAt) + ")" }] : [])
+                                                                   : quick.added.length > 1 && quick.worked ? [{ key: "a", label: "Go back to the setup that worked" }] : [])
                                           .concat([{ key: "x", label: "Play without mods" }, { key: "b", label: "Keep my mods" }])
         : sheet === "chain" ? [{ key: "a", label: "Open its page" }, { key: "b", label: "Later" }]
         : sheet === "nobrowser" ? [{ key: "a", label: "Check again" }, { key: "b", label: "Close" }]
@@ -3307,7 +3308,8 @@ Window {
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
                         visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length > 0 && !app.modPage
-                        result: app.browseData
+                        // The cards with Installed and Update ready worked out from My mods (getItems).
+                        result: app.browseData ? Object.assign({}, app.browseData, { items: app.getItems }) : null
                         loading: app.browseLoading
                         loadingMore: app.loadingMore
                         search: app.getText
