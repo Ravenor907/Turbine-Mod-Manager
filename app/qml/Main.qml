@@ -666,7 +666,7 @@ Window {
         function onPages(title, json) { app.openPages(title, app.parse(json, [])) }
         function onHandlerJsonChanged() { app.handler = app.parse(Turbine.handlerJson, { state: "unknown" }) }
         // Catching browser downloads (catch.rs).
-        function onStatusJsonChanged() { if (!shot.on) app.status = app.parse(Turbine.statusJson, { active: false }) }
+        function onStatusJsonChanged() { if (!shot.on || shot.page === "slowhint") app.status = app.parse(Turbine.statusJson, { active: false }) }
         function onBrowserJsonChanged() {
             if (shot.on) return
             app.browser = app.parse(Turbine.browserJson, { checked: false })
