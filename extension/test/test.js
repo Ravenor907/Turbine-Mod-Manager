@@ -484,7 +484,7 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
 
   await fake.waitFor((m) => m.type === "hello");
   await until(() => vm.runInContext("bridge.getState().conn", ctx) === "connected", 3000, "worker connected");
-  assert.equal(fake.received[0].ext, "0.3");
+  assert.equal(fake.received[0].ext, JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")).version);
 
   // A panel on a Nexus page reports the page and an nxm link.
   const panelMsgs = [];
