@@ -85,6 +85,11 @@ jobs:
           rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
           rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/tests
           /tmp/bridge/tests
+      - name: Test the controller pointer (app/src/pointer.rs needs only the standard library)
+        shell: bash
+        run: |
+          rustc +1.97.0 --edition 2021 --test app/src/pointer.rs -o /tmp/pointer-tests
+          /tmp/pointer-tests
 
   vendor:
     name: Rust crates for the offline Flatpak build
@@ -249,7 +254,40 @@ jobs:
             shoot "check-cyberpunk-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
             shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"
             shoot "notes-witcher-$size" "$size" mods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
+            # The controller pointer: shown over the mod list and clicked on the second mod's ON pill through the same
+            # mouse events the right stick and RT make; wheel steps (the left stick) on the 2,000 row list.
+            shoot "pointer-$size" "$size" pointer "$PWD/home" --game=$skyrim \
+              "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+            shoot "pointerscroll-$size" "$size" pointerscroll "$PWD/home"
+            # Downloads caught with no setup: the question in Turbine and over the browser; Get Mods without a key.
+            shoot "caught-$size" "$size" caught "$PWD/home" --game=$cp2077
+            shoot "caughtgm-$size" "$size" caughtgm "$PWD/home" --game=$cp2077
+            shoot "nexusnokey-$size" "$size" nexusnokey "$PWD/home" --game=$skyrim
           done
+          # The pointer's events really reached Turbine's interface: the click turned the mod off, the wheel scrolled.
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/pointer-$size/turbine-mod-manager/activity.log"
+            if grep -q "Left click (RT)" "$log" && grep -q "Turn off" "$log"; then
+              echo "::notice title=Pointer click $size::$(grep -h 'Turn off' "$log" | head -n1 | cut -c1-160)"
+            else
+              echo "::error title=Pointer click didn't reach the mod ($size)::"; (grep -h "pad\|action" "$log" | tail -n 20 || true); fail=1
+            fi
+            log="$PWD/data/pointerscroll-$size/turbine-mod-manager/activity.log"
+            moved=$(grep -ho "the list moved [0-9]* px" "$log" 2>/dev/null | grep -o "[0-9][0-9]*" | head -n1 || true)
+            if [ -n "$moved" ] && [ "$moved" -gt 0 ]; then
+              echo "::notice title=Pointer wheel $size::The list moved $moved px"
+            else
+              echo "::error title=Wheel steps didn't scroll the list ($size)::"; (grep -h "pad" "$log" | tail -n 20 || true); fail=1
+            fi
+          done
+          # Mod Manager Download links: the installed Flatpak says Turbine opens nxm:// links.
+          loc=$(flatpak info --user --show-location io.github.ravenor907.TurbineModManager || true)
+          desk="$loc/export/share/applications/io.github.ravenor907.TurbineModManager.desktop"
+          if grep -q "^MimeType=.*x-scheme-handler/nxm" "$desk" && grep -q "^Exec=.*%u" "$desk"; then
+            echo "::notice title=nxm handler exported::$(grep -h '^Exec=' "$desk")"
+          else
+            echo "::error title=nxm handler not exported::$desk"; (cat "$desk" 2>&1 || true); fail=1
+          fi
           # The browser helper is in the Flatpak (without its tests).
           ext=$(flatpak run --command=sh io.github.ravenor907.TurbineModManager -c 'ls /app/share/turbine-mod-manager/extension' 2>&1 | tr '\n' ' ')
           echo "Browser helper in the Flatpak: $ext"

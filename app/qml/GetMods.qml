@@ -102,6 +102,7 @@ Item {
                         }
                         Text { text: "Type"; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
                     }
+                    HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
                     TapHandler { onTapped: gm.barClicked(b.index) }
                 }
             }
@@ -134,6 +135,7 @@ Item {
                     font.pixelSize: gm.ui.px(14)
                     font.bold: parent.on
                 }
+                HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
                 TapHandler { onTapped: gm.categoryClicked(parent.index) }
             }
         }
@@ -220,6 +222,7 @@ Item {
                                 }
                             }
                         }
+                        HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
                         TapHandler { onTapped: gm.itemClicked(cell.index) }
                     }
                 }

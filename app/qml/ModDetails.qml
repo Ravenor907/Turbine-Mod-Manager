@@ -221,6 +221,7 @@ Item {
                         }
                         Text { text: md.openInstead ? "Open on Nexus" : md.install.some(x => x.upgrade && x.main) ? "Update" : "Install"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(17); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }
+                    HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                     TapHandler { onTapped: md.installClicked() }
                 }
                 Text {
@@ -251,6 +252,7 @@ Item {
                     }
                     Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
+                HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.versionsClicked() }
             }
             // Nexus requirements: "Also needs", with have-it and missing states.

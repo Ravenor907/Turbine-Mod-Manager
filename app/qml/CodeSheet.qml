@@ -97,6 +97,7 @@ Item {
                         Text { anchors.centerIn: parent; text: "A"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(13); font.bold: true }
                     }
                     Text { text: "Copy again"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: cs.copyClicked() }
                 }
                 Row {
@@ -107,6 +108,7 @@ Item {
                         Text { anchors.centerIn: parent; text: "B"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(13); font.bold: true }
                     }
                     Text { text: "Close"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: cs.closed() }
                 }
             }

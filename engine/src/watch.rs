@@ -21,7 +21,7 @@ use crate::nexus::FileList;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// How long after opening the page a download still counts (seconds).
 pub const WINDOW_SECS: u64 = 30 * 60;
@@ -79,8 +79,20 @@ impl Expectation {
     }
 
     /// Does Turbine know anything to match on (a name or a size)?
-    fn knows_files(&self) -> bool {
+    pub fn knows_files(&self) -> bool {
         self.files.iter().any(|f| !f.file_name.is_empty() || f.size_bytes > 0)
+    }
+
+    /// Is a finished file in Downloads (its name and size) this mod's download? By name first, then by size; with
+    /// no file list, any archive is a guess. None when the file list says it isn't one of the mod's files.
+    pub fn match_file(&self, name: &str, size: u64) -> Option<(Option<ExpectedFile>, Confidence)> {
+        if !self.knows_files() {
+            return Some((None, Confidence::Guess));
+        }
+        if let Some(f) = self.files.iter().find(|f| same_download_name(name, &f.file_name)) {
+            return Some((Some(f.clone()), Confidence::Name));
+        }
+        self.files.iter().find(|f| same_size(size, f.size_bytes)).map(|f| (Some(f.clone()), Confidence::Size))
     }
 }
 
@@ -206,20 +218,11 @@ impl Watcher {
             if !stable || s.size == 0 || busy.contains(&s.path) {
                 continue;
             }
-            let found = if exp.knows_files() {
-                let by_name = exp.files.iter().find(|f| same_download_name(&name, &f.file_name));
-                let by_size = exp.files.iter().find(|f| same_size(s.size, f.size_bytes));
-                match (by_name, by_size) {
-                    (Some(f), _) => Found { path: s.path.clone(), size: s.size, file: Some(f.clone()), confidence: Confidence::Name },
-                    (None, Some(f)) => Found { path: s.path.clone(), size: s.size, file: Some(f.clone()), confidence: Confidence::Size },
-                    (None, None) => continue,
-                }
-            } else {
-                if s.modified > exp.started_at.saturating_add(WINDOW_SECS) {
-                    continue;
-                }
-                Found { path: s.path.clone(), size: s.size, file: None, confidence: Confidence::Guess }
-            };
+            if !exp.knows_files() && s.modified > exp.started_at.saturating_add(WINDOW_SECS) {
+                continue;
+            }
+            let Some((file, confidence)) = exp.match_file(&name, s.size) else { continue };
+            let found = Found { path: s.path.clone(), size: s.size, file, confidence };
             let better = match &best {
                 None => true,
                 Some((b, m)) => (found.confidence, s.modified, &found.path) > (b.confidence, *m, &b.path),
@@ -239,11 +242,28 @@ impl Watcher {
     }
 }
 
-fn secs(t: SystemTime) -> u64 {
-    t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+/// When a file counts as arrived: the later of its modification time and its status change time (seconds since
+/// 1970). Some browsers give a finished download the server's own date, which can be years old; the status change
+/// time is still the moment the file was written or renamed into Downloads, which the player's system sets.
+pub fn arrived_secs(mtime: i64, ctime: i64) -> u64 {
+    mtime.max(ctime).max(0) as u64
 }
 
-/// The regular files directly in these folders (not inside subfolders, links not followed).
+/// `arrived_secs` for a file's metadata.
+pub fn arrived(m: &fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        arrived_secs(m.mtime(), m.ctime())
+    }
+    #[cfg(not(unix))]
+    {
+        m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
+    }
+}
+
+/// The regular files directly in these folders (not inside subfolders, links not followed). `modified` is when
+/// each one arrived (see `arrived`).
 pub fn scan(folders: &[PathBuf]) -> Vec<Seen> {
     let mut out = Vec::new();
     for dir in folders {
@@ -251,7 +271,7 @@ pub fn scan(folders: &[PathBuf]) -> Vec<Seen> {
         for e in rd.flatten() {
             let Ok(m) = e.path().symlink_metadata() else { continue };
             if m.is_file() {
-                out.push(Seen { path: e.path(), size: m.len(), modified: m.modified().map(secs).unwrap_or(0) });
+                out.push(Seen { path: e.path(), size: m.len(), modified: arrived(&m) });
             }
         }
     }
@@ -305,4 +325,334 @@ pub fn default_folders(home: &Path) -> Vec<PathBuf> {
         }
     }
     out
+}
+
+// ------------------------------------------------------------------------------------------------ always-on catching
+//
+// While Turbine runs it watches Downloads for every new mod archive, however the player got to the download (a Nexus
+// page opened from Turbine, from the browser's own bookmarks, a link someone sent). A `Catcher` looks once a second
+// and reports, for each file newer than the last time Turbine looked:
+// - a browser's unfinished download (for "Downloading <name>" on the status line);
+// - why a file is left alone (not a zip, 7z or rar; still being written; empty; the player said it isn't a mod);
+// - a finished archive, once its size has stayed the same between looks and the browser's unfinished file is gone.
+// Deciding which game a finished archive goes into is `decide`. Files are only ever read, never moved or deleted.
+
+/// On the very first run, archives this many seconds old still count (and Turbine asks before adding any of them).
+pub const FIRST_RUN_SECS: u64 = 24 * 60 * 60;
+/// The most ignored files remembered (the oldest are forgotten first).
+pub const MAX_IGNORED: usize = 500;
+
+/// Why a file in Downloads was left alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// Not a zip, 7z or rar file.
+    NotArchive,
+    /// The browser is still writing it (its .part, .crdownload or .download file is there).
+    Unfinished,
+    /// Its size changed since the last look.
+    Growing,
+    /// Zero bytes.
+    Empty,
+    /// The player said it isn't a mod.
+    Ignored,
+}
+
+impl Skip {
+    /// Plain words for the activity log.
+    pub fn words(self) -> &'static str {
+        match self {
+            Skip::NotArchive => "not a zip, 7z or rar file",
+            Skip::Unfinished => "the browser is still downloading it",
+            Skip::Growing => "still being written",
+            Skip::Empty => "it is empty",
+            Skip::Ignored => "you said it isn't a mod",
+        }
+    }
+}
+
+/// A finished archive that arrived in Downloads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Arrival {
+    pub path: PathBuf,
+    pub size: u64,
+    /// When it arrived (seconds since 1970, see `arrived`).
+    pub arrived: u64,
+    /// It arrived before this Turbine started (found by the catch-up look).
+    pub catch_up: bool,
+}
+
+/// What one look found. Skips are said once per file (again only when the reason changes).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Event {
+    Skipped { path: PathBuf, why: Skip },
+    /// The newest unfinished download: its final name (without the browser's ending) and its size so far.
+    Downloading { name: String, size: u64 },
+    Ready(Arrival),
+}
+
+/// The key a file is remembered by in the ignore list: its full path and size (a new download with the same name
+/// but other contents is asked about again).
+pub fn ignore_key(path: &Path, size: u64) -> String {
+    format!("{size}|{}", path.display())
+}
+
+/// Watches folders for every new finished archive.
+#[derive(Clone, Debug)]
+pub struct Catcher {
+    pub folders: Vec<PathBuf>,
+    /// Files that arrived before this are left alone.
+    pub since: u64,
+    /// When this Turbine started: files that arrived before it are catch-up files.
+    pub started: u64,
+    /// How many looks in a row a file's size must stay the same before it counts as finished (at least 1).
+    pub stable_looks: u32,
+    /// Size at the last look, and how many looks in a row it stayed that size.
+    sizes: HashMap<PathBuf, (u64, u32)>,
+    /// What was last said about each file (a skip, or "ready" with its size and arrival).
+    told: HashMap<PathBuf, Told>,
+    ignored: std::collections::HashSet<String>,
+    /// Files that count however old they are (ones Turbine was still asking about when it last closed).
+    again: std::collections::HashSet<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Told {
+    Skip(Skip),
+    Ready(u64, u64),
+}
+
+impl Catcher {
+    pub fn new(folders: Vec<PathBuf>, since: u64, started: u64) -> Catcher {
+        Catcher {
+            folders,
+            since,
+            started,
+            stable_looks: 1,
+            sizes: HashMap::new(),
+            told: HashMap::new(),
+            ignored: Default::default(),
+            again: Default::default(),
+        }
+    }
+
+    /// Report this file again even though it arrived before `since` (an unanswered question from the last run).
+    pub fn ask_again(&mut self, path: &Path) {
+        self.again.insert(path.to_path_buf());
+    }
+
+    /// Never report this file as ready again (the player said it isn't a mod). Takes `ignore_key`s.
+    pub fn ignore(&mut self, key: &str) {
+        self.ignored.insert(key.to_string());
+    }
+
+    pub fn is_ignored(&self, path: &Path, size: u64) -> bool {
+        self.ignored.contains(&ignore_key(path, size))
+    }
+
+    fn tell(&mut self, path: &Path, what: Told, out: &mut Vec<Event>) {
+        if self.told.get(path) == Some(&what) {
+            return;
+        }
+        self.told.insert(path.to_path_buf(), what.clone());
+        match what {
+            Told::Skip(why) => out.push(Event::Skipped { path: path.to_path_buf(), why }),
+            Told::Ready(..) => {}
+        }
+    }
+
+    /// One look at the folders' listing.
+    pub fn step(&mut self, listing: &[Seen]) -> Vec<Event> {
+        let mut out = Vec::new();
+        let mut busy: Vec<PathBuf> = Vec::new();
+        let mut newest_partial: Option<(u64, String, u64)> = None;
+        for s in listing {
+            let name = file_name(&s.path);
+            let lc = name.to_ascii_lowercase();
+            if let Some(sfx) = PARTIAL_SUFFIXES.iter().find(|x| lc.ends_with(*x)) {
+                let base = &name[..name.len() - sfx.len()];
+                busy.push(s.path.with_file_name(base));
+                if s.modified + SLACK_SECS >= self.since && newest_partial.as_ref().map(|b| s.modified >= b.0).unwrap_or(true) {
+                    // Chromium names a download "Unconfirmed 123456.crdownload" until it knows the name.
+                    let shown = if base.starts_with("Unconfirmed ") { "a file".to_string() } else { base.to_string() };
+                    newest_partial = Some((s.modified, shown, s.size));
+                }
+            }
+        }
+        let mut sizes = HashMap::new();
+        for s in listing {
+            if s.modified < self.since && !self.again.contains(&s.path) {
+                continue;
+            }
+            let name = file_name(&s.path);
+            let lc = name.to_ascii_lowercase();
+            if PARTIAL_SUFFIXES.iter().any(|x| lc.ends_with(x)) {
+                continue;
+            }
+            if !archives::is_archive_name(&name) {
+                self.tell(&s.path, Told::Skip(Skip::NotArchive), &mut out);
+                continue;
+            }
+            let looks = match self.sizes.get(&s.path) {
+                Some((size, n)) if *size == s.size => n + 1,
+                _ => 0,
+            };
+            sizes.insert(s.path.clone(), (s.size, looks));
+            if busy.contains(&s.path) {
+                self.tell(&s.path, Told::Skip(Skip::Unfinished), &mut out);
+                continue;
+            }
+            if s.size == 0 {
+                self.tell(&s.path, Told::Skip(Skip::Empty), &mut out);
+                continue;
+            }
+            if looks < self.stable_looks.max(1) {
+                if self.sizes.contains_key(&s.path) {
+                    self.tell(&s.path, Told::Skip(Skip::Growing), &mut out);
+                }
+                continue;
+            }
+            if self.is_ignored(&s.path, s.size) {
+                self.tell(&s.path, Told::Skip(Skip::Ignored), &mut out);
+                continue;
+            }
+            let ready = Told::Ready(s.size, s.modified);
+            if self.told.get(&s.path) != Some(&ready) {
+                self.told.insert(s.path.clone(), ready);
+                out.push(Event::Ready(Arrival { path: s.path.clone(), size: s.size, arrived: s.modified, catch_up: s.modified < self.started }));
+            }
+        }
+        // Files that went away are forgotten, so a new download with the same name counts again.
+        self.told.retain(|p, _| listing.iter().any(|s| &s.path == p));
+        self.sizes = sizes;
+        if let Some((_, name, size)) = newest_partial {
+            out.insert(0, Event::Downloading { name, size });
+        }
+        out
+    }
+
+    /// Looks at the real folders once.
+    pub fn poll(&mut self) -> Vec<Event> {
+        let listing = scan(&self.folders);
+        self.step(&listing)
+    }
+}
+
+/// What Turbine keeps between runs about catching downloads (in its own data folder).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CatchState {
+    /// Everything that arrived before this was dealt with (seconds since 1970).
+    pub last_seen: u64,
+    /// Files the player said aren't mods (`ignore_key`s), oldest first.
+    pub ignored: Vec<String>,
+    /// Files Turbine was still asking about when it closed (full paths): asked again next time.
+    pub pending: Vec<String>,
+}
+
+impl CatchState {
+    pub fn parse(text: &str) -> Option<CatchState> {
+        let j = crate::json::parse(text).ok()?;
+        let last_seen = match j.get("lastSeen") {
+            Some(crate::json::Json::Num(n)) if *n >= 0.0 => *n as u64,
+            _ => return None,
+        };
+        let list = |key: &str| -> Vec<String> {
+            j.get(key).map(crate::json::Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(str::to_string)).collect()
+        };
+        Some(CatchState { last_seen, ignored: list("ignored"), pending: list("pending") })
+    }
+
+    pub fn to_json(&self) -> String {
+        let list = |v: &[String]| v.iter().map(|k| crate::json::quote(k)).collect::<Vec<_>>().join(",");
+        format!("{{\"lastSeen\":{},\"ignored\":[{}],\"pending\":[{}]}}\n", self.last_seen, list(&self.ignored), list(&self.pending))
+    }
+
+    /// Remembers a file the player said isn't a mod (forgetting the oldest past `MAX_IGNORED`).
+    pub fn ignore(&mut self, key: &str) {
+        self.ignored.retain(|k| k != key);
+        self.ignored.push(key.to_string());
+        while self.ignored.len() > MAX_IGNORED {
+            self.ignored.remove(0);
+        }
+    }
+
+    /// Reads the saved state; None when there is none yet (the first run) or it can't be read.
+    pub fn load(path: &Path) -> Option<CatchState> {
+        CatchState::parse(&fs::read_to_string(path).ok()?)
+    }
+
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.new");
+        fs::write(&tmp, self.to_json())?;
+        fs::rename(&tmp, path)
+    }
+}
+
+/// Where the catch-up look starts, and whether this is the first run (then Turbine asks before adding anything
+/// from it). With a saved state, from when Turbine last looked (a little before, for coarse file times).
+pub fn catch_up_since(state: Option<&CatchState>, now: u64) -> (u64, bool) {
+    match state {
+        Some(s) if s.last_seen > 0 => (s.last_seen.min(now).saturating_sub(SLACK_SECS), false),
+        _ => (now.saturating_sub(FIRST_RUN_SECS), true),
+    }
+}
+
+/// How Turbine knew which game a download is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Basis {
+    /// The browser helper saw the Nexus page it came from.
+    Helper,
+    /// Nexus knows the file by its MD5.
+    Md5,
+    /// A Nexus mod page opened from Turbine, and the file matched it (`Confidence`).
+    Page(Confidence),
+    /// The game the player last had open in Turbine.
+    LastGame,
+    /// Nothing to go on.
+    Nothing,
+}
+
+/// Which game a finished download goes into, and whether Turbine is sure enough to add it by itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decision {
+    /// The best game's ID (Turbine's), when there is one.
+    pub game: Option<String>,
+    pub basis: Basis,
+    /// Add without asking.
+    pub sure: bool,
+}
+
+/// Decides, in this order: the browser helper's page, Nexus's MD5 lookup, a matching Nexus page opened from
+/// Turbine, then the game last open in Turbine. The first three are sure (a page match only by name or size; a
+/// guess is not), the last never is. On the first run's catch-up, Turbine always asks.
+pub fn decide(helper: Option<&str>, md5: Option<&str>, page: Option<(&str, Confidence)>, last_game: Option<&str>, first_run_catch_up: bool) -> Decision {
+    let (game, basis, sure) = if let Some(g) = helper {
+        (Some(g), Basis::Helper, true)
+    } else if let Some(g) = md5 {
+        (Some(g), Basis::Md5, true)
+    } else if let Some((g, c)) = page {
+        (Some(g), Basis::Page(c), c != Confidence::Guess)
+    } else if let Some(g) = last_game {
+        (Some(g), Basis::LastGame, false)
+    } else {
+        (None, Basis::Nothing, false)
+    };
+    Decision { game: game.map(str::to_string), basis, sure: sure && !first_run_catch_up }
+}
+
+impl Basis {
+    /// Plain words for the activity log.
+    pub fn words(self) -> &'static str {
+        match self {
+            Basis::Helper => "the browser helper saw its Nexus page",
+            Basis::Md5 => "Nexus Mods knows the file",
+            Basis::Page(Confidence::Name) => "it matches a Nexus page opened from Turbine by name",
+            Basis::Page(Confidence::Size) => "it matches a Nexus page opened from Turbine by size",
+            Basis::Page(Confidence::Guess) => "a Nexus page was opened from Turbine, but its file list isn't known",
+            Basis::LastGame => "it is the game last open in Turbine",
+            Basis::Nothing => "nothing says which game it is for",
+        }
+    }
 }

@@ -137,6 +137,7 @@ Item {
             font.bold: true
         }
         Switch { on: srow.on; anchors.right: parent.right; anchors.rightMargin: report.ui.px(12); anchors.verticalCenter: parent.verticalCenter }
+        HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
         TapHandler { onTapped: srow.toggled() }
     }
     component Button: Rectangle {
@@ -168,6 +169,7 @@ Item {
             }
             Text { text: btn.label; color: btn.primary ? report.ui.c.onAccent : report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
         }
+        HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
         TapHandler { onTapped: btn.clicked() }
     }
 
@@ -284,6 +286,7 @@ Item {
                         font.family: report.ui.bodyFont
                         font.pixelSize: report.ui.px(13)
                     }
+                    HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
                     TapHandler { onTapped: if (!report.editing) report.beginEdit() }
                 }
                 Row {

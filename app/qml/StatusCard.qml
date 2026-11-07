@@ -11,6 +11,7 @@ Rectangle {
     property bool interactive: true
 
     signal confirm(bool yes)
+    signal pick()
     signal choose(int group, int option)
     signal next()
     signal back()
@@ -107,7 +108,8 @@ Rectangle {
             visible: !card.interactive && (card.asking || card.choosing)
             width: parent.width
             wrapMode: Text.WordWrap
-            text: card.asking ? "Switch to Turbine to answer (Steam button, then Turbine)." : "Pick the installer's choices on the Nexus page, or in Turbine."
+            text: card.asking ? "Switch to Turbine to answer (Steam button, then Turbine): A add it, X another game, B not a mod."
+                  : "Pick the installer's choices on the Nexus page, or in Turbine."
             color: ui.c.warn
             font.family: ui.bodyFont; font.pixelSize: ui.px(14)
         }
@@ -115,8 +117,9 @@ Rectangle {
         Row {
             visible: card.interactive && card.asking
             spacing: ui.px(8)
-            CardButton { label: "Add it"; strong: true; onClicked: card.confirm(true) }
-            CardButton { label: "Not this one"; onClicked: card.confirm(false) }
+            CardButton { visible: !!card.status && !!card.status.game; label: "Add it"; strong: true; onClicked: card.confirm(true) }
+            CardButton { label: card.status && card.status.game ? "Other game" : "Pick the game"; strong: !(card.status && card.status.game); onClicked: card.pick() }
+            CardButton { label: "Not a mod"; onClicked: card.confirm(false) }
         }
         // Installer choices (Desktop Mode panel)
         Column {

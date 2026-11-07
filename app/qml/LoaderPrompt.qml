@@ -266,6 +266,7 @@ Item {
                 GradientStop { position: 1; color: btn.ui.c.accentLo }
             }
         }
+        HoverHandler { onHoveredChanged: btn.ui.hover(parent, hovered) }
         TapHandler { onTapped: btn.clicked() }
 
         Row {

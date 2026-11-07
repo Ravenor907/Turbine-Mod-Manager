@@ -90,6 +90,7 @@ Item {
                     }
                     Text { text: fs.page > 0 || (fs.step && fs.step.canGoBack) ? "Back a step" : "Stop"; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
                 }
+                HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                 TapHandler { onTapped: fs.goBack() }
             }
             Text {
@@ -196,6 +197,7 @@ Item {
                             width: fs.ui.px(26); height: width; radius: width / 2; color: fs.ui.c.raised; border.color: fs.ui.c.accentLo
                             Text { anchors.centerIn: parent; text: "A"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13); font.bold: true }
                         }
+                        HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                         TapHandler { onTapped: fs.activate(opt.index) }
                     }
                 }

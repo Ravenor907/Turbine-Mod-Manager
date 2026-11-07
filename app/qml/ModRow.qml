@@ -28,6 +28,8 @@ Rectangle {
 
     signal clicked()
     signal toggleClicked()
+    signal menuClicked()
+    readonly property Item pillItem: pill
 
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
@@ -81,7 +83,9 @@ Rectangle {
         }
     }
 
+    HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
     TapHandler { onTapped: root.clicked() }
+    TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
 
     Row {
         id: leftPart
@@ -127,6 +131,7 @@ Rectangle {
                 font.bold: true
                 font.letterSpacing: root.ui.px(0.4)
             }
+            HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
             TapHandler { onTapped: root.toggleClicked() }
         }
     }

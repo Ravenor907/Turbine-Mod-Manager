@@ -138,6 +138,7 @@ Item {
                         GradientStop { position: 1; color: Qt.tint(root.ui.c.card, Qt.rgba(root.ui.c.focusFill.r, root.ui.c.focusFill.g, root.ui.c.focusFill.b, 0.5)) }
                     }
                 }
+                HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
                 TapHandler { onTapped: root.activated(fileRow.index) }
 
                 // Zip icon tile.

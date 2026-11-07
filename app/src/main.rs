@@ -7,6 +7,7 @@ mod log;
 mod loot;
 mod online;
 mod pad;
+mod pointer;
 mod single;
 mod system;
 

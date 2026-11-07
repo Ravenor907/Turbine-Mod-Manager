@@ -123,6 +123,7 @@ Item {
                             }
                             Text { text: modelData.label; color: parent.parent.foc ? sh.ui.c.accentText : sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
+                        HoverHandler { onHoveredChanged: sh.ui.hover(parent, hovered) }
                         TapHandler { onTapped: sh.activated(index) }
                     }
                 }

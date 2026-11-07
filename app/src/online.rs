@@ -27,6 +27,11 @@ fn shared_key() -> std::sync::MutexGuard<'static, Option<String>> {
 }
 static SAMPLES: AtomicBool = AtomicBool::new(false);
 
+/// The build's screenshot checks are using recorded samples (no internet, no key needed).
+pub fn using_samples() -> bool {
+    SAMPLES.load(Ordering::SeqCst)
+}
+
 pub fn nexus_key() -> Option<String> {
     if SAMPLES.load(Ordering::SeqCst) {
         return None;

@@ -15,6 +15,7 @@ Window {
     property var fomod: null
 
     signal confirm(bool yes)
+    signal pick()
     signal choose(int group, int option)
     signal next()
     signal back()
@@ -41,6 +42,7 @@ Window {
         x: win.hud ? win.margin : 0
         y: win.hud ? win.height - height - win.margin * 2 : 0
         onConfirm: (yes) => win.confirm(yes)
+        onPick: win.pick()
         onChoose: (g, o) => win.choose(g, o)
         onNext: win.next()
         onBack: win.back()

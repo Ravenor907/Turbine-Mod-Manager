@@ -45,6 +45,10 @@ pub mod qobject {
         #[qproperty(QString, status_json, cxx_name = "statusJson")]
         #[qproperty(QString, browser_json, cxx_name = "browserJson")]
         #[qproperty(QString, bridge_json, cxx_name = "bridgeJson")]
+        #[qproperty(f64, pointer_x, cxx_name = "pointerX")]
+        #[qproperty(f64, pointer_y, cxx_name = "pointerY")]
+        #[qproperty(bool, pointer_shown, cxx_name = "pointerShown")]
+        #[qproperty(bool, pointer_paused, cxx_name = "pointerPaused")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -54,6 +58,13 @@ pub mod qobject {
         /// Reads the controllers. QML calls this on a timer while the window is active.
         #[qinvokable]
         fn poll(self: Pin<&mut Self>);
+
+        /// For the build's screenshot checks: shows the controller pointer at (x, y), then clicks there with the
+        /// left button when `click`, and turns the wheel `wheel` steps (positive scrolls down), all through the same
+        /// mouse and wheel events the sticks and triggers make.
+        #[qinvokable]
+        #[cxx_name = "selftestPointer"]
+        fn selftest_pointer(self: Pin<&mut Self>, x: f64, y: f64, click: bool, wheel: i32);
 
         /// Turbine's window came back to the front: drops controller presses made meanwhile (in a game).
         #[qinvokable]
@@ -337,10 +348,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "watchPage"]
         fn watch_page(self: Pin<&mut Self>, url: &QString) -> QString;
-        /// The player's answer to "Add it?" for a file the watcher could only guess.
+        /// The player's answer to "Found <file>. Add it to <game>?": yes adds it to that game, no means it isn't a
+        /// mod (never asked about again).
         #[qinvokable]
         #[cxx_name = "watchConfirm"]
         fn watch_confirm(self: Pin<&mut Self>, path: &QString, yes: bool);
+        /// The player picked another game for a found file (X): adds it there.
+        #[qinvokable]
+        #[cxx_name = "catchPick"]
+        fn catch_pick(self: Pin<&mut Self>, path: &QString, game_id: &QString);
         /// Labs: watch for a download from Steam's own browser; answers the steam:// address to open.
         #[qinvokable]
         #[cxx_name = "watchSteamBrowser"]
@@ -373,12 +389,14 @@ pub mod qobject {
         #[qsignal]
         fn added(self: Pin<&mut Self>, name: QString, notes: QString);
 
-        /// The watcher found a file it can only guess belongs to the mod: {"path","name","size","game","gameName"}.
+        /// A finished download Turbine isn't sure about: {"path","name","size","game","gameName","why","more"}
+        /// ("game" is "" when no game fits; "more": how many others wait after it).
         #[qsignal]
         fn asked(self: Pin<&mut Self>, json: QString);
 
         /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
-        /// "up", "down", "left", "right" (D-pad and left stick).
+        /// "up", "down", "left", "right" (the D-pad). The triggers come here only while the pointer is hidden;
+        /// while it shows they click (RT left, LT right).
         #[qsignal]
         fn pad(self: Pin<&mut Self>, button: QString, pressed: bool);
 
@@ -478,6 +496,15 @@ pub struct TurbineRust {
     pub(crate) browser_json: QString,
     pub(crate) bridge_json: QString,
     pub(crate) catching: crate::catch::Catching,
+    pub(crate) pointer_x: f64,
+    pub(crate) pointer_y: f64,
+    pub(crate) pointer_shown: bool,
+    pub(crate) pointer_paused: bool,
+    /// The controller pointer: where it is, the left stick's wheel, and the last look's time.
+    pub(crate) pointer: crate::pointer::Pointer,
+    pub(crate) pointer_at: Option<std::time::Instant>,
+    /// Mouse buttons a trigger holds down: [left (RT), right (LT)].
+    pub(crate) mouse_down: [bool; 2],
 }
 
 impl Default for TurbineRust {
@@ -526,6 +553,13 @@ impl Default for TurbineRust {
             browser_json: QString::from("{\"checked\":false}"),
             bridge_json: QString::from("{\"running\":false}"),
             catching: crate::catch::Catching::default(),
+            pointer_x: -1.0,
+            pointer_y: -1.0,
+            pointer_shown: false,
+            pointer_paused: false,
+            pointer: crate::pointer::Pointer::default(),
+            pointer_at: None,
+            mouse_down: [false, false],
         }
     }
 }
@@ -916,18 +950,119 @@ impl qobject::Turbine {
             let r = Pads::open();
             self.as_mut().rust_mut().reader = Some(r);
         }
-        let (events, connected) = match self.as_mut().rust_mut().reader.as_mut() {
-            Some(r) => (r.poll(), r.connected()),
-            None => (Vec::new(), false),
+        let (events, connected, sticks) = match self.as_mut().rust_mut().reader.as_mut() {
+            Some(r) => (r.poll(), r.connected(), r.sticks()),
+            None => (Vec::new(), false, crate::pointer::Sticks::default()),
         };
         if *self.pads() != connected {
             self.as_mut().set_pads(connected);
         }
+        self.as_mut().pointer_tick(&sticks);
         for (button, pressed) in events {
+            // While the pointer shows, RT and LT are the left and right mouse buttons (held for dragging).
+            let mouse = match button {
+                "rt" => Some(0),
+                "lt" => Some(1),
+                _ => None,
+            };
+            if let Some(i) = mouse {
+                let held = self.rust().mouse_down[i];
+                if held || (pressed && self.rust().pointer.shown && !*self.pointer_paused()) {
+                    self.as_mut().mouse_button(i, pressed);
+                    continue;
+                }
+            }
             if pressed {
                 crate::log::line("pad", &format!("Press {button}"));
             }
             self.as_mut().pad(QString::from(button), pressed);
+        }
+    }
+
+    /// One look at the sticks for the controller pointer: moves it (right stick), scrolls (left stick), hides it
+    /// after 3 seconds without the right stick. Nothing while the on-screen keyboard is up (`pointerPaused`).
+    fn pointer_tick(mut self: Pin<&mut Self>, sticks: &crate::pointer::Sticks) {
+        let now = std::time::Instant::now();
+        let dt = self.rust().pointer_at.map(|t| now.duration_since(t).as_secs_f64() * 1000.0).unwrap_or(16.0);
+        self.as_mut().rust_mut().pointer_at = Some(now);
+        if *self.pointer_paused() {
+            if self.rust().pointer.shown {
+                self.as_mut().rust_mut().pointer.shown = false;
+                self.as_mut().pointer_publish();
+            }
+            return;
+        }
+        let Some((w, h)) = crate::pad::window_size() else { return };
+        let t = {
+            let mut rm = self.as_mut().rust_mut();
+            rm.pointer.tick(sticks, dt, w, h)
+        };
+        let (x, y) = (self.rust().pointer.x, self.rust().pointer.y);
+        if t.moved {
+            crate::pad::send(crate::pad::Kind::Move, x, y, 0, self.mouse_mask(), 0);
+        }
+        if t.hid {
+            // Off the window, so nothing stays highlighted under a hidden pointer.
+            crate::pad::send(crate::pad::Kind::Move, -100.0, -100.0, 0, 0, 0);
+        }
+        if t.wheel != 0 {
+            crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, self.mouse_mask(), t.wheel);
+        }
+        if t.moved || t.hid {
+            if t.moved && !*self.pointer_shown() {
+                crate::log::line("pad", "Pointer shown (right stick)");
+            }
+            self.as_mut().pointer_publish();
+        }
+    }
+
+    fn mouse_mask(&self) -> i32 {
+        let d = self.rust().mouse_down;
+        i32::from(d[0]) | (i32::from(d[1]) << 1)
+    }
+
+    /// The pointer's place and whether it shows, for the pointer drawn in QML.
+    fn pointer_publish(mut self: Pin<&mut Self>) {
+        let (x, y, shown) = (self.rust().pointer.x, self.rust().pointer.y, self.rust().pointer.shown);
+        if *self.pointer_x() != x {
+            self.as_mut().set_pointer_x(x);
+        }
+        if *self.pointer_y() != y {
+            self.as_mut().set_pointer_y(y);
+        }
+        if *self.pointer_shown() != shown {
+            self.as_mut().set_pointer_shown(shown);
+        }
+    }
+
+    /// A trigger as a mouse button: `i` 0 left (RT, R2 on some pads), 1 right (LT, L2).
+    fn mouse_button(mut self: Pin<&mut Self>, i: usize, pressed: bool) {
+        if self.rust().mouse_down[i] == pressed {
+            return;
+        }
+        self.as_mut().rust_mut().mouse_down[i] = pressed;
+        let holding = self.rust().mouse_down.iter().any(|d| *d);
+        self.as_mut().rust_mut().pointer.holding = holding;
+        let (x, y) = (self.rust().pointer.x, self.rust().pointer.y);
+        let button = if i == 0 { 1 } else { 2 };
+        if pressed {
+            crate::log::line("pad", &format!("{} at {x:.0}, {y:.0}", if i == 0 { "Left click (RT)" } else { "Right click (LT)" }));
+        }
+        let kind = if pressed { crate::pad::Kind::Press } else { crate::pad::Kind::Release };
+        crate::pad::send(kind, x, y, button, self.mouse_mask(), 0);
+    }
+
+    pub fn selftest_pointer(mut self: Pin<&mut Self>, x: f64, y: f64, click: bool, wheel: i32) {
+        crate::log::line("pad", &format!("Pointer check at {x:.0}, {y:.0} (click {click}, wheel {wheel})"));
+        self.as_mut().rust_mut().pointer.place(x, y);
+        self.as_mut().pointer_publish();
+        crate::pad::send(crate::pad::Kind::Move, x, y, 0, 0, 0);
+        if click {
+            self.as_mut().mouse_button(0, true);
+            self.as_mut().mouse_button(0, false);
+        }
+        if wheel != 0 {
+            crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, 0, wheel);
         }
     }
 

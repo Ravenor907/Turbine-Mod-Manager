@@ -142,6 +142,7 @@ Rectangle {
                     font.weight: Font.DemiBold
                 }
             }
+            HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
             TapHandler { onTapped: root.actionClicked() }
         }
     }

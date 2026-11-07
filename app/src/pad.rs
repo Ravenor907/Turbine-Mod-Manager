@@ -1,5 +1,7 @@
-//! Controllers through SDL. In Game Mode, Steam hands non-Steam apps a virtual Xbox pad, the same path games use.
-//! Sticks and triggers become plain presses so the interface only deals with buttons.
+//! Controllers through SDL. In Game Mode, Steam hands non-Steam apps a virtual Xbox pad, the same path games use;
+//! SDL's controller mappings cover Xbox 360 and Series pads and the handhelds' built-in controls the same way.
+//! Buttons and the triggers become plain presses ("rt", "lt"); the sticks are kept as positions for the controller
+//! pointer (pointer.rs): right stick moves it, left stick scrolls.
 
 use sdl2::controller::{Axis, Button, GameController};
 use sdl2::event::Event;
@@ -7,7 +9,7 @@ use sdl2::{EventPump, GameControllerSubsystem, Sdl, TimerSubsystem};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-/// How far a stick or trigger must move to count as a press, and where it lets go again (so it never flickers).
+/// How far a trigger must move to count as a press, and where it lets go again (so it never flickers).
 const PRESS_AT: i16 = 20_000;
 const RELEASE_AT: i16 = 12_000;
 /// The same tap seen on two devices (Steam's virtual pad and the raw one) arrives within this many milliseconds.
@@ -22,8 +24,10 @@ pub struct Pads {
     held: HashMap<&'static str, u32>,
     /// When each button was last let go, and on which pad.
     last_up: HashMap<&'static str, (u32, Instant)>,
-    /// Stick and trigger directions currently counted as pressed, per pad.
+    /// Triggers currently counted as pressed, per pad.
     axis_down: HashMap<(u32, &'static str), bool>,
+    /// Each pad's sticks: left x, left y, right x, right y (SDL's -32768..32767, y down).
+    sticks: HashMap<u32, [i16; 4]>,
     /// Presses are dropped until then (just after Turbine's window comes back to the front).
     quiet_until: Option<Instant>,
     timer: Option<TimerSubsystem>,
@@ -50,6 +54,7 @@ impl Pads {
             held: HashMap::new(),
             last_up: HashMap::new(),
             axis_down: HashMap::new(),
+            sticks: HashMap::new(),
             quiet_until: None,
             timer,
             waits: VecDeque::new(),
@@ -66,6 +71,28 @@ impl Pads {
             }
         }
         pads
+    }
+
+    /// Where the sticks are now. With more than one pad (Steam's virtual pad and the raw one report the same
+    /// stick), each stick is taken from the pad that has it pushed furthest.
+    pub fn sticks(&self) -> crate::pointer::Sticks {
+        use crate::pointer::unit;
+        let mut s = crate::pointer::Sticks::default();
+        let (mut lm, mut rm) = (0.0, 0.0);
+        for v in self.sticks.values() {
+            let (lx, ly, rx, ry) = (unit(v[0]), unit(v[1]), unit(v[2]), unit(v[3]));
+            if lx.hypot(ly) > lm {
+                lm = lx.hypot(ly);
+                s.lx = lx;
+                s.ly = ly;
+            }
+            if rx.hypot(ry) > rm {
+                rm = rx.hypot(ry);
+                s.rx = rx;
+                s.ry = ry;
+            }
+        }
+        s
     }
 
     pub fn connected(&self) -> bool {
@@ -146,6 +173,16 @@ impl Pads {
                         }
                     }
                     Event::ControllerAxisMotion { which, axis, value, .. } => {
+                        let slot = match axis {
+                            Axis::LeftX => Some(0),
+                            Axis::LeftY => Some(1),
+                            Axis::RightX => Some(2),
+                            Axis::RightY => Some(3),
+                            _ => None,
+                        };
+                        if let Some(i) = slot {
+                            self.sticks.entry(which).or_insert([0; 4])[i] = value;
+                        }
                         for (name, v) in axis_names(axis, value) {
                             let key = (which, name);
                             let was = *self.axis_down.get(&key).unwrap_or(&false);
@@ -180,6 +217,7 @@ impl Pads {
             self.open.retain(|c| c.instance_id() != id);
             self.held.retain(|_, pad| *pad != id);
             self.axis_down.retain(|(pad, _), _| *pad != id);
+            self.sticks.remove(&id);
         }
         let now = Instant::now();
         raw.into_iter().filter_map(|(pad, b, down)| self.dedupe(pad, b, down, now).then_some((b, down))).collect()
@@ -228,15 +266,53 @@ fn button_name(b: Button) -> Option<&'static str> {
     })
 }
 
-/// Left stick acts as the D-pad; triggers act as buttons. Each yields (name, strength) pairs, strength 0 when idle.
+/// The triggers act as buttons (the sticks are read as positions instead). Yields (name, strength), 0 when idle.
 fn axis_names(axis: Axis, value: i16) -> Vec<(&'static str, i16)> {
     let pos = value.max(0);
-    let neg = value.checked_neg().unwrap_or(i16::MAX).max(0);
     match axis {
-        Axis::LeftX => vec![("right", pos), ("left", neg)],
-        Axis::LeftY => vec![("down", pos), ("up", neg)],
         Axis::TriggerLeft => vec![("lt", pos)],
         Axis::TriggerRight => vec![("rt", pos)],
         _ => vec![],
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ pointer events
+
+extern "C" {
+    // qtglue.cpp
+    fn turbine_window_size(w: *mut f64, h: *mut f64) -> i32;
+    fn turbine_pointer_event(kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) -> i32;
+}
+
+/// A mouse event for Turbine's window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Move,
+    Press,
+    Release,
+    Wheel,
+}
+
+/// The main window's size (its own pixels), when it is there.
+pub fn window_size() -> Option<(f64, f64)> {
+    let (mut w, mut h) = (0.0, 0.0);
+    // SAFETY: qtglue.cpp writes two doubles through the pointers it is given, on the interface thread.
+    let r = unsafe { turbine_window_size(&mut w, &mut h) };
+    (r == 1 && w > 0.0 && h > 0.0).then_some((w, h))
+}
+
+/// Delivers a mouse or wheel event to the main window. `button`, `buttons`: Qt's values (1 left, 2 right);
+/// `wheel`: steps, positive scrolls down.
+pub fn send(kind: Kind, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) {
+    let k = match kind {
+        Kind::Move => 0,
+        Kind::Press => 1,
+        Kind::Release => 2,
+        Kind::Wheel => 3,
+    };
+    // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends events to Turbine's own window.
+    let r = unsafe { turbine_pointer_event(k, x, y, button, buttons, wheel) };
+    if r != 1 && kind != Kind::Move {
+        crate::log::line("pad", "Pointer event not delivered: Turbine's window wasn't found");
     }
 }

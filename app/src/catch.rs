@@ -1,7 +1,10 @@
 //! Catching mods the player downloads in their own browser, and saying how it goes:
-//! - the Downloads watcher: opening a Nexus mod page from Turbine starts a `watch::Watcher` for that mod. A file that
-//!   matches one of the mod's files by name or size is added by itself; a guess (Turbine couldn't read the mod's file
-//!   list) is added only after the player says yes;
+//! - the Downloads watcher: while Turbine runs it watches Downloads for every new zip, 7z or rar archive, however the
+//!   player got to the download (and catches up at start on ones that arrived while it was closed). The game is
+//!   decided in this order: the browser helper's page, Nexus Mods by the file's MD5 (with a key), a Nexus page opened
+//!   from Turbine whose files it matches, then the game last open in Turbine. Sure answers add the file by itself;
+//!   otherwise one question: "Found <file>. Add it to <game>?" (A add, X another game, B not a mod, never asked
+//!   again). The activity log says each step: folders watched, files seen, why each was left alone or matched;
 //! - the browser helper (bridge.rs): downloads the extension reports, its Mod Manager Download links, and installer
 //!   choices made on the Nexus page;
 //! - the status both show: `statusJson` for the overlay (over the browser, Desktop and Game Mode) and "status",
@@ -16,12 +19,11 @@ use core::pin::Pin;
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use turbine_engine::json::{quote, Json};
 use turbine_engine::net::SourceInfo;
-use turbine_engine::watch::{self, Confidence, Expectation, Found, Watcher};
+use turbine_engine::watch::{self, Arrival, Basis, CatchState, Catcher, Confidence, Event, Expectation};
 use turbine_engine::{browser, nexus, Game};
 
 type Qt = CxxQtThread<qobject::Turbine>;
@@ -30,7 +32,7 @@ type Qt = CxxQtThread<qobject::Turbine>;
 pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
 /// The folder in Downloads the helper is copied to, for Load unpacked.
 pub const HELPER_FOLDER: &str = "Turbine browser helper";
-/// The most watchers at once (one per Nexus page opened from Turbine, each for 30 minutes).
+/// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 
 fn now_secs() -> u64 {
@@ -111,12 +113,47 @@ pub fn identify(domain: &str, path: &Path) -> Option<SourceInfo> {
     }
 }
 
-/// A file found by a guess, waiting for the player's yes.
+/// A finished download Turbine isn't sure about, waiting for the player's answer.
 #[derive(Clone, Debug)]
 pub struct Ask {
     pub path: PathBuf,
+    pub size: u64,
+    /// The best guess (None when no game fits at all).
+    pub game: Option<Game>,
+    /// What is known about it for that game: a Nexus page it matched, or Nexus's answer by MD5.
+    pub hint: Option<(bridge::NexusRef, Option<String>)>,
+    pub source: Option<SourceInfo>,
+    /// Why that game, in words.
+    pub why: String,
+}
+
+/// A Nexus page opened from Turbine that a download matched.
+#[derive(Clone, Debug)]
+pub struct PageMatch {
     pub game: Game,
+    pub confidence: Confidence,
     pub r: bridge::NexusRef,
+    pub version: Option<String>,
+    pub started: u64,
+}
+
+fn ago(secs: u64) -> String {
+    match secs {
+        0..=119 => format!("{secs} seconds ago"),
+        120..=7199 => format!("{} minutes ago", secs / 60),
+        7200..=172_799 => format!("{} hours ago", secs / 3600),
+        _ => format!("{} days ago", secs / 86_400),
+    }
+}
+
+fn size_words(b: u64) -> String {
+    if b >= 1 << 20 {
+        format!("{:.1} MB", b as f64 / (1u64 << 20) as f64)
+    } else if b >= 1024 {
+        format!("{} KB", b / 1024)
+    } else {
+        format!("{b} bytes")
+    }
 }
 
 /// A download the helper is reporting.
@@ -132,8 +169,8 @@ pub struct HelperDownload {
 #[derive(Default)]
 pub struct Catching {
     pub started: bool,
-    /// Running watchers by "domain:mod", with their stop switches; the key of the one that guesses, if any.
-    pub watches: Vec<(String, Arc<AtomicBool>, bool)>,
+    /// Nexus mod pages opened from Turbine: what each one's download looks like (for 30 minutes).
+    pub expects: Vec<Expectation>,
     /// Files already added (or being added), so the watcher and the helper never add the same one twice.
     pub handled: std::collections::VecDeque<PathBuf>,
     pub asks: Vec<Ask>,
@@ -142,6 +179,16 @@ pub struct Catching {
     pub page: Option<bridge::NexusRef>,
     /// Is the status a caught download's (so finishing its installer reports "Added")?
     pub busy: bool,
+    /// Kept between runs: when Downloads was last looked at, ignored files, unanswered questions.
+    pub state: CatchState,
+    /// Where `state` is saved (None until watching starts, and always in the build's screenshot checks).
+    pub state_path: Option<PathBuf>,
+    /// This is Turbine's first run (its catch-up files are asked about, never added by themselves).
+    pub first_run: bool,
+    /// The unfinished download the watcher last saw (its name), for the status line.
+    pub partial: String,
+    /// Downloads the browser helper reported with a known game: (file name, game id, Nexus page).
+    pub helper_games: std::collections::VecDeque<(String, String, Option<bridge::NexusRef>)>,
 }
 
 fn status_text(active: bool, text: &str, level: &str, progress: Option<f64>, game: &str, added: &str, done: bool, ask: &str) -> String {
@@ -228,7 +275,8 @@ impl qobject::Turbine {
         }
         bridge::set_games(games_json(&self.rust().found));
         self.as_mut().bridge_refresh();
-        self.browser_check();
+        self.as_mut().browser_check();
+        self.start_downloads_watch();
     }
 
     /// Looks for a web browser on the host (in the background); the answer lands in `browserJson`.
@@ -296,9 +344,297 @@ impl qobject::Turbine {
         r
     }
 
-    // ------------------------------------------------------------------------------------------------ the watcher
+    // ------------------------------------------------------------------------------------------------ Downloads
 
-    /// Opening a Nexus mod page: watch Downloads for its file. Answers {"watching", "game", "error"}.
+    /// Starts watching Downloads for every new mod archive, for as long as Turbine runs (once, at start; never in
+    /// the build's screenshot checks). Archives that arrived since Turbine last looked are caught up on first; on the
+    /// very first run, the last 24 hours count and Turbine asks before adding any of those.
+    fn start_downloads_watch(mut self: Pin<&mut Self>) {
+        let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
+        let saved = CatchState::load(&path);
+        let now = now_secs();
+        let (since, first) = watch::catch_up_since(saved.as_ref(), now);
+        let state = saved.unwrap_or_default();
+        let folders = watch_folders();
+        for f in &folders {
+            let there = f.is_dir();
+            crate::log::line("catch", &format!("Watching {} for new mod archives (zip, 7z, rar){}", f.display(), if there { "" } else { "; it isn't there yet" }));
+        }
+        if first {
+            crate::log::line("catch", "First run: archives from the last 24 hours count, and Turbine asks before adding any of them");
+        } else {
+            crate::log::line("catch", &format!("Catching up on archives that arrived since Turbine last looked ({})", ago(now.saturating_sub(since))));
+        }
+        let mut c = Catcher::new(folders, since, now);
+        for k in &state.ignored {
+            c.ignore(k);
+        }
+        for p in &state.pending {
+            c.ask_again(Path::new(p));
+        }
+        if !state.pending.is_empty() {
+            crate::log::line("catch", &format!("{} found {} still waiting for an answer from last time", state.pending.len(), if state.pending.len() == 1 { "file" } else { "files" }));
+        }
+        {
+            let mut rm = self.as_mut().rust_mut();
+            let k = &mut rm.catching;
+            k.state = state;
+            k.state_path = Some(path);
+            k.first_run = first;
+        }
+        let qt = self.qt_thread();
+        let _ = std::thread::Builder::new().name("turbine-downloads".into()).spawn(move || {
+            let mut looks: u64 = 0;
+            let mut had_partial = false;
+            loop {
+                // With the browser helper connected, its own report of a finished download comes first.
+                c.stable_looks = if bridge::connected() { 3 } else { 1 };
+                let events = c.poll();
+                let partial = events.iter().any(|e| matches!(e, Event::Downloading { .. }));
+                if !events.is_empty() || had_partial {
+                    post(&qt, move |t| t.catch_events(events));
+                }
+                had_partial = partial;
+                looks += 1;
+                if looks % 30 == 5 {
+                    post(&qt, |t| t.catch_save(false));
+                }
+                std::thread::sleep(Duration::from_secs(watch::POLL_SECS));
+            }
+        });
+    }
+
+    /// Writes what Turbine keeps about catching (when it last looked, ignored files, unanswered questions).
+    /// `decided`: right after a file was dealt with, so it counts as seen; otherwise a few seconds are left open for
+    /// files still settling.
+    fn catch_save(mut self: Pin<&mut Self>, decided: bool) {
+        let now = now_secs();
+        let Some(path) = self.rust().catching.state_path.clone() else { return };
+        let state = {
+            let mut rm = self.as_mut().rust_mut();
+            let k = &mut rm.catching;
+            let t = if decided { now } else { now.saturating_sub(5) };
+            k.state.last_seen = k.state.last_seen.max(t);
+            k.state.pending = k.asks.iter().map(|a| a.path.to_string_lossy().into_owned()).collect();
+            k.state.clone()
+        };
+        if let Err(e) = state.save(&path) {
+            crate::log::line("catch", &format!("Couldn't save {}: {e}", path.display()));
+        }
+    }
+
+    /// What the Downloads watcher saw in one look.
+    pub(crate) fn catch_events(mut self: Pin<&mut Self>, events: Vec<Event>) {
+        let mut partial = None;
+        for e in events {
+            match e {
+                Event::Skipped { path, why } => crate::log::line("catch", &format!("Downloads: {} left alone: {}", label_of(&path), why.words())),
+                Event::Downloading { name, .. } => partial = Some(name),
+                Event::Ready(a) => self.as_mut().catch_arrival(a),
+            }
+        }
+        match partial {
+            Some(name) => {
+                if self.rust().catching.partial != name {
+                    crate::log::line("catch", &format!("Downloads: {name} is downloading"));
+                    self.as_mut().rust_mut().catching.partial = name.clone();
+                }
+                // The browser helper reports downloads itself, with real progress.
+                if !bridge::connected() {
+                    let text = format!("Downloading {name}");
+                    let status = self.status_json().to_string();
+                    if (!self.rust().catching.busy || status.contains("Downloading")) && !status.contains(&quote(&text)) {
+                        self.as_mut().set_status(&text, "busy", None, "", "", false, "");
+                    }
+                }
+            }
+            None => {
+                if !self.rust().catching.partial.is_empty() {
+                    self.as_mut().rust_mut().catching.partial.clear();
+                    // The download ended without a mod to add (cancelled, or not an archive): no "Downloading" left.
+                    if self.status_json().to_string().contains("\"text\":\"Downloading") {
+                        self.status_done();
+                    }
+                }
+            }
+        }
+    }
+
+    /// A finished archive arrived in Downloads: decide which game it goes into (in the background when Nexus is
+    /// asked about it), then add it or ask.
+    fn catch_arrival(mut self: Pin<&mut Self>, a: Arrival) {
+        let name = label_of(&a.path);
+        crate::log::line(
+            "catch",
+            &format!("Downloads: {name} finished ({}, {})", size_words(a.size), if a.catch_up { "arrived while Turbine was closed" } else { "arrived just now" }),
+        );
+        if self.handled(&a.path) {
+            crate::log::line("catch", &format!("{name} was already added"));
+            return;
+        }
+        if self.rust().catching.state.ignored.contains(&watch::ignore_key(&a.path, a.size)) {
+            crate::log::line("catch", &format!("{name}: you said it isn't a mod"));
+            return;
+        }
+        if self.rust().catching.asks.iter().any(|x| x.path == a.path) {
+            return;
+        }
+        if self.rust().catching.downloads.iter().any(|(_, d)| d.label == name) {
+            crate::log::line("catch", &format!("{name}: the browser helper is reporting this download; it adds it when it finishes"));
+            return;
+        }
+        // 1. The browser helper saw the Nexus page it came from.
+        let helper = self
+            .rust()
+            .catching
+            .helper_games
+            .iter()
+            .rev()
+            .find(|(l, _, _)| *l == name)
+            .and_then(|(_, g, r)| self.find(g).map(|g| (g, r.clone())));
+        // 3. A Nexus page opened from Turbine whose files it matches (name, then size; a guess when its list isn't
+        //    known), only for files that arrived after the page was opened.
+        let now = now_secs();
+        let mut page: Option<PageMatch> = None;
+        for e in self.rust().catching.expects.iter().filter(|e| !e.expired_at(now)) {
+            if a.arrived + 2 < e.started_at {
+                continue;
+            }
+            let Some((file, confidence)) = e.match_file(&name, a.size) else { continue };
+            if page.as_ref().map(|p| confidence > p.confidence || (confidence == p.confidence && e.started_at > p.started)).unwrap_or(true) {
+                if let Some(game) = self.find(&e.game_id) {
+                    let r = bridge::NexusRef { domain: e.domain.clone(), mod_id: e.mod_id, file_id: file.as_ref().map(|f| f.file_id).filter(|x| *x > 0) };
+                    page = Some(PageMatch { game, confidence, r, version: file.map(|f| f.version), started: e.started_at });
+                }
+            }
+        }
+        if helper.is_some() || crate::online::nexus_key().is_none() {
+            return self.catch_decide(a, helper, None, page);
+        }
+        // 2. Nexus Mods by the file's MD5, for each of the installed games it has (the likeliest first).
+        let mut domains: Vec<(String, Game)> = Vec::new();
+        let mut add = |g: &Game| {
+            if let Some(d) = nexus::domain_for_store_id(&g.store_id) {
+                if !domains.iter().any(|(x, _)| x == d) {
+                    domains.push((d.to_string(), g.clone()));
+                }
+            }
+        };
+        if let Some(p) = &page {
+            add(&p.game);
+        }
+        if let Some(g) = self.current_game() {
+            add(&g);
+        }
+        for g in &self.rust().found {
+            add(g);
+        }
+        domains.truncate(6);
+        crate::log::line("catch", &format!("Looking up {name} on Nexus Mods by its MD5"));
+        let qt = self.qt_thread();
+        let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
+            let md5 = domains.into_iter().find_map(|(d, g)| identify(&d, &a.path).map(|s| (g, s)));
+            post(&qt, move |t| t.catch_decide(a, None, md5, page));
+        });
+    }
+
+    /// Picks the game in order (the helper, Nexus by MD5, a matching Nexus page, the game last open in Turbine), then
+    /// adds the file when Turbine is sure, or asks.
+    fn catch_decide(mut self: Pin<&mut Self>, a: Arrival, helper: Option<(Game, Option<bridge::NexusRef>)>, md5: Option<(Game, SourceInfo)>, page: Option<PageMatch>) {
+        let name = label_of(&a.path);
+        if self.handled(&a.path) || self.rust().catching.asks.iter().any(|x| x.path == a.path) {
+            return;
+        }
+        let last = self.current_game();
+        let first_catch_up = self.rust().catching.first_run && a.catch_up;
+        let (hid, mid, pid, lid) = (
+            helper.as_ref().map(|(g, _)| g.id()),
+            md5.as_ref().map(|(g, _)| g.id()),
+            page.as_ref().map(|p| (p.game.id(), p.confidence)),
+            last.as_ref().map(Game::id),
+        );
+        let d = watch::decide(hid.as_deref(), mid.as_deref(), pid.as_ref().map(|(g, c)| (g.as_str(), *c)), lid.as_deref(), first_catch_up);
+        let game = d.game.as_deref().and_then(|id| self.find(id));
+        let gname = game.as_ref().map(|g| g.name.clone()).unwrap_or_else(|| "no game".into());
+        crate::log::line(
+            "catch",
+            &format!(
+                "{name}: {gname}, because {}; {}",
+                d.basis.words(),
+                if d.sure && game.is_some() { "adding it" } else if first_catch_up { "asking first (first run)" } else { "asking" }
+            ),
+        );
+        // What is known about where it came from, for the mod's name, version and update checks.
+        let (hint, source) = match d.basis {
+            Basis::Helper => (helper.and_then(|(_, r)| r).map(|r| (r, None)), None),
+            Basis::Md5 => (None, md5.map(|(_, s)| s)),
+            Basis::Page(_) => (page.map(|p| (p.r, p.version)), None),
+            _ => (None, None),
+        };
+        match game {
+            Some(g) if d.sure => {
+                self.as_mut().catch_add(g, a.path, hint, source);
+                self.catch_save(true);
+            }
+            game => {
+                if game.is_none() && self.rust().found.is_empty() {
+                    crate::log::line("catch", &format!("{name}: no games found here, so there is nowhere to add it"));
+                    return;
+                }
+                let ask = Ask { path: a.path, size: a.size, game, hint, source, why: d.basis.words().to_string() };
+                self.as_mut().rust_mut().catching.asks.push(ask);
+                self.as_mut().catch_save(true);
+                // The first question shows; with more waiting, it says how many.
+                self.show_ask();
+            }
+        }
+    }
+
+    /// Shows the first waiting question in Turbine (the "found" sheet) and on the status card over other apps.
+    fn show_ask(mut self: Pin<&mut Self>) {
+        let Some(ask) = self.rust().catching.asks.first().cloned() else { return };
+        let more = self.rust().catching.asks.len() - 1;
+        let name = label_of(&ask.path);
+        let p = ask.path.to_string_lossy().into_owned();
+        let (gid, gname) = ask.game.as_ref().map(|g| (g.id(), g.name.clone())).unwrap_or_default();
+        let text = if gname.is_empty() { format!("Found {name}. Which game is it for?") } else { format!("Found {name}. Add it to {gname}?") };
+        self.as_mut().set_status(&text, "warn", None, &gname, "", false, &p);
+        let j = format!(
+            "{{\"path\":{},\"name\":{},\"size\":{},\"game\":{},\"gameName\":{},\"why\":{},\"more\":{more}}}",
+            quote(&p),
+            quote(&name),
+            ask.size,
+            quote(&gid),
+            quote(&gname),
+            quote(&ask.why)
+        );
+        self.asked(QString::from(j.as_str()));
+    }
+
+    fn take_ask(mut self: Pin<&mut Self>, path: &Path) -> Option<Ask> {
+        let mut rm = self.as_mut().rust_mut();
+        let asks = &mut rm.catching.asks;
+        let i = asks.iter().position(|a| a.path == path);
+        let taken = i.map(|i| asks.remove(i));
+        taken
+    }
+
+    /// After an answer: the next question, or the card goes away.
+    fn next_ask(mut self: Pin<&mut Self>) {
+        self.as_mut().catch_save(true);
+        if self.rust().catching.asks.is_empty() {
+            if !self.rust().catching.busy || self.status_json().to_string().contains("\"ask\":\"/") {
+                self.status_done();
+            }
+        } else {
+            self.show_ask();
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ Nexus pages
+
+    /// Opening a Nexus mod page: a download that matches it goes into its game by itself (Downloads is watched all
+    /// the time anyway). Answers {"watching", "game", "error"}.
     pub fn watch_page(mut self: Pin<&mut Self>, url: &QString) -> QString {
         let url = url.to_string();
         let out = |watching: bool, game: &str, error: &str| {
@@ -306,7 +642,7 @@ impl qobject::Turbine {
         };
         let Some(r) = bridge::nexus_page(&url) else { return out(false, "", "") };
         let Some(game) = self.game_for_domain(&r.domain) else {
-            crate::log::line("catch", &format!("Not watching for {}:{}: no game for that domain here", r.domain, r.mod_id));
+            crate::log::line("catch", &format!("Nexus page for {} mod {}: that game isn't installed here", r.domain, r.mod_id));
             return out(false, "", "That game isn't installed here.");
         };
         let name = game.name.clone();
@@ -314,7 +650,8 @@ impl qobject::Turbine {
         out(true, &name, "")
     }
 
-    /// Labs, Steam's built-in browser: a guessing watcher for the game on screen. Answers the steam:// address.
+    /// Labs, Steam's built-in browser: downloads from now on are guessed to be for the game on screen. Answers the
+    /// steam:// address.
     pub fn watch_steam_browser(mut self: Pin<&mut Self>) -> QString {
         if let Some(game) = self.current_game() {
             let domain = nexus::domain_for_store_id(&game.store_id).unwrap_or("").to_string();
@@ -324,114 +661,46 @@ impl qobject::Turbine {
         QString::from("steam://openurl/https://www.nexusmods.com")
     }
 
-    /// Starts (or restarts) a watcher. `files`: the mod's file list when already known; otherwise it is read from
-    /// Nexus first when the player has a key.
+    /// Remembers what a Nexus page's download looks like. `files`: the mod's file list when already known;
+    /// otherwise it is read from Nexus in the background when the player has a key.
     fn start_watch(mut self: Pin<&mut Self>, game: Game, r: bridge::NexusRef, files: Option<nexus::FileList>) {
-        let key = format!("{}:{}", r.domain, r.mod_id);
-        let stop = Arc::new(AtomicBool::new(false));
-        {
-            let mut rm = self.as_mut().rust_mut();
-            let c = &mut rm.catching;
-            c.watches.retain(|(k, s, _)| {
-                let same = *k == key;
-                if same {
-                    s.store(true, Ordering::SeqCst);
-                }
-                !same && !s.load(Ordering::SeqCst)
-            });
-            while c.watches.len() >= MAX_WATCHES {
-                let (_, s, _) = c.watches.remove(0);
-                s.store(true, Ordering::SeqCst);
-            }
-            c.watches.push((key.clone(), stop.clone(), false));
-        }
-        let qt = self.qt_thread();
         let started = now_secs();
-        let _ = std::thread::Builder::new().name("turbine-watch".into()).spawn(move || {
-            let list = files.or_else(|| {
-                let k = crate::online::nexus_key()?;
-                if r.mod_id == 0 {
-                    return None;
+        let mut exp = Expectation::new(&game.id(), &r.domain, r.mod_id, started);
+        if let Some(l) = &files {
+            exp = exp.with_files(l);
+        }
+        crate::log::line("catch", &format!("Nexus page for {} mod {} opened: a matching download goes into {}", r.domain, r.mod_id, game.name));
+        self.as_mut().expect_page(exp.clone());
+        if files.is_some() || r.mod_id == 0 {
+            return;
+        }
+        let Some(k) = crate::online::nexus_key() else { return };
+        let qt = self.qt_thread();
+        let _ = std::thread::Builder::new().name("turbine-files".into()).spawn(move || {
+            let client = turbine_engine::net::Client::new(crate::VERSION, &crate::online::temp_dir());
+            match nexus::Nexus::new(client, &k, crate::VERSION).files(&r.domain, r.mod_id) {
+                Ok(l) => {
+                    let exp = exp.with_files(&l);
+                    crate::log::line("catch", &format!("Nexus lists {} files for {}:{}; matching by name and size", exp.files.len(), r.domain, r.mod_id));
+                    post(&qt, move |t| t.expect_page(exp));
                 }
-                let client = turbine_engine::net::Client::new(crate::VERSION, &crate::online::temp_dir());
-                match nexus::Nexus::new(client, &k, crate::VERSION).files(&r.domain, r.mod_id) {
-                    Ok(l) => Some(l),
-                    Err(e) => {
-                        crate::log::line("catch", &format!("Nexus's file list for {}:{} couldn't be read ({e}); watching by guess", r.domain, r.mod_id));
-                        None
-                    }
-                }
-            });
-            let mut exp = Expectation::new(&game.id(), &r.domain, r.mod_id, started);
-            if let Some(l) = &list {
-                exp = exp.with_files(l);
-            }
-            let guess = exp.files.iter().all(|f| f.file_name.is_empty() && f.size_bytes == 0);
-            {
-                let (k2, s2) = (key.clone(), stop.clone());
-                post(&qt, move |t| t.watch_started(&k2, &s2, guess));
-            }
-            let folders = watch_folders();
-            crate::log::line(
-                "catch",
-                &format!(
-                    "Watching {} for {} mod {} ({}; {} files known)",
-                    folders.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "),
-                    game.name,
-                    r.mod_id,
-                    if guess { "will ask before adding" } else { "adds a match by itself" },
-                    exp.files.len()
-                ),
-            );
-            let mut w = Watcher::new(exp, folders.clone());
-            let mut partial = String::new();
-            let found = loop {
-                if stop.load(Ordering::SeqCst) || w.expectation.expired_at(now_secs()) {
-                    break None;
-                }
-                if let Some(f) = w.poll() {
-                    break Some(f);
-                }
-                // A download still being written: say so (unless the helper reports it with real progress).
-                if !bridge::connected() {
-                    if let Some((name, size)) = unfinished(&folders, started) {
-                        let line = format!("{name}:{size}");
-                        if line != partial {
-                            partial = line;
-                            let g = game.name.clone();
-                            post(&qt, move |mut t| {
-                                if !t.rust().catching.busy || t.status_json().to_string().contains("Downloading") {
-                                    t.as_mut().set_status(&format!("Downloading {name}"), "busy", None, &g, "", false, "");
-                                }
-                            });
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_secs(watch::POLL_SECS));
-            };
-            let k3 = key.clone();
-            match found {
-                Some(f) => post(&qt, move |t| t.watch_found(&k3, game, r, f)),
-                None => post(&qt, move |mut t| t.as_mut().rust_mut().catching.watches.retain(|(k, s, _)| *k != k3 || !s.load(Ordering::SeqCst))),
+                Err(e) => crate::log::line("catch", &format!("Nexus's file list for {}:{} couldn't be read ({e}); Turbine will ask about its download", r.domain, r.mod_id)),
             }
         });
     }
 
-    fn watch_started(mut self: Pin<&mut Self>, key: &str, stop: &Arc<AtomicBool>, guess: bool) {
+    fn expect_page(mut self: Pin<&mut Self>, exp: Expectation) {
+        let now = now_secs();
         let mut rm = self.as_mut().rust_mut();
-                    let c = &mut rm.catching;
-        if guess {
-            // Only one watcher guesses at a time: the newest page's.
-            for (k, s, g) in c.watches.iter() {
-                if *g && k != key {
-                    s.store(true, Ordering::SeqCst);
-                }
-            }
+        let list = &mut rm.catching.expects;
+        list.retain(|e| !(e.domain == exp.domain && e.mod_id == exp.mod_id && e.game_id == exp.game_id) && !e.expired_at(now));
+        // Only one page guesses at a time: the newest.
+        if !exp.knows_files() {
+            list.retain(|e| e.knows_files());
         }
-        for w in c.watches.iter_mut() {
-            if w.0 == key && Arc::ptr_eq(&w.1, stop) {
-                w.2 = guess;
-            }
+        list.push(exp);
+        while list.len() > MAX_WATCHES {
+            list.remove(0);
         }
     }
 
@@ -450,62 +719,42 @@ impl qobject::Turbine {
         h.push_back(real);
     }
 
-    fn watch_found(mut self: Pin<&mut Self>, key: &str, game: Game, r: bridge::NexusRef, f: Found) {
-        self.as_mut().rust_mut().catching.watches.retain(|(k, _, _)| k != key);
-        let name = label_of(&f.path);
-        crate::log::line("catch", &format!("Found {name} in Downloads ({} confidence) for {}", f.confidence.label(), game.name));
-        if self.handled(&f.path) {
-            crate::log::line("catch", &format!("{name} was already added"));
-            return;
-        }
-        match f.confidence {
-            Confidence::Name | Confidence::Size => {
-                let r = bridge::NexusRef { file_id: f.file.as_ref().map(|x| x.file_id).filter(|x| *x > 0).or(r.file_id), ..r };
-                let version = f.file.as_ref().map(|x| x.version.clone());
-                self.catch_add(game, f.path, Some((r, version)));
-            }
-            Confidence::Guess => {
-                let ask = Ask { path: f.path.clone(), game: game.clone(), r };
-                self.as_mut().rust_mut().catching.asks.retain(|a| a.path != ask.path);
-                self.as_mut().rust_mut().catching.asks.push(ask);
-                let p = f.path.to_string_lossy().into_owned();
-                self.as_mut().set_status(&format!("Found {name}. Add it to {}?", game.name), "warn", None, &game.name, "", false, &p);
-                let j = format!(
-                    "{{\"path\":{},\"name\":{},\"size\":{},\"game\":{},\"gameName\":{}}}",
-                    quote(&p),
-                    quote(&name),
-                    f.size,
-                    quote(&game.id()),
-                    quote(&game.name)
-                );
-                self.asked(QString::from(j.as_str()));
-            }
-        }
-    }
-
-    /// The player's answer to "Add it?" for a file found by a guess.
+    /// The player's answer to "Found <file>. Add it to <game>?": yes adds it; no means it isn't a mod, and Turbine
+    /// never asks about that file again.
     pub fn watch_confirm(mut self: Pin<&mut Self>, path: &QString, yes: bool) {
         let path = PathBuf::from(path.to_string());
-        let ask = {
-            let mut rm = self.as_mut().rust_mut();
-            let asks = &mut rm.catching.asks;
-            let i = asks.iter().position(|a| a.path == path);
-            let taken = i.map(|i| asks.remove(i));
-            taken
-        };
-        let Some(ask) = ask else { return };
-        crate::log::line("action", &format!("{} {}", if yes { "Add" } else { "Don't add" }, label_of(&path)));
-        if yes {
-            let hint = (ask.r.mod_id > 0).then_some((ask.r, None));
-            self.catch_add(ask.game, ask.path, hint);
-        } else {
-            self.status_done();
+        let Some(ask) = self.as_mut().take_ask(&path) else { return };
+        let name = label_of(&path);
+        match (yes, ask.game.clone()) {
+            (true, Some(game)) => {
+                crate::log::line("action", &format!("Add {name} to {}", game.name));
+                self.as_mut().catch_add(game, ask.path, ask.hint, ask.source);
+            }
+            _ => {
+                crate::log::line("action", &format!("Not a mod: {name} (won't be asked about again)"));
+                let key = watch::ignore_key(&ask.path, ask.size);
+                self.as_mut().rust_mut().catching.state.ignore(&key);
+            }
         }
+        self.next_ask();
     }
 
-    /// Adds a caught download to its game: identified on Nexus first when the player has a key, then added on the mod
-    /// worker; the status says how it went.
-    pub(crate) fn catch_add(mut self: Pin<&mut Self>, game: Game, path: PathBuf, hint: Option<(bridge::NexusRef, Option<String>)>) {
+    /// The player picked another game for a found file.
+    pub fn catch_pick(mut self: Pin<&mut Self>, path: &QString, game_id: &QString) {
+        let path = PathBuf::from(path.to_string());
+        let Some(game) = self.find(&game_id.to_string()) else { return };
+        let Some(ask) = self.as_mut().take_ask(&path) else { return };
+        crate::log::line("action", &format!("Add {} to {} (picked)", label_of(&path), game.name));
+        // What Nexus said about it only holds for the game it said.
+        let same = ask.game.as_ref().map(|g| g.id() == game.id()).unwrap_or(false);
+        let (hint, source) = if same { (ask.hint, ask.source) } else { (None, None) };
+        self.as_mut().catch_add(game, ask.path, hint, source);
+        self.next_ask();
+    }
+
+    /// Adds a caught download to its game: identified on Nexus first when the player has a key (unless `known`
+    /// already says what it is), then added on the mod worker; the status says how it went.
+    pub(crate) fn catch_add(mut self: Pin<&mut Self>, game: Game, path: PathBuf, hint: Option<(bridge::NexusRef, Option<String>)>, known: Option<SourceInfo>) {
         if self.handled(&path) {
             return;
         }
@@ -516,7 +765,7 @@ impl qobject::Turbine {
         let qt = self.qt_thread();
         let domain = hint.as_ref().map(|(r, _)| r.domain.clone()).or_else(|| nexus::domain_for_store_id(&game.store_id).map(str::to_string));
         let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
-            let found = domain.as_deref().filter(|d| !d.is_empty()).and_then(|d| identify(d, &path));
+            let found = known.or_else(|| domain.as_deref().filter(|d| !d.is_empty()).and_then(|d| identify(d, &path)));
             let source = found
                 .or_else(|| hint.as_ref().map(|(r, v)| hint_source(r, v.clone())))
                 .unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..Default::default() });
@@ -616,6 +865,12 @@ impl qobject::Turbine {
                 let d = HelperDownload { label: label.clone(), game, r, total };
                 let mut rm = self.as_mut().rust_mut();
                 let c = &mut rm.catching;
+                if let Some(g) = &d.game {
+                    c.helper_games.push_back((label.clone(), g.id(), d.r.clone()));
+                    if c.helper_games.len() > 20 {
+                        c.helper_games.pop_front();
+                    }
+                }
                 c.downloads.retain(|(i, _)| *i != id);
                 c.downloads.push((id, d));
                 if c.downloads.len() > 20 {
@@ -671,7 +926,7 @@ impl qobject::Turbine {
                 let r = d.as_ref().and_then(|d| d.r.clone());
                 let game = d.as_ref().and_then(|d| d.game.clone()).or_else(|| r.as_ref().and_then(|r| self.game_for_domain(&r.domain)));
                 match game {
-                    Some(g) => self.catch_add(g, path, r.map(|r| (r, None))),
+                    Some(g) => self.catch_add(g, path, r.map(|r| (r, None)), None),
                     None => {
                         let label = label_of(&path);
                         crate::log::line("bridge", &format!("{label}: no game for it here"));
@@ -725,26 +980,6 @@ fn report(w: &Worker, game: &Game, out: crate::actions::Outcome) {
         }),
         crate::actions::Outcome::Failed(e) => w.post(move |t| t.set_status(&e, "stop", None, &g, "", true, "")),
     }
-}
-
-/// The newest unfinished download (a browser's .part, .crdownload or .download file) started after `since`.
-fn unfinished(folders: &[PathBuf], since: u64) -> Option<(String, u64)> {
-    let mut best: Option<(u64, String, u64)> = None;
-    for s in watch::scan(folders) {
-        let name = label_of(&s.path);
-        let lc = name.to_ascii_lowercase();
-        let Some(sfx) = watch::PARTIAL_SUFFIXES.iter().find(|x| lc.ends_with(*x)) else { continue };
-        if s.modified + 2 < since {
-            continue;
-        }
-        let shown = name[..name.len() - sfx.len()].to_string();
-        // Chromium names unfinished files "Unconfirmed 123456.crdownload" until the name is known.
-        let shown = if shown.starts_with("Unconfirmed ") { "a file".to_string() } else { shown };
-        if best.as_ref().map(|b| s.modified > b.0).unwrap_or(true) {
-            best = Some((s.modified, shown, s.size));
-        }
-    }
-    best.map(|(_, n, s)| (n, s))
 }
 
 /// The browser check's JSON plus the warning's words (title, text, steps), so the interface has one source.

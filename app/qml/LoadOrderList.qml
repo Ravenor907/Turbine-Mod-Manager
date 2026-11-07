@@ -57,6 +57,7 @@ Item {
                     }
                     Text { text: "Sort automatically"; color: lo.ui.c.text; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
+                HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
                 TapHandler { onTapped: lo.sortClicked() }
             }
             Text {
@@ -102,6 +103,7 @@ Item {
                         color: row.p.active ? lo.ui.c.raised : lo.ui.c.ground
                         border.color: row.p.active ? "transparent" : lo.ui.c.line
                         Text { anchors.centerIn: parent; text: row.p.active ? "ON" : "OFF"; color: row.p.active ? lo.ui.c.accentText : lo.ui.c.muted; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(13); font.bold: true }
+                        HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
                         TapHandler { onTapped: lo.toggleClicked(row.index) }
                     }
                     Text {
@@ -127,6 +129,7 @@ Item {
                         }
                     }
                 }
+                HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
                 TapHandler { onTapped: lo.rowClicked(row.index) }
             }
         }

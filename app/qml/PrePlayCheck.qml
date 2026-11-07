@@ -13,6 +13,11 @@ import QtQuick.Shapes
 //   ui.bodyFont   font family for everything else
 Item {
     id: root
+    // Plain words as StyledText, with options that start with two hyphens ("--launcher-skip") in a fixed-width font.
+    function styled(t) {
+        const esc = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")
+        return esc.replace(/(^|\s)(--[A-Za-z0-9][A-Za-z0-9-]*)/g, '$1<font face="monospace">$2</font>')
+    }
 
     required property var ui
 
@@ -152,9 +157,11 @@ Item {
                             font.weight: Font.DemiBold
                         }
                         Text {
-                            visible: text !== ""
+                            visible: (checkRow.modelData.detail || "") !== ""
                             width: parent.width
-                            text: checkRow.modelData.detail || ""
+                            // Commands like --launcher-skip in a fixed-width font, so the two hyphens show apart.
+                            textFormat: Text.StyledText
+                            text: root.styled(checkRow.modelData.detail || "")
                             wrapMode: Text.WordWrap
                             color: checkRow.flagged ? root.ui.c.soft : root.ui.c.muted
                             font.family: root.ui.bodyFont
@@ -285,6 +292,7 @@ Item {
                 GradientStop { position: 1; color: btn.ui.c.accentLo }
             }
         }
+        HoverHandler { onHoveredChanged: btn.ui.hover(parent, hovered) }
         TapHandler { onTapped: btn.clicked() }
 
         Row {

@@ -1,11 +1,18 @@
-// Two small things the Rust side can't reach through cxx-qt-lib: Qt's message handler (QML warnings and console
-// lines go into Turbine's activity log, fatal errors into crash.log) and the clipboard.
+// Things the Rust side can't reach through cxx-qt-lib: Qt's message handler (QML warnings and console lines go into
+// Turbine's activity log, fatal errors into crash.log), the clipboard, the Game Mode overlay's window property and
+// the controller pointer's mouse and wheel events.
 
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
 #include <QtGui/QClipboard>
 #include <QtGui/QGuiApplication>
+// Before Xlib below (its macros clash with names in Qt's headers).
+#include <QtCore/QCoreApplication>
+#include <QtCore/QElapsedTimer>
+#include <QtGui/QMouseEvent>
+#include <QtGui/QWheelEvent>
+#include <QtGui/QWindow>
 
 namespace {
 using Sink = void (*)(int kind, const char *place, const char *text);
@@ -95,4 +102,62 @@ extern "C" int turbine_overlay_mark(int on)
     Q_UNUSED(on);
     return -3;
 #endif
+}
+
+// The controller pointer (pointer.rs and backend.rs): mouse and wheel events made from the sticks and triggers,
+// delivered straight into Turbine's main window (objectName "turbineMain") the way a real mouse's are, so every
+// TapHandler, MouseArea, ListView and Flickable reacts to them. Moving the system cursor isn't used: gamescope (Game
+// Mode) doesn't let an app move it. kind: 0 move, 1 press, 2 release, 3 wheel. button and buttons use Qt's values
+// (1 left, 2 right). wheel: steps, positive scrolls down. Returns 1 when sent, -1 when the window isn't there.
+
+namespace {
+QWindow *mainWindow()
+{
+    const auto windows = QGuiApplication::topLevelWindows();
+    for (QWindow *w : windows) {
+        if (w->objectName() == QLatin1String("turbineMain"))
+            return w;
+    }
+    return nullptr;
+}
+
+quint64 stamp()
+{
+    static QElapsedTimer clock;
+    if (!clock.isValid())
+        clock.start();
+    return static_cast<quint64>(clock.elapsed());
+}
+}
+
+extern "C" int turbine_window_size(double *w, double *h)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    *w = win->width();
+    *h = win->height();
+    return 1;
+}
+
+extern "C" int turbine_pointer_event(int kind, double x, double y, int button, int buttons, int wheel)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    const QPointF local(x, y);
+    const QPointF global = win->mapToGlobal(local);
+    const Qt::MouseButton b = static_cast<Qt::MouseButton>(button);
+    const Qt::MouseButtons held = Qt::MouseButtons::fromInt(buttons);
+    if (kind == 3) {
+        QWheelEvent ev(local, global, QPoint(), QPoint(0, -120 * wheel), held, Qt::NoModifier, Qt::NoScrollPhase, false);
+        ev.setTimestamp(stamp());
+        QCoreApplication::sendEvent(win, &ev);
+        return 1;
+    }
+    const QEvent::Type type = kind == 1 ? QEvent::MouseButtonPress : kind == 2 ? QEvent::MouseButtonRelease : QEvent::MouseMove;
+    QMouseEvent ev(type, local, global, kind == 0 ? Qt::NoButton : b, held, Qt::NoModifier);
+    ev.setTimestamp(stamp());
+    QCoreApplication::sendEvent(win, &ev);
+    return 1;
 }

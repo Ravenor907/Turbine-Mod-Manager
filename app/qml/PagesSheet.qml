@@ -43,7 +43,7 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Press Mod Manager Download on the page and the file comes to Turbine by itself."
+                text: "Download it on the page with Slow download (or Mod Manager Download): Turbine adds the file when it lands in Downloads."
                 color: pg.ui.c.text
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(15)
             }
@@ -52,7 +52,7 @@ Item {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: [pg.gameMode ? "This works best in Desktop Mode, with the browser and Turbine side by side." : "",
-                       !pg.handlerSet ? "First set Turbine for Nexus downloads in Settings, Accounts." : ""].filter(s => s !== "").join(" ")
+                       !pg.handlerSet ? "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Accounts. Slow download needs nothing." : ""].filter(s => s !== "").join(" ")
                 color: pg.ui.c.warn
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(14)
             }
@@ -88,6 +88,7 @@ Item {
                         }
                         Text { text: "Open on Nexus"; color: row.foc ? pg.ui.c.accentText : pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(15); font.bold: row.foc; anchors.verticalCenter: parent.verticalCenter }
                     }
+                    HoverHandler { onHoveredChanged: pg.ui.hover(parent, hovered) }
                     TapHandler { onTapped: pg.activated(row.index) }
                 }
             }

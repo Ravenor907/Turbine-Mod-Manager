@@ -114,6 +114,7 @@ Item {
                             }
                             Text { text: parent.parent.modelData[1]; color: parent.parent.index === 1 ? ask.ui.c.onAccent : ask.ui.c.text; font.family: ask.ui.bodyFont; font.pixelSize: ask.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
+                        HoverHandler { onHoveredChanged: ask.ui.hover(parent, hovered) }
                         TapHandler { onTapped: parent.index === 1 ? ask.accept() : ask.cancel() }
                     }
                 }

@@ -202,6 +202,7 @@ Item {
             }
         }
 
+        HoverHandler { onHoveredChanged: entry.ui.hover(parent, hovered) }
         TapHandler { onTapped: entry.clicked() }
 
         Rectangle {

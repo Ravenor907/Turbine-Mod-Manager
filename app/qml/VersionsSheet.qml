@@ -118,6 +118,7 @@ Item {
                         }
                         Text { text: "Install"; color: vs.ui.c.soft; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
                     }
+                    HoverHandler { onHoveredChanged: vs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: vs.activated(row.index) }
                 }
             }

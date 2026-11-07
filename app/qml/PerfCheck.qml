@@ -225,6 +225,7 @@ Item {
                             font.pixelSize: perf.ui.px(15)
                             font.bold: true
                         }
+                        HoverHandler { onHoveredChanged: perf.ui.hover(parent, hovered) }
                         TapHandler { onTapped: perf.activate(btn.index) }
                     }
                 }

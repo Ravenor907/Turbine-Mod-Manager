@@ -102,6 +102,7 @@ Item {
                             Text { anchors.centerIn: parent; text: "A"; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(13); font.bold: true }
                         }
                     }
+                    HoverHandler { onHoveredChanged: ps.ui.hover(parent, hovered) }
                     TapHandler { onTapped: ps.activated(row.index) }
                 }
             }

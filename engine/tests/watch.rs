@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use support::TempDir;
 use turbine_engine::nexus;
 use turbine_engine::watch::{
-    default_folders, parse_user_dirs, same_download_name, scan, wait, Confidence, ExpectedFile, Expectation, Seen, Watcher,
-    WINDOW_SECS,
+    arrived_secs, catch_up_since, decide, default_folders, ignore_key, parse_user_dirs, same_download_name, scan, wait, Arrival, Basis,
+    CatchState, Catcher, Confidence, Event, ExpectedFile, Expectation, Seen, Skip, Watcher, FIRST_RUN_SECS, MAX_IGNORED, WINDOW_SECS,
 };
 
 const T0: u64 = 1_800_000_000;
@@ -183,4 +183,210 @@ fn downloads_folder_from_user_dirs() {
     let t = TempDir::new("userdirs");
     t.write(".config/user-dirs.dirs", b"XDG_DOWNLOAD_DIR=\"$HOME/Telechargements\"\n");
     assert_eq!(default_folders(&t.0), vec![t.path("Downloads"), t.path("Telechargements")]);
+}
+
+// ------------------------------------------------------------------------------------------------ always-on catching
+
+fn ready(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Ready(a) => Some(a.path.file_name().unwrap().to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn skips(events: &[Event]) -> Vec<(String, Skip)> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Skipped { path, why } => Some((path.file_name().unwrap().to_string_lossy().into_owned(), *why)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn file_time_is_the_later_of_modified_and_changed() {
+    // A browser that keeps the server's date: modified in 2015, written into Downloads now.
+    assert_eq!(arrived_secs(1_420_000_000, 1_800_000_000), 1_800_000_000);
+    assert_eq!(arrived_secs(1_800_000_100, 1_800_000_000), 1_800_000_100);
+    assert_eq!(arrived_secs(-5, -1), 0);
+}
+
+#[test]
+fn real_file_with_an_old_modified_date_still_counts_as_new() {
+    let t = TempDir::new("ctime");
+    let p = t.write("Downloads/Old Date Mod.zip", b"zip bytes");
+    let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000); // 2001
+    fs::File::options().write(true).open(&p).unwrap().set_modified(old).unwrap();
+    let meta = fs::metadata(&p).unwrap();
+    assert_eq!(meta.modified().unwrap(), old, "the file really says 2001");
+    let listing = scan(&[t.path("Downloads")]);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert!(listing[0].modified + 60 >= now, "counted from when it landed, not the server's date: {}", listing[0].modified);
+
+    // The catcher takes it even though Turbine started (and looked) after 2001.
+    let mut c = Catcher::new(vec![t.path("Downloads")], now - 30, now - 30);
+    assert!(ready(&c.poll()).is_empty(), "first look: size seen once");
+    assert_eq!(ready(&c.poll()), vec!["Old Date Mod.zip"]);
+    assert_eq!(fs::read(&p).unwrap(), b"zip bytes", "never touched");
+}
+
+#[test]
+fn catcher_waits_for_finished_stable_archives_and_says_why_it_skips() {
+    let mut c = Catcher::new(vec![], T0, T0);
+    let a = "Cyber Engine Tweaks-107-1-36-0.zip";
+    // Firefox: the empty final file and the .part beside it.
+    let e = c.step(&[seen(a, 0, T0 + 5), seen(&format!("{a}.part"), 1000, T0 + 5), seen("notes.pdf", 10, T0 + 5), seen("old.zip", 10, T0 - 100)]);
+    assert_eq!(e[0], Event::Downloading { name: a.into(), size: 1000 });
+    assert_eq!(skips(&e), vec![(a.to_string(), Skip::Unfinished), ("notes.pdf".to_string(), Skip::NotArchive)]);
+    assert!(ready(&e).is_empty());
+    // Said once only.
+    let e = c.step(&[seen(a, 0, T0 + 6), seen(&format!("{a}.part"), 9000, T0 + 6), seen("notes.pdf", 10, T0 + 5)]);
+    assert!(skips(&e).is_empty());
+    // Done, but its size is seen for the first time at this size: still being written.
+    let e = c.step(&[seen(a, 23_000, T0 + 7)]);
+    assert_eq!(skips(&e), vec![(a.to_string(), Skip::Growing)]);
+    let e = c.step(&[seen(a, 23_000, T0 + 7)]);
+    assert_eq!(e, vec![Event::Ready(Arrival { path: PathBuf::from("/home/deck/Downloads").join(a), size: 23_000, arrived: T0 + 7, catch_up: false })]);
+    // Ready only once.
+    assert!(c.step(&[seen(a, 23_000, T0 + 7)]).is_empty());
+    // Chrome's and other browsers' unfinished files; Chromium's "Unconfirmed" name.
+    let e = c.step(&[seen("B.7z", 50, T0 + 9), seen("B.7z.crdownload", 50, T0 + 9), seen("Unconfirmed 4411.crdownload", 70, T0 + 10)]);
+    assert_eq!(e[0], Event::Downloading { name: "a file".into(), size: 70 });
+    assert_eq!(skips(&e), vec![("B.7z".to_string(), Skip::Unfinished)]);
+    let e = c.step(&[seen("C.rar", 0, T0 + 9)]);
+    assert_eq!(skips(&e), vec![("C.rar".to_string(), Skip::Empty)]);
+    assert!(c.step(&[seen("C.rar", 0, T0 + 9)]).is_empty());
+}
+
+#[test]
+fn catcher_needs_more_looks_when_asked() {
+    let mut c = Catcher::new(vec![], T0, T0);
+    c.stable_looks = 3;
+    let l = [seen("Mod.zip", 9, T0 + 1)];
+    assert!(ready(&c.step(&l)).is_empty());
+    assert!(ready(&c.step(&l)).is_empty());
+    assert!(ready(&c.step(&l)).is_empty());
+    assert_eq!(ready(&c.step(&l)), vec!["Mod.zip"]);
+}
+
+#[test]
+fn ignored_files_are_never_ready_again_and_new_contents_are() {
+    let mut c = Catcher::new(vec![], T0, T0);
+    let p = PathBuf::from("/home/deck/Downloads/Wallpaper Pack.zip");
+    c.ignore(&ignore_key(&p, 400));
+    let l = [seen("Wallpaper Pack.zip", 400, T0 + 2)];
+    c.step(&l);
+    let e = c.step(&l);
+    assert_eq!(skips(&e), vec![("Wallpaper Pack.zip".to_string(), Skip::Ignored)]);
+    assert!(ready(&e).is_empty());
+    assert!(c.step(&l).is_empty(), "said once");
+    // Downloaded again with other contents (another size): asked about again.
+    let l = [seen("Wallpaper Pack.zip", 500, T0 + 9)];
+    c.step(&l);
+    assert_eq!(ready(&c.step(&l)), vec!["Wallpaper Pack.zip"]);
+
+    // The saved list keeps the newest MAX_IGNORED, and reads back.
+    let mut st = CatchState { last_seen: T0, ignored: vec![], pending: vec!["/home/deck/Downloads/Waiting.zip".into()] };
+    for i in 0..MAX_IGNORED + 3 {
+        st.ignore(&ignore_key(&PathBuf::from(format!("/d/{i}.zip")), 1));
+    }
+    st.ignore(&ignore_key(&PathBuf::from("/d/5.zip"), 1));
+    assert_eq!(st.ignored.len(), MAX_IGNORED);
+    assert_eq!(st.ignored.last().unwrap(), "1|/d/5.zip");
+    assert!(!st.ignored.contains(&"1|/d/0.zip".to_string()));
+    let back = CatchState::parse(&st.to_json()).unwrap();
+    assert_eq!(back, st);
+    assert_eq!(CatchState::parse("{}"), None);
+    assert_eq!(CatchState::parse("not json"), None);
+
+    let t = TempDir::new("catchstate");
+    let path = t.path("turbine-mod-manager/catch.json");
+    assert_eq!(CatchState::load(&path), None);
+    st.save(&path).unwrap();
+    assert_eq!(CatchState::load(&path), Some(st));
+}
+
+#[test]
+fn catch_up_window_and_catch_up_files() {
+    // First run: the last 24 hours, and Turbine asks.
+    assert_eq!(catch_up_since(None, T0), (T0 - FIRST_RUN_SECS, true));
+    assert_eq!(catch_up_since(Some(&CatchState::default()), T0), (T0 - FIRST_RUN_SECS, true));
+    // Later: from when it last looked (2 seconds of slack), never in the future.
+    let st = CatchState { last_seen: T0 - 3600, ..Default::default() };
+    assert_eq!(catch_up_since(Some(&st), T0), (T0 - 3602, false));
+    let ahead = CatchState { last_seen: T0 + 99, ..Default::default() };
+    assert_eq!(catch_up_since(Some(&ahead), T0), (T0 - 2, false));
+
+    // Started at T0, last looked an hour before: files from that hour are catch-up files, older ones are left alone.
+    let (since, _) = catch_up_since(Some(&st), T0);
+    let mut c = Catcher::new(vec![], since, T0);
+    let l = [seen("Before.zip", 5, T0 - 7200), seen("While Closed.zip", 5, T0 - 60), seen("Now.zip", 5, T0 + 4)];
+    c.step(&l);
+    let e = c.step(&l);
+    let arrivals: Vec<(String, bool)> = e
+        .iter()
+        .filter_map(|e| match e {
+            Event::Ready(a) => Some((a.path.file_name().unwrap().to_string_lossy().into_owned(), a.catch_up)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arrivals, vec![("While Closed.zip".to_string(), true), ("Now.zip".to_string(), false)]);
+
+    // A question left unanswered last time is asked again, however old the file is.
+    let mut c = Catcher::new(vec![], since, T0);
+    c.ask_again(&PathBuf::from("/home/deck/Downloads/Before.zip"));
+    c.step(&l);
+    assert_eq!(ready(&c.step(&l)), vec!["Before.zip", "While Closed.zip", "Now.zip"]);
+}
+
+#[test]
+fn deciding_the_game_goes_in_order() {
+    let d = decide(Some("steam:1091500"), Some("steam:489830"), Some(("steam:292030", Confidence::Name)), Some("steam:892970"), false);
+    assert_eq!((d.game.as_deref(), d.basis, d.sure), (Some("steam:1091500"), Basis::Helper, true));
+    let d = decide(None, Some("steam:489830"), Some(("steam:292030", Confidence::Name)), Some("steam:892970"), false);
+    assert_eq!((d.game.as_deref(), d.basis, d.sure), (Some("steam:489830"), Basis::Md5, true));
+    let d = decide(None, None, Some(("steam:292030", Confidence::Size)), Some("steam:892970"), false);
+    assert_eq!((d.game.as_deref(), d.basis, d.sure), (Some("steam:292030"), Basis::Page(Confidence::Size), true));
+    let d = decide(None, None, Some(("steam:292030", Confidence::Guess)), Some("steam:892970"), false);
+    assert_eq!((d.game.as_deref(), d.sure), (Some("steam:292030"), false), "a guess asks");
+    let d = decide(None, None, None, Some("steam:892970"), false);
+    assert_eq!((d.game.as_deref(), d.basis, d.sure), (Some("steam:892970"), Basis::LastGame, false));
+    let d = decide(None, None, None, None, false);
+    assert_eq!((d.game, d.basis, d.sure), (None, Basis::Nothing, false));
+    // The first run's catch-up always asks, even when sure.
+    let d = decide(Some("steam:1091500"), None, None, None, true);
+    assert_eq!((d.game.as_deref(), d.sure), (Some("steam:1091500"), false));
+    for b in [Basis::Helper, Basis::Md5, Basis::Page(Confidence::Guess), Basis::LastGame, Basis::Nothing] {
+        assert!(!b.words().is_empty());
+    }
+}
+
+#[test]
+fn expectation_matches_a_single_file() {
+    let e = expect(&[("Mod-1-2.zip", 5000)]);
+    assert_eq!(e.match_file("Mod-1-2 (1).zip", 1).unwrap().1, Confidence::Name);
+    assert_eq!(e.match_file("renamed.zip", 5100).unwrap().1, Confidence::Size);
+    assert_eq!(e.match_file("other.zip", 99_999), None);
+    let none = Expectation::new("steam:1", "x", 1, T0);
+    assert_eq!(none.match_file("anything.zip", 3), Some((None, Confidence::Guess)));
+}
+
+#[test]
+fn real_folders_with_the_catcher() {
+    let t = TempDir::new("catcher");
+    let dl = t.path("Downloads");
+    t.write("Downloads/Real Mod.7z", b"7z bytes");
+    t.write("Downloads/Real Mod 2.zip.part", b"partial");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    let mut c = Catcher::new(vec![dl.clone()], now - 10, now + 100);
+    let e = c.poll();
+    assert!(e.contains(&Event::Downloading { name: "Real Mod 2.zip".into(), size: 7 }));
+    let e = c.poll();
+    let a = e.iter().find_map(|e| if let Event::Ready(a) = e { Some(a.clone()) } else { None }).unwrap();
+    assert_eq!(a.path, dl.join("Real Mod 7z").with_file_name("Real Mod.7z"));
+    assert!(a.catch_up, "arrived before this Turbine started");
 }

@@ -25,6 +25,8 @@ type Qt = CxxQtThread<qobject::Turbine>;
 pub(crate) type NetTask = Box<dyn FnOnce(&mut Net, &Qt) + Send>;
 
 const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
+/// Said when a Mod Manager Download link arrives and there is no Nexus key.
+pub const NO_KEY_NXM: &str = "Mod Manager Download needs your Nexus API key. Use Slow download (or Manual download) instead, Turbine picks it up from Downloads.";
 
 /// The Thunderstore community of a Steam game, when it has one.
 pub(crate) fn community(game: &Game) -> Option<&'static str> {
@@ -1260,9 +1262,32 @@ impl qobject::Turbine {
         };
         let l = match turbine_engine::nxm::parse(&link.to_string()) {
             Ok(l) => l,
-            Err(e) => return out("", "", &e),
+            Err(e) => {
+                crate::log::line("nxm", &format!("A Nexus link arrived that can't be read: {e}"));
+                return out("", "", &e);
+            }
         };
-        crate::log::line("nxm", &format!("Opening {}", l.redacted()));
+        crate::log::line("nxm", &format!("Mod Manager Download link arrived: {}", l.redacted()));
+        if crate::online::nexus_key().is_none() && !crate::online::using_samples() {
+            // Without a key Turbine can't ask Nexus for the file. Slow download works, and the page's mod is
+            // remembered so that download goes into the right game by itself.
+            crate::log::line("nxm", "No Nexus API key: pointing to Slow download instead");
+            let ids = l.store_ids();
+            let game = self
+                .current_game()
+                .filter(|g| ids.contains(&g.store_id.as_str()))
+                .or_else(|| self.rust().found.iter().find(|g| ids.contains(&g.store_id.as_str())).cloned());
+            return QString::from(
+                format!(
+                    "{{\"game\":{},\"name\":{},\"error\":{},\"needsKey\":true,\"page\":{}}}",
+                    quote(&game.map(|g| g.id()).unwrap_or_default()),
+                    quote(l.game_name().unwrap_or("")),
+                    quote(NO_KEY_NXM),
+                    quote(&turbine_engine::nexus::mod_page_url(&l.domain, l.mod_id))
+                )
+                .as_str(),
+            );
+        }
         let Some(name) = l.game_name() else {
             return out("", "", &format!("That Nexus link is for a game Turbine doesn't support ({}).", l.domain));
         };
