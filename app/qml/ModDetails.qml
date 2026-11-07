@@ -10,6 +10,7 @@ Item {
     id: md
     required property var ui
     property var info: null               // the engine's details answer
+    property string fallbackPicture: ""   // the card's thumbnail, while the page has no picture of its own
     property bool focused: true
     property string mainLabel: ""
     property string mainLine: ""
@@ -96,7 +97,7 @@ Item {
                 Image {
                     id: pic
                     anchors.fill: parent
-                    source: md.info ? (md.info.picture || md.info.icon || "") : ""
+                    source: md.info ? (md.info.picture || md.info.icon || md.fallbackPicture) : md.fallbackPicture
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready

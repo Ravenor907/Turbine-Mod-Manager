@@ -267,17 +267,24 @@ jobs:
             shoot "nexusnokey-$size" "$size" nexusnokey "$PWD/home" --game=$skyrim
             # 0.5: Get mods without a key (grid, the fallback, a mod page free and Premium, back to the same search),
             # a game with no mods, Removed mods, a new mod arriving, opening Nexus, the rail, Look and the waiting pill.
-            lanterns="--selftest-import=$dl/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
-            needs="--selftest-import=$dl/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
-            shoot "getmods-start-$size" "$size" getmods "$PWD/home" --game=$skyrim "$lanterns"
+            # Each of these gets its own copy of the home (the mod store sits in the game's library).
+            fresh() { rm -rf "$PWD/fh/$1" && mkdir -p "$PWD/fh" && cp -a "$PWD/home" "$PWD/fh/$1"; }
+            fresh "getmods-$size"; h="$PWD/fh/getmods-$size"
+            shoot "getmods-start-$size" "$size" getmods "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
             shoot "getmods-fallback-$size" "$size" getmodsfallback "$PWD/home" --game=$skyrim
-            shoot "modpage-free-$size" "$size" modpagefree "$PWD/home" --game=$w3 "$needs"
-            shoot "modpage-premium-$size" "$size" modpagepremium "$PWD/home" --game=$w3 "$needs"
+            for p in modpagefree modpagepremium; do
+              fresh "$p-$size"; h="$PWD/fh/$p-$size"
+              shoot "${p/modpage/modpage-}-$size" "$size" $p "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
+            done
             shoot "getmods-back-$size" "$size" getmodsback "$PWD/home" --game=$skyrim
-            shoot "emptygame-$size" "$size" emptygame "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
-            shoot "emptygame-mods-$size" "$size" emptygamemods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
-            shoot "removed-$size" "$size" removed "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip,$dl/Better Torches 1.0.zip"
-            shoot "newmod-$size" "$size" newmod "$PWD/home" --game=$w3 "--selftest-import=$dl/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
+            for p in emptygame emptygamemods; do
+              fresh "$p-$size"; h="$PWD/fh/$p-$size"
+              shoot "${p/gamemods/game-mods}-$size" "$size" $p "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip"
+            done
+            fresh "removed-$size"; h="$PWD/fh/removed-$size"
+            shoot "removed-$size" "$size" removed "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip,$h/Downloads/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
+            fresh "newmod-$size"; h="$PWD/fh/newmod-$size"
+            shoot "newmod-$size" "$size" newmod "$h" --game=$w3 "--selftest-import=$h/Downloads/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
             shoot "opening-$size" "$size" opening "$PWD/home" --game=$w3
             shoot "opening8s-$size" "$size" opening8s "$PWD/home" --game=$w3
             shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
@@ -288,8 +295,8 @@ jobs:
           shoot "size150-1280x800" 1280x800 size150 "$PWD/home"
           shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
             "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
-          shoot "desktopgrid-1920x1080" 1920x1080 desktopgrid "$PWD/home" --game=$skyrim --layout=desktop "$lanterns"
-          shoot "tv-1920x1080" 1920x1080 tv "$PWD/home" --game=$skyrim --layout=tv --external-display "$lanterns"
+          shoot "desktopgrid-1920x1080" 1920x1080 desktopgrid "$PWD/home" --game=$skyrim --layout=desktop
+          shoot "tv-1920x1080" 1920x1080 tv "$PWD/home" --game=$skyrim --layout=tv --external-display
           # The 0.5 checks in the activity logs.
           for size in 1280x800 1920x1080; do
             log="$PWD/data/getmods-fallback-$size/turbine-mod-manager/activity.log"

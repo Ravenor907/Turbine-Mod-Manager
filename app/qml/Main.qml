@@ -203,7 +203,7 @@ Window {
             else if (shot.page === "emptygame" || shot.page === "emptygamemods" || shot.page === "removed") {
                 // One removed mod (two for the Removed sheet): imported, then removed.
                 for (const m of app.mods) Turbine.removeMod(m.id)
-                app.landedOn = ""
+                app.landAgain = true
                 if (shot.page === "emptygamemods") { app.tab = 0; app.modIndex = 0 }
                 if (shot.page === "removed") removedShot.start()
             }
@@ -853,13 +853,18 @@ Window {
     function modArrived(gameId, id, name, on) {
         note("action", "New mod " + name + " in " + gameId)
         const i = games.findIndex(g => g.id === gameId)
+        const words = "New: " + name + (on ? " (on)" : " (off)") + ". Start: Play"
+        // The build's pictures add their test mods this way: only the new-mod picture follows them.
+        if (shot.on && shot.page !== "newmod") return
+        // Installed from the mod page of the game on screen: stay on the page (its button says Installed).
+        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); return }
         if (i >= 0 && i !== current) current = i
         if (page !== "game") { page = "game" }
         if (sheet === "add" || sheet === "found") sheet = ""
         zone = "main"; tab = 0; modPage = false
         arrivedMod = { id: id, name: name }
         focusArrived()
-        if (!shot.on || shot.page === "newmod") toast.done("New: " + name + (on ? " (on)" : " (off)") + ". Start: Play")
+        toast.done(words)
     }
     function focusArrived() {
         if (!arrivedMod) return
@@ -1266,8 +1271,11 @@ Window {
     readonly property string getBanner: bannerOn ? "No mods for " + gameTitle + " yet. Pick one below, or search." : ""
     // Entering a game with no mods lands on Get mods (once per visit).
     property string landedOn: ""
+    property bool landAgain: false
     function maybeLandOnGet() {
-        if (!game || !modsLoaded || landedOn === game.id || page !== "game") return
+        if (!game || !modsLoaded || page !== "game") return
+        if (landedOn === game.id && !(landAgain && mods.length === 0)) return
+        landAgain = false
         landedOn = game.id
         if (mods.length === 0 && sources.length > 0 && tab === 0 && shot.page !== "emptygamemods" && shot.page.indexOf("mods") !== 0 && shot.page !== "removed") tab = 1
     }
@@ -2707,7 +2715,7 @@ Window {
                     }
                     ListView {
                         id: modList
-                        visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded
+                        visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage
                         anchors.fill: parent
                         anchors.topMargin: moveLine.height
                         topMargin: app.px(4)
@@ -2831,6 +2839,7 @@ Window {
                         anchors.topMargin: app.px(4)
                         visible: app.page === "game" && app.modPage
                         info: app.detailsData
+                        fallbackPicture: app.detailsItem && app.detailsItem.icon ? app.detailsItem.icon : ""
                         focused: app.zone === "main" && app.sheet === ""
                         mainLabel: app.mainLabel
                         mainLine: app.mainLine
@@ -2845,7 +2854,7 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.game !== null && app.tab === 2
+                        visible: app.page === "game" && app.game !== null && app.tab === 2 && !app.modPage
                         plugins: app.order
                         error: app.orderError
                         messages: app.orderMessages
@@ -3505,11 +3514,11 @@ Window {
     // The focused game's name beside the rail.
     Rectangle {
         id: railLabel
-        readonly property Item tileNow: app.zone === "rail" && app.railIndex < app.games.length ? railList.itemAtIndex(app.railIndex) : null
-        visible: tileNow !== null && app.sheet === ""
+        readonly property bool on: app.zone === "rail" && app.railIndex < app.games.length
+        visible: on && app.sheet === ""
         z: 20
         x: rail.width + app.px(4)
-        y: tileNow ? tileNow.mapToItem(app.contentItem, 0, 0).y + (tileNow.height - height) / 2 + railList.contentY * 0 : 0
+        y: railList.y + app.railIndex * (app.px(66) + railList.spacing) - railList.contentY + (app.px(66) - height) / 2
         width: railLabelText.implicitWidth + app.px(24)
         height: app.px(32)
         radius: app.px(6)

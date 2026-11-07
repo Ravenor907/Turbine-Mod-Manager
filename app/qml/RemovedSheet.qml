@@ -18,7 +18,7 @@ Item {
 
     function rowWords(m) {
         const at = new Date(m.removedAt * 1000)
-        const left = Math.max(0, 7 - Math.floor((now.getTime() / 1000 - m.removedAt) / 86400))
+        const left = Math.max(0, Math.min(7, Math.ceil((m.removedAt + 7 * 86400 - Date.now() / 1000) / 86400)))
         return Qt.formatDate(at, "MMM d") + " · " + (left === 1 ? "1 day left" : left + " days left")
     }
 
