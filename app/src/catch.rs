@@ -619,15 +619,26 @@ impl qobject::Turbine {
         taken
     }
 
-    /// After an answer: the next question, or the card goes away.
+    /// After an answer: the next question, or the question goes away (in Turbine and on the card).
     fn next_ask(mut self: Pin<&mut Self>) {
         self.as_mut().catch_save(true);
         if self.rust().catching.asks.is_empty() {
+            self.as_mut().asked(QString::from("{}"));
             if !self.rust().catching.busy || self.status_json().to_string().contains("\"ask\":\"/") {
                 self.status_done();
             }
         } else {
             self.show_ask();
+        }
+    }
+
+    /// The player added a file by hand (Add from Downloads): the watcher leaves it alone, and any question about it
+    /// goes away.
+    pub(crate) fn hand_added(mut self: Pin<&mut Self>, path: &Path) {
+        self.as_mut().mark_handled(path);
+        if self.as_mut().take_ask(path).is_some() {
+            crate::log::line("catch", &format!("{} was added by hand; not asking about it", label_of(path)));
+            self.next_ask();
         }
     }
 

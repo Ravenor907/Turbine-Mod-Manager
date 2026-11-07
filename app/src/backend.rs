@@ -1229,6 +1229,7 @@ impl qobject::Turbine {
         let Some(game) = self.current_game() else { return };
         let path = PathBuf::from(path.to_string());
         let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        self.as_mut().hand_added(&path);
         self.as_mut().edited();
         // With a Nexus key the file is looked up by its MD5 first, so it gets its Nexus name, version and updates.
         let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);

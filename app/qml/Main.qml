@@ -331,7 +331,12 @@ Window {
             if (app.bridge.moved && !app.movedPaired) { app.movedPaired = true; app.note("bridge", "Port changed: opening the pairing page again"); app.pair(false) }
         }
         function onAdded(name, notes) { app.openNotes(name, app.parse(notes, [])) }
-        function onAsked(json) { app.found = app.parse(json, null); if (app.found && app.sheet === "") { app.infoIndex = 0; app.sheet = "found" } }
+        function onAsked(json) {
+            const f = app.parse(json, null)
+            app.found = f && f.path ? f : null
+            if (app.found && app.sheet === "") { app.infoIndex = 0; app.sheet = "found" }
+            else if (!app.found && (app.sheet === "found" || app.sheet === "pickgame")) app.sheet = ""
+        }
         function onPad(button, pressed) { pressed ? app.press(button) : app.release(button) }
         // 0.3
         function onBrowseJsonChanged() {
