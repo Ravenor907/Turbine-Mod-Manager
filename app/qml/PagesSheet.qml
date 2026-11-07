@@ -36,9 +36,9 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: pg.title.toUpperCase()
+                text: pg.title
                 color: pg.ui.c.text
-                font.family: pg.ui.titleFont; font.pixelSize: pg.ui.px(18); font.bold: true; font.letterSpacing: pg.ui.px(1.5)
+                font.family: pg.ui.titleFont; font.pixelSize: pg.ui.px(18); font.bold: true
             }
             Text {
                 width: parent.width

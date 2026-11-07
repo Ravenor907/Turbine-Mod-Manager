@@ -23,6 +23,8 @@ Rectangle {
     property int timeout: 5000            // milliseconds; 0 keeps it up until hide()
     property real bottomMargin: ui.px(58) // distance from the parent's bottom (clears the legend)
     property bool shown: false
+    // Three looks, never mixed: "info" (accent i mark), "done" (ok check), "problem" (warn mark, real failures only).
+    property string kind: "info"
 
     signal actionClicked()
     signal hidden()
@@ -81,10 +83,28 @@ Rectangle {
         x: root.ui.px(16)
         spacing: root.ui.px(14)
 
+        Rectangle {
+            id: mark
+            anchors.verticalCenter: parent.verticalCenter
+            width: root.ui.px(22); height: width; radius: width / 2
+            readonly property color tone: root.kind === "done" ? root.ui.c.ok : root.kind === "problem" ? root.ui.c.warn : root.ui.c.accentHi
+            color: "transparent"
+            border.color: tone
+            border.width: Math.max(1, root.ui.px(1.5))
+            Text {
+                anchors.centerIn: parent
+                text: root.kind === "done" ? "\u2713" : root.kind === "problem" ? "!" : "i"
+                color: mark.tone
+                font.family: root.ui.bodyFont
+                font.pixelSize: root.ui.px(14)
+                font.bold: true
+            }
+        }
+
         Text {
             id: mainText
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(40) - (detailText.visible ? detailText.width + parent.spacing : 0) - (action.visible ? action.width + parent.spacing : 0))
+            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0) - (action.visible ? action.width + parent.spacing : 0))
             text: root.escaped(root.text || "") + (root.strong !== "" ? (root.text !== "" ? " " : "") + "<b>" + root.escaped(root.strong) + "</b>" : "")
             textFormat: Text.StyledText
             elide: Text.ElideRight

@@ -136,7 +136,12 @@
       return Array.from(tracked.keys());
     }
 
-    return { onCreated, onChanged, onErased, restore, poll, activeIds, stop: stopPolling };
+    // A download the helper replaced with its own copy (saved into Game Mods): dropped without a word to Turbine.
+    function forget(id) {
+      if (tracked.has(id)) finish(id);
+    }
+
+    return { onCreated, onChanged, onErased, restore, poll, activeIds, forget, stop: stopPolling };
   }
 
   const api = { createDownloadTracker };

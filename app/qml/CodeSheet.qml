@@ -30,9 +30,9 @@ Item {
             width: parent.width - cs.ui.px(44)
             spacing: cs.ui.px(12)
             Text {
-                text: "THUNDERSTORE PROFILE CODE"
+                text: "Thunderstore profile code"
                 color: cs.ui.c.text
-                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.px(18); font.bold: true; font.letterSpacing: cs.ui.px(1.5)
+                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.px(18); font.bold: true
             }
             Text {
                 width: parent.width
@@ -63,7 +63,6 @@ Item {
                     font.family: "monospace"
                     font.pixelSize: cs.ui.px(cs.state_ === "ready" ? 30 : 22)
                     font.bold: true
-                    font.letterSpacing: cs.ui.px(1)
                 }
             }
             Text {

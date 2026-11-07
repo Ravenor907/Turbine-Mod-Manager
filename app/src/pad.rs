@@ -38,6 +38,14 @@ pub struct Pads {
 impl Pads {
     /// Opens SDL's controller support. If SDL isn't available Turbine still runs, with keyboard and touch only.
     pub fn open() -> Self {
+        // Steam sets these for apps it starts so they only see its virtual pad; in Desktop Mode that can leave
+        // Turbine with no pad at all. Every pad SDL can see counts (twins are told apart by `dedupe`).
+        for k in ["SDL_GAMECONTROLLER_IGNORE_DEVICES", "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"] {
+            if let Ok(v) = std::env::var(k) {
+                crate::log::line("pad", &format!("{k} was set ({} characters); cleared so SDL sees every controller", v.len()));
+                std::env::remove_var(k);
+            }
+        }
         sdl2::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         let sdl = sdl2::init().ok();
         let subsystem = sdl.as_ref().and_then(|s| s.game_controller().ok());
@@ -61,7 +69,11 @@ impl Pads {
         };
         if let Some(sub) = pads.subsystem.as_ref() {
             let count = sub.num_joysticks().unwrap_or(0);
+            crate::log::line("pad", &format!("SDL lists {count} joystick device(s)"));
             for i in 0..count {
+                let name = sub.name_for_index(i).unwrap_or_else(|_| "unnamed".into());
+                let guid = pads._sdl.as_ref().and_then(|s| s.joystick().ok()).and_then(|j| j.device_guid(i).ok()).map(|g| g.string()).unwrap_or_default();
+                crate::log::line("pad", &format!("Device {i}: {name}, GUID {guid}, {}", if sub.is_game_controller(i) { "a game controller" } else { "not a game controller (no mapping)" }));
                 if sub.is_game_controller(i) {
                     if let Ok(c) = sub.open(i) {
                         crate::log::line("pad", &format!("Controller found: {}", c.name()));
@@ -261,6 +273,13 @@ fn button_name(b: Button) -> Option<&'static str> {
         Button::DPadDown => "down",
         Button::DPadLeft => "left",
         Button::DPadRight => "right",
+        Button::LeftStick => "l3",
+        Button::RightStick => "r3",
+        // The back grips, where a pad has them and Steam passes them on (its default layout sends nothing).
+        Button::Paddle1 => "r4",
+        Button::Paddle2 => "l4",
+        Button::Paddle3 => "r5",
+        Button::Paddle4 => "l5",
         // The Steam / Guide button belongs to Steam; Turbine never uses it.
         _ => return None,
     })

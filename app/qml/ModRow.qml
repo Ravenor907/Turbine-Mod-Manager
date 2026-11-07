@@ -56,7 +56,8 @@ Rectangle {
     }
 
     implicitWidth: ui.px(600)
-    implicitHeight: ui.px(54)
+    property bool compact: false          // Desktop layout: 38 px rows
+    implicitHeight: ui.px(compact ? 38 : 54)
     radius: ui.px(6)
     color: ui.c.card
 

@@ -89,13 +89,12 @@ Item {
 
             Text {
                 width: parent.width
-                text: (root.title || "").toUpperCase()
+                text: root.title || ""
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
                 font.pixelSize: root.ui.px(18)
                 font.bold: true
-                font.letterSpacing: root.ui.px(1)
             }
             Text {
                 width: parent.width

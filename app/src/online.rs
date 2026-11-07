@@ -120,6 +120,8 @@ pub struct Net {
     version: String,
     /// The release the last self check found, for Install.
     pub release: Option<selfupdate::Release>,
+    /// Screenshot checks: browsing Nexus without a key fails, as if Nexus refused it.
+    pub sample_nexus_fail: bool,
 }
 
 fn err(e: NetError) -> String {
@@ -132,7 +134,7 @@ pub const NEXUS_MOD: &str = "nexus-mod:";
 
 /// Said instead of Install for free accounts.
 pub const FREE_WORDS: &str =
-    "Nexus only lets Premium members download inside apps. A opens its page: press Mod Manager Download there and it comes to Turbine.";
+    "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself.";
 
 /// "2026-11-06" from seconds since 1970 (UTC).
 pub fn date_of(secs: u64) -> String {
@@ -208,6 +210,7 @@ impl Net {
             account: None,
             version: version.to_string(),
             release: None,
+            sample_nexus_fail: false,
         }
     }
 
@@ -225,10 +228,17 @@ impl Net {
 
     /// A picture's address for the interface: none in the screenshot checks (they have no internet).
     fn pic(&self, url: &str) -> String {
-        if self.sample.is_some() || !url.starts_with("https://") {
-            String::new()
-        } else {
+        if let Some(dir) = &self.sample {
+            // Recorded samples name local pictures as "sample:<file>"; the internet's are left out.
+            return match url.strip_prefix("sample:") {
+                Some(f) if !f.contains('/') && dir.join(f).is_file() => format!("file://{}", dir.join(f).display()),
+                _ => String::new(),
+            };
+        }
+        if url.starts_with("https://") {
             url.to_string()
+        } else {
+            String::new()
         }
     }
 
@@ -483,6 +493,24 @@ impl Net {
         Some(Nexus::new(self.client.clone(), key, &self.version))
     }
 
+    /// For browsing: with the key when there is one, otherwise without (v2 GraphQL needs none).
+    fn nexus_any(&self) -> Nexus {
+        Nexus::with_key(self.client.clone(), self.key.as_deref(), &self.version)
+    }
+
+    fn nexus_public(&self) -> Nexus {
+        Nexus::public(self.client.clone(), &self.version)
+    }
+
+    /// Labs: one search without a key, to show whether Nexus answers keyless browsing on this device.
+    pub fn keyless_check(&mut self, domain: &str) -> Result<String, String> {
+        if self.sample.is_some() {
+            return if self.sample_nexus_fail { Err("Nexus answered 401 (test run)".into()) } else { Ok("Nexus answered with 12 mods (test run)".into()) };
+        }
+        let p = self.nexus_public().search(domain, "", nexus::SearchSort::Endorsements, 0, 5, false).map_err(err)?;
+        Ok(format!("Nexus answered without a key: {} mods for {domain}", p.total))
+    }
+
     /// Checks a key with Nexus and keeps it (saved in a file only the player can read) when it works.
     pub fn set_key(&mut self, key: &str) -> Result<String, String> {
         let key = key.trim().to_string();
@@ -553,19 +581,44 @@ impl Net {
         }
     }
 
-    pub fn browse_nexus(&mut self, game: &GameInfo, text: &str, sort: &str) -> Result<String, String> {
+    /// Get mods for a Nexus game: one page of 30 from `offset`. Without a key (or when the keyed call fails) it asks
+    /// without one; the error tells the app to fall back to opening Nexus in the browser.
+    pub fn browse_nexus(&mut self, game: &GameInfo, text: &str, sort: &str, offset: u32) -> Result<String, String> {
         let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
-        let s = match sort {
-            "downloads" => nexus::SearchSort::Downloads,
-            "updated" => nexus::SearchSort::Updated,
-            "name" => nexus::SearchSort::Name,
-            _ => nexus::SearchSort::Endorsements,
-        };
-        let page = if let Some(t) = self.sample_text("nexus_graphql_search.json") {
-            nexus::parse_search(&t?)?
+        let s = nexus::SearchSort::from_key(sort);
+        let keyless = self.key.is_none();
+        let page = if self.sample.is_some() {
+            if self.sample_nexus_fail {
+                return Err("Nexus answered 401 (test run)".into());
+            }
+            let t = self.sample_text("nexus_graphql_search.json").ok_or("The search sample is missing.")??;
+            let mut p = nexus::parse_search(&t)?;
+            // A search in the samples keeps the mods whose name has the words.
+            let words = text.trim().to_lowercase();
+            if !words.is_empty() {
+                p.mods.retain(|m| m.name.to_lowercase().contains(&words) || m.summary.to_lowercase().contains(&words));
+            }
+            if offset > 0 {
+                p.mods.clear();
+            }
+            p
         } else {
-            self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts to browse Nexus Mods.")?.search(&domain, text, s, 0, 60, false).map_err(err)?
+            let first = self.nexus_any().search(&domain, text, s, offset, 30, false);
+            match first {
+                Ok(p) => p,
+                Err(e) if !keyless => {
+                    crate::log::line("net", &format!("Nexus browse with the key failed ({e}); trying without it"));
+                    self.nexus_public().search(&domain, text, s, offset, 30, false).map_err(err)?
+                }
+                Err(e) => return Err(err(e)),
+            }
         };
+        if keyless && offset == 0 {
+            crate::log::line("net", &format!("Nexus browse without a key: {} mods for {domain} ({} in all)", page.mods.len(), page.total));
+        }
+        if page.relaxed {
+            crate::log::line("net", "Nexus refused that sort; showing Most endorsed instead");
+        }
         let items: Vec<String> = page
             .mods
             .iter()
@@ -578,34 +631,55 @@ impl Net {
                     quote(&m.summary),
                     m.downloads,
                     m.endorsements,
-                    quote(&self.pic(&m.thumbnail_url)),
+                    quote(&self.pic(if m.thumbnail_url.is_empty() { &m.picture_url } else { &m.thumbnail_url })),
                     quote(&m.version),
                     quote(&day(&m.updated_at)),
                     game.have.iter().any(|h| h.source.kind == "nexus"
-                        && nexus::parse_source_id(&h.source.id).is_some_and(|(_, id, _)| id == m.mod_id))
+                        && nexus::parse_source_id(&h.source.id).map(|(_, id, _)| id).or_else(|| nexus::source_mod(&h.source).map(|(_, m)| m)).is_some_and(|id| id == m.mod_id))
                 )
             })
             .collect();
         Ok(format!(
-            "{{\"source\":\"nexus\",\"total\":{},\"note\":\"\",\"categories\":[],\"items\":[{}]}}",
+            "{{\"source\":\"nexus\",\"total\":{},\"offset\":{offset},\"relaxed\":{},\"keyless\":{keyless},\"note\":\"\",\"categories\":[],\"items\":[{}]}}",
             page.total,
+            page.relaxed,
             items.join(",")
         ))
     }
 
     fn nexus_files(&self, domain: &str, mod_id: u64) -> Result<nexus::FileList, String> {
-        if let Some(t) = self.sample_text("nexus_files_all.json").filter(|t| t.is_ok()).or_else(|| self.sample_text("nexus_files.json")) {
-            return nexus::parse_files(&t?);
+        self.nexus_files_for(domain, mod_id, None)
+    }
+
+    fn nexus_files_for(&self, domain: &str, mod_id: u64, game_id: Option<u64>) -> Result<nexus::FileList, String> {
+        if self.sample.is_some() {
+            if self.graphql_sample(domain) {
+                return nexus::parse_mod_files(&self.sample_text("nexus_graphql_files.json").ok_or("The files sample is missing.")??);
+            }
+            if let Some(t) = self.sample_text("nexus_files_all.json").filter(|t| t.is_ok()).or_else(|| self.sample_text("nexus_files.json")) {
+                return nexus::parse_files(&t?);
+            }
         }
-        self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.files(domain, mod_id).map_err(err)
+        self.nexus_any().files_any(domain, mod_id, game_id).map_err(err)
+    }
+
+    /// The screenshot checks: the GraphQL details sample is used for its own game (The Witcher 3), the v1 samples
+    /// for the rest.
+    fn graphql_sample(&self, domain: &str) -> bool {
+        self.sample_text("nexus_graphql_details.json")
+            .and_then(|t| t.ok())
+            .and_then(|t| nexus::parse_mod_details(&t, domain).ok())
+            .is_some_and(|d| d.info.domain == domain)
     }
 
     /// What a Nexus mod needs (other Nexus mods, outside downloads, DLC), checked against the game's mods.
     fn nexus_requirements(&self, game: &GameInfo, domain: &str, mod_id: u64) -> Result<nexus::RequirementCheck, String> {
-        let reqs = if let Some(t) = self.sample_text("nexus_graphql_requirements.json") {
+        let reqs = if self.sample.is_some() && self.graphql_sample(domain) {
+            nexus::parse_requirements(&self.sample_text("nexus_graphql_details.json").ok_or("The details sample is missing.")??, domain)?
+        } else if let Some(t) = self.sample_text("nexus_graphql_requirements.json") {
             nexus::parse_requirements(&t?, domain)?
         } else {
-            self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.requirements(domain, mod_id).map_err(err)?
+            self.nexus_any().requirements(domain, mod_id).map_err(err)?
         };
         let installed: Vec<(String, SourceInfo)> = game.have.iter().map(|h| (h.mod_id.clone(), h.source.clone())).collect();
         Ok(nexus::check_requirements(&reqs, &installed))
@@ -621,14 +695,19 @@ impl Net {
 
     pub fn details_nexus(&mut self, game: &GameInfo, mod_id: u64) -> Result<String, String> {
         let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
-        let info = if let Some(t) = self.sample_text("nexus_mod.json") {
-            nexus::parse_mod(&t?)?
+        // The page's facts through GraphQL (no key needed); the v1 sample for the older screenshot checks.
+        let (info, game_id) = if self.sample.is_some() && !self.graphql_sample(&domain) {
+            (nexus::parse_mod(&self.sample_text("nexus_mod.json").ok_or("The mod sample is missing.")??)?, None)
+        } else if self.sample.is_some() {
+            let d = nexus::parse_mod_details(&self.sample_text("nexus_graphql_details.json").ok_or("The details sample is missing.")??, &domain)?;
+            (d.info, Some(d.game_id))
         } else {
-            self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.mod_info(&domain, mod_id).map_err(err)?
+            let (d, _) = self.nexus_any().details(&domain, mod_id).map_err(err)?;
+            (d.info, Some(d.game_id))
         };
-        let files = self.nexus_files(&domain, mod_id)?;
-        let main = files.main_file().cloned();
-        let premium = self.account().map(|a| a.is_premium).unwrap_or(false);
+        let files = self.nexus_files_for(&domain, mod_id, game_id)?;
+        let main = files.newest_main().cloned();
+        let premium = self.key.is_some() && self.account().map(|a| a.is_premium).unwrap_or(false);
         let pick = main
             .as_ref()
             .map(|f| {
@@ -670,7 +749,24 @@ impl Net {
             }
         }
         let page = nexus::files_page_url(&domain, mod_id);
-        Ok(format!(
+        let file_page = main.as_ref().map(|f| nexus::file_page_url(&domain, mod_id, f.file_id)).unwrap_or_else(|| page.clone());
+        let main_line = main
+            .as_ref()
+            .map(|f| format!("Main file: {} {}{}", f.name, f.version, if f.size_bytes > 0 { format!(" · {}", net::human_size(f.size_bytes)) } else { String::new() }))
+            .unwrap_or_default();
+        let updated = if info.updated_timestamp > 0 { date_of(info.updated_timestamp) } else { String::new() };
+        let detail_json = format!(
+            ",\"filePage\":{},\"fileId\":{},\"mainLine\":{},\"updatedText\":{},\"author\":{},\"endorsements\":{},\"installed\":{},\"picture\":{}",
+            quote(&file_page),
+            quote(&main.as_ref().map(|f| f.file_id.to_string()).unwrap_or_default()),
+            quote(&main_line),
+            quote(&updated),
+            quote(&info.author),
+            info.endorsements,
+            Self::installed_file(game, &domain, mod_id).is_some() || game.have.iter().any(|h| nexus::source_mod(&h.source).is_some_and(|(_, m)| m == mod_id)),
+            quote(&self.pic(&info.picture_url))
+        );
+        let out = format!(
             "{{\"source\":\"nexus\",\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"icon\":{},\"code\":false,\"version\":{},\"size\":{},\"updated\":\"\",\"downloads\":{},\"rating\":{},\"categories\":[],\"deprecated\":{},\"install\":[{}],\"already\":[],\"missing\":[],\"skippedLoaders\":[],\"premium\":{},\"message\":{},\"page\":{},\"needs\":{},\"needsNote\":{},\"versions\":[{}],\"installedVersion\":{},\"versionsNote\":{}}}",
             quote(&mod_id.to_string()),
             quote(&info.name),
@@ -690,8 +786,9 @@ impl Net {
             quote(&needs_note),
             others.join(","),
             quote(&have.and_then(|f| files.file(f)).map(|f| f.version.clone()).unwrap_or_default()),
-            quote(if premium { "" } else { "Free accounts: A opens that file's page on Nexus. Press Mod Manager Download there and it comes to Turbine." })
-        ))
+            quote(if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it by itself." })
+        );
+        Ok(format!("{}{}}}", &out[..out.len() - 1], detail_json))
     }
 
     /// Downloads the requirements Turbine can fetch for a Premium account (the Download steps), each handed to
@@ -802,7 +899,7 @@ impl Net {
             return Err(nexus::FREE_ACCOUNT_MESSAGE.into());
         }
         let files = self.nexus_files(&domain, mod_id)?;
-        let file = if file_id == 0 { files.main_file() } else { files.files.iter().find(|f| f.file_id == file_id) }
+        let file = if file_id == 0 { files.newest_main() } else { files.files.iter().find(|f| f.file_id == file_id) }
             .cloned()
             .ok_or("Nexus lists no file to download for that mod.")?;
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
@@ -1108,7 +1205,7 @@ mod tests {
         let first = items[0].str_at("id").unwrap().to_string();
         let d = n.details_ts(&game(), &first).unwrap();
         assert!(json::parse(&d).is_ok(), "{d}");
-        let nb = n.browse_nexus(&game(), "", "").unwrap();
+        let nb = n.browse_nexus(&game(), "", "", 0).unwrap();
         assert!(json::parse(&nb).is_ok());
         let nd = n.details_nexus(&game(), 2400).unwrap();
         assert!(json::parse(&nd).is_ok(), "{nd}");

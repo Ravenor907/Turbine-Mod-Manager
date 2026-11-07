@@ -178,6 +178,9 @@ pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: Sour
             if let Some(id) = replaces {
                 let gid = game.id();
                 w.post(move |t| t.drop_update(&gid, &id));
+            } else {
+                let (gid, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
+                w.post(move |t| t.arrived(QString::from(gid.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
             }
             Outcome::Added { name: done.item.name.clone(), notes: done.notes.clone() }
         }
@@ -359,6 +362,8 @@ fn installer_next(w: &mut Worker, game: &Game, mut p: turbine_engine::store::Pen
                     show_notes(w, &done.item.name, &done.notes);
                     let (g, m, notes) = (game.name.clone(), done.item.name.clone(), done.notes.clone());
                     w.post(move |t| t.caught_added(&g, &m, notes, true));
+                    let (gid, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
+                    w.post(move |t| t.arrived(QString::from(gid.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
                 }
                 Err(e) => {
                     let g = game.name.clone();
@@ -848,18 +853,57 @@ impl qobject::Turbine {
     // ------------------------------------------------------------------------------------------------ Get Mods
 
     pub fn browse(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString) {
+        self.browse_page(text, category, sort, source, 0);
+    }
+
+    /// One page of Get mods from `offset` (the next 30 when the focus reaches the last row). A Nexus failure says
+    /// "fallback" so the app shows Open on Nexus instead, and the activity log says why.
+    pub fn browse_page(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString, offset: i32) {
         let info = self.info();
         let (text, category, sort, source) = (text.to_string(), category.to_string(), sort.to_string(), source.to_string());
-        let name = format!("Browse {} on {source} \"{text}\"", info.name);
+        let offset = offset.max(0) as u32;
+        let name = format!("Browse {} on {source} \"{text}\" from {offset}", info.name);
         self.net_send(
             &name,
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let r = if source == "nexus" { net.browse_nexus(&info, &text, &sort) } else { net.browse_ts(&info, &text, &category, &sort) };
+                let r = if source == "nexus" { net.browse_nexus(&info, &text, &sort, offset) } else { net.browse_ts(&info, &text, &category, &sort) };
                 let j = match r {
-                    Ok(j) => format!("{{\"game\":{},\"query\":{},{}", quote(&info.id), quote(&text), &j[1..]),
-                    Err(e) => format!("{{\"game\":{},\"query\":{},\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), quote(&e)),
+                    Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{}", quote(&info.id), quote(&text), offset > 0, &j[1..]),
+                    Err(e) if source == "nexus" => {
+                        crate::log::line("net", &format!("Nexus browse without a key failed: {e}. Using Open on Nexus instead."));
+                        format!("{{\"game\":{},\"query\":{},\"append\":{},\"fallback\":true,\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e))
+                    }
+                    Err(e) => format!("{{\"game\":{},\"query\":{},\"append\":{},\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e)),
                 };
                 set(qt, move |t| t.set_browse_json(QString::from(j.as_str())));
+            }),
+        );
+    }
+
+    /// Labs: browse Nexus once without a key and say what came back.
+    pub fn nexus_keyless_check(self: Pin<&mut Self>) {
+        let info = self.info();
+        let domain = info.domain.clone().unwrap_or_else(|| "skyrimspecialedition".into());
+        self.net_send(
+            "Labs: Nexus without a key",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let (ok, words) = match net.keyless_check(&domain) {
+                    Ok(w) => (true, w),
+                    Err(e) => (false, format!("Nexus browse without a key failed: {e}")),
+                };
+                crate::log::line("labs", &words);
+                let j = format!("{{\"id\":\"nexus-keyless\",\"ok\":{ok},\"text\":{}}}", quote(&words));
+                set(qt, move |t| t.set_labs_json(QString::from(j.as_str())));
+            }),
+        );
+    }
+
+    /// The screenshot checks: browsing Nexus fails as if Nexus refused it.
+    pub fn set_sample_nexus_fail(self: Pin<&mut Self>) {
+        self.net_send(
+            "Test run: Nexus browsing refused",
+            Box::new(|net: &mut Net, _qt: &Qt| {
+                net.sample_nexus_fail = true;
             }),
         );
     }

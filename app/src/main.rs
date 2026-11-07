@@ -3,6 +3,7 @@ mod backend;
 mod bridge;
 mod catch;
 mod labs;
+mod launch;
 mod log;
 mod loot;
 mod online;

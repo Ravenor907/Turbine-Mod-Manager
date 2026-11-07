@@ -39,9 +39,9 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: sh.title.toUpperCase()
+                text: sh.title
                 color: sh.ui.c.text
-                font.family: sh.ui.titleFont; font.pixelSize: sh.ui.px(18); font.bold: true; font.letterSpacing: sh.ui.px(1.5)
+                font.family: sh.ui.titleFont; font.pixelSize: sh.ui.px(18); font.bold: true
             }
             Text {
                 visible: sh.text !== ""

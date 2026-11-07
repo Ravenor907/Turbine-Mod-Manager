@@ -12,6 +12,7 @@ const P = require("../lib/protocol.js");
 const C = require("../lib/choices.js");
 const { createBridge } = require("../lib/bridge.js");
 const { createDownloadTracker } = require("../lib/downloads.js");
+const S = require("../lib/save.js");
 const { startFakeTurbine } = require("./fake-turbine.js");
 
 const TOKEN = "a".repeat(32) + "0123456789abcdef0123456789abcdef";
@@ -125,7 +126,7 @@ test("Messages from Turbine are checked and cleaned", () => {
 
   const w = P.validateIncoming('{"type":"welcome","turbineVersion":"0.3","games":[{"id":489830,"name":"Skyrim Special Edition","domain":"skyrimspecialedition"}]}');
   assert.equal(w.turbineVersion, "0.3");
-  assert.deepEqual(w.games[0], { id: "489830", name: "Skyrim Special Edition", domain: "skyrimspecialedition" });
+  assert.deepEqual(w.games[0], { id: "489830", name: "Skyrim Special Edition", domain: "skyrimspecialedition", folder: "" });
 
   const s = P.validateIncoming({ type: "status", text: "Downloading", level: "nonsense", progress: 7 });
   assert.equal(s.level, "ok");
@@ -449,9 +450,12 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   const fire = (name, ...args) => (listeners[name] || []).map((fn) => fn(...args));
   const items = new Map();
   const badge = [];
+  const restarted = [];
+  const cancelled = [];
   const pick = (store, keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((k) => k in store).map((k) => [k, store[k]]));
   const chrome = {
     runtime: {
+      id: "ourid",
       getManifest: () => JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")),
       onConnect: on("connect"),
       onMessage: on("message"),
@@ -466,7 +470,14 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
       onCreated: on("dlCreated"),
       onChanged: on("dlChanged"),
       onErased: on("dlErased"),
+      onDeterminingFilename: on("dlName"),
       search: async (q) => (items.has(q.id) ? [items.get(q.id)] : []),
+      download: async (o) => {
+        restarted.push(o);
+        return 99;
+      },
+      cancel: async (id) => cancelled.push(id),
+      erase: async (q) => cancelled.push(q.id),
     },
     action: {
       setBadgeText: (o) => badge.push(o.text),
@@ -504,6 +515,14 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   assert.deepEqual(page, { type: "page", url: "https://www.nexusmods.com/valheim/mods/387?tab=files", domain: "valheim", modId: 387 });
   await fake.waitFor((m) => m.type === "nxm");
   assert.equal(fake.received.filter((m) => m.type === "nxm").length, 1);
+
+  // A Slow download from Nexus is started again into Game Mods with no Save box; the browser's copy goes.
+  const kept = fire("dlName", { id: 41, url: "https://cf-files.nexus-cdn.com/1/387/Mod-387-1-0-1699999999.zip", referrer: "https://www.nexusmods.com/valheim/mods/387", filename: "" }, () => {});
+  assert.deepEqual(kept, [true]);
+  await until(() => cancelled.includes(41), 2000, "browser copy cancelled");
+  assert.equal(restarted[0].saveAs, false);
+  assert.ok(restarted[0].filename.startsWith("Game Mods/"), restarted[0].filename);
+  assert.deepEqual(fire("dlName", { id: 42, url: "https://example.com/x.zip", referrer: "https://example.com/", filename: "x.zip" }, () => {}), [false]);
 
   // A panel from another site is turned away.
   let kicked = false;
@@ -566,4 +585,54 @@ test("Every file loads, the manifest is minimal and the house rules hold", () =>
     assert.ok(!text.includes(String.fromCharCode(0x2014)) && !text.includes(String.fromCharCode(0x2013)), "no em or en dash in " + f);
     if (f.endsWith(".js")) new vm.Script(text, { filename: f });
   }
+});
+
+// ---------- Saving into Game Mods/<game> ----------
+
+test("Nexus downloads are saved into Game Mods/<game> with the game's folder name", () => {
+  const games = [{ id: "steam:292030", name: "The Witcher 3", domain: "witcher3", folder: "The Witcher 3" }];
+  const item = {
+    id: 7,
+    url: "https://cf-files.nexus-cdn.com/952/5/All Quest Objectives On Map-5-1-0-5-1699999999.zip?md5=x&expires=1",
+    finalUrl: "https://cf-files.nexus-cdn.com/952/5/All%20Quest%20Objectives%20On%20Map-5-1-0-5-1699999999.zip?md5=x&expires=1",
+    referrer: "https://www.nexusmods.com/witcher3/mods/5?tab=files&file_id=12",
+    filename: "",
+  };
+  const p = S.plan(item, games, "ourid");
+  assert.equal(p.filename, "Game Mods/The Witcher 3/All Quest Objectives On Map-5-1-0-5-1699999999.zip");
+  assert.equal(p.game, "The Witcher 3");
+  assert.equal(p.url, item.finalUrl);
+  // An unknown game goes to Other.
+  const other = S.plan(Object.assign({}, item, { referrer: "https://www.nexusmods.com/baldursgate3/mods/1" }), games, "ourid");
+  assert.equal(other.filename, "Game Mods/Other/All Quest Objectives On Map-5-1-0-5-1699999999.zip");
+  // Its own downloads, files not from Nexus's servers, and downloads not started from Nexus are left alone.
+  assert.equal(S.plan(Object.assign({}, item, { byExtensionId: "ourid" }), games, "ourid"), null);
+  assert.equal(S.plan(Object.assign({}, item, { url: "https://example.com/a.zip", finalUrl: "https://example.com/a.zip" }), games, "ourid"), null);
+  assert.equal(S.plan(Object.assign({}, item, { referrer: "https://example.com/" }), games, "ourid"), null);
+  assert.equal(S.plan(Object.assign({}, item, { finalUrl: "http://cf-files.nexus-cdn.com/a.zip", url: "http://cf-files.nexus-cdn.com/a.zip" }), games, "ourid"), null);
+});
+
+test("Game folder names match Turbine's and file names stay inside the folder", () => {
+  assert.equal(S.folderName("The Witcher 3: Wild Hunt"), "The Witcher 3 Wild Hunt");
+  assert.equal(S.folderName("a/b\\c?"), "abc");
+  assert.equal(S.folderName(".."), "Other");
+  assert.equal(S.baseName("/home/deck/Downloads/../x.zip"), "x.zip");
+  assert.equal(S.baseName("..hidden.zip"), "hidden.zip");
+  assert.equal(S.baseName("https://cf-files.nexus-cdn.com/1/2/My%20Mod.7z?x=1"), "My Mod.7z");
+});
+
+test("A replaced download is dropped without a word to Turbine", async () => {
+  const sent = [];
+  const t = createDownloadTracker({ search: async () => [], send: (m) => sent.push(m), pollMs: 5, nameWaitMs: 5 });
+  t.onCreated({ id: 3, url: "https://cf-files.nexus-cdn.com/1/2/a.zip", referrer: "https://www.nexusmods.com/witcher3/mods/5" });
+  t.forget(3);
+  t.onErased(3);
+  await sleep(30);
+  assert.deepEqual(sent, []);
+  t.stop();
+});
+
+test("The welcome game list keeps each game's folder", () => {
+  const w = P.validateIncoming({ type: "welcome", turbineVersion: "0.5", games: [{ id: "steam:292030", name: "The Witcher 3", domain: "witcher3", folder: "The Witcher 3" }] });
+  assert.equal(w.games[0].folder, "The Witcher 3");
 });

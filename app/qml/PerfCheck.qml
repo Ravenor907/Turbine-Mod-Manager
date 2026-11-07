@@ -183,12 +183,11 @@ Item {
             width: parent.width - perf.ui.px(36)
             spacing: perf.ui.px(10)
             Text {
-                text: "PERFORMANCE CHECK"
+                text: "Performance check"
                 color: perf.ui.c.text
                 font.family: perf.ui.titleFont
                 font.pixelSize: perf.ui.px(18)
                 font.bold: true
-                font.letterSpacing: perf.ui.px(1.5)
             }
             Text {
                 width: parent.width

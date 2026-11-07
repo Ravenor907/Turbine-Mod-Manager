@@ -116,7 +116,7 @@
         const games = Array.isArray(msg.games)
           ? msg.games
               .filter((g) => g && typeof g === "object")
-              .map((g) => ({ id: str(String(g.id ?? ""), 100), name: str(g.name, 200) || "", domain: str(g.domain, 100) }))
+              .map((g) => ({ id: str(String(g.id ?? ""), 100), name: str(g.name, 200) || "", domain: str(g.domain, 100), folder: str(g.folder, 100) || "" }))
           : [];
         return { type: "welcome", turbineVersion: str(msg.turbineVersion, 40) || "", games };
       }
@@ -202,6 +202,7 @@
     }),
     downloadFinished: (id, path, size) => ({ type: "download.finished", id, path, size }),
     downloadFailed: (id, error) => ({ type: "download.failed", id, error: String(error || "unknown") }),
+    restartFailed: (filename, error) => ({ type: "download.restartFailed", filename: String(filename || ""), error: String(error || "unknown") }),
     nxm: (url) => ({ type: "nxm", url }),
     page: (url) => {
       const p = parseNexusUrl(url);

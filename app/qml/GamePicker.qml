@@ -37,7 +37,7 @@ Item {
                 width: parent.width
                 text: "WHICH GAME IS IT FOR?"
                 color: gp.ui.c.text
-                font.family: gp.ui.titleFont; font.pixelSize: gp.ui.px(18); font.bold: true; font.letterSpacing: gp.ui.px(1.5)
+                font.family: gp.ui.titleFont; font.pixelSize: gp.ui.px(18); font.bold: true
             }
             Text {
                 width: parent.width

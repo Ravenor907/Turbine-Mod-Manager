@@ -49,6 +49,7 @@ pub mod qobject {
         #[qproperty(f64, pointer_y, cxx_name = "pointerY")]
         #[qproperty(bool, pointer_shown, cxx_name = "pointerShown")]
         #[qproperty(bool, pointer_paused, cxx_name = "pointerPaused")]
+        #[qproperty(QString, labs_json, cxx_name = "labsJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -222,6 +223,45 @@ pub mod qobject {
         /// Get Mods: source "thunderstore" or "nexus"; sort "downloads", "rating", "updated" or "name".
         #[qinvokable]
         fn browse(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString);
+
+        /// One page of Get mods from `offset` (infinite scroll).
+        #[qinvokable]
+        #[cxx_name = "browsePage"]
+        fn browse_page(self: Pin<&mut Self>, text: &QString, category: &QString, sort: &QString, source: &QString, offset: i32);
+
+        /// Labs: browse Nexus once without a key; the answer lands in `labsJson`.
+        #[qinvokable]
+        #[cxx_name = "nexusKeylessCheck"]
+        fn nexus_keyless_check(self: Pin<&mut Self>);
+
+        /// The screenshot checks: browsing Nexus fails as if Nexus refused it.
+        #[qinvokable]
+        #[cxx_name = "setSampleNexusFail"]
+        fn set_sample_nexus_fail(self: Pin<&mut Self>);
+
+        /// Recently removed: delete one mod for good, or all of them.
+        #[qinvokable]
+        #[cxx_name = "purgeRemoved"]
+        fn purge_removed(self: Pin<&mut Self>, id: &QString);
+        #[qinvokable]
+        #[cxx_name = "purgeAllRemoved"]
+        fn purge_all_removed(self: Pin<&mut Self>);
+
+        /// Opens a web page: in Game Mode Turbine starts the browser itself (launch.rs). Answers
+        /// {"how": "gamemode" | "desktop" | "portal", "name", "error"}; with "desktop" or "portal" QML opens it.
+        #[qinvokable]
+        #[cxx_name = "openUrl"]
+        fn open_url(self: Pin<&mut Self>, url: &QString) -> QString;
+
+        /// Opens a page in Steam's own browser. Answers "" or what went wrong.
+        #[qinvokable]
+        #[cxx_name = "openInSteam"]
+        fn open_in_steam(self: Pin<&mut Self>, url: &QString) -> QString;
+
+        /// An HDMI or DisplayPort display is connected.
+        #[qinvokable]
+        #[cxx_name = "externalDisplay"]
+        fn external_display(self: &Self) -> bool;
 
         #[qinvokable]
         fn details(self: Pin<&mut Self>, id: &QString, source: &QString);
@@ -400,6 +440,11 @@ pub mod qobject {
         #[qsignal]
         fn pad(self: Pin<&mut Self>, button: QString, pressed: bool);
 
+        /// A mod was just added (a caught download, a Premium or Thunderstore install, Add from Downloads): the
+        /// game's id, the mod's id and name, and whether it is on.
+        #[qsignal]
+        fn arrived(self: Pin<&mut Self>, game: QString, id: QString, name: QString, on: bool);
+
         /// A sentence for the status line. level: "work" (in progress), "ok", "warn" or "error".
         #[qsignal]
         fn message(self: Pin<&mut Self>, text: QString, level: QString);
@@ -511,6 +556,7 @@ pub struct TurbineRust {
     /// Time since the pointer's place was last sent: while it shows and rests, it is sent again now and then, so
     /// a list redrawn under it (a mod turned on, a sheet opened) gets its outline back.
     pub(crate) resend_ms: f64,
+    pub(crate) labs_json: QString,
 }
 
 impl Default for TurbineRust {
@@ -558,6 +604,7 @@ impl Default for TurbineRust {
             status_json: QString::from("{\"active\":false}"),
             browser_json: QString::from("{\"checked\":false}"),
             bridge_json: QString::from("{\"running\":false}"),
+            labs_json: QString::default(),
             catching: crate::catch::Catching::default(),
             pointer_x: -1.0,
             pointer_y: -1.0,
@@ -982,6 +1029,13 @@ impl qobject::Turbine {
             }
             if pressed {
                 crate::log::line("pad", &format!("Press {button}"));
+                // A D-pad or face button means the player is using the buttons: the pointer goes, so the triggers
+                // switch tabs again at once.
+                let face = matches!(button, "a" | "b" | "x" | "y" | "up" | "down" | "left" | "right");
+                if face && self.rust().pointer.shown && self.rust().mouse_down == [false, false] {
+                    self.as_mut().rust_mut().pointer.shown = false;
+                    self.as_mut().pointer_publish();
+                }
             }
             self.as_mut().pad(QString::from(button), pressed);
         }
@@ -1287,6 +1341,31 @@ impl qobject::Turbine {
     pub fn undo_remove(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {e}")));
+    }
+
+    pub fn purge_removed(self: Pin<&mut Self>, id: &QString) {
+        let id = id.to_string();
+        crate::log::line("action", &format!("Delete for good: {id}"));
+        self.change(move |s| s.purge_removed(&id).map_err(|e| format!("Couldn't delete that mod: {e}")));
+    }
+
+    pub fn purge_all_removed(self: Pin<&mut Self>) {
+        crate::log::line("action", "Empty Recently removed");
+        self.change(move |s| s.purge_all_removed().map(|_| ()).map_err(|e| format!("Couldn't empty Recently removed: {e}")));
+    }
+
+    pub fn open_url(self: Pin<&mut Self>, url: &QString) -> QString {
+        let gm = *self.gamemode();
+        let b = self.browser_json().to_string();
+        QString::from(crate::launch::open(&url.to_string(), gm, &b).as_str())
+    }
+
+    pub fn open_in_steam(self: Pin<&mut Self>, url: &QString) -> QString {
+        QString::from(crate::launch::open_in_steam(&url.to_string()).as_str())
+    }
+
+    pub fn external_display(&self) -> bool {
+        crate::launch::external_display()
     }
 
     /// Takes the waiting changes off the count before the job runs (so leaving the window right after Play doesn't

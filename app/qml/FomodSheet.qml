@@ -98,9 +98,9 @@ Item {
                 width: parent.width - fs.ui.px(360)
                 horizontalAlignment: Text.AlignHCenter
                 elide: Text.ElideRight
-                text: (fs.info && fs.info.data ? (fs.info.data.name || fs.info.data.module) : "").toUpperCase()
+                text: fs.info && fs.info.data ? (fs.info.data.name || fs.info.data.module) : ""
                 color: fs.ui.c.text
-                font.family: fs.ui.titleFont; font.pixelSize: fs.ui.px(17); font.bold: true; font.letterSpacing: fs.ui.px(1.5)
+                font.family: fs.ui.titleFont; font.pixelSize: fs.ui.px(17); font.bold: true
             }
             Text {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter

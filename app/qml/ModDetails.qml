@@ -1,38 +1,42 @@
 import QtQuick
 
-// A mod's details before installing: picture and facts on the left (version, size, updated, downloads, where from),
-// then its name, "Code mod", what it does, what else it brings ("Also installs", with Included, Have it and Not
-// found), and Install with how much it downloads. A installs; Main.qml handles the keys.
+// A mod's page, pushed over Get mods. Left (60%): the largest picture the source gives, name, author, version,
+// size, updated date, endorsements and downloads, then the summary. Right (40%): the main button with one line
+// under it ("Get it on Nexus", "Install", "Installed · On"), "Other files", then "Also needs" (each requirement with
+// Installed, Will be added or Get it; A on one opens its page). On a narrow window the right column goes under the
+// picture. Main.qml moves the focus (focusIndex: 0 main button, 1 Other files, 2 and on the requirements) and scrolls
+// with the D-pad (scroll()).
 Item {
     id: md
     required property var ui
     property var info: null               // the engine's details answer
     property bool focused: true
-    property string installNote: ""       // e.g. "Downloading..." while it runs
+    property string mainLabel: ""
+    property string mainLine: ""
+    property bool mainBusy: false
+    property real mainProgress: -1
+    property int focusIndex: 0
 
     signal installClicked()
     signal versionsClicked()
+    signal needClicked(int index)
 
     readonly property bool loading: !info || info.loading === true
-    readonly property var install: info && info.install ? info.install : []
-    readonly property var extra: install.filter(x => !x.main)
-    readonly property real total: install.reduce((a, x) => a + (x.size || 0), 0)
     readonly property int otherCount: info && info.versions ? info.versions.length : 0
-    readonly property bool canInstall: !loading && !info.error && install.length > 0
-    // Free Nexus accounts: A opens the mod's page instead of installing.
-    readonly property bool openInstead: !loading && !!info && info.premium === false && !!info.page
+    readonly property bool stacked: width < ui.px(640)
     // Nexus requirements: {missing, installed, unchecked, steps}.
     readonly property var needs: info && info.needs ? info.needs : null
     function stepFor(name) { return needs ? (needs.steps || []).find(x => x.name === name) : undefined }
     readonly property var needRows: !needs ? [] :
-        (needs.missing || []).map(r => {
+        (needs.installed || []).map(r => ({ tag: "Installed", lvl: "ok", r: r }))
+        .concat((needs.missing || []).map(r => {
             const st = stepFor(r.name)
-            return { tag: "Missing", lvl: "warn", name: r.name,
-                     words: st && st.action === "download" ? "comes with Install" : "its page opens with A" }
-        })
-        .concat((needs.installed || []).map(r => ({ tag: "Have it", lvl: "ok", name: r.name, words: "already installed" })))
-        .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", name: r.name,
-                                                    words: r.isDlc ? "game add-on you need" : "get it from its own site" })))
+            return { tag: st && st.action === "download" ? "Will be added" : "Get it", lvl: "", r: r }
+        }))
+        .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", r: r })))
+    // Thunderstore: what Install brings along.
+    readonly property var install: info && info.install ? info.install : []
+    readonly property var extra: install.filter(x => !x.main)
     function size(b) {
         if (!b) return "Not listed"
         if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"
@@ -41,19 +45,25 @@ Item {
         return b + " bytes"
     }
     function count(n) {
+        n = n || 0
         if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".0", "") + "M"
         if (n >= 1000) return Math.round(n / 1000) + "K"
-        return String(n || 0)
+        return String(n)
     }
-    readonly property string installWords: {
-        if (!info || loading) return ""
-        if (info.message) return info.message
-        if (install.length === 0) return (info.already || []).length > 0 ? "You have it, and everything it needs." : "Nothing to download."
-        const main = install.find(x => x.main)
-        let w = size(main ? main.size : 0)
-        if (extra.length > 0) w += " plus " + size(total - (main ? main.size : 0)) + " for " + extra.map(x => x.name).join(", ")
-        return w
+    function scroll(d) {
+        view.contentY = Math.max(0, Math.min(Math.max(0, view.contentHeight - view.height), view.contentY + d * ui.px(70)))
     }
+    function focusItem() {
+        return focusIndex === 0 ? mainBtn : focusIndex === 1 ? otherRow : needRep.itemAt(focusIndex - 2)
+    }
+    onFocusIndexChanged: Qt.callLater(function () {
+        const it = md.focusItem()
+        if (!it) return
+        const p = it.mapToItem(view.contentItem, 0, 0)
+        if (p.y < view.contentY) view.contentY = Math.max(0, p.y - ui.px(8))
+        else if (p.y + it.height > view.contentY + view.height) view.contentY = p.y + it.height - view.height + ui.px(8)
+    })
+    onInfoChanged: view.contentY = 0
 
     Text {
         visible: md.loading || !!(md.info && md.info.error)
@@ -61,7 +71,7 @@ Item {
         width: Math.min(parent.width, md.ui.px(520))
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WordWrap
-        text: md.loading ? "Reading the details..." : (md.info.error || "")
+        text: md.loading ? "Reading the mod's page..." : (md.info.error || "")
         color: md.ui.c.soft
         font.family: md.ui.bodyFont
         font.pixelSize: md.ui.px(16)
@@ -71,220 +81,195 @@ Item {
         id: view
         visible: !md.loading && !(md.info && md.info.error)
         anchors.fill: parent
-        contentHeight: Math.max(left.implicitHeight, right.implicitHeight) + md.ui.px(8)
+        contentHeight: md.stacked ? left.implicitHeight + right.implicitHeight + md.ui.px(24) : Math.max(left.implicitHeight, right.implicitHeight) + md.ui.px(8)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         Column {
             id: left
-            width: Math.min(md.ui.px(280), parent.width * 0.34)
+            width: md.stacked ? view.width : view.width * 0.6 - md.ui.px(8)
             spacing: md.ui.px(8)
             Rectangle {
-                width: parent.width; height: width * 0.56
-                radius: md.ui.px(8)
+                width: parent.width; height: Math.min(width * 9 / 16, md.ui.px(300))
+                radius: md.ui.px(6)
                 color: md.ui.c.raised
                 clip: true
                 Image {
                     id: pic
                     anchors.fill: parent
-                    source: md.info && md.info.icon ? md.info.icon : ""
-                    fillMode: Image.PreserveAspectFit
+                    source: md.info ? (md.info.picture || md.info.icon || "") : ""
+                    fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready
                 }
                 Text {
                     visible: !pic.visible
                     anchors.centerIn: parent
-                    text: md.info && md.info.name ? md.info.name.substring(0, 2).toUpperCase() : ""
-                    color: md.ui.c.soft
-                    font.family: md.ui.titleFont; font.pixelSize: md.ui.px(30); font.bold: true
-                }
-            }
-            Rectangle {
-                width: parent.width
-                height: facts.implicitHeight + md.ui.px(16)
-                radius: md.ui.px(8)
-                color: md.ui.c.card
-                Column {
-                    id: facts
-                    x: md.ui.px(12); y: md.ui.px(8)
-                    width: parent.width - md.ui.px(24)
-                    spacing: md.ui.px(4)
-                    Repeater {
-                        model: !md.info || md.loading ? [] : [
-                            ["Version", md.info.version || "Not listed"],
-                            ["Size", md.size(md.info.size)],
-                            ["Updated", md.info.updated || "Not listed"],
-                            ["Downloads", md.count(md.info.downloads)],
-                            ["By", md.info.owner || ""],
-                            ["From", md.info.source === "nexus" ? "Nexus Mods" : "Thunderstore"]
-                        ]
-                        Item {
-                            required property var modelData
-                            width: facts.width; height: md.ui.px(22)
-                            Text { text: parent.modelData[0]; color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
-                            Text {
-                                anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width * 0.62; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight
-                                text: parent.modelData[1]; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Column {
-            id: right
-            x: left.width + md.ui.px(16)
-            width: view.width - x
-            spacing: md.ui.px(10)
-            Row {
-                spacing: md.ui.px(10)
-                Text { text: md.info && md.info.name ? md.info.name : ""; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(22); font.bold: true }
-                Rectangle {
-                    visible: !!md.info && md.info.code === true
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: cm.implicitWidth + md.ui.px(14); height: md.ui.px(26); radius: md.ui.px(5)
-                    color: md.ui.c.raised
-                    Text { id: cm; anchors.centerIn: parent; text: "Code mod"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                }
-                Rectangle {
-                    visible: !!md.info && md.info.deprecated === true
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: dp.implicitWidth + md.ui.px(14); height: md.ui.px(26); radius: md.ui.px(5)
-                    color: md.ui.c.raised
-                    Text { id: dp; anchors.centerIn: parent; text: "No longer looked after"; color: md.ui.c.warn; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
+                    text: md.info && md.info.name ? md.info.name.substring(0, 1).toUpperCase() : ""
+                    color: md.ui.c.muted
+                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(48); font.bold: true
                 }
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
+                text: md.info && md.info.name ? md.info.name : ""
+                color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(22); font.weight: Font.DemiBold
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: !md.info || md.loading ? "" : [
+                    md.info.owner ? "By " + md.info.owner : "",
+                    md.info.version ? "Version " + md.info.version : "",
+                    md.info.size ? md.size(md.info.size) : "",
+                    (md.info.updatedText || md.info.updated) ? "Updated " + (md.info.updatedText || md.info.updated) : ""
+                ].filter(x => x !== "").join(" · ")
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                text: !md.info || md.loading ? "" : md.count(md.info.rating) + (md.info.source === "nexus" ? " endorsements" : " ratings") + " · " + md.count(md.info.downloads) + " downloads"
+                color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
-                maximumLineCount: 6
-                elide: Text.ElideRight
                 text: md.info && md.info.summary ? md.info.summary : ""
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(16)
+                font.pixelSize: md.ui.px(15)
             }
-            // What else it brings
-            Column {
-                visible: md.extra.length + (md.info && md.info.already ? md.info.already.length : 0)
-                         + (md.info && md.info.skippedLoaders ? md.info.skippedLoaders.length : 0) + (md.info && md.info.missing ? md.info.missing.length : 0) > 0
+        }
+        Column {
+            id: right
+            x: md.stacked ? 0 : view.width * 0.6 + md.ui.px(8)
+            y: md.stacked ? left.implicitHeight + md.ui.px(16) : 0
+            width: md.stacked ? view.width : view.width * 0.4 - md.ui.px(8)
+            spacing: md.ui.px(10)
+            Rectangle {
+                id: mainBtn
                 width: parent.width
-                spacing: md.ui.px(6)
-                Text {
-                    text: md.extra.length > 0 ? "Also installs: " + md.extra.map(x => x.name + " " + x.version).join(", ") : "What it needs"
-                    color: md.ui.c.accentText
-                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.bold: true
-                    width: parent.width; elide: Text.ElideRight
+                height: md.ui.px(48)
+                radius: md.ui.px(8)
+                gradient: Gradient {
+                    GradientStop { position: 0; color: md.ui.c.accentHi }
+                    GradientStop { position: 1; color: md.ui.c.accent }
                 }
-                Repeater {
-                    model: !md.info || md.loading ? [] :
-                        md.extra.map(x => ({ tag: "Included", lvl: "ok", name: x.name + " " + x.version, words: x.summary || "" }))
-                        .concat((md.info.already || []).map(x => ({ tag: "Have it", lvl: "", name: x, words: "already installed" })))
-                        .concat((md.info.skippedLoaders || []).map(x => ({ tag: "Have it", lvl: "", name: x, words: "the mod loader, already installed" })))
-                        .concat((md.info.missing || []).map(x => ({ tag: "Not found", lvl: "warn", name: x, words: "not on Thunderstore; the mod may not work without it" })))
-                    Row {
-                        required property var modelData
-                        spacing: md.ui.px(8)
-                        width: right.width
-                        Rectangle {
-                            width: tg.implicitWidth + md.ui.px(14); height: md.ui.px(26); radius: md.ui.px(5)
-                            color: md.ui.c.raised
-                            Text { id: tg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                        }
-                        Text { text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Text { width: parent.width * 0.5; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
-                    }
-                }
-            }
-            Row {
-                spacing: md.ui.px(12)
+                border.color: md.ui.c.text
+                border.width: md.focused && md.focusIndex === 0 ? md.ui.px(2) : 0
                 Rectangle {
-                    visible: md.canInstall
-                    width: ir.implicitWidth + md.ui.px(30); height: md.ui.px(44); radius: md.ui.px(8)
-                    gradient: Gradient {
-                        GradientStop { position: 0; color: md.ui.c.accentHi }
-                        GradientStop { position: 1; color: md.ui.c.accent }
-                    }
-                    border.color: md.ui.c.text
-                    border.width: md.focused ? md.ui.px(2) : 0
-                    Row {
-                        id: ir
-                        anchors.centerIn: parent
-                        spacing: md.ui.px(8)
-                        Rectangle {
-                            width: md.ui.px(26); height: width; radius: width / 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            color: Qt.rgba(0, 0, 0, 0.18)
-                            Text { anchors.centerIn: parent; text: "A"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                        }
-                        Text { text: md.openInstead ? "Open on Nexus" : md.install.some(x => x.upgrade && x.main) ? "Update" : "Install"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(17); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                    }
-                    HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: md.installClicked() }
+                    visible: md.mainProgress >= 0
+                    anchors.left: parent.left; anchors.bottom: parent.bottom
+                    anchors.margins: md.ui.px(3)
+                    width: (parent.width - md.ui.px(6)) * Math.max(0, Math.min(1, md.mainProgress))
+                    height: md.ui.px(4); radius: md.ui.px(2)
+                    color: md.ui.c.onAccent
+                    opacity: 0.5
                 }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: right.width - (md.canInstall ? md.ui.px(md.openInstead ? 220 : 160) : 0)
-                    wrapMode: Text.WordWrap
-                    text: md.installNote !== "" ? md.installNote : md.installWords
-                    color: md.info && md.info.message ? md.ui.c.warn : md.ui.c.soft
-                    font.family: md.ui.bodyFont
-                    font.pixelSize: md.ui.px(15)
+                Row {
+                    anchors.centerIn: parent
+                    spacing: md.ui.px(8)
+                    Rectangle {
+                        visible: md.focused && md.focusIndex === 0
+                        width: md.ui.px(26); height: width; radius: width / 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Qt.rgba(0, 0, 0, 0.18)
+                        Text { anchors.centerIn: parent; text: "A"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
+                    }
+                    Text { text: md.mainLabel; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
+                HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
+                TapHandler { onTapped: md.installClicked() }
             }
-            // X: Other versions (older Thunderstore versions, or a Nexus mod's other files).
+            Text {
+                visible: text !== ""
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: md.mainLine
+                color: md.ui.c.soft
+                font.family: md.ui.bodyFont
+                font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                visible: !!md.info && !!md.info.mainLine
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: md.info && md.info.mainLine ? md.info.mainLine : ""
+                color: md.ui.c.text
+                font.family: md.ui.bodyFont
+                font.pixelSize: md.ui.px(14)
+            }
             Rectangle {
                 id: otherRow
                 visible: md.otherCount > 0
-                width: otherWords.implicitWidth + md.ui.px(48); height: md.ui.px(40); radius: md.ui.px(8)
-                color: md.ui.c.card
-                border.color: md.ui.c.line
+                width: parent.width; height: md.ui.px(40); radius: md.ui.px(6)
+                color: md.focused && md.focusIndex === 1 ? md.ui.c.focusFill : md.ui.c.card
+                border.color: md.ui.c.accent
+                border.width: md.focused && md.focusIndex === 1 ? md.ui.px(2) : 0
                 Row {
-                    id: otherWords
-                    anchors.centerIn: parent
+                    x: md.ui.px(12)
+                    anchors.verticalCenter: parent.verticalCenter
                     spacing: md.ui.px(8)
                     Rectangle {
                         width: md.ui.px(24); height: width; radius: width / 2; color: md.ui.c.raised; border.color: md.ui.c.accentLo
                         anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: "X"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
                     }
-                    Text { text: md.otherCount + (md.otherCount === 1 ? " other version" : " other versions"); color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Other files (" + md.otherCount + ")"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.versionsClicked() }
             }
-            // Nexus requirements: "Also needs", with have-it and missing states.
-            Column {
-                visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
+            // Thunderstore: what Install brings along.
+            Text {
+                visible: md.extra.length > 0
                 width: parent.width
-                spacing: md.ui.px(6)
-                Text {
-                    text: "Also needs"
-                    color: md.ui.c.accentText
-                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.bold: true
-                }
-                Text {
-                    visible: !!md.info && !!md.info.needsNote
-                    width: parent.width; wrapMode: Text.WordWrap
-                    text: md.info && md.info.needsNote ? md.info.needsNote : ""
-                    color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
-                }
-                Repeater {
-                    model: md.needRows
-                    Row {
-                        required property var modelData
-                        spacing: md.ui.px(8)
-                        width: right.width
-                        Rectangle {
-                            width: Math.max(md.ui.px(84), ntg.implicitWidth + md.ui.px(14)); height: md.ui.px(26); radius: md.ui.px(5)
-                            color: md.ui.c.raised
-                            Text { id: ntg; anchors.centerIn: parent; text: parent.parent.modelData.tag; color: parent.parent.modelData.lvl === "ok" ? md.ui.c.ok : parent.parent.modelData.lvl === "warn" ? md.ui.c.warn : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                        }
-                        Text { width: Math.min(implicitWidth, parent.width * 0.45); elide: Text.ElideRight; text: parent.modelData.name; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        Text { width: parent.width * 0.4; elide: Text.ElideRight; text: parent.modelData.words; color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+                wrapMode: Text.WordWrap
+                text: "Also installs: " + md.extra.map(x => x.name + " " + x.version).join(", ")
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
+                text: "Also needs"
+                color: md.ui.c.accentText
+                font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.weight: Font.DemiBold
+            }
+            Text {
+                visible: !!md.info && !!md.info.needsNote
+                width: parent.width; wrapMode: Text.WordWrap
+                text: md.info && md.info.needsNote ? md.info.needsNote : ""
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+            }
+            Repeater {
+                id: needRep
+                model: md.needRows
+                Rectangle {
+                    id: nr
+                    required property int index
+                    required property var modelData
+                    readonly property bool foc: md.focused && md.focusIndex === index + 2
+                    width: right.width; height: md.ui.px(44); radius: md.ui.px(6)
+                    color: foc ? md.ui.c.focusFill : md.ui.c.card
+                    border.color: md.ui.c.accent
+                    border.width: foc ? md.ui.px(2) : 0
+                    Text {
+                        x: md.ui.px(12)
+                        width: parent.width - tag.width - md.ui.px(30)
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        text: nr.modelData.r.name
+                        color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold
                     }
+                    Rectangle {
+                        id: tag
+                        anchors.right: parent.right; anchors.rightMargin: md.ui.px(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: tt.implicitWidth + md.ui.px(14); height: md.ui.px(26); radius: md.ui.px(5)
+                        color: md.ui.c.raised
+                        Text { id: tt; anchors.centerIn: parent; text: nr.modelData.tag; color: nr.modelData.lvl === "ok" ? md.ui.c.ok : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
+                    }
+                    HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
+                    TapHandler { onTapped: md.needClicked(nr.index) }
                 }
             }
         }

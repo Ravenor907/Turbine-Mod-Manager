@@ -28,7 +28,7 @@ Rectangle {
         return level === "ok" ? ui.c.ok : level === "stop" ? ui.c.stop : level === "warn" ? ui.c.warn : ui.c.accentHi
     }
 
-    width: ui.px(380)
+    width: ui.px(340)
     height: col.implicitHeight + ui.px(28)
     radius: ui.px(10)
     color: ui.c.panel
@@ -50,9 +50,9 @@ Rectangle {
                 color: card.levelColor()
             }
             Text {
-                text: "TURBINE"
+                text: "Turbine"
                 color: ui.c.accentText
-                font.family: ui.titleFont; font.pixelSize: ui.px(14); font.bold: true; font.letterSpacing: ui.px(1.5)
+                font.family: ui.bodyFont; font.pixelSize: ui.px(14); font.bold: true
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {

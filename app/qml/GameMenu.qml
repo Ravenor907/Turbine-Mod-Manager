@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Shapes
 
-// The game menu that View opens: the safety tools for the whole game. Play original (no mods, nothing deleted),
+// The game menu that View opens: the safety tools for the whole game. Play without mods (no mods, nothing deleted),
 // Restore last working setup (with when it was saved), then any extra items. A centered card over a dimmed
 // backdrop like the approved mockup, or a side sheet with placement: "side". It fills its parent; show and hide it
 // with visible.
@@ -34,7 +34,7 @@ Item {
     signal closed()
 
     readonly property var allItems: [
-        { key: "original", label: "Play original", detail: originalDetail, icon: "play", enabled: true },
+        { key: "original", label: "Play without mods", detail: originalDetail, icon: "play", enabled: true },
         { key: "restore", label: "Restore last working setup", detail: restoreAvailable ? restoreDate : restoreEmptyText,
           icon: "restore", enabled: restoreAvailable, more: true }
     ].concat(extraItems || [])
@@ -112,13 +112,12 @@ Item {
             spacing: root.ui.px(3)
             Text {
                 width: parent.width
-                text: (root.gameName || "").toUpperCase()
+                text: root.gameName || ""
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
                 font.pixelSize: root.ui.px(18)
                 font.bold: true
-                font.letterSpacing: root.ui.px(1)
             }
             Text {
                 visible: text !== ""

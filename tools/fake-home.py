@@ -231,6 +231,10 @@ def downloads(folder):
         "modFasterRoach/content/scripts/game/player/playerWitcher.ws": script,
         "input.settings": "[Exploration]\nIK_F8=(Action=FasterRoach)\n",
     }, now - 5 * 86400)
+    # A Nexus download, named the way Nexus names files (name, mod ID, version, upload time).
+    zip_file(os.path.join(folder, "All Quest Objectives On Map-5-1-0-5-1699999999.zip"), {
+        "modAllQuestObjectives/content/scripts/game/gui/hud/modules/hudModuleMinimap2.ws": script,
+    }, now - 2 * 86400)
     # A profile share file someone sent, for Lethal Company.
     share = {"turbineProfile": 1, "app": "Turbine Mod Manager",
              "game": {"name": "Lethal Company", "store": "steam", "storeId": "1966720"}, "profile": "Friday night",

@@ -41,7 +41,7 @@ Item {
             x: vs.ui.px(18); y: vs.ui.px(18)
             width: parent.width - vs.ui.px(36)
             spacing: vs.ui.px(6)
-            Text { text: "OTHER VERSIONS"; color: vs.ui.c.text; font.family: vs.ui.titleFont; font.pixelSize: vs.ui.px(18); font.bold: true; font.letterSpacing: vs.ui.px(1.5) }
+            Text { text: "Other files"; color: vs.ui.c.text; font.family: vs.ui.titleFont; font.pixelSize: vs.ui.px(18); font.bold: true }
             Text {
                 width: parent.width; wrapMode: Text.WordWrap
                 text: vs.note !== "" ? vs.note : vs.modName + ": A installs the chosen one in place of the one you have, in the same spot and on or off."
@@ -74,9 +74,9 @@ Item {
                     height: visible ? vs.ui.px(28) : 0
                     verticalAlignment: Text.AlignBottom
                     bottomPadding: vs.ui.px(4)
-                    text: (row.modelData.group || "").toUpperCase()
+                    text: row.modelData.group || ""
                     color: vs.ui.c.muted
-                    font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13); font.bold: true; font.letterSpacing: vs.ui.px(1)
+                    font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13); font.bold: true
                 }
                 Rectangle {
                     id: box

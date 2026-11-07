@@ -2,7 +2,7 @@
 /* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads */
 "use strict";
 
-importScripts("lib/protocol.js", "lib/bridge.js", "lib/downloads.js");
+importScripts("lib/protocol.js", "lib/bridge.js", "lib/downloads.js", "lib/save.js");
 
 const P = TurbineProtocol;
 const EXT_VERSION = chrome.runtime.getManifest().version;
@@ -196,6 +196,28 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     bridge.reconnect();
     reply({ ok: true });
   });
+  return true;
+});
+
+// Nexus downloads go into Downloads/Game Mods/<game>/ with no Save box (lib/save.js).
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  const st = bridge.getState();
+  const games = st.welcome && Array.isArray(st.welcome.games) ? st.welcome.games : [];
+  const p = TurbineSave.plan(item, games, chrome.runtime.id);
+  if (!p) return false;
+  chrome.downloads
+    .download({ url: p.url, filename: p.filename, saveAs: false, conflictAction: "uniquify" })
+    .then(() => {
+      tracker.forget(item.id);
+      // The new copy is on its way: the browser's own one (and its Save box) goes.
+      chrome.downloads.cancel(item.id).catch(() => {});
+      chrome.downloads.erase({ id: item.id }).catch(() => {});
+    })
+    .catch((e) => {
+      // Couldn't start it again (the link may have expired): the browser's own download goes on as usual.
+      bridge.send(P.build.restartFailed(item.filename, e && e.message));
+      suggest();
+    });
   return true;
 });
 

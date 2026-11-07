@@ -265,7 +265,55 @@ jobs:
             shoot "caught-$size" "$size" caught "$PWD/home" --game=$cp2077
             shoot "caughtgm-$size" "$size" caughtgm "$PWD/home" --game=$cp2077
             shoot "nexusnokey-$size" "$size" nexusnokey "$PWD/home" --game=$skyrim
+            # 0.5: Get mods without a key (grid, the fallback, a mod page free and Premium, back to the same search),
+            # a game with no mods, Removed mods, a new mod arriving, opening Nexus, the rail, Look and the waiting pill.
+            lanterns="--selftest-import=$dl/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
+            needs="--selftest-import=$dl/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
+            shoot "getmods-start-$size" "$size" getmods "$PWD/home" --game=$skyrim "$lanterns"
+            shoot "getmods-fallback-$size" "$size" getmodsfallback "$PWD/home" --game=$skyrim
+            shoot "modpage-free-$size" "$size" modpagefree "$PWD/home" --game=$w3 "$needs"
+            shoot "modpage-premium-$size" "$size" modpagepremium "$PWD/home" --game=$w3 "$needs"
+            shoot "getmods-back-$size" "$size" getmodsback "$PWD/home" --game=$skyrim
+            shoot "emptygame-$size" "$size" emptygame "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
+            shoot "emptygame-mods-$size" "$size" emptygamemods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
+            shoot "removed-$size" "$size" removed "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip,$dl/Better Torches 1.0.zip"
+            shoot "newmod-$size" "$size" newmod "$PWD/home" --game=$w3 "--selftest-import=$dl/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
+            shoot "opening-$size" "$size" opening "$PWD/home" --game=$w3
+            shoot "opening8s-$size" "$size" opening8s "$PWD/home" --game=$w3
+            shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
+            shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
+            shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
           done
+          # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
+          shoot "size150-1280x800" 1280x800 size150 "$PWD/home"
+          shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
+            "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+          shoot "desktopgrid-1920x1080" 1920x1080 desktopgrid "$PWD/home" --game=$skyrim --layout=desktop "$lanterns"
+          shoot "tv-1920x1080" 1920x1080 tv "$PWD/home" --game=$skyrim --layout=tv --external-display "$lanterns"
+          # The 0.5 checks in the activity logs.
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/getmods-fallback-$size/turbine-mod-manager/activity.log"
+            if grep -q "Nexus browse without a key failed" "$log"; then
+              echo "::notice title=Keyless fallback $size::$(grep -h 'Nexus browse without a key failed' "$log" | head -n1 | cut -c1-200)"
+            else
+              echo "::error title=No fallback line in the activity log ($size)::"; (tail -n 20 "$log" || true); fail=1
+            fi
+            log="$PWD/data/getmods-back-$size/turbine-mod-manager/activity.log"
+            if grep -q 'Back from the mod page: search "lantern", card 5' "$log"; then
+              echo "::notice title=Get mods back $size::same search, card 5"
+            else
+              echo "::error title=B didn't come back to the same search and card ($size)::"; (grep -h "shot\|action" "$log" | tail -n 20 || true); fail=1
+            fi
+            log="$PWD/data/newmod-$size/turbine-mod-manager/activity.log"
+            if grep -q "New mod All Quest Objectives On Map" "$log"; then
+              echo "::notice title=New mod $size::$(grep -h 'New mod ' "$log" | head -n1 | cut -c1-160)"
+            else
+              echo "::error title=The new mod wasn't named cleanly or focused ($size)::"; (grep -h "New mod\|Add " "$log" | tail -n 10 || true); fail=1
+            fi
+          done
+          # Words that must never be on screen any more.
+          hits=$(grep -n -E "No controller found|Play original|\"Accounts\"|RECENTLY REMOVED" app/qml/*.qml || true)
+          if [ -n "$hits" ]; then echo "::error title=Old words still in the interface::"; echo "$hits"; fail=1; fi
           # The pointer's events really reached Turbine's interface: the click turned the mod off, the wheel scrolled.
           for size in 1280x800 1920x1080; do
             log="$PWD/data/pointer-$size/turbine-mod-manager/activity.log"

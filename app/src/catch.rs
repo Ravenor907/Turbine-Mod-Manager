@@ -50,7 +50,7 @@ where
 /// Steam's own browser saves where it is told; where that is in Game Mode isn't known yet (see Labs, Steam's
 /// built-in browser).
 pub fn watch_folders() -> Vec<PathBuf> {
-    watch::default_folders(&turbine_engine::home_dir())
+    watch::with_game_mods(&watch::default_folders(&turbine_engine::home_dir()))
 }
 
 /// A finished download the helper reported: a real archive file directly in one of the watched folders.
@@ -187,6 +187,9 @@ pub struct Catching {
     pub first_run: bool,
     /// The unfinished download the watcher last saw (its name), for the status line.
     pub partial: String,
+    /// Since when the same unfinished download has been seen without growing (a Save box waiting, after 3 s).
+    pub partial_since: Option<std::time::Instant>,
+    pub partial_size: u64,
     /// Downloads the browser helper reported with a known game: (file name, game id, Nexus page).
     pub helper_games: std::collections::VecDeque<(String, String, Option<bridge::NexusRef>)>,
 }
@@ -208,7 +211,13 @@ fn games_json(games: &[Game]) -> String {
         .iter()
         .filter_map(|g| {
             let d = nexus::domain_for_store_id(&g.store_id)?;
-            Some(format!("{{\"id\":{},\"name\":{},\"domain\":{}}}", quote(&g.id()), quote(&g.name), quote(d)))
+            Some(format!(
+                "{{\"id\":{},\"name\":{},\"domain\":{},\"folder\":{}}}",
+                quote(&g.id()),
+                quote(&g.name),
+                quote(d),
+                quote(&watch::game_folder_name(&g.name))
+            ))
         })
         .collect();
     format!("[{}]", items.join(","))
@@ -389,6 +398,17 @@ impl qobject::Turbine {
             loop {
                 // With the browser helper connected, its own report of a finished download comes first.
                 c.stable_looks = if bridge::connected() { 3 } else { 1 };
+                // A new game's Game Mods folder is picked up within a few seconds.
+                if looks % 5 == 0 {
+                    let now_folders = watch_folders();
+                    if now_folders != c.folders {
+                        let added: Vec<String> = now_folders.iter().filter(|f| !c.folders.contains(f)).map(|f| f.display().to_string()).collect();
+                        if !added.is_empty() {
+                            crate::log::line("catch", &format!("Watching {} too", added.join(", ")));
+                        }
+                        c.folders = now_folders;
+                    }
+                }
                 let events = c.poll();
                 let partial = events.iter().any(|e| matches!(e, Event::Downloading { .. }));
                 if !events.is_empty() || had_partial {
@@ -429,7 +449,14 @@ impl qobject::Turbine {
         for e in events {
             match e {
                 Event::Skipped { path, why } => crate::log::line("catch", &format!("Downloads: {} left alone: {}", label_of(&path), why.words())),
-                Event::Downloading { name, .. } => partial = Some(name),
+                Event::Downloading { name, size } => {
+                    if self.rust().catching.partial_size != size {
+                        let mut rm = self.as_mut().rust_mut();
+                        rm.catching.partial_size = size;
+                        rm.catching.partial_since = Some(std::time::Instant::now());
+                    }
+                    partial = Some(name)
+                }
                 Event::Ready(a) => self.as_mut().catch_arrival(a),
             }
         }
@@ -439,20 +466,24 @@ impl qobject::Turbine {
                     crate::log::line("catch", &format!("Downloads: {name} is downloading"));
                     self.as_mut().rust_mut().catching.partial = name.clone();
                 }
-                // The browser helper reports downloads itself, with real progress.
+                // The browser helper reports downloads itself, with real progress. Without it there is no percent: the
+                // browser writes a temporary file, and its Save box may still be waiting.
                 if !bridge::connected() {
-                    let text = format!("Downloading {name}");
+                    let waiting = self.rust().catching.partial_since.is_some_and(|t| t.elapsed() >= Duration::from_secs(3));
+                    let text = if waiting { "Press Save in the browser".to_string() } else { format!("Downloading in the browser: {name}") };
                     let status = self.status_json().to_string();
-                    if (!self.rust().catching.busy || status.contains("Downloading")) && !status.contains(&quote(&text)) {
-                        self.as_mut().set_status(&text, "busy", None, "", "", false, "");
+                    if (!self.rust().catching.busy || status.contains("Downloading") || status.contains("Press Save")) && !status.contains(&quote(&text)) {
+                        self.as_mut().set_status(&text, if waiting { "wait" } else { "busy" }, None, "", "", false, "");
                     }
                 }
             }
             None => {
                 if !self.rust().catching.partial.is_empty() {
                     self.as_mut().rust_mut().catching.partial.clear();
+                    self.as_mut().rust_mut().catching.partial_since = None;
                     // The download ended without a mod to add (cancelled, or not an archive): no "Downloading" left.
-                    if self.status_json().to_string().contains("\"text\":\"Downloading") {
+                    let st = self.status_json().to_string();
+                    if st.contains("\"text\":\"Downloading") || st.contains("\"text\":\"Press Save") {
                         self.status_done();
                     }
                 }
@@ -482,6 +513,23 @@ impl qobject::Turbine {
         if self.rust().catching.downloads.iter().any(|(_, d)| d.label == name) {
             crate::log::line("catch", &format!("{name}: the browser helper is reporting this download; it adds it when it finishes"));
             return;
+        }
+        // 0. Saved into Downloads/Game Mods/<game> (by the browser helper): a sure match for that game.
+        if let Some(folder) = watch::game_mods_folder_of(&a.path) {
+            let game = self.rust().found.iter().find(|g| watch::game_folder_name(&g.name) == folder).cloned();
+            if let Some(g) = game {
+                let d = watch::decide_all(Some(&g.id()), None, None, None, None, false);
+                crate::log::line("catch", &format!("{name}: {}, because {}; adding it", g.name, d.basis.words()));
+                // The mod ID and version from Nexus's file name pattern, when it has one.
+                let domain = nexus::domain_for_store_id(&g.store_id).unwrap_or("").to_string();
+                let hint = turbine_engine::store::nexus_ids_from_name(&name)
+                    .filter(|_| !domain.is_empty())
+                    .map(|(m, v)| (bridge::NexusRef { domain: domain.clone(), mod_id: m, file_id: None }, Some(v)));
+                self.as_mut().catch_add(g, a.path, hint, None);
+                self.catch_save(true);
+                return;
+            }
+            crate::log::line("catch", &format!("{name} is in Game Mods/{folder}, but no installed game has that name; deciding the usual way"));
         }
         // 1. The browser helper saw the Nexus page it came from.
         let helper = self
@@ -598,7 +646,7 @@ impl qobject::Turbine {
         let p = ask.path.to_string_lossy().into_owned();
         let (gid, gname) = ask.game.as_ref().map(|g| (g.id(), g.name.clone())).unwrap_or_default();
         let text = if gname.is_empty() { format!("Found {name}. Which game is it for?") } else { format!("Found {name}. Add it to {gname}?") };
-        self.as_mut().set_status(&text, "warn", None, &gname, "", false, &p);
+        self.as_mut().set_status(&text, "info", None, &gname, "", false, &p);
         let j = format!(
             "{{\"path\":{},\"name\":{},\"size\":{},\"game\":{},\"gameName\":{},\"why\":{},\"more\":{more}}}",
             quote(&p),
@@ -685,11 +733,15 @@ impl qobject::Turbine {
         if files.is_some() || r.mod_id == 0 {
             return;
         }
-        let Some(k) = crate::online::nexus_key() else { return };
+        if crate::online::using_samples() {
+            return;
+        }
+        // With a key through v1; without one through GraphQL (no key needed).
+        let k = crate::online::nexus_key();
         let qt = self.qt_thread();
         let _ = std::thread::Builder::new().name("turbine-files".into()).spawn(move || {
             let client = turbine_engine::net::Client::new(crate::VERSION, &crate::online::temp_dir());
-            match nexus::Nexus::new(client, &k, crate::VERSION).files(&r.domain, r.mod_id) {
+            match nexus::Nexus::with_key(client, k.as_deref(), crate::VERSION).files_any(&r.domain, r.mod_id, None) {
                 Ok(l) => {
                     let exp = exp.with_files(&l);
                     crate::log::line("catch", &format!("Nexus lists {} files for {}:{}; matching by name and size", exp.files.len(), r.domain, r.mod_id));
@@ -894,9 +946,21 @@ impl qobject::Turbine {
                 let Some(d) = self.rust().catching.downloads.iter().find(|(i, _)| *i == id).map(|(_, d)| d.clone()) else { return };
                 let got = num_of(msg, "receivedBytes");
                 let total = num_of(msg, "totalBytes").max(d.total);
-                let p = (total > 0).then(|| got as f64 / total as f64);
+                // Never 100% before the browser says it finished with its final name (its Save box may still wait).
+                let p = (total > 0).then(|| (got as f64 / total as f64).min(0.99));
                 let gname = d.game.as_ref().map(|g| g.name.clone()).unwrap_or_default();
                 self.as_mut().set_status(&format!("Downloading {}", d.label), "busy", p, &gname, "", false, "");
+            }
+            "download.restartFailed" => {
+                // The helper couldn't save it into Game Mods without a Save box (the link expired): the browser's own
+                // download goes on, and may ask where to save.
+                let file = msg.str_at("filename").unwrap_or("the file");
+                crate::log::line("bridge", &format!("The helper couldn't restart {file} into Game Mods; the browser's own download goes on"));
+                self.as_mut().set_status("Your browser may ask where to save.", "busy", None, "", "", false, "");
+            }
+            "download.waiting" => {
+                crate::log::line("bridge", "The browser is waiting for Save");
+                self.as_mut().set_status("Press Save in the browser", "wait", None, "", "", false, "");
             }
             "download.failed" => {
                 let id = id_of(msg);
@@ -975,7 +1039,7 @@ impl qobject::Turbine {
         if only_if_busy && !self.rust().catching.busy {
             return;
         }
-        self.as_mut().set_status(&format!("Added to {game}"), "ok", None, game, name, true, "");
+        self.as_mut().set_status(&format!("Added to {game}: {name}. It's on."), "ok", None, game, name, true, "");
         let notes: Vec<String> = notes.iter().map(|n| quote(n)).collect();
         bridge::broadcast(&format!("{{\"type\":\"added\",\"game\":{},\"mod\":{},\"notes\":[{}],\"needs\":[]}}", quote(game), quote(name), notes.join(",")));
     }

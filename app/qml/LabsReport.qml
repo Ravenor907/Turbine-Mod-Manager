@@ -199,12 +199,11 @@ Item {
                 width: view.width
                 spacing: report.ui.px(10)
                 Text {
-                    text: "REPORT A BUG"
+                    text: "Report a bug"
                     color: report.ui.c.text
                     font.family: report.ui.titleFont
                     font.pixelSize: report.ui.px(18)
                     font.bold: true
-                    font.letterSpacing: report.ui.px(1.5)
                 }
                 Text {
                     visible: report.item !== ""
