@@ -68,7 +68,8 @@ Item {
         id: card
         anchors.centerIn: parent
         width: Math.min(parent.width - root.ui.px(40), root.ui.px(560))
-        height: Math.min(content.implicitHeight + root.ui.px(34), parent.height - root.ui.px(24))
+        // Clear of the controls legend at the bottom of the window.
+        height: Math.min(content.implicitHeight + root.ui.px(34), parent.height - root.ui.px(112))
         radius: root.ui.px(6)
         color: root.ui.c.panel
         border.width: Math.max(1, root.ui.px(1.5))
@@ -100,7 +101,7 @@ Item {
                 id: checkList
                 width: parent.width
                 // What's left of the screen after the title, the buttons and the note.
-                height: Math.min(checkCol.implicitHeight, root.height - root.ui.px(24) - root.ui.px(34) - titleText.height
+                height: Math.min(checkCol.implicitHeight, root.height - root.ui.px(112) - root.ui.px(34) - titleText.height
                                  - buttonFlow.height - (noteText.visible ? noteText.height + content.spacing : 0) - content.spacing * 2)
                 contentHeight: checkCol.implicitHeight
                 clip: true

@@ -137,7 +137,7 @@ Window {
             else if ((shot.page === "nexusdetails" || shot.page === "nexusversions" || shot.page === "nexusfree") && app.getItems.length > 0) app.openDetails(app.getItems[0])
             else if (shot.page === "code") { app.openProfiles(); Turbine.profileCode("Default"); app.sheet = "code" }
             else if (shot.page === "profiles") app.openProfiles()
-            else if (shot.page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "browser")
+            else if (shot.page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "overlay")
             else if (shot.page === "lootsort" || shot.page === "lootnotes") { app.orderIndex = -1; Turbine.orderSort() }
             // After the first frames, so the screenshot inside the report has something in it.
             else if (shot.page === "report") app.openReport(app.labsItems[6], "Undo put the mod back at the bottom of the list instead of where it was.", "")
