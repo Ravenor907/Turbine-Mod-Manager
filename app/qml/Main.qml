@@ -1989,7 +1989,7 @@ Window {
           expect: "The game has the change without pressing Play in Turbine." },
         { id: "uninstall-undo", title: "Uninstall and Undo", how: "Uninstall a mod from its menu (X), then press Y for Undo.",
           expect: "It moves to Removed mods and comes back with Undo, in the same place." },
-        { id: "play-original", title: "Play original", how: "Game menu (View) > Play original.",
+        { id: "play-original", title: "Play without mods", how: "Game menu (View) > Play without mods.",
           expect: "The game starts with no mods. The mods stay in Turbine and go back in at the next Play." },
         { id: "restore", title: "Restore last setup played", how: "Play with mods, change some, then Game menu (View) > Restore last working setup.",
           expect: "The mods go back to how they were the last time the game was played." },
