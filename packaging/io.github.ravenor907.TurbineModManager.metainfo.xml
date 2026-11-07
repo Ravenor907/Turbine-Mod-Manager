@@ -15,6 +15,17 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.53" date="2026-11-07" type="development">
+      <description>
+        <p>Round four:</p>
+        <ul>
+          <li>Game Mode opens Chrome through Steam, and the browser helper opens the Nexus page in a new tab</li>
+          <li>A one-time guide to add Chrome to Steam, with Steam's browser as a fallback</li>
+          <li>Nexus API key help: where to find it, one-press Paste, and what a free key does</li>
+          <li>Menus and sheets fit and scroll on every screen size</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.52" date="2026-11-07" type="development">
       <description>
         <p>Round three, from the game testers:</p>
