@@ -318,7 +318,7 @@ pub mod qobject {
         fn profile_create(self: Pin<&mut Self>, name: &QString);
         #[qinvokable]
         #[cxx_name = "profileRename"]
-        fn profile_rename(self: Pin<&mut Self>, old: &QString, new: &QString);
+        fn profile_rename(self: Pin<&mut Self>, from: &QString, to: &QString);
         /// Deletes a profile (never the one in use).
         #[qinvokable]
         #[cxx_name = "profileDelete"]

@@ -1212,8 +1212,8 @@ impl qobject::Turbine {
         });
     }
 
-    pub fn profile_rename(self: Pin<&mut Self>, old: &QString, new: &QString) {
-        let (old, new) = (old.to_string(), new.to_string());
+    pub fn profile_rename(self: Pin<&mut Self>, from: &QString, to: &QString) {
+        let (old, new) = (from.to_string(), to.to_string());
         self.profile_job("Rename profile", move |w, game| {
             let r = w.slot(game).and_then(|s| {
                 let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
