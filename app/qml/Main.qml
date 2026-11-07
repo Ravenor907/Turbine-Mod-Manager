@@ -2922,7 +2922,7 @@ Window {
                                 isOn: entry.m.enabled === true
                                 ordered: app.ordered
                                 compact: app.desktopLayout
-                                order: entry.kind === "mod" ? app.mods.indexOf(entry.m) + 1 : 0
+                                order: entry.kind === "mod" ? app.mods.findIndex(x => x.id === entry.m.id) + 1 : 0
                                 ticked: app.selecting && entry.kind === "mod" ? (app.ticked[entry.m.id] ? 1 : 0) : -1
                                 aLabel: app.selecting ? (app.ticked[entry.m.id] ? "Untick" : "Tick") : (entry.m.enabled === true ? "Turn off" : "Turn on")
                                 xLabel: app.selecting ? (app.tickedCount > 0 ? "Act on " + app.tickedCount : "") : "More"
