@@ -120,6 +120,30 @@ pub fn tail(n: usize) -> Vec<String> {
     s.ring.iter().skip(s.ring.len().saturating_sub(n)).cloned().collect()
 }
 
+/// The last `n` lines of activity.log, oldest first: earlier runs too, so the lines before a crash are there. Reads
+/// at most the file's last 512 KB; with no file, this run's lines.
+pub fn last_lines(n: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let path = state().dir.as_ref().map(|d| d.join("activity.log"));
+    let read = path.and_then(|p| {
+        let mut f = fs::File::open(p).ok()?;
+        let len = f.metadata().ok()?.len();
+        let from = len.saturating_sub(512 * 1024);
+        f.seek(SeekFrom::Start(from)).ok()?;
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).ok()?;
+        let text = String::from_utf8_lossy(&buf).into_owned();
+        // A read that starts mid-file starts mid-line: that first piece is dropped.
+        let mut lines: Vec<String> = text.lines().skip(usize::from(from > 0)).map(str::to_string).collect();
+        if lines.is_empty() {
+            return None;
+        }
+        lines.drain(..lines.len().saturating_sub(n));
+        Some(lines)
+    });
+    read.unwrap_or_else(|| tail(n))
+}
+
 fn crash_path() -> Option<PathBuf> {
     state().dir.as_ref().map(|d| d.join("crash.log"))
 }

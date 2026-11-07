@@ -1,5 +1,6 @@
-// Service worker: keeps the link to Turbine, reports Nexus downloads and nxm links, feeds the panel and popup, and
-// opens the Nexus page Turbine asks for in a new tab (Game Mode starts the browser through Steam, then sends it).
+// Service worker: keeps the link to Turbine, reports Nexus downloads and nxm links, feeds the panel and popup,
+// opens the Nexus page Turbine asks for in a new tab (Game Mode starts the browser through Steam, then sends it),
+// and reloads itself when Turbine has put a newer helper in its folder.
 /* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads */
 "use strict";
 
@@ -54,6 +55,11 @@ function handleTurbine(msg) {
     case "open":
       openTab(msg.url);
       return;
+    case "reload":
+      // An unpacked helper reloads from its folder on disk, where Turbine put its newer files. The worker and
+      // panels start again with the new version and reconnect by themselves.
+      if (chrome.runtime.reload) setTimeout(() => chrome.runtime.reload(), 100);
+      return;
     default:
       break;
   }
@@ -106,6 +112,7 @@ function broadcast() {
 const BADGE = {
   ok: { text: "OK", color: "#4F7A3A" },
   busy: { text: "...", color: "#C99E52" },
+  wait: { text: "!", color: "#E0A33A" },
   warn: { text: "!", color: "#B9822E" },
   stop: { text: "X", color: "#A23B2A" },
 };

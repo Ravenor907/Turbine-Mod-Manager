@@ -155,6 +155,16 @@ pub mod qobject {
         #[cxx_name = "copyText"]
         fn copy_text(self: &Self, text: &QString);
 
+        /// Labs > Activity log: the last `lines` lines of the activity log, oldest first, one per line.
+        #[qinvokable]
+        #[cxx_name = "activityLog"]
+        fn activity_log(self: &Self, lines: i32) -> QString;
+
+        /// Labs > Activity log: saves the last 500 lines into Downloads. Answers {"file": name, "error": ""}.
+        #[qinvokable]
+        #[cxx_name = "saveActivityLog"]
+        fn save_activity_log(self: &Self) -> QString;
+
         /// The text on the clipboard ("" when there is none). Never logged.
         #[qinvokable]
         #[cxx_name = "clipboardText"]
@@ -272,7 +282,8 @@ pub mod qobject {
         #[cxx_name = "browserShortcut"]
         fn browser_shortcut(self: &Self) -> QString;
 
-        /// Opens a page in Steam's own browser. Answers "" or what went wrong.
+        /// Steam's own browser with this page: answers the steam://openurl link for QML to open (as Play opens
+        /// steam://rungameid), or "" when the address can't be opened that way.
         #[qinvokable]
         #[cxx_name = "openInSteam"]
         fn open_in_steam(self: Pin<&mut Self>, url: &QString) -> QString;
@@ -1892,6 +1903,28 @@ impl qobject::Turbine {
         };
         crate::log::line("action", &format!("Read the clipboard ({} characters)", text.chars().count()));
         QString::from(text.as_str())
+    }
+
+    pub fn activity_log(&self, lines: i32) -> QString {
+        QString::from(crate::log::last_lines(lines.clamp(1, 2000) as usize).join("\n").as_str())
+    }
+
+    pub fn save_activity_log(&self) -> QString {
+        let text = crate::log::last_lines(500).join("\n") + "\n";
+        let name = format!("Turbine-activity-{}.log", crate::log::file_stamp());
+        let dir = crate::labs::downloads();
+        let r = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(&name), text));
+        let (file, error) = match r {
+            Ok(()) => {
+                crate::log::line("labs", &format!("Saved the activity log to Downloads as {name}"));
+                (name, String::new())
+            }
+            Err(e) => {
+                crate::log::line("labs", &format!("Couldn't save the activity log to Downloads: {e}"));
+                (String::new(), format!("Couldn't save it in Downloads ({e})."))
+            }
+        };
+        QString::from(format!("{{\"file\":{},\"error\":{}}}", turbine_engine::json::quote(&file), turbine_engine::json::quote(&error)).as_str())
     }
 
     pub fn copy_text(&self, text: &QString) {

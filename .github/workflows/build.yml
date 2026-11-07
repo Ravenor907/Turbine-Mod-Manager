@@ -234,6 +234,8 @@ jobs:
             shoot "loader-$size" "$size" loader "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
             # Labs mode and Seasonal (neither is saved from a picture).
             for page in about labs perfcheck; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
+            # 0.54: Labs > Activity log (after a game page's worth of lines).
+            shoot "activity-$size" "$size" activity "$PWD/home" --game=$skyrim
             shoot "report-$size" "$size" report "$PWD/home" --game=$skyrim
             shoot "autumn-$size" "$size" mods "$PWD/home" --game=steam:892970 --season=autumn "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
             shoot "snow-$size" "$size" settings "$PWD/home" --season=snow
@@ -307,6 +309,7 @@ jobs:
             shoot "newmod-$size" "$size" newmod "$h" --game=$w3 "--selftest-import=$h/Downloads/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
             shoot "opening-$size" "$size" opening "$PWD/home" --game=$w3
             shoot "opening8s-$size" "$size" opening8s "$PWD/home" --game=$w3
+            shoot "slowhint-$size" "$size" slowhint "$PWD/home" --game=$w3
             shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
             shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
             shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
@@ -378,6 +381,16 @@ jobs:
             if grep -q "Recheck: no Chrome-family browser among Steam's non-Steam games" "$log" && grep -q "Showing Add Chrome to Steam" "$log"; then
               echo "::notice title=Add Chrome to Steam $size::$(grep -h 'Recheck:' "$log" | head -n1 | cut -c1-200)"
             else echo "::error title=Add Chrome to Steam didn't show ($size)::"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
+          done
+          # 0.54: Labs > Activity log shows the log's lines.
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/activity-$size/turbine-mod-manager/activity.log"
+            if grep -Eq "Activity log open: [1-9][0-9]* lines" "$log"; then echo "::notice title=Activity log $size::$(grep -h 'Activity log open' "$log" | head -n1)"
+            else echo "::error title=The activity log sheet showed no lines ($size)::"; (grep -h "labs\|shot" "$log" | tail -n 6 || true); fail=1; fi
+            # Opening a file page on a free account says to press Slow download.
+            log="$PWD/data/slowhint-$size/turbine-mod-manager/activity.log"
+            if grep -q "Status: press Slow download on the page" "$log"; then echo "::notice title=Slow download hint $size::shown"
+            else echo "::error title=Opening a Nexus file page didn't say to press Slow download ($size)::"; (grep -h "catch\|browser" "$log" | tail -n 6 || true); fail=1; fi
           done
           # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
           shoot "size150-1280x800" 1280x800 size150 "$PWD/home"

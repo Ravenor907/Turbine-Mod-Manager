@@ -11,6 +11,7 @@ Works in Chrome, Brave, Edge, Chromium and Vivaldi (version 116 or newer).
 - **Panel on Nexus pages:** a small Turbine panel in the bottom-right corner shows progress, "Added to (game)" with notes and any other mods it needs, and the installer's options when a mod asks you to choose. Tap the panel to open it and "Hide" to shrink it back. Drag it by its title bar to move it.
 - **Toolbar button:** shows whether Turbine is connected and what it is doing. The badge shows progress, OK, or ! when something needs a look.
 - **Opens the mod's page in Game Mode:** Game Mode only shows apps Steam starts, so Turbine starts your browser through Steam (add it once as a non-Steam game) and asks the helper to open the Nexus page in a new tab. It only ever opens nexusmods.com pages this way.
+- **Keeps itself up to date:** when Turbine has a newer helper, it copies the new files into the folder in Downloads you loaded the helper from and asks the helper to reload from there. Helpers from Turbine 0.53 and earlier can't do this yet: once, open chrome://extensions and press the reload arrow on Turbine browser helper.
 - **Game hint:** it tells Turbine which mod page you are on, so Turbine knows the game. It reads only the page address.
 
 It never clicks or changes anything on Nexus pages (opening a tab is all it does), and it only talks to Turbine on this computer (127.0.0.1).

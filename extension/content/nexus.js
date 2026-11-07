@@ -19,6 +19,7 @@
   let waiting = false;
   let seenAdded = 0;
   let seenChoices = "";
+  let seenWait = "";
 
   // ---------- Link to the service worker ----------
   function connectPort() {
@@ -105,7 +106,7 @@
     .pill .name { font-family: Cinzel, Georgia, serif; font-weight: 700; color: #EDC87A; letter-spacing: .04em; }
     .pill .short { color: #CDBE9F; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: #6B5A3E; }
-    .dot.ok { background: #7FA35A; } .dot.busy { background: #C99E52; } .dot.warn { background: #E0A33A; } .dot.stop { background: #C8553D; }
+    .dot.ok { background: #7FA35A; } .dot.busy { background: #C99E52; } .dot.wait { background: #E0A33A; } .dot.warn { background: #E0A33A; } .dot.stop { background: #C8553D; }
     .card { width: min(440px, calc(100vw - 24px)); max-height: min(72vh, 680px); display: flex; flex-direction: column;
       background: #0B0A08; border: 2px solid #C99E52; border-radius: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.6); overflow: hidden; }
     .head { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; background: #1A150D;
@@ -332,6 +333,12 @@
       seenChoices = ck;
       waiting = false;
       if (state.choices) wantOpen = true;
+    }
+    // Turbine waits for the player to do something on the page (press Slow download): the panel opens to say so.
+    const wk = state.status && state.status.level === "wait" ? state.status.text : "";
+    if (wk !== seenWait) {
+      seenWait = wk;
+      if (wk) wantOpen = true;
     }
     if (state.conn === "connected" && lastHref === "") reportPage();
     if (wantOpen && !open) {

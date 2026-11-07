@@ -6,7 +6,7 @@
   const PROTOCOL_VERSION = 1;
   const PORT_MIN = 47701;
   const PORT_MAX = 47710;
-  const LEVELS = ["ok", "busy", "warn", "stop"];
+  const LEVELS = ["ok", "busy", "wait", "warn", "stop"];
   const KINDS = ["one", "any", "atleastone", "atmostone", "all"];
   const STATES = ["selected", "available", "required", "disabled"];
 
@@ -192,6 +192,9 @@
         const url = isNexusTabUrl(msg.url);
         return url ? { type: "open", url } : null;
       }
+      // Turbine put a newer helper in the folder this one was loaded from: reload from it.
+      case "reload":
+        return { type: "reload" };
       default:
         return null;
     }

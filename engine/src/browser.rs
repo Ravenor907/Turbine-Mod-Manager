@@ -240,12 +240,13 @@ pub fn game_mode_command(name: &str, how: &str, url: &str, steam_game_id: Option
     Some(out)
 }
 
-/// Steam's own browser: steam://openurl/<url>, opened on the host.
-pub fn steam_browser_command(url: &str) -> Option<Vec<String>> {
+/// Steam's own browser: the steam://openurl/<url> link. The app opens it the way Play opens steam://rungameid
+/// (Qt.openUrlExternally, through the desktop portal), which Game Mode shows.
+pub fn steam_browser_link(url: &str) -> Option<String> {
     if !url.starts_with("https://") || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
     }
-    Some(vec!["flatpak-spawn".into(), "--host".into(), "xdg-open".into(), format!("steam://openurl/{url}")])
+    Some(format!("steam://openurl/{url}"))
 }
 
 /// May Turbine ask the browser helper to open this address in a new tab? Only https pages on www.nexusmods.com or

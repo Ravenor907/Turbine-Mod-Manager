@@ -32,6 +32,8 @@ type Qt = CxxQtThread<qobject::Turbine>;
 pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
 /// The folder in Downloads the helper is copied to, for Load unpacked.
 pub const HELPER_FOLDER: &str = "Turbine browser helper";
+/// What the status says while a Nexus file page is open for a free account.
+pub const SLOW_DOWNLOAD: &str = "Press Slow download on this page. Turbine adds the mod when it finishes.";
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 
@@ -272,6 +274,9 @@ impl qobject::Turbine {
         }
         self.as_mut().rust_mut().catching.started = true;
         let _ = bridge::VERSION.set(crate::VERSION.to_string());
+        let _ = bridge::BUNDLED.set(manifest_version(&helper_source()).unwrap_or_default());
+        let _ = bridge::BEFORE_RELOAD.set(refresh_helper_copy);
+        refresh_helper_copy();
         let qt = self.qt_thread();
         let handler: bridge::Handler = Arc::new(move |kind: &str, msg: &Json| {
             let (kind, msg) = (kind.to_string(), msg.clone());
@@ -324,9 +329,8 @@ impl qobject::Turbine {
     /// Copies the helper into Downloads for Load unpacked. Answers {"folder": path, "error": ""}.
     pub fn helper_setup(self: Pin<&mut Self>) -> QString {
         crate::log::line("action", "Set up the browser helper");
-        let to = turbine_engine::home_dir().join("Downloads").join(HELPER_FOLDER);
-        let from = std::env::var_os("TURBINE_HELPER_SOURCE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(HELPER_SOURCE));
-        let r = copy_helper(&from, &to);
+        let to = helper_folder();
+        let r = copy_helper(&helper_source(), &to);
         let (folder, error) = match r {
             Ok(n) => {
                 crate::log::line("bridge", &format!("Copied the browser helper ({n} files) to {}", to.display()));
@@ -705,7 +709,15 @@ impl qobject::Turbine {
             return out(false, "", "That game isn't installed here.");
         };
         let name = game.name.clone();
+        let mod_page = r.mod_id != 0;
         self.as_mut().start_watch(game, r, None);
+        // A free account presses Slow download on the page itself (Turbine never presses anything there): the status
+        // in Turbine, over the browser and in the helper's panel says so until the download starts.
+        let premium = turbine_engine::json::parse(&self.account_json().to_string()).ok().and_then(|a| a.get("premium").and_then(Json::as_bool)).unwrap_or(false);
+        if mod_page && !premium {
+            crate::log::line("catch", "Status: press Slow download on the page (a free account downloads there)");
+            self.as_mut().set_status(SLOW_DOWNLOAD, "wait", None, &name, "", false, "");
+        }
         out(true, &name, "")
     }
 
@@ -891,6 +903,9 @@ impl qobject::Turbine {
     pub(crate) fn bridge_message(mut self: Pin<&mut Self>, kind: &str, msg: &Json) {
         match kind {
             "connected" => {
+                // A newer helper goes into its folder in Downloads now too, so a reload (Turbine's, or the
+                // player's own in chrome://extensions) picks it up.
+                refresh_helper_copy();
                 bridge::set_games(games_json(&self.rust().found));
                 self.as_mut().bridge_refresh();
                 // The status now, if there is one, then any installer choices already waiting.
@@ -1082,6 +1097,42 @@ pub fn browser_json(check: &str) -> String {
         quote(browser::NO_BROWSER_TEXT),
         steps.join(",")
     )
+}
+
+/// Where this Turbine's helper files are (TURBINE_HELPER_SOURCE overrides it for tests).
+fn helper_source() -> PathBuf {
+    std::env::var_os("TURBINE_HELPER_SOURCE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(HELPER_SOURCE))
+}
+
+/// The helper's folder in Downloads (Turbine puts it there for Load unpacked).
+fn helper_folder() -> PathBuf {
+    turbine_engine::home_dir().join("Downloads").join(HELPER_FOLDER)
+}
+
+/// The "version" in a helper folder's manifest.json, when it is Turbine's helper.
+fn manifest_version(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let m = turbine_engine::json::parse(&text).ok()?;
+    if m.str_at("name") != Some("Turbine browser helper") {
+        return None;
+    }
+    m.str_at("version").map(str::to_string).filter(|v| !v.is_empty())
+}
+
+/// At start, and before Turbine asks a helper to reload: when the helper in Downloads (the folder Turbine placed for
+/// Load unpacked) is older than the one Turbine carries, the newer files are copied over it. Chrome loads an unpacked
+/// helper from that folder, so its next reload is the new one. A folder that isn't Turbine's helper is left alone.
+pub fn refresh_helper_copy() {
+    let (from, to) = (helper_source(), helper_folder());
+    let Some(have) = manifest_version(&to) else { return };
+    let Some(new) = manifest_version(&from) else { return };
+    if !bridge::version_older(&have, &new) {
+        return;
+    }
+    match copy_helper(&from, &to) {
+        Ok(n) => crate::log::line("bridge", &format!("Updated the browser helper in {} from {have} to {new} ({n} files)", to.display())),
+        Err(e) => crate::log::line("bridge", &format!("Couldn't update the browser helper in {} from {have} to {new}: {e}", to.display())),
+    }
 }
 
 /// Copies the helper's files (plain files only, tests left out) into `to`. Returns how many were copied.

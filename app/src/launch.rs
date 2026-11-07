@@ -1,40 +1,26 @@
 //! Opening a web page for the player. In Game Mode gamescope only shows what Steam itself starts, so a browser
-//! started any other way (Qt.openUrlExternally, or on the host with Turbine's SteamGameId) opens where nobody can
-//! see it. There Turbine finds the player's Chrome-family browser among their non-Steam games (shortcuts.vdf, read
-//! only), starts it through Steam with steam://rungameid/<id> (the same steam:// way Steam's own browser opens),
-//! and asks the browser helper to open the page in a new tab: sent at once when the helper is connected, or kept
-//! until it connects. With no browser in Steam the app shows how to add one (once), and Steam's own browser is the
-//! fallback. Desktop Mode keeps the normal way. Each step is written to the activity log. Fixed arguments, never a
-//! shell.
+//! started any other way opens where nobody can see it. There Turbine finds the player's Chrome-family browser among
+//! their non-Steam games (shortcuts.vdf, read only) and the app opens steam://rungameid/<id> with
+//! Qt.openUrlExternally, exactly the way Play starts a game (and Steam's keyboard opens), so Steam starts it where
+//! the player sees it. The browser helper then opens the page in a new tab: sent at once when it is connected, or
+//! kept until it connects. A helper too old to know "open" doesn't make the page wait: Steam's own browser opens it
+//! right away. With no browser in Steam the app shows how to add one (once), and Steam's own browser is the fallback
+//! (steam://openurl, opened the same way). Desktop Mode keeps the normal way. Each step is written to the activity
+//! log; nothing here starts a program.
 
-use std::process::{Command, Stdio};
 use crate::bridge;
 use turbine_engine::browser;
 use turbine_engine::json::{self, quote};
 use turbine_engine::shortcuts;
 
-fn spawn(args: &[String]) -> Result<(), String> {
-    let (prog, rest) = args.split_first().ok_or("nothing to run")?;
-    let mut child = Command::new(prog)
-        .args(rest)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("{prog} couldn't start: {e}"))?;
-    // Reaped in the background so it never lingers as a zombie.
-    let _ = std::thread::Builder::new().name("turbine-open".into()).spawn(move || {
-        let _ = child.wait();
-    });
-    Ok(())
-}
-
 /// Opens `url`. `browser_json` is the browser check's answer ({"result":{"found","name","how"}}). Answers
 /// {"how", "name", "error", ...}:
 /// - "desktop": the app opens it with Qt.openUrlExternally itself;
-/// - "shortcut": Game Mode, the browser was started through Steam; also "browser", "steam" (the steam:// link, which
-///   the app opens itself when "error" says starting it failed), "helper" (a helper has paired) and "sent" (the page
-///   went to the helper now, rather than waiting for it to connect);
+/// - "shortcut": Game Mode, a browser is among the player's non-Steam games; also "browser", "steam" (the
+///   steam://rungameid link the app opens now), "helper" (a helper has paired) and "sent" (the page went to the
+///   helper now, rather than waiting for it to connect);
+/// - "oldhelper": Game Mode, the helper that last connected is too old to open pages: "steam" is Steam's browser
+///   (steam://openurl) with the page, which the app opens right away;
 /// - "noshortcut": Game Mode, no Chrome-family browser among the player's non-Steam games.
 pub fn open(url: &str, game_mode: bool, browser_json: &str) -> String {
     let check = json::parse(browser_json).ok();
@@ -49,6 +35,19 @@ pub fn open(url: &str, game_mode: bool, browser_json: &str) -> String {
 
 /// Game Mode: the player's browser through Steam, then the page through the helper.
 pub fn open_through_steam(url: &str) -> String {
+    if bridge::paired() && !bridge::helper_knows_open() {
+        let v = bridge::helper_version();
+        let link = browser::steam_browser_link(url).unwrap_or_default();
+        crate::log::line(
+            "browser",
+            &format!(
+                "The browser helper is {v}, too old to open pages (it needs {}): Steam's browser opens the page right away instead. The player is told: {}",
+                bridge::OPEN_SINCE,
+                bridge::OLD_HELPER_TEXT
+            ),
+        );
+        return format!("{{\"how\":\"oldhelper\",\"name\":\"Steam's browser\",\"steam\":{},\"helperVersion\":{},\"error\":\"\"}}", quote(&link), quote(&v));
+    }
     crate::log::line("browser", "Game Mode: looking for a Chrome-family browser among Steam's non-Steam games (shortcuts.vdf, read only)");
     let Some(sc) = shortcuts::find_browser(&turbine_engine::home_dir()) else {
         crate::log::line("browser", "No Chrome-family browser among Steam's non-Steam games: Game Mode can't show one Turbine starts");
@@ -59,16 +58,6 @@ pub fn open_through_steam(url: &str) -> String {
         &format!("Found {} in Steam as \"{}\" (appid {}, game id {}, from {})", sc.browser, sc.name, sc.appid, shortcuts::game_id(sc.appid), sc.file.display()),
     );
     let link = sc.url();
-    let error = match open_steam_link(&link) {
-        Ok(()) => {
-            crate::log::line("browser", &format!("Started {} through Steam: {link}", sc.browser));
-            String::new()
-        }
-        Err(e) => {
-            crate::log::line("browser", &format!("Couldn't start {link} on the host ({e}); the app tries the steam:// link itself"));
-            e
-        }
-    };
     let helper = bridge::paired();
     let sent = match bridge::open_tab(url) {
         Ok(true) => {
@@ -79,7 +68,7 @@ pub fn open_through_steam(url: &str) -> String {
             crate::log::line(
                 "browser",
                 &if helper {
-                    format!("Waiting up to {} seconds for the helper to connect, then it opens {url}", bridge::OPEN_WAIT.as_secs())
+                    format!("The helper isn't connected yet: it opens {url} when it connects (within {} seconds)", bridge::OPEN_WAIT.as_secs())
                 } else {
                     "The browser helper isn't set up: the browser opens, but not on the page".to_string()
                 },
@@ -92,11 +81,10 @@ pub fn open_through_steam(url: &str) -> String {
         }
     };
     format!(
-        "{{\"how\":\"shortcut\",\"name\":{},\"browser\":{},\"steam\":{},\"helper\":{helper},\"sent\":{sent},\"error\":{}}}",
+        "{{\"how\":\"shortcut\",\"name\":{},\"browser\":{},\"steam\":{},\"helper\":{helper},\"sent\":{sent},\"error\":\"\"}}",
         quote(&sc.browser),
         quote(&sc.name),
-        quote(&link),
-        quote(&error)
+        quote(&link)
     )
 }
 
@@ -115,33 +103,18 @@ pub fn browser_shortcut_json() -> String {
     }
 }
 
-/// Opens a steam:// link on the host (Steam handles it, so Game Mode shows what it starts).
-fn open_steam_link(link: &str) -> Result<(), String> {
-    if !link.starts_with("steam://") || link.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("not a steam:// link".into());
-    }
-    let args: Vec<String> = if std::path::Path::new("/.flatpak-info").exists() {
-        vec!["flatpak-spawn".into(), "--host".into(), "xdg-open".into(), link.into()]
-    } else {
-        vec!["xdg-open".into(), link.into()]
-    };
-    spawn(&args)
-}
-
-/// Steam's own browser (the safety net in Game Mode). Answers "" or what went wrong.
+/// Steam's own browser (the safety net in Game Mode): the steam://openurl link the app opens with
+/// Qt.openUrlExternally, or "" when the address can't be opened that way.
 pub fn open_in_steam(url: &str) -> String {
-    match browser::steam_browser_command(url) {
-        Some(args) => match spawn(&args) {
-            Ok(()) => {
-                crate::log::line("browser", "Opened Nexus with: Steam's browser (steam://openurl)");
-                String::new()
-            }
-            Err(e) => {
-                crate::log::line("browser", &format!("Steam's browser couldn't be opened: {e}"));
-                e
-            }
-        },
-        None => "That address can't be opened.".into(),
+    match browser::steam_browser_link(url) {
+        Some(link) => {
+            crate::log::line("browser", "Asked Steam's browser to open Nexus (steam://openurl)");
+            link
+        }
+        None => {
+            crate::log::line("browser", "Steam's browser can't open that address");
+            String::new()
+        }
     }
 }
 

@@ -63,6 +63,7 @@ Window {
         property bool overlay: true         // Show status over other apps
         property bool addShown: false       // "Add Chrome to Steam" was shown once (Game Mode)
         property bool helperHintShown: false // "Set up the browser helper too" was shown once (Game Mode)
+        property string oldHelperShown: ""  // "Your browser helper is out of date" was shown for this helper version
     }
     // Settings > Updates (and Labs > Update channel).
     Settings {
@@ -93,9 +94,9 @@ Window {
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
-                                      "checkfocus", "menuskse", "addbrowser"].indexOf(page) >= 0
+                                      "checkfocus", "menuskse", "addbrowser", "slowhint"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
-        readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
+        readonly property bool labs: ["about", "labs", "report", "perfcheck", "activity"].indexOf(page) >= 0
         // --layout=desktop or tv (not saved from a picture); --external-display pretends an HDMI display is there.
         readonly property string layout: arg("layout")
         readonly property bool external: args.indexOf("--external-display") >= 0
@@ -130,7 +131,8 @@ Window {
                             "Optional, so it also opens in Game Mode: open the app menu, right-click the browser, and pick Add to Steam.",
                             "Switch back to Game Mode and open Turbine again."] }
                     : { checked: true, result: { found: true, name: "Google Chrome", how: "flatpak" } }
-                app.bridge = { running: true, port: 47701, paired: true, connected: page === "browser" ? 1 : 0, ext: "iniglfblobfbekihldmgekchfehncbeb", error: "" }
+                app.bridge = { running: true, port: 47701, paired: true, connected: page === "browser" ? 1 : 0, ext: "iniglfblobfbekihldmgekchfehncbeb", error: "",
+                               helper: page === "browser" ? "0.52" : "", bundled: "0.54", outdated: page === "browser", manual: page === "browser" }
                 app.openSection("Getting mods")
                 if (page === "helper") { app.helperFolder = "/home/deck/Downloads/Turbine browser helper"; app.infoIndex = 0; app.sheet = "helper" }
                 else if (page === "nobrowser") app.noBrowser()
@@ -188,6 +190,8 @@ Window {
             }
             else if (page === "pointerscroll") { app.page = "perf"; app.zone = "perf" }
             else if (page === "perfcheck") app.openPerf()
+            else if (page === "activity") { app.openSection("Labs"); app.openActivity() }
+            else if (page === "slowhint") Turbine.setSampleFree()
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
     }
@@ -225,6 +229,8 @@ Window {
             else if (shot.page === "playoptions") { app.press("start"); playOptionsShot.start() }
             else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("r3"); askView.open("Find a mod", "", "glow", "", 60, false, "Show them"); askView.accept() }
             else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.startSelect(app.mods[0]); app.act("down") }
+            // 0.54: a mod's file page opened on a free account: the status says to press Slow download.
+            else if (shot.page === "slowhint") app.openNexus("https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1")
             else if (shot.page === "opening8s") { app.getArea = "fallback"; app.getAct("a"); app.openHelpNow() }
             // 0.51: the mod menu of a mod that loses a file; the closed-early prompt; the next requirement; the list bar.
             else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; ")) }
@@ -668,7 +674,12 @@ Window {
         }
         function onBridgeJsonChanged() {
             if (shot.on) return
+            const was = app.bridge.connected || 0
             app.bridge = app.parse(Turbine.bridgeJson, { running: false })
+            if (app.bridge.connected > was && app.openState !== "")
+                app.note("browser", "The browser helper " + (app.bridge.helper || "") + " connected " + (Date.now() - app.openAt) + " ms after Open")
+            // An old helper that can't reload itself: how to bring it up to date, once (Settings, Getting mods says it too).
+            if (app.bridge.connected > was && app.bridge.manual) app.oldHelperOnce(app.bridge.helper)
             // The helper was paired on another port: the pairing page again, once.
             if (app.bridge.moved && !app.movedPaired) { app.movedPaired = true; app.note("bridge", "Port changed: opening the pairing page again"); app.pair(false) }
         }
@@ -846,8 +857,10 @@ Window {
         if (!game) return { level: Turbine.problems !== "" ? "warn" : "ok", words: "No games found yet", detail: "" }
         if (dl.active) return { level: "busy", words: "Downloading " + dl.label, detail: "", progress: dlPart >= 0 ? dlPart : 0,
                                  progressText: dl.total > 0 ? Math.round(dlPart * 100) + "% · " + sizeWords(dl.got) + " of " + sizeWords(dl.total) : sizeWords(dl.got) }
-        if (openState === "opening") return { level: "busy", words: "Opening Nexus in " + openName + "...", detail: "" }
-        if (openState === "open") return { level: "ok", words: "Nexus is open in " + openName + ". Turbine adds your download by itself.", detail: "" }
+        // A free account presses Slow download on the page itself; the status says so (catch.rs, watchPage).
+        const slow = status.active && !status.done && status.level === "wait" && status.text.indexOf("Slow download") >= 0
+        if (openState === "opening") return { level: "busy", words: slow ? status.text : "Opening Nexus in " + openName + "...", detail: slow ? "Opening Nexus in " + openName + "..." : "" }
+        if (openState === "open") return { level: slow ? "busy" : "ok", words: slow ? status.text : "Nexus is open in " + openName + ". Turbine adds your download by itself.", detail: "" }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
@@ -1535,6 +1548,7 @@ Window {
     function sheetAct(b) {
         if (sheet === "report") reportView.handleButton(b)
         else if (sheet === "perf") perfView.handleButton(b)
+        else if (sheet === "activity") activityView.handleButton(b)
         else if (sheet === "details" || sheet === "notice") {
             if (b === "a" || b === "b" || b === "view") {
                 if (sheet === "notice") seen.notSteamOS = true
@@ -1626,7 +1640,7 @@ Window {
             else if (b === "down") menuIndex = Math.min(cardMenuItems.length - 1, menuIndex + 1)
             else if (b === "a") cardMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
-        } else if (["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser"].indexOf(sheet) >= 0) infoAct(b)
+        } else if (["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"].indexOf(sheet) >= 0) infoAct(b)
         else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "ask") {
             // X shows Steam's keyboard again (closed by mistake); Y clears the field.
@@ -2177,12 +2191,14 @@ Window {
     property string openState: ""         // "", "opening", "open"
     property string openName: "the browser"
     property string openUrlNow: ""
+    property double openAt: 0
     property string addMode: ""           // "noshortcut" or "helper": what the Add Chrome to Steam sheet says
     function openNexus(url) {
         if (!browserFound) { noBrowser(); return false }
         const w = parse(Turbine.watchPage(url), {})
         if (w.watching) note("catch", "Watching Downloads for this mod (" + w.game + ")")
         openUrlNow = url
+        openAt = Date.now()
         openName = browser.result && browser.result.name ? browser.result.name : shot.on ? "Chrome" : "the browser"
         if (shot.on) { openState = "opening"; openTimer.restart(); return true }
         const r = parse(Turbine.openUrl(url), { how: "desktop" })
@@ -2191,10 +2207,19 @@ Window {
             else { note("browser", "No browser in Steam: Steam's browser instead"); steamOpen() }
             return true
         }
+        if (r.how === "oldhelper") {
+            // The helper in the browser is too old to open pages: Steam's browser opens the page now, and the
+            // player hears once how to bring the helper up to date.
+            oldHelperOnce(r.helperVersion)
+            steamOpen()
+            return true
+        }
         if (r.how === "shortcut") {
             openName = r.name || openName
-            // Starting it on the host failed: the steam:// link through the portal, as Steam's keyboard opens.
-            if (r.error) Qt.openUrlExternally(r.steam)
+            // The same way Play starts a game: Steam gets the link through the desktop portal and starts the
+            // browser where Game Mode shows it.
+            note("browser", "Asked Steam to start " + openName + ": " + r.steam)
+            Qt.openUrlExternally(r.steam)
             openState = "opening"
             openTimer.restart()
             if (!r.helper) {
@@ -2207,6 +2232,14 @@ Window {
         openTimer.restart()
         Qt.openUrlExternally(url)
         return true
+    }
+    // The helper in the browser is older than Turbine's and can't reload itself: said once per helper version.
+    function oldHelperOnce(v) {
+        if (shot.on || browserSet.oldHelperShown === (v || "?")) return
+        browserSet.oldHelperShown = v || "?"
+        note("browser", "Showing: the browser helper " + (v || "") + " is out of date (once)")
+        infoIndex = 0
+        sheet = "oldhelper"
     }
     function showAddBrowser(mode) {
         addMode = mode
@@ -2233,8 +2266,13 @@ Window {
         note("action", "Open in Steam's browser")
         openState = ""
         if (shot.on) return
-        const e = Turbine.openInSteam(openUrlNow)
-        if (e !== "") Qt.openUrlExternally("steam://openurl/" + openUrlNow)
+        const link = Turbine.openInSteam(openUrlNow)
+        if (link === "") { toast.showPlain("Steam's browser can't open that address."); return }
+        // Opened like Play's steam://rungameid, so Game Mode shows it.
+        Qt.openUrlExternally(link)
+        openName = "Steam's browser"
+        openState = "opening"
+        openTimer.restart()
     }
     function openHelpNow() { openTimer.stop(); if (sheet === "") { note("browser", "Still in front 8 seconds after Open: offering Steam's browser"); sheet = "openhelp" } }
     // 8 seconds after Open, Turbine still in front and no browser window: the safety net (Game Mode only).
@@ -2242,7 +2280,11 @@ Window {
         id: openTimer
         interval: 8000
         onTriggered: {
-            if (app.openState === "opening" && app.active && Turbine.gamemode) app.openHelpNow()
+            if (app.openState === "opening" && app.active && Turbine.gamemode) {
+                // Steam's browser is already the safety net: say so in the log rather than offer it again.
+                if (app.openName === "Steam's browser") app.note("browser", "Still in front 8 seconds after asking Steam's browser to open Nexus")
+                else app.openHelpNow()
+            }
             if (app.openState === "opening") app.openState = ""
         }
     }
@@ -2250,7 +2292,10 @@ Window {
     Connections {
         target: app
         function onActiveChanged() {
-            if (!app.active && app.openState === "opening") { app.openState = "open"; openTimer.stop() }
+            if (!app.active && app.openState === "opening") {
+                app.note("browser", app.openName + " came up: Turbine went to the background " + (Date.now() - app.openAt) + " ms after Open")
+                app.openState = "open"; openTimer.stop()
+            }
             else if (app.active && app.openState === "open") openGone.restart()
         }
     }
@@ -2618,7 +2663,12 @@ Window {
           how: "Free key: mod details, file lists and update checks. Premium key: also one-press downloads straight from Turbine. Without Premium, Get it on Nexus opens the file's page and Turbine adds the download." }
     ].concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
         { kind: "action", key: "helper", title: "Browser helper", action: "Set up",
-          how: "Saves Nexus downloads with no Save box, sorted into Game Mods folders. Tip: in Chrome's settings, turn off Ask where to save each file." },
+          how: "Saves Nexus downloads with no Save box, sorted into Game Mods folders. Tip: in Chrome's settings, turn off Ask where to save each file." }
+    ]).concat(bridge.outdated ? [
+        { kind: "info", key: "helperOld", title: "Your browser helper is out of date" + (bridge.helper ? " (" + bridge.helper + ", Turbine has " + bridge.bundled + ")" : ""),
+          how: bridge.manual ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. After that it updates by itself."
+                             : "Turbine put the new version in its folder and asks it to reload when it connects." }
+    ] : []).concat([
         { kind: "toggle", key: "overlay", title: "Show status over other apps",
           how: "A small Turbine card shows download progress and Added while you're in the browser.",
           value: browserSet.overlay, options: [false, true], names: ["Off", "On"] }
@@ -2804,7 +2854,8 @@ Window {
         { kind: "action", key: "keyless", title: "Nexus without a key", how: labsResult ? labsResult.text : "Asks Nexus for this game's mods with no key and says what came back", action: "Check" },
         { kind: "action", key: "steamBrowser", title: "Open Nexus in Steam's browser", how: "For the Steam's built-in browser check below: opens nexusmods.com in Steam and watches Downloads for the game on screen", action: "Open" },
         { kind: "action", key: "gmBrowser", title: "Browser through Steam (Game Mode)",
-          how: labsShortcut ? labsShortcut : "Looks for Chrome among Steam's non-Steam games, starts it through Steam, and asks the helper to open nexusmods.com", action: "Try it" }
+          how: labsShortcut ? labsShortcut : "Looks for Chrome among Steam's non-Steam games, starts it through Steam, and asks the helper to open nexusmods.com", action: "Try it" },
+        { kind: "action", key: "activity", title: "Activity log", how: "The last 500 lines of what Turbine did, to read, copy or save to Downloads", action: "Open" }
     ].concat(updates.prerelease ? [
         { kind: "action", key: "stable", title: "Go back to stable", how: "Installs the latest stable Turbine, even if it's older, and turns Pre-release off", action: "Go back" }
     ] : []).concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
@@ -2838,6 +2889,7 @@ Window {
         note("action", "Labs: " + row.title)
         if (row.key === "report") openReport(null, "", "")
         else if (row.key === "perf") openPerf()
+        else if (row.key === "activity") openActivity()
         else if (row.key === "keyless") { Turbine.nexusKeylessCheck(); toast.info("Asking Nexus...") }
         else if (row.key === "gmBrowser") {
             const r = parse(Turbine.browserShortcut(), { found: false })
@@ -2850,6 +2902,13 @@ Window {
             if (!shot.on) Qt.openUrlExternally(url)
             toast.showPlain("Opened Nexus Mods in Steam's browser. Try a Slow download; Turbine asks before adding what it finds.")
         }
+    }
+    // Labs > Activity log: the last 500 lines in a sheet.
+    property var activityLines: []
+    function openActivity() {
+        activityLines = Turbine.activityLog(500).split("\n").filter(l => l !== "")
+        note("labs", "Activity log open: " + activityLines.length + " lines")
+        sheet = "activity"
     }
     function labsItemText(item) {
         if (!item) return ""
@@ -4224,7 +4283,7 @@ Window {
     InfoSheet {
         id: infoView
         ui: kit
-        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser"].indexOf(app.sheet) >= 0
+        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"].indexOf(app.sheet) >= 0
         title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
                : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
                : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
@@ -4232,6 +4291,7 @@ Window {
                : app.sheet === "addbrowser" && app.addMode === "helper" ? "Set up the browser helper too"
                : app.sheet === "addbrowser" ? "Add Chrome to Steam so it opens in Game Mode"
                : app.sheet === "found" ? "Found a download"
+               : app.sheet === "oldhelper" ? "Your browser helper is out of date"
                : "Added " + app.notesName
         text: app.sheet === "quick" ? app.quickText
               : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". A opens its files on Nexus: pick the file for your " + app.gameTitle + " version and press Slow download. Turbine adds it too."
@@ -4241,7 +4301,9 @@ Window {
               : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
               : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
                     + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
-              : app.sheet === "notes" ? "Something to know about this mod:" : ""
+              : app.sheet === "notes" ? "Something to know about this mod:"
+              : app.sheet === "oldhelper" ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. Turbine already put the new version in its folder. After this once, the helper updates by itself."
+              : ""
         steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
                : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
                                            "Turn on Developer mode (top right).",
@@ -4256,6 +4318,7 @@ Window {
         footnote: app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
                   : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
                   : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
+                  : app.sheet === "oldhelper" ? "Until then, Nexus pages open in Steam's browser." + (app.bridge.helper ? " Helper " + app.bridge.helper + ", Turbine's " + (app.bridge.bundled || "") + "." : "")
                   : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.found.gameName + ": " + app.found.why + ". " : "")
                     + "The file stays in Downloads either way." + (app.found.more > 0 ? " " + app.plural(app.found.more, "more file waits", "more files wait") + " after this one." : "")
                   : ""
@@ -4421,6 +4484,21 @@ Window {
         onCancelled: app.askCancelled()
     }
 
+    ActivityLog {
+        id: activityView
+        ui: kit
+        visible: app.sheet === "activity"
+        lines: app.activityLines
+        onCopyClicked: {
+            Turbine.copyText(app.activityLines.slice(-500).join("\n") + "\n")
+            toast.showPlain("Copied the last " + Math.min(500, app.activityLines.length) + " lines of the activity log.")
+        }
+        onSaveClicked: {
+            const r = app.parse(Turbine.saveActivityLog(), { error: "Couldn't save it." })
+            toast.showPlain(r.error ? r.error : "Saved to Downloads as " + r.file + ".")
+        }
+        onCloseClicked: app.sheet = ""
+    }
     PerfCheck {
         id: perfView
         ui: kit
@@ -4468,6 +4546,7 @@ Window {
         // Keep this size? shows its own keys (Change, Keep, Go back) at a fixed size; no legend under it.
         if (s === "keepsize") return []
         if (s === "openhelp") return [["a", "Open in Steam's browser"], ["b", "Close"]]
+        if (s === "oldhelper") return [["a", "OK"]].concat(infoView.scrolls ? [["▲▼", "Scroll"]] : [])
         if (s === "nobrowser" || s === "helper" || s === "addbrowser") return [["◀▶", "Choose"]].concat(infoView.scrolls ? [["▲▼", "Scroll"]] : [])
         if (s === "found") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Not a mod"]]
         if (s === "notes") return [["a", "OK"]]
@@ -4475,6 +4554,7 @@ Window {
         if (s === "fomod") return [["a", "Choose"], ["start", "Next"], ["b", "Back a step"]]
         if (s === "ask") return [["a", "Done"], ["b", "Cancel"]].concat(Turbine.gamemode ? [["x", "Keyboard"]] : []).concat([["y", "Clear"]])
         if (s === "perf") return [["◀▶", "Choose"], ["b", "Close"]]
+        if (s === "activity") return [["▲▼", "Scroll"], ["◀▶", "Choose"], ["b", "Close"]]
         if (s === "report") return reportView.editing ? [["b", "Done typing"]] : [["▲▼", "Move"], ["b", "Close"]]
         if (s !== "") return [["b", "Close"]]
         if (zone === "rail") return [["a", "Open"], ["b", "Back"]].concat(railIndex < games.length ? [["x", "Game menu"]] : []).concat([["lb+rb", "Switch game"]])

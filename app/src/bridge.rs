@@ -538,6 +538,11 @@ struct State {
     /// A Nexus page waiting for the helper to connect (Game Mode starts the browser through Steam first), and when
     /// it was asked for.
     pending_open: Option<(String, Instant)>,
+    /// The helper version the last connected helper said in hello ("" when none has connected yet). Kept on disk,
+    /// so Turbine knows an old helper before it connects.
+    helper_version: String,
+    /// The helper version Turbine already asked to reload this run (asked once, so an old copy elsewhere can't loop).
+    reload_asked: Option<String>,
 }
 
 fn state() -> MutexGuard<'static, Option<State>> {
@@ -556,6 +561,61 @@ const TOKEN_FILE: &str = "bridge-token";
 const PAIRED_FILE: &str = "bridge-paired";
 /// The port used last time: tried first, so a paired helper finds Turbine where it was.
 const PORT_FILE: &str = "bridge-port";
+/// The version the last connected helper reported.
+const HELPER_VERSION_FILE: &str = "bridge-helper-version";
+
+/// The first helper version that knows "open" (opens a Nexus page in a new tab).
+pub const OPEN_SINCE: &str = "0.53";
+/// The first helper version that knows "reload" (reloads itself from its folder with chrome.runtime.reload()).
+pub const RELOAD_SINCE: &str = "0.54";
+/// What the player does once when the helper is too old to reload itself.
+pub const OLD_HELPER_TEXT: &str =
+    "Your browser helper is out of date. In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper.";
+
+/// The helper version this Turbine carries (from its manifest), set once at start; "" when it has none.
+pub static BUNDLED: OnceLock<String> = OnceLock::new();
+/// Run before Turbine asks a helper to reload: puts Turbine's newer helper files in the folder it loads from.
+pub static BEFORE_RELOAD: OnceLock<fn()> = OnceLock::new();
+
+/// Compares two dotted versions ("0.53", "0.41", "1.2"): numbers part by part, missing parts are 0. Anything that
+/// isn't a number counts as 0, so a broken version is always "older".
+pub fn version_older(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> { v.trim().split('.').map(|p| p.trim().parse().unwrap_or(0)).collect() };
+    let (x, y) = (parts(a), parts(b));
+    for i in 0..x.len().max(y.len()) {
+        let (p, q) = (x.get(i).copied().unwrap_or(0), y.get(i).copied().unwrap_or(0));
+        if p != q {
+            return p < q;
+        }
+    }
+    false
+}
+
+/// What Turbine does about a helper of version `helper` when it carries `bundled`.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HelperAge {
+    /// As new as Turbine's (or Turbine carries none, or the version isn't known).
+    Current,
+    /// Older, and it knows "reload": Turbine asks it to reload itself from its folder.
+    Reload,
+    /// Older, and too old to reload itself: the player presses reload in chrome://extensions once.
+    Manual,
+}
+
+pub fn helper_age(helper: &str, bundled: &str) -> HelperAge {
+    if helper.is_empty() || bundled.is_empty() || !version_older(helper, bundled) {
+        HelperAge::Current
+    } else if version_older(helper, RELOAD_SINCE) {
+        HelperAge::Manual
+    } else {
+        HelperAge::Reload
+    }
+}
+
+/// {"type":"reload"}: the helper reloads itself from its folder (an unpacked extension picks up new files).
+pub fn reload_message() -> String {
+    "{\"type\":\"reload\"}".to_string()
+}
 
 /// 32 random bytes as hex, from the system's random source.
 pub fn new_token() -> io::Result<String> {
@@ -598,6 +658,7 @@ fn load_or_make_token(dir: &Path) -> Result<String, String> {
 pub fn start(dir: &Path, log_line: fn(&str), handler: Handler) -> Result<u16, String> {
     let token = load_or_make_token(dir)?;
     let paired = std::fs::read_to_string(dir.join(PAIRED_FILE)).ok().and_then(|s| extension_id(&format!("chrome-extension://{}", s.trim())));
+    let helper_version = std::fs::read_to_string(dir.join(HELPER_VERSION_FILE)).map(|v| v.trim().chars().take(20).collect::<String>()).unwrap_or_default();
     let last: Option<u16> = std::fs::read_to_string(dir.join(PORT_FILE)).ok().and_then(|s| s.trim().parse().ok()).filter(|p| (FIRST_PORT..=LAST_PORT).contains(p));
     let mut listener = None;
     for port in last.into_iter().chain(FIRST_PORT..=LAST_PORT) {
@@ -608,7 +669,7 @@ pub fn start(dir: &Path, log_line: fn(&str), handler: Handler) -> Result<u16, St
     }
     let Some((listener, port)) = listener else {
         let e = format!("ports {FIRST_PORT} to {LAST_PORT} are all in use");
-        *state() = Some(State { port: 0, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: e.clone(), log: log_line, moved: false, pending_open: None });
+        *state() = Some(State { port: 0, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: e.clone(), log: log_line, moved: false, pending_open: None, helper_version, reload_asked: None });
         return Err(e);
     };
     // A paired helper looks for Turbine on the old port; when it had to change, the pairing page opens again.
@@ -616,7 +677,7 @@ pub fn start(dir: &Path, log_line: fn(&str), handler: Handler) -> Result<u16, St
     if last != Some(port) {
         let _ = write_private(&dir.join(PORT_FILE), &port.to_string());
     }
-    *state() = Some(State { port, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: String::new(), log: log_line, moved, pending_open: None });
+    *state() = Some(State { port, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: String::new(), log: log_line, moved, pending_open: None, helper_version, reload_asked: None });
     std::thread::Builder::new()
         .name("turbine-bridge".into())
         .spawn(move || {
@@ -662,22 +723,68 @@ pub fn set_games(json: String) {
     }
 }
 
-/// {"running","port","paired","connected","ext","error"} for Settings.
+/// {"running","port","paired","connected","ext","error","moved","helper","bundled","outdated","manual"} for Settings.
+/// "helper": the version the last connected helper reported; "outdated": it is older than the one Turbine carries;
+/// "manual": too old to reload itself (the player presses reload in chrome://extensions once).
 pub fn status_json() -> String {
+    let bundled = BUNDLED.get().map(String::as_str).unwrap_or("");
     let g = state();
     match g.as_ref() {
-        None => "{\"running\":false,\"port\":0,\"paired\":false,\"connected\":0,\"ext\":\"\",\"error\":\"\",\"moved\":false}".into(),
-        Some(s) => format!(
-            "{{\"running\":{},\"port\":{},\"paired\":{},\"connected\":{},\"ext\":{},\"error\":{},\"moved\":{}}}",
-            s.port != 0,
-            s.port,
-            s.paired.is_some(),
-            s.clients.len(),
-            quote(s.paired.as_deref().unwrap_or("")),
-            quote(&s.error),
-            s.moved && s.clients.is_empty()
+        None => format!(
+            "{{\"running\":false,\"port\":0,\"paired\":false,\"connected\":0,\"ext\":\"\",\"error\":\"\",\"moved\":false,\"helper\":\"\",\"bundled\":{},\"outdated\":false,\"manual\":false}}",
+            quote(bundled)
         ),
+        Some(s) => {
+            let age = helper_age(&s.helper_version, bundled);
+            format!(
+                "{{\"running\":{},\"port\":{},\"paired\":{},\"connected\":{},\"ext\":{},\"error\":{},\"moved\":{},\"helper\":{},\"bundled\":{},\"outdated\":{},\"manual\":{}}}",
+                s.port != 0,
+                s.port,
+                s.paired.is_some(),
+                s.clients.len(),
+                quote(s.paired.as_deref().unwrap_or("")),
+                quote(&s.error),
+                s.moved && s.clients.is_empty(),
+                quote(&s.helper_version),
+                quote(bundled),
+                age != HelperAge::Current,
+                age == HelperAge::Manual
+            )
+        }
     }
+}
+
+/// The version the last connected helper reported ("" when none has connected yet).
+pub fn helper_version() -> String {
+    state().as_ref().map(|s| s.helper_version.clone()).unwrap_or_default()
+}
+
+/// Does the helper know "open"? False only when the last one that connected was older than OPEN_SINCE: then a page
+/// shouldn't wait for it.
+pub fn helper_knows_open() -> bool {
+    let v = helper_version();
+    v.is_empty() || !version_older(&v, OPEN_SINCE)
+}
+
+/// A helper said its version in hello: kept (and saved). Answers whether Turbine should ask it to reload now (it is
+/// older than Turbine's, knows "reload", and wasn't asked for this version yet this run).
+pub fn note_helper_version(v: &str) -> bool {
+    let v: String = v.trim().chars().filter(|c| c.is_ascii_digit() || *c == '.').take(20).collect();
+    let bundled = BUNDLED.get().cloned().unwrap_or_default();
+    let mut g = state();
+    let Some(s) = g.as_mut() else { return false };
+    if v.is_empty() {
+        return false;
+    }
+    if s.helper_version != v {
+        s.helper_version = v.clone();
+        let _ = write_private(&s.dir.join(HELPER_VERSION_FILE), &v);
+    }
+    if helper_age(&v, &bundled) != HelperAge::Reload || s.reload_asked.as_deref() == Some(v.as_str()) {
+        return false;
+    }
+    s.reload_asked = Some(v);
+    true
 }
 
 /// Is an extension connected right now?
@@ -892,10 +999,32 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
                 format!("{{\"type\":\"welcome\",\"turbineVersion\":{},\"protocol\":{PROTOCOL},\"games\":{}}}", quote(VERSION.get().map(String::as_str).unwrap_or("")), s.games)
             };
             send(&out, OP_TEXT, welcome.as_bytes());
-            log(&format!("Browser helper {ext} connected (helper version {})", msg.str_at("ext").unwrap_or("?")));
+            let hv = msg.str_at("ext").unwrap_or("?").to_string();
+            let reload = note_helper_version(&hv);
+            let bundled = BUNDLED.get().cloned().unwrap_or_default();
+            log(&format!(
+                "Browser helper {ext} connected (helper version {hv}{})",
+                match helper_age(&hv, &bundled) {
+                    HelperAge::Current => String::new(),
+                    HelperAge::Reload => format!(", older than Turbine's {bundled}"),
+                    HelperAge::Manual => format!(", older than Turbine's {bundled} and too old to reload itself"),
+                }
+            ));
             if let Some(url) = take_pending_open() {
-                let sent = send(&out, OP_TEXT, open_message(&url).as_bytes());
-                log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
+                if version_older(&hv, OPEN_SINCE) {
+                    log(&format!("Didn't ask helper {hv} to open {url}: it is too old to know how"));
+                } else {
+                    let sent = send(&out, OP_TEXT, open_message(&url).as_bytes());
+                    log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
+                }
+            }
+            if reload {
+                // Turbine's newer files go into its folder first (catch.rs), so the reload picks them up.
+                if let Some(f) = BEFORE_RELOAD.get() {
+                    f();
+                }
+                let sent = send(&out, OP_TEXT, reload_message().as_bytes());
+                log(&format!("Asked helper {hv} to reload itself from its folder (Turbine has {bundled}){}", if sent { "" } else { " (it didn't take it)" }));
             }
             handler("connected", &msg);
             continue;
@@ -1230,5 +1359,31 @@ mod tests {
         assert!(kinds.contains(&"connected".to_string()) && kinds.contains(&"page".to_string()), "{kinds:?}");
         assert_eq!(std::fs::read_to_string(dir.join(PORT_FILE)).unwrap(), port.to_string());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn helper_versions_compare_by_number() {
+        assert!(version_older("0.41", "0.53"));
+        assert!(version_older("0.9", "0.10"));
+        assert!(version_older("0.53", "1.0"));
+        assert!(version_older("0.5", "0.5.1"));
+        assert!(!version_older("0.53", "0.53"));
+        assert!(!version_older("0.54", "0.53"));
+        assert!(!version_older("1.0", "0.99"));
+        assert!(version_older("?", "0.1"));
+    }
+
+    #[test]
+    fn old_helpers_reload_or_ask_the_player() {
+        assert_eq!(helper_age("0.53", "0.53"), HelperAge::Current);
+        assert_eq!(helper_age("0.60", "0.54"), HelperAge::Current);
+        assert_eq!(helper_age("", "0.54"), HelperAge::Current);
+        assert_eq!(helper_age("0.52", ""), HelperAge::Current);
+        // 0.53 and earlier don't know "reload": the player presses the reload arrow once.
+        assert_eq!(helper_age("0.41", "0.54"), HelperAge::Manual);
+        assert_eq!(helper_age("0.53", "0.54"), HelperAge::Manual);
+        assert_eq!(helper_age("0.54", "0.55"), HelperAge::Reload);
+        assert_eq!(reload_message(), "{\"type\":\"reload\"}");
+        assert!(OLD_HELPER_TEXT.contains("chrome://extensions"));
     }
 }

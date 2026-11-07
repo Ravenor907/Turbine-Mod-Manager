@@ -172,6 +172,11 @@ test("Messages from Turbine are checked and cleaned", () => {
   assert.equal(P.validateIncoming({ type: "choices", sessionId: "s", groups: [{ options: [{}] }] }), null);
   assert.deepEqual(P.validateIncoming({ type: "choices.done", sessionId: "s1" }), { type: "choices.done", sessionId: "s1" });
   assert.deepEqual(P.validateIncoming({ type: "error", text: "Nope" }), { type: "error", text: "Nope" });
+  // Turbine asks a helper older than its own to reload from its folder; extra fields are dropped.
+  assert.deepEqual(P.validateIncoming('{"type":"reload"}'), { type: "reload" });
+  assert.deepEqual(P.validateIncoming({ type: "reload", url: "https://evil.example/" }), { type: "reload" });
+  // "wait": Turbine waits for the player on the page (press Slow download).
+  assert.equal(P.validateIncoming({ type: "status", text: "Press Slow download on this page.", level: "wait" }).level, "wait");
 });
 
 test("Turbine may only open Nexus pages in a new tab", () => {
@@ -486,11 +491,13 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   const cancelled = [];
   const tabsMade = [];
   const windowsFocused = [];
+  let reloads = 0;
   const pick = (store, keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((k) => k in store).map((k) => [k, store[k]]));
   const chrome = {
     runtime: {
       id: "ourid",
       getManifest: () => JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")),
+      reload: () => reloads++,
       onConnect: on("connect"),
       onMessage: on("message"),
       onStartup: on("startup"),
@@ -595,6 +602,16 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   assert.equal(JSON.stringify(windowsFocused[0]), JSON.stringify([3, { focused: true }]));
   await sleep(50);
   assert.equal(tabsMade.length, 1, "the other site was not opened");
+
+  // Turbine waits for the player to press Slow download: the panel hears it and the badge says so.
+  fake.send({ type: "status", text: "Press Slow download on this page. Turbine adds the mod when it finishes.", level: "wait", progress: null, game: "Valheim" });
+  await until(() => panelMsgs.some((m) => m.status && m.status.level === "wait"), 2000, "wait status to panel");
+  assert.equal(badge[badge.length - 1], "!");
+
+  // Turbine put a newer helper in this one's folder: it reloads itself from there.
+  assert.equal(reloads, 0);
+  fake.send({ type: "reload" });
+  await until(() => reloads === 1, 2000, "reloaded");
 
   // A finished Nexus download goes out with its absolute path.
   const item = { id: 11, url: "https://cf-files.nexus-cdn.com/a.zip", referrer: "https://www.nexusmods.com/valheim/mods/387", filename: "/home/deck/Downloads/a.zip", totalBytes: 5, bytesReceived: 5, fileSize: 5, state: "complete" };
