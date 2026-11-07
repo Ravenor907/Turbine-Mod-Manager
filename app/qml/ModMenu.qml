@@ -59,6 +59,8 @@ Item {
         if (!it) return
         if (it.y < flick.contentY) flick.contentY = it.y
         else if (it.y + it.height > flick.contentY + flick.height) flick.contentY = it.y + it.height - flick.height
+        // The last row scrolls all the way, past the fade.
+        if (focusIndex === itemRepeater.count - 1) flick.contentY = Math.max(0, flick.contentHeight - flick.height)
     }
     onFocusIndexChanged: Qt.callLater(showFocused)
     onVisibleChanged: if (visible) { flick.contentY = 0; Qt.callLater(showFocused) }
@@ -141,7 +143,8 @@ Item {
             width: parent.width - root.ui.px(26)
             clip: true
             contentWidth: width
-            contentHeight: body.height
+            // A little room under the last row, so it never sits against the sheet's edge.
+            contentHeight: body.height + root.ui.px(6)
             boundsBehavior: Flickable.StopAtBounds
 
             Column {
@@ -164,6 +167,8 @@ Item {
                         danger: modelData.danger === true
                         more: modelData.more === true
                         focused: index === root.focusIndex
+                        // Curved icons aren't clipped by the list, so a row cut off at an edge hides its icon.
+                        iconShown: y >= flick.contentY - 1 && y + height <= flick.contentY + flick.height + 1
                         dangerColor: root.readable(root.ui.c.warn, root.ui.c.panel)
                         onClicked: root.activated(index)
                     }
@@ -238,6 +243,18 @@ Item {
                 }
             }
         }
+        // More rows below: a fade over the bottom edge of the list.
+        Rectangle {
+            visible: flick.contentY < flick.contentHeight - flick.height - 1
+            anchors.left: flick.left
+            anchors.right: flick.right
+            anchors.bottom: flick.bottom
+            height: root.ui.px(26)
+            gradient: Gradient {
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 1; color: root.ui.c.panel }
+            }
+        }
     }
 
     // One action in the sheet: icon tile, label, detail, and A on the focused one (or › when it leads further).
@@ -252,6 +269,7 @@ Item {
         property bool more: false
         property bool focused: false
         property color dangerColor: ui.c.warn
+        property bool iconShown: true
         signal clicked()
 
         implicitHeight: Math.max(ui.px(48), entryText.implicitHeight + ui.px(14))
@@ -284,7 +302,7 @@ Item {
             radius: entry.ui.px(6)
             color: entry.focused ? Qt.tint(entry.ui.c.card, Qt.rgba(entry.ui.c.accent.r, entry.ui.c.accent.g, entry.ui.c.accent.b, 0.28)) : entry.ui.c.raised
             Shape {
-                visible: entry.iconData !== ""
+                visible: entry.iconData !== "" && entry.iconShown
                 anchors.centerIn: parent
                 width: entry.ui.px(18)
                 height: width

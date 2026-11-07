@@ -535,6 +535,9 @@ struct State {
     log: fn(&str),
     /// The port isn't the one the helper was paired on: it needs the pairing page again.
     moved: bool,
+    /// A Nexus page waiting for the helper to connect (Game Mode starts the browser through Steam first), and when
+    /// it was asked for.
+    pending_open: Option<(String, Instant)>,
 }
 
 fn state() -> MutexGuard<'static, Option<State>> {
@@ -605,7 +608,7 @@ pub fn start(dir: &Path, log_line: fn(&str), handler: Handler) -> Result<u16, St
     }
     let Some((listener, port)) = listener else {
         let e = format!("ports {FIRST_PORT} to {LAST_PORT} are all in use");
-        *state() = Some(State { port: 0, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: e.clone(), log: log_line, moved: false });
+        *state() = Some(State { port: 0, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: e.clone(), log: log_line, moved: false, pending_open: None });
         return Err(e);
     };
     // A paired helper looks for Turbine on the old port; when it had to change, the pairing page opens again.
@@ -613,7 +616,7 @@ pub fn start(dir: &Path, log_line: fn(&str), handler: Handler) -> Result<u16, St
     if last != Some(port) {
         let _ = write_private(&dir.join(PORT_FILE), &port.to_string());
     }
-    *state() = Some(State { port, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: String::new(), log: log_line, moved });
+    *state() = Some(State { port, token, dir: dir.to_path_buf(), paired, clients: Vec::new(), games: "[]".into(), error: String::new(), log: log_line, moved, pending_open: None });
     std::thread::Builder::new()
         .name("turbine-bridge".into())
         .spawn(move || {
@@ -680,6 +683,50 @@ pub fn status_json() -> String {
 /// Is an extension connected right now?
 pub fn connected() -> bool {
     state().as_ref().is_some_and(|s| !s.clients.is_empty())
+}
+
+/// Has a helper ever paired with this Turbine?
+pub fn paired() -> bool {
+    state().as_ref().is_some_and(|s| s.paired.is_some())
+}
+
+/// How long a page waits for the helper to connect before it is dropped (the browser was closed again, or it has
+/// no helper).
+pub const OPEN_WAIT: Duration = Duration::from_secs(180);
+
+/// {"type":"open","url":...}: the helper opens the page in a new tab.
+pub fn open_message(url: &str) -> String {
+    format!("{{\"type\":\"open\",\"url\":{}}}", quote(url))
+}
+
+/// Asks the helper to open a Nexus page in a new tab. Sent now when a helper is connected (answers true); otherwise
+/// kept until one connects within OPEN_WAIT (answers false). Only nexusmods.com https pages; anything else is
+/// refused.
+pub fn open_tab(url: &str) -> Result<bool, String> {
+    if !turbine_engine::browser::nexus_tab_url(url) {
+        return Err("only Nexus Mods pages open this way".into());
+    }
+    if connected() {
+        broadcast(&open_message(url));
+        if connected() {
+            if let Some(s) = state().as_mut() {
+                s.pending_open = None;
+            }
+            return Ok(true);
+        }
+    }
+    if let Some(s) = state().as_mut() {
+        s.pending_open = Some((url.to_string(), Instant::now()));
+    }
+    Ok(false)
+}
+
+/// The waiting page, if it is still fresh; it is taken (sent once).
+fn take_pending_open() -> Option<String> {
+    let mut g = state();
+    let s = g.as_mut()?;
+    let (url, at) = s.pending_open.take()?;
+    (at.elapsed() <= OPEN_WAIT).then_some(url)
 }
 
 /// Sends a message to every connected extension. Connections that can't take it are dropped.
@@ -846,6 +893,10 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
             };
             send(&out, OP_TEXT, welcome.as_bytes());
             log(&format!("Browser helper {ext} connected (helper version {})", msg.str_at("ext").unwrap_or("?")));
+            if let Some(url) = take_pending_open() {
+                let sent = send(&out, OP_TEXT, open_message(&url).as_bytes());
+                log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
+            }
             handler("connected", &msg);
             continue;
         }
@@ -1071,6 +1122,15 @@ mod tests {
         assert_eq!(feed(&mut a, &client_frame(true, OP_TEXT, &[0xff, 0xfe]), 100).unwrap_err().0, 1007);
         let mut a = Assembler::default();
         assert_eq!(feed(&mut a, &client_frame(true, OP_CLOSE, &[3]), 100).unwrap_err().0, 1002);
+    }
+
+    #[test]
+    fn open_asks_only_for_nexus_pages() {
+        assert_eq!(open_message("https://www.nexusmods.com/a?b=\"c\""), "{\"type\":\"open\",\"url\":\"https://www.nexusmods.com/a?b=\\\"c\\\"\"}");
+        assert!(open_tab("https://evil.example/").is_err());
+        assert!(open_tab("http://www.nexusmods.com/").is_err());
+        // Nothing is connected here, so a Nexus page waits for the helper.
+        assert_eq!(open_tab("https://www.nexusmods.com/skyrimspecialedition/mods/1"), Ok(false));
     }
 
     #[test]

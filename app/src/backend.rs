@@ -155,6 +155,11 @@ pub mod qobject {
         #[cxx_name = "copyText"]
         fn copy_text(self: &Self, text: &QString);
 
+        /// The text on the clipboard ("" when there is none). Never logged.
+        #[qinvokable]
+        #[cxx_name = "clipboardText"]
+        fn clipboard_text(self: &Self) -> QString;
+
         /// The Labs report, written out in plain text. item: what it's about (may be empty); interface: page,
         /// focus, window and look, from QML; perf: Labs > Performance check's report or ""; shot: the screenshot's
         /// file name or "".
@@ -255,11 +260,17 @@ pub mod qobject {
         #[cxx_name = "purgeAllRemoved"]
         fn purge_all_removed(self: Pin<&mut Self>);
 
-        /// Opens a web page: in Game Mode Turbine starts the browser itself (launch.rs). Answers
-        /// {"how": "gamemode" | "desktop" | "portal", "name", "error"}; with "desktop" or "portal" QML opens it.
+        /// Opens a web page: in Game Mode through the player's browser in Steam and the helper (launch.rs). Answers
+        /// {"how": "shortcut" | "noshortcut" | "desktop", "name", "error", ...}; with "desktop" QML opens it.
         #[qinvokable]
         #[cxx_name = "openUrl"]
         fn open_url(self: Pin<&mut Self>, url: &QString) -> QString;
+
+        /// Is there a Chrome-family browser among Steam's non-Steam games? {"found":false} or
+        /// {"found":true,"browser","name","appid","gameid","url"} (read only, logged).
+        #[qinvokable]
+        #[cxx_name = "browserShortcut"]
+        fn browser_shortcut(self: &Self) -> QString;
 
         /// Opens a page in Steam's own browser. Answers "" or what went wrong.
         #[qinvokable]
@@ -1502,6 +1513,10 @@ impl qobject::Turbine {
         QString::from(crate::launch::open(&url.to_string(), gm, &b).as_str())
     }
 
+    pub fn browser_shortcut(&self) -> QString {
+        QString::from(crate::launch::browser_shortcut_json().as_str())
+    }
+
     pub fn open_in_steam(self: Pin<&mut Self>, url: &QString) -> QString {
         QString::from(crate::launch::open_in_steam(&url.to_string()).as_str())
     }
@@ -1641,7 +1656,7 @@ impl qobject::Turbine {
                     return;
                 }
                 match turbine_engine::kcd::restore_mod_order(&game.install_dir, &keep) {
-                    Ok(true) => w.say("Your mod_order.txt is back as it was before Turbine. Turbine adds its mods that are on again at the next change or Play.", "ok"),
+                    Ok(true) => w.say("Your mod_order.txt is back as it was before Turbine. Turbine re-adds its own mods that are on at your next change or Play, so the file changes again then.", "ok"),
                     Ok(false) => w.say("There is no earlier mod_order.txt to put back.", "warn"),
                     Err(e) => w.say(e, "error"),
                 }
@@ -1862,6 +1877,23 @@ impl qobject::Turbine {
         crate::log::line(&kind.to_string(), &text.to_string());
     }
 
+    pub fn clipboard_text(&self) -> QString {
+        // SAFETY: qtglue.cpp returns a malloc'd, zero-ended copy (or null) made on this (the GUI) thread; it is read
+        // once here and handed back to turbine_free_text.
+        let text = unsafe {
+            let p = turbine_clipboard_text();
+            if p.is_null() {
+                String::new()
+            } else {
+                let t = std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned();
+                turbine_free_text(p);
+                t
+            }
+        };
+        crate::log::line("action", &format!("Read the clipboard ({} characters)", text.chars().count()));
+        QString::from(text.as_str())
+    }
+
     pub fn copy_text(&self, text: &QString) {
         let text = text.to_string().replace('\0', "");
         let Ok(c) = std::ffi::CString::new(text) else { return };
@@ -1968,6 +2000,8 @@ impl qobject::Turbine {
 extern "C" {
     // qtglue.cpp
     fn turbine_copy_text(text: *const std::os::raw::c_char);
+    fn turbine_clipboard_text() -> *mut std::os::raw::c_char;
+    fn turbine_free_text(text: *mut std::os::raw::c_char);
 }
 
 /// Applies a game's waiting changes; `n` of them go back on the count if it fails.

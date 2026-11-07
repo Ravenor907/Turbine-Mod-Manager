@@ -1,4 +1,5 @@
-//! Valve's text KeyValues format ("VDF"), as used by libraryfolders.vdf and appmanifest_*.acf.
+//! Valve's text KeyValues format ("VDF"), as used by libraryfolders.vdf and appmanifest_*.acf, and its binary form,
+//! as used by shortcuts.vdf (the player's non-Steam games).
 //!
 //! Keys are case-insensitive in Steam's own reader, so lookups here are too.
 
@@ -210,6 +211,114 @@ impl Parser {
                 Tok::Open if depth >= MAX_DEPTH => return Err(self.err("nested too deeply")),
                 Tok::Open => Vdf::Obj(self.object_body(depth + 1)?),
                 Tok::Close | Tok::End => return Err(self.err("key without a value")),
+            };
+            items.push((key, value));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------- binary
+
+/// Binary VDF type bytes.
+const B_OBJ: u8 = 0x00;
+const B_STR: u8 = 0x01;
+const B_INT: u8 = 0x02;
+const B_FLOAT: u8 = 0x03;
+const B_PTR: u8 = 0x04;
+const B_WSTR: u8 = 0x05;
+const B_COLOR: u8 = 0x06;
+const B_U64: u8 = 0x07;
+const B_END: u8 = 0x08;
+const B_I64: u8 = 0x0A;
+const B_END_ALT: u8 = 0x0B;
+
+/// Parses binary VDF (shortcuts.vdf). Each item is a type byte, a key ending in a zero byte, then the value; an
+/// object ends with 0x08. Strings become `Vdf::Str`; 32-bit numbers become their unsigned decimal form (Steam keeps
+/// a shortcut's appid as a 32-bit number whose top bit is set, so "2147483649", not "-2147483647"); 64-bit numbers
+/// and floats become decimal too. Never panics on a broken file; `line` in an error is the byte offset.
+pub fn parse_binary(bytes: &[u8]) -> Result<Vdf, VdfError> {
+    let mut r = BinReader { b: bytes, pos: 0 };
+    let items = r.object(0, true)?;
+    Ok(Vdf::Obj(items))
+}
+
+struct BinReader<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl BinReader<'_> {
+    fn err(&self, message: &'static str) -> VdfError {
+        VdfError { line: self.pos, message }
+    }
+
+    fn byte(&mut self) -> Option<u8> {
+        let v = *self.b.get(self.pos)?;
+        self.pos += 1;
+        Some(v)
+    }
+
+    fn take(&mut self, n: usize) -> Result<&[u8], VdfError> {
+        let end = self.pos.checked_add(n).filter(|e| *e <= self.b.len()).ok_or_else(|| self.err("file ends inside a value"))?;
+        let out = &self.b[self.pos..end];
+        self.pos = end;
+        Ok(out)
+    }
+
+    fn cstr(&mut self) -> Result<String, VdfError> {
+        let rest = &self.b[self.pos..];
+        let len = rest.iter().position(|&c| c == 0).ok_or_else(|| self.err("text without an end"))?;
+        let s = String::from_utf8_lossy(&rest[..len]).into_owned();
+        self.pos += len + 1;
+        Ok(s)
+    }
+
+    fn wstr(&mut self) -> Result<String, VdfError> {
+        let mut units = Vec::new();
+        loop {
+            let b = self.take(2)?;
+            let u = u16::from_le_bytes([b[0], b[1]]);
+            if u == 0 {
+                return Ok(String::from_utf16_lossy(&units));
+            }
+            units.push(u);
+        }
+    }
+
+    /// Reads items until the object's end byte (or, at the top level, the end of the file).
+    fn object(&mut self, depth: usize, top: bool) -> Result<Vec<(String, Vdf)>, VdfError> {
+        let mut items = Vec::new();
+        loop {
+            let Some(t) = self.byte() else {
+                return if top { Ok(items) } else { Err(self.err("missing end of object")) };
+            };
+            if t == B_END || t == B_END_ALT {
+                // At the top level this is the end byte Steam writes after the root object.
+                return Ok(items);
+            }
+            let key = self.cstr()?;
+            let value = match t {
+                B_OBJ if depth >= MAX_DEPTH => return Err(self.err("nested too deeply")),
+                B_OBJ => Vdf::Obj(self.object(depth + 1, false)?),
+                B_STR => Vdf::Str(self.cstr()?),
+                B_WSTR => Vdf::Str(self.wstr()?),
+                B_INT | B_PTR | B_COLOR => {
+                    let b = self.take(4)?;
+                    Vdf::Str(u32::from_le_bytes([b[0], b[1], b[2], b[3]]).to_string())
+                }
+                B_FLOAT => {
+                    let b = self.take(4)?;
+                    Vdf::Str(f32::from_le_bytes([b[0], b[1], b[2], b[3]]).to_string())
+                }
+                B_U64 => {
+                    let b = self.take(8)?;
+                    Vdf::Str(u64::from_le_bytes(b.try_into().unwrap_or([0; 8])).to_string())
+                }
+                B_I64 => {
+                    let b = self.take(8)?;
+                    Vdf::Str(i64::from_le_bytes(b.try_into().unwrap_or([0; 8])).to_string())
+                }
+                _ => return Err(self.err("unknown value type")),
             };
             items.push((key, value));
         }

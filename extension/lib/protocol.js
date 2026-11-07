@@ -63,6 +63,19 @@
     return { domain, modId, fileId };
   }
 
+  // May Turbine have this page opened in a new tab? Only https pages on www.nexusmods.com or another
+  // nexusmods.com host, with no user name or port, at most 2048 characters. Opening a tab is all the helper does
+  // with it: it never clicks anything on the page.
+  function isNexusTabUrl(text) {
+    if (typeof text !== "string" || text.length > 2048 || /[\s\\]/.test(text)) return null;
+    const u = parseUrl(text);
+    if (!u || u.protocol !== "https:" || u.username || u.password || u.port) return null;
+    const host = u.hostname.toLowerCase();
+    if (!host.endsWith(".nexusmods.com")) return null;
+    if (!/^([a-z0-9-]+\.)+nexusmods\.com$/.test(host)) return null;
+    return u.href;
+  }
+
   function isNxmUrl(text) {
     if (typeof text !== "string" || text.length > 2048) return false;
     return /^nxm:\/\/[a-z0-9_-]+\/[^\s"'<>\\]+$/i.test(text);
@@ -175,6 +188,10 @@
       case "error":
         if (typeof msg.text !== "string") return null;
         return { type: "error", text: str(msg.text, 1000) };
+      case "open": {
+        const url = isNexusTabUrl(msg.url);
+        return url ? { type: "open", url } : null;
+      }
       default:
         return null;
     }
@@ -222,6 +239,7 @@
     isNexusDownload,
     parseNexusUrl,
     isNxmUrl,
+    isNexusTabUrl,
     isToken,
     isPort,
     parsePairingUrl,

@@ -247,3 +247,23 @@ pub fn steam_browser_command(url: &str) -> Option<Vec<String>> {
     }
     Some(vec!["flatpak-spawn".into(), "--host".into(), "xdg-open".into(), format!("steam://openurl/{url}")])
 }
+
+/// May Turbine ask the browser helper to open this address in a new tab? Only https pages on www.nexusmods.com or
+/// another nexusmods.com host, with no user name, port, spaces or control characters, at most 2048 characters. The
+/// helper checks the same rule again before it opens anything.
+pub fn nexus_tab_url(url: &str) -> bool {
+    if url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '\\') {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else { return false };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let host = rest[..end].to_ascii_lowercase();
+    if host.contains('@') || host.contains(':') {
+        return false;
+    }
+    let ok_label = |l: &str| !l.is_empty() && l.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    match host.strip_suffix(".nexusmods.com") {
+        Some(sub) => sub.split('.').all(ok_label),
+        None => false,
+    }
+}

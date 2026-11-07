@@ -174,6 +174,38 @@ test("Messages from Turbine are checked and cleaned", () => {
   assert.deepEqual(P.validateIncoming({ type: "error", text: "Nope" }), { type: "error", text: "Nope" });
 });
 
+test("Turbine may only open Nexus pages in a new tab", () => {
+  for (const ok of [
+    "https://www.nexusmods.com/skyrimspecialedition/mods/12604?tab=files&file_id=1",
+    "https://next.nexusmods.com/settings/api-keys",
+    "https://www.nexusmods.com/settings/api-keys",
+  ]) {
+    assert.equal(P.isNexusTabUrl(ok), new URL(ok).href, ok);
+    assert.deepEqual(P.validateIncoming({ type: "open", url: ok }), { type: "open", url: new URL(ok).href });
+  }
+  for (const bad of [
+    "http://www.nexusmods.com/",
+    "https://nexusmods.com/",
+    "https://nexusmods.com.evil.example/",
+    "https://evilnexusmods.com/",
+    "https://user@www.nexusmods.com/",
+    "https://www.nexusmods.com:8443/",
+    "https://www.nexusmods.com/ x",
+    "https://www.nexusmods.com\\@evil.example/",
+    "javascript:alert(1)",
+    "nxm://skyrim/mods/1/files/2",
+    "chrome://settings",
+    "https://www.nexusmods.com/" + "a".repeat(2100),
+    "",
+    42,
+    null,
+  ]) {
+    assert.equal(P.isNexusTabUrl(bad), null, String(bad));
+    assert.equal(P.validateIncoming({ type: "open", url: bad }), null, String(bad));
+  }
+  assert.equal(P.validateIncoming({ type: "open" }), null);
+});
+
 test("Messages to Turbine have the protocol's fields", () => {
   assert.deepEqual(P.build.hello(TOKEN, "0.3"), { type: "hello", token: TOKEN, version: 1, ext: "0.3" });
   assert.deepEqual(P.build.page("https://www.nexusmods.com/valheim/mods/387?tab=files"), {
@@ -452,6 +484,8 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   const badge = [];
   const restarted = [];
   const cancelled = [];
+  const tabsMade = [];
+  const windowsFocused = [];
   const pick = (store, keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((k) => k in store).map((k) => [k, store[k]]));
   const chrome = {
     runtime: {
@@ -478,6 +512,16 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
       },
       cancel: async (id) => cancelled.push(id),
       erase: async (q) => cancelled.push(q.id),
+    },
+    tabs: {
+      create: async (o) => {
+        tabsMade.push(o);
+        return { id: 5, windowId: 3 };
+      },
+    },
+    windows: {
+      update: async (id, o) => windowsFocused.push([id, o]),
+      create: async () => {},
     },
     action: {
       setBadgeText: (o) => badge.push(o.text),
@@ -541,6 +585,16 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   assert.deepEqual(await fake.waitFor((m) => m.type === "choice"), { type: "choice", sessionId: "s9", step: 0, selected: ["x"] });
   fake.send({ type: "choices.done", sessionId: "s9" });
   await until(() => panelMsgs.length && panelMsgs[panelMsgs.length - 1].choices === null, 2000, "choices cleared");
+
+  // Turbine asks for a Nexus page (Game Mode): it opens in a new tab in front. Anything else is ignored.
+  fake.send({ type: "open", url: "https://example.com/" });
+  fake.send({ type: "open", url: "https://www.nexusmods.com/valheim/mods/387?tab=files&file_id=5" });
+  await until(() => tabsMade.length === 1, 2000, "tab opened");
+  assert.equal(JSON.stringify(tabsMade[0]), JSON.stringify({ url: "https://www.nexusmods.com/valheim/mods/387?tab=files&file_id=5", active: true }));
+  await until(() => windowsFocused.length === 1, 2000, "window focused");
+  assert.equal(JSON.stringify(windowsFocused[0]), JSON.stringify([3, { focused: true }]));
+  await sleep(50);
+  assert.equal(tabsMade.length, 1, "the other site was not opened");
 
   // A finished Nexus download goes out with its absolute path.
   const item = { id: 11, url: "https://cf-files.nexus-cdn.com/a.zip", referrer: "https://www.nexusmods.com/valheim/mods/387", filename: "/home/deck/Downloads/a.zip", totalBytes: 5, bytesReceived: 5, fileSize: 5, state: "complete" };

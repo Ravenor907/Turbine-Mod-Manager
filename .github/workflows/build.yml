@@ -262,7 +262,7 @@ jobs:
             shoot "code-$size" "$size" code "$PWD/home" --game=$lethal \
               "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
             # The browser: Settings > Accounts > Browser, the no-browser warning, the helper's steps, the status card.
-            for page in browser nobrowser helper overlay overlaygm; do shoot "$page-$size" "$size" $page "$PWD/home"; done
+            for page in browser nobrowser helper overlay overlaygm addbrowser; do shoot "$page-$size" "$size" $page "$PWD/home"; done
             # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
             cp2077=steam:1091500
             w3=steam:292030
@@ -370,6 +370,14 @@ jobs:
             log="$PWD/data/check-witcher-$size/turbine-mod-manager/activity.log"
             if grep -q "Check before Play buttons: .*Turn off Faster Roach" "$log"; then echo "::notice title=Witcher clash $size::$(grep -h 'Check before Play buttons' "$log" | head -n1 | cut -c1-200)"
             else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
+          done
+          # 0.53: Game Mode's browser through Steam: with no shortcuts.vdf the check finds nothing and says so, and
+          # Add Chrome to Steam shows.
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/addbrowser-$size/turbine-mod-manager/activity.log"
+            if grep -q "Recheck: no Chrome-family browser among Steam's non-Steam games" "$log" && grep -q "Showing Add Chrome to Steam" "$log"; then
+              echo "::notice title=Add Chrome to Steam $size::$(grep -h 'Recheck:' "$log" | head -n1 | cut -c1-200)"
+            else echo "::error title=Add Chrome to Steam didn't show ($size)::"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
           done
           # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
           shoot "size150-1280x800" 1280x800 size150 "$PWD/home"

@@ -6,6 +6,8 @@
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
 #include <QtGui/QClipboard>
+#include <cstdlib>
+#include <cstring>
 #include <QtGui/QGuiApplication>
 // Before Xlib below (its macros clash with names in Qt's headers).
 #include <QtCore/QCoreApplication>
@@ -47,6 +49,21 @@ extern "C" void turbine_copy_text(const char *text)
 {
     if (QClipboard *clip = QGuiApplication::clipboard())
         clip->setText(QString::fromUtf8(text));
+}
+
+// The clipboard's text as a malloc'd UTF-8 copy for Rust (freed with turbine_free_text), or null when there is none.
+extern "C" char *turbine_clipboard_text()
+{
+    QClipboard *clip = QGuiApplication::clipboard();
+    if (!clip)
+        return nullptr;
+    const QByteArray b = clip->text().toUtf8();
+    return strdup(b.constData());
+}
+
+extern "C" void turbine_free_text(char *text)
+{
+    free(text);
 }
 
 // The Game Mode status overlay. gamescope (SteamOS's Game Mode compositor) paints a window as an overlay over the

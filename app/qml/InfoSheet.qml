@@ -3,7 +3,8 @@ import QtQuick
 // A plain sheet: a title, a few sentences, numbered steps or a list of notes, and one or two buttons. Used for the
 // no-browser warning, the browser helper's setup steps, a mod's install notes and "Add this file?" for a download
 // the watcher could only guess. A runs the focused button (drawn with A); the others show their own key (X, Y, B).
-// Main.qml handles the keys.
+// Main.qml handles the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the
+// wheel) and the buttons stay in view at the bottom.
 Item {
     id: sh
     required property var ui
@@ -20,22 +21,44 @@ Item {
     signal activated(int index)
     signal closed()
 
+    readonly property bool scrolls: flick.contentHeight > flick.height + 1
+    // Scrolls the words by a step (d = 1 down, -1 up). False when they are already at that end.
+    function scrollBy(d) {
+        const before = flick.contentY
+        flick.contentY = Math.max(0, Math.min(flick.contentHeight - flick.height, flick.contentY + d * sh.ui.px(80)))
+        return flick.contentY !== before
+    }
+    onVisibleChanged: if (visible) flick.contentY = 0
+
     Rectangle { anchors.fill: parent; color: "#C0000000" }
     MouseArea { anchors.fill: parent; onClicked: sh.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - sh.ui.px(40), sh.ui.px(660))
-        height: Math.min(parent.height - sh.ui.px(60), col.implicitHeight + sh.ui.px(40))
+        // Clear of the legend at the bottom (px 44) and never past the top.
+        height: Math.min(parent.height - sh.ui.px(110), col.implicitHeight + btnFlow.implicitHeight + sh.ui.px(52))
+        anchors.verticalCenterOffset: -sh.ui.px(20)
         radius: sh.ui.px(10)
         color: sh.ui.c.panel
         border.color: sh.ui.c.line
         clip: true
         MouseArea { anchors.fill: parent }
         Rectangle { width: parent.width; height: sh.ui.px(3); color: sh.ui.c.accent; radius: sh.ui.px(2) }
+        Flickable {
+            id: flick
+            x: sh.ui.px(22)
+            width: parent.width - sh.ui.px(44)
+            anchors.bottom: btnFlow.top
+            anchors.bottomMargin: sh.ui.px(8)
+            anchors.top: parent.top
+            anchors.topMargin: sh.ui.px(20)
+            clip: true
+            contentWidth: width
+            contentHeight: col.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
         Column {
             id: col
-            x: sh.ui.px(22); y: sh.ui.px(20)
-            width: parent.width - sh.ui.px(44)
+            width: flick.width
             spacing: sh.ui.px(10)
             Text {
                 width: parent.width
@@ -99,10 +122,25 @@ Item {
                 color: sh.ui.c.muted
                 font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(14)
             }
+        }
+        }
+        // More words below: a fade over the last line.
+        Rectangle {
+            visible: sh.scrolls && flick.contentY < flick.contentHeight - flick.height - 1
+            anchors.left: flick.left; anchors.right: flick.right; anchors.bottom: flick.bottom
+            height: sh.ui.px(28)
+            gradient: Gradient {
+                GradientStop { position: 0; color: "transparent" }
+                GradientStop { position: 1; color: sh.ui.c.panel }
+            }
+        }
             Flow {
-                width: parent.width
+                id: btnFlow
+                x: sh.ui.px(22)
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: sh.ui.px(18)
+                width: parent.width - sh.ui.px(44)
                 spacing: sh.ui.px(10)
-                topPadding: sh.ui.px(4)
                 Repeater {
                     model: sh.buttons
                     Rectangle {
@@ -134,6 +172,5 @@ Item {
                     }
                 }
             }
-        }
     }
 }

@@ -1,4 +1,5 @@
-// Service worker: keeps the link to Turbine, reports Nexus downloads and nxm links, and feeds the panel and popup.
+// Service worker: keeps the link to Turbine, reports Nexus downloads and nxm links, feeds the panel and popup, and
+// opens the Nexus page Turbine asks for in a new tab (Game Mode starts the browser through Steam, then sends it).
 /* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads */
 "use strict";
 
@@ -50,12 +51,30 @@ function handleTurbine(msg) {
     case "error":
       view.lastError = msg.text;
       break;
+    case "open":
+      openTab(msg.url);
+      return;
     default:
       break;
   }
   chrome.storage.session.set({ view });
   updateBadge();
   broadcast();
+}
+
+// A new tab on a Nexus page, in front. Checked again here; opening a tab is all this does (nothing is clicked).
+// chrome.tabs.create needs no permission; with no window open yet, a new window takes the page.
+function openTab(url) {
+  const safe = P.isNexusTabUrl(url);
+  if (!safe) return;
+  chrome.tabs
+    .create({ url: safe, active: true })
+    .then((tab) => {
+      if (tab && typeof tab.windowId === "number" && chrome.windows) chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+    })
+    .catch(() => {
+      if (chrome.windows) chrome.windows.create({ url: safe, focused: true }).catch(() => {});
+    });
 }
 
 function snapshot() {

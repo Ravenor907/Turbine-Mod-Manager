@@ -26,6 +26,7 @@ pub mod profiles;
 pub mod proton;
 pub mod rules;
 pub mod selfupdate;
+pub mod shortcuts;
 pub mod sha256;
 pub mod steam;
 pub mod store;
