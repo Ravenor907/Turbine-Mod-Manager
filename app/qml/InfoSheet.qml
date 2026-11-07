@@ -92,7 +92,8 @@ Item {
             Text {
                 visible: sh.footnote !== ""
                 width: parent.width
-                wrapMode: Text.WrapAnywhere
+                // Long folder names still break; words don't.
+                wrapMode: Text.Wrap
                 text: sh.footnote
                 color: sh.ui.c.muted
                 font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(14)

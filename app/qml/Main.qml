@@ -76,7 +76,7 @@ Window {
         readonly property int h: parseInt(arg("size").split("x")[1]) || 800
         readonly property string page: arg("page")
         // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
-        readonly property bool slow: ["pointer", "pointerscroll", "caught", "nexusnokey", "mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
+        readonly property bool slow: ["pointer", "pointerscroll", "checkend", "caught", "nexusnokey", "mods", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -147,7 +147,7 @@ Window {
         interval: 2500
         onTriggered: {
             if (shot.page === "menu" && app.menuMod) app.sheet = "modmenu"
-            else if (shot.page === "check") app.startPlay()
+            else if (shot.page === "check" || shot.page === "checkend") { app.startPlay(); if (shot.page === "checkend") checkEndShot.start() }
             else if (shot.page === "moddetails" && app.browseData && app.browseData.items && app.browseData.items.length > 0) app.openDetails(app.browseData.items[0])
             else if (shot.page === "versions" && app.browseData && app.browseData.items && app.browseData.items.length > 0)
                 app.openDetails(app.browseData.items.find(x => x.id === "x753-More_Suits") || app.browseData.items[0])
@@ -573,7 +573,7 @@ Window {
         note("engine", "Check before Play: " + list.map(x => x.level + " " + x.title).join("; "))
         const trouble = list.some(x => x.level === "stop" || x.level === "warn")
         if (msgLevel === "work" && msgText === "Checking before Play...") msgText = ""
-        if (trouble || shot.page === "check") { checkIndex = 0; sheet = "check" }
+        if (trouble || shot.page === "check" || shot.page === "checkend") { checkIndex = 0; sheet = "check" }
         else Turbine.play(game.id)
     }
     readonly property bool checkStops: checks.some(x => x.level === "stop")
@@ -987,7 +987,7 @@ Window {
         if (nexusNoKey) {
             browseLoading = false
             browseData = { game: game.id, source: "nexus", items: [], categories: [], noKey: true,
-                           error: "Press A on Open " + gameTitle + " mods on Nexus Mods. " + noKeyLine + " No key or browser helper needed." }
+                           error: "A opens this game's mods on Nexus Mods in your browser. " + noKeyLine + " No key or browser helper needed." }
             return
         }
         browseLoading = true
@@ -3111,6 +3111,8 @@ Window {
         Turbine.selftestPointer(p.x, p.y, false, 12)
         scrollCheckNote.start()
     }
+    // The build's picture of the end of the check before Play: wheel steps over it.
+    Timer { id: checkEndShot; interval: 900; onTriggered: Turbine.selftestPointer(app.width / 2, app.height * 0.45, false, 40) }
     Timer { id: scrollCheckNote; interval: 1500; onTriggered: app.note("pad", "Scroll check: the list moved " + Math.round(perfList.contentY) + " px") }
     Item {
         id: pointerLayer

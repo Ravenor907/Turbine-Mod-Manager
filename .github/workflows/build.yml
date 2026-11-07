@@ -252,6 +252,8 @@ jobs:
             w3=steam:292030
             shoot "mods-cyberpunk-$size" "$size" mods "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
             shoot "check-cyberpunk-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
+            # The end of the check, scrolled there by wheel steps (REDmod's --launcher-skip in a fixed-width font).
+            shoot "checkend-cyberpunk-$size" "$size" checkend "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
             shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"
             shoot "notes-witcher-$size" "$size" mods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
             # The controller pointer: shown over the mod list and clicked on the second mod's ON pill through the same
@@ -267,8 +269,8 @@ jobs:
           # The pointer's events really reached Turbine's interface: the click turned the mod off, the wheel scrolled.
           for size in 1280x800 1920x1080; do
             log="$PWD/data/pointer-$size/turbine-mod-manager/activity.log"
-            if grep -q "Left click (RT)" "$log" && grep -q "Turn off" "$log"; then
-              echo "::notice title=Pointer click $size::$(grep -h 'Turn off' "$log" | head -n1 | cut -c1-160)"
+            if grep -q "Left click (RT)" "$log" && grep -Eq "Turn (on|off) " "$log"; then
+              echo "::notice title=Pointer click $size::$(grep -Eh 'Turn (on|off) ' "$log" | head -n1 | cut -c1-160)"
             else
               echo "::error title=Pointer click didn't reach the mod ($size)::"; (grep -h "pad\|action" "$log" | tail -n 20 || true); fail=1
             fi

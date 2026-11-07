@@ -505,6 +505,9 @@ pub struct TurbineRust {
     pub(crate) pointer_at: Option<std::time::Instant>,
     /// Mouse buttons a trigger holds down: [left (RT), right (LT)].
     pub(crate) mouse_down: [bool; 2],
+    /// Looks until the pointer's place is sent again after a click (what was under it may have been redrawn, so
+    /// its outline comes back without moving the stick).
+    pub(crate) rehover: u8,
 }
 
 impl Default for TurbineRust {
@@ -560,6 +563,7 @@ impl Default for TurbineRust {
             pointer: crate::pointer::Pointer::default(),
             pointer_at: None,
             mouse_down: [false, false],
+            rehover: 0,
         }
     }
 }
@@ -998,7 +1002,14 @@ impl qobject::Turbine {
             rm.pointer.tick(sticks, dt, w, h)
         };
         let (x, y) = (self.rust().pointer.x, self.rust().pointer.y);
-        if t.moved {
+        let again = match self.rust().rehover {
+            0 => false,
+            n => {
+                self.as_mut().rust_mut().rehover = n - 1;
+                n == 1 && self.rust().pointer.shown
+            }
+        };
+        if t.moved || again {
             crate::pad::send(crate::pad::Kind::Move, x, y, 0, self.mouse_mask(), 0);
         }
         if t.hid {
@@ -1050,6 +1061,9 @@ impl qobject::Turbine {
         }
         let kind = if pressed { crate::pad::Kind::Press } else { crate::pad::Kind::Release };
         crate::pad::send(kind, x, y, button, self.mouse_mask(), 0);
+        if !pressed {
+            self.as_mut().rust_mut().rehover = 6;
+        }
     }
 
     pub fn selftest_pointer(mut self: Pin<&mut Self>, x: f64, y: f64, click: bool, wheel: i32) {
