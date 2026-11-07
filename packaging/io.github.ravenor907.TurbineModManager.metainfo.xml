@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.5" date="2026-11-07" type="development">
+      <description>
+        <p>Getting mods made easy, and a new layout:</p>
+        <ul>
+          <li>Browse, search and sort a game's Nexus mods inside Turbine, no key needed</li>
+          <li>One press gets a mod; the browser helper saves Nexus downloads into Game Mods with no Save box</li>
+          <li>Nexus opens in Game Mode, with Steam's browser as a fallback</li>
+          <li>New layout with My mods, Get mods and Load order, plain words throughout</li>
+          <li>Interface size slider, TV layout only with an external display, and every size change can be undone</li>
+          <li>Fuller controller support: B goes back everywhere, Find, hold Start for Play options, faster lists, back grips</li>
+          <li>Recently removed mods can be deleted for good</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.41" date="2026-11-07" type="development">
       <description>
         <p>Fixes from the owner's 0.4 test:</p>
