@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.4" date="2026-11-07" type="development">
+      <description>
+        <p>Nexus downloads through your own browser, for testing on the owner's handhelds:</p>
+        <ul>
+          <li>Downloads from Nexus Mods in your browser are added to the right game</li>
+          <li>A status card shows over the browser in Desktop Mode and over other apps in Game Mode</li>
+          <li>Browser helper for Chrome, Brave, Edge, Chromium and Vivaldi shows installer choices on the Nexus page</li>
+          <li>A warning with install steps when no browser is found</li>
+          <li>Cyberpunk 2077 and The Witcher 3 checks before Play, and Proton settings for every game</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2" date="2026-11-06" type="development">
       <description>
         <p>Mods you can use, for testing on the owner's handhelds:</p>
