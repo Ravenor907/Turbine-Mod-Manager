@@ -28,7 +28,7 @@ pub const WINDOW_SECS: u64 = 30 * 60;
 /// How often `wait` looks (seconds).
 pub const POLL_SECS: u64 = 1;
 /// Endings of the files browsers write while a download is still going.
-pub const PARTIAL_SUFFIXES: &[&str] = &[".part", ".crdownload", ".download"];
+pub const PARTIAL_SUFFIXES: &[&str] = &[".part", ".crdownload", ".download", ".tmp"];
 /// Files changed this many seconds before the page was opened still count (clocks and file times are coarse).
 const SLACK_SECS: u64 = 2;
 
@@ -337,6 +337,50 @@ pub fn default_folders(home: &Path) -> Vec<PathBuf> {
 // - a finished archive, once its size has stayed the same between looks and the browser's unfinished file is gone.
 // Deciding which game a finished archive goes into is `decide`. Files are only ever read, never moved or deleted.
 
+/// The folder in Downloads the browser helper sorts Nexus downloads into, one subfolder per game.
+pub const GAME_MODS: &str = "Game Mods";
+/// The subfolder for a download whose game Turbine doesn't know.
+pub const OTHER_FOLDER: &str = "Other";
+
+/// The folder name for a game inside Game Mods: its name without characters browsers or file systems refuse
+/// (< > : " / \\ | ? * and control characters), spaces kept, at most 80 characters, never "." or "..".
+pub fn game_folder_name(name: &str) -> String {
+    let cleaned: String = name.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
+    let words = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
+    let t: String = words.trim_matches('.').chars().take(80).collect();
+    let t = t.trim().to_string();
+    if t.is_empty() { OTHER_FOLDER.to_string() } else { t }
+}
+
+/// The folders to watch for these Downloads folders: each one, its Game Mods folder, and every subfolder of that
+/// (links not followed). Asked again now and then, so a new game's folder is picked up.
+pub fn with_game_mods(downloads: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for d in downloads {
+        out.push(d.clone());
+        let gm = d.join(GAME_MODS);
+        out.push(gm.clone());
+        if let Ok(rd) = fs::read_dir(&gm) {
+            let mut subs: Vec<PathBuf> = rd.flatten().filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false)).map(|e| e.path()).collect();
+            subs.sort();
+            out.extend(subs);
+        }
+    }
+    out
+}
+
+/// The game folder a file sits in, when it is directly inside Downloads/Game Mods/<game folder>/ ("Other" doesn't
+/// count). The answer is the folder's name, to compare with `game_folder_name` of each game.
+pub fn game_mods_folder_of(path: &Path) -> Option<String> {
+    let dir = path.parent()?;
+    let gm = dir.parent()?;
+    if gm.file_name()? != GAME_MODS {
+        return None;
+    }
+    let name = dir.file_name()?.to_string_lossy().into_owned();
+    (name != OTHER_FOLDER && !name.is_empty()).then_some(name)
+}
+
 /// On the very first run, archives this many seconds old still count (and Turbine asks before adding any of them).
 pub const FIRST_RUN_SECS: u64 = 24 * 60 * 60;
 /// The most ignored files remembered (the oldest are forgotten first).
@@ -602,6 +646,8 @@ pub fn catch_up_since(state: Option<&CatchState>, now: u64) -> (u64, bool) {
 /// How Turbine knew which game a download is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Basis {
+    /// It was saved into Downloads/Game Mods/<game>/ (by the browser helper).
+    Folder,
     /// The browser helper saw the Nexus page it came from.
     Helper,
     /// Nexus knows the file by its MD5.
@@ -628,6 +674,15 @@ pub struct Decision {
 /// Turbine, then the game last open in Turbine. The first three are sure (a page match only by name or size; a
 /// guess is not), the last never is. On the first run's catch-up, Turbine always asks.
 pub fn decide(helper: Option<&str>, md5: Option<&str>, page: Option<(&str, Confidence)>, last_game: Option<&str>, first_run_catch_up: bool) -> Decision {
+    decide_all(None, helper, md5, page, last_game, first_run_catch_up)
+}
+
+/// `decide` with the Game Mods folder first: a file in a game's folder there is always a sure match, on the first
+/// run's catch-up too (only the browser helper puts files there).
+pub fn decide_all(folder: Option<&str>, helper: Option<&str>, md5: Option<&str>, page: Option<(&str, Confidence)>, last_game: Option<&str>, first_run_catch_up: bool) -> Decision {
+    if let Some(g) = folder {
+        return Decision { game: Some(g.to_string()), basis: Basis::Folder, sure: true };
+    }
     let (game, basis, sure) = if let Some(g) = helper {
         (Some(g), Basis::Helper, true)
     } else if let Some(g) = md5 {
@@ -646,6 +701,7 @@ impl Basis {
     /// Plain words for the activity log.
     pub fn words(self) -> &'static str {
         match self {
+            Basis::Folder => "it was saved in that game's Game Mods folder",
             Basis::Helper => "the browser helper saw its Nexus page",
             Basis::Md5 => "Nexus Mods knows the file",
             Basis::Page(Confidence::Name) => "it matches a Nexus page opened from Turbine by name",

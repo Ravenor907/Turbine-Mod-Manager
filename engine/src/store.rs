@@ -314,6 +314,20 @@ pub fn clean_name(file_name: &str) -> (String, Option<String>) {
     (if name.is_empty() { "Mod".into() } else { name }, version)
 }
 
+/// A Nexus download's mod ID and version from its file name ("Fast Travel from Anywhere-324-1-0-5-1699999999.zip"
+/// gives (324, "1.0.5")), when the name has Nexus's pattern: name, mod ID, version parts, upload time.
+pub fn nexus_ids_from_name(file_name: &str) -> Option<(u64, String)> {
+    let stem = file_name.rsplit_once('.').map(|(s, _)| s).unwrap_or(file_name);
+    let parts: Vec<&str> = stem.split('-').collect();
+    let last = parts.len().checked_sub(1)?;
+    if parts.len() < 3 || !all_digits(parts[last]) || parts[last].len() < 9 {
+        return None;
+    }
+    let i = (1..last).find(|&i| all_digits(parts[i]))?;
+    let id: u64 = parts[i].parse().ok().filter(|x| *x > 0)?;
+    Some((id, parts[i + 1..last].join(".")))
+}
+
 /// Where a game's store goes: a hidden folder at the top of the game's library, for every library (internal storage
 /// too: device numbers can match while the folders are still separate mounts, and links between mounts fail). Only
 /// when the library can't be written does it go in the data folder. The device numbers are no longer used.
@@ -1235,6 +1249,26 @@ impl Store {
         self.mods.insert(at, entry.removed.item);
         self.archives.insert(at, entry.archive);
         self.save()
+    }
+
+    /// Deletes one mod from Recently removed for good (its files in Turbine's own store only; the game folder lost
+    /// them when it was removed). It can't be put back afterwards.
+    pub fn purge_removed(&mut self, id: &str) -> io::Result<()> {
+        let r = self.removed_extra.iter().position(|r| r.removed.item.id == id).ok_or_else(|| not_found(id))?;
+        remove_dir(&self.removed_dir(id))?;
+        self.removed_extra.remove(r);
+        self.save()
+    }
+
+    /// Empties Recently removed for good. Returns how many mods were deleted.
+    pub fn purge_all_removed(&mut self) -> io::Result<usize> {
+        let ids: Vec<String> = self.removed_extra.iter().map(|r| r.removed.item.id.clone()).collect();
+        for id in &ids {
+            remove_dir(&self.removed_dir(id))?;
+        }
+        self.removed_extra.clear();
+        self.save()?;
+        Ok(ids.len())
     }
 
     /// Every file the enabled mods put in the game, in order (later ones win).

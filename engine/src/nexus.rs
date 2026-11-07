@@ -1,6 +1,7 @@
-//! Nexus Mods through its official API, with the player's personal API key (pasted in Settings from their Nexus
-//! account page). v1 REST for the account, mod details, files, update lists and download links; v2 GraphQL for
-//! browsing. Requests send Turbine's application headers and respect Nexus's rate limit headers. Parsing is pure and
+//! Nexus Mods through its official API. Browsing needs no key: v2 GraphQL (search, a mod's details and
+//! requirements, its files) is sent with Turbine's application headers only (`Nexus::public`). The player's personal
+//! API key (pasted in Settings from their Nexus account page) adds v1 REST for the account, update lists, MD5
+//! lookups and Premium download links. Requests send Turbine's application headers and respect Nexus's rate limit headers. Parsing is pure and
 //! tested offline; the network calls are thin wrappers.
 
 use crate::json::{self, quote, Json};
@@ -83,15 +84,27 @@ pub fn load_key(path: &Path) -> Option<String> {
     plausible_key(&k).then(|| k.trim().to_string())
 }
 
-/// The headers every request carries.
+/// The headers every request with a key carries.
 pub fn headers(key: &str, app_version: &str) -> Vec<(String, String)> {
+    let mut h = vec![("apikey".to_string(), key.trim().to_string())];
+    h.extend(headers_public(app_version));
+    h
+}
+
+/// The headers of a request without a key (browsing): Turbine's name and version, no `apikey`.
+pub fn headers_public(app_version: &str) -> Vec<(String, String)> {
     vec![
-        ("apikey".into(), key.trim().into()),
         ("Application-Name".into(), APP_NAME.into()),
         ("Application-Version".into(), app_version.into()),
         ("Accept".into(), "application/json".into()),
     ]
 }
+
+/// What a call that needs the key says when there is none.
+pub const NEEDS_KEY: &str = "This needs a Nexus Mods key (Settings, Getting mods).";
+
+/// How long Turbine waits after Nexus says "too many requests" (seconds).
+pub const BACKOFF_SECS: u64 = 60;
 
 // ---- Rate limits ----
 
@@ -321,6 +334,16 @@ impl FileList {
             .or_else(|| self.files.iter().filter(|f| f.category == "MAIN").max_by_key(|f| f.uploaded_timestamp))
     }
 
+    /// The file the mod page offers: the newest current MAIN file; if there is none, the newest file that can still
+    /// be downloaded.
+    pub fn newest_main(&self) -> Option<&FileInfo> {
+        self.files
+            .iter()
+            .filter(|f| f.category == "MAIN")
+            .max_by_key(|f| (f.uploaded_timestamp, f.file_id))
+            .or_else(|| self.files.iter().filter(|f| !f.is_removed()).max_by_key(|f| (f.uploaded_timestamp, f.file_id)))
+    }
+
     /// Every downloadable file of the mod, grouped by category (main, updates, optional, other, old versions,
     /// archived), newest first in each group. Removed files are left out; empty groups too.
     pub fn groups(&self) -> Vec<FileGroup> {
@@ -501,11 +524,34 @@ pub enum SearchSort {
     Downloads,
     Updated,
     Name,
+    /// Most endorsed among the mods updated in the last 30 days. The v2 schema has no trending sort of its own, so
+    /// this is the endorsements sort with an updatedAt filter; if Nexus refuses the filter, `search` asks again as
+    /// Endorsements (and says so in `SearchPage::relaxed`).
+    Trending,
+    /// Newest first (createdAt, newest first); refused, it falls back to Endorsements the same way.
+    Newest,
 }
 
+/// The days Trending looks back over.
+pub const TRENDING_DAYS: u64 = 30;
+
 impl SearchSort {
+    /// Reads the app's sort names: "trending", "endorsements", "downloads", "updated", "newest", "name".
+    pub fn from_key(key: &str) -> SearchSort {
+        match key {
+            "trending" => SearchSort::Trending,
+            "downloads" => SearchSort::Downloads,
+            "updated" => SearchSort::Updated,
+            "newest" => SearchSort::Newest,
+            "name" => SearchSort::Name,
+            _ => SearchSort::Endorsements,
+        }
+    }
+
     fn field(self) -> (&'static str, &'static str) {
         match self {
+            SearchSort::Trending => ("endorsements", "DESC"),
+            SearchSort::Newest => ("createdAt", "DESC"),
             SearchSort::Endorsements => ("endorsements", "DESC"),
             SearchSort::Downloads => ("downloads", "DESC"),
             SearchSort::Updated => ("updatedAt", "DESC"),
@@ -521,6 +567,31 @@ author endorsements downloads pictureUrl thumbnailUrl adultContent updatedAt } }
 /// The JSON body for a search: mods for one game, optionally by name (wildcard match), adult mods left out unless
 /// asked for, sorted (most endorsed first by default).
 pub fn search_body(domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> String {
+    search_body_at(domain, text, sort, offset, count, adult, net_now())
+}
+
+fn net_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// "2026-11-07T00:00:00Z" for seconds since 1970 (UTC, whole days are enough here).
+pub fn iso_day(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    // Civil date from days since 1970 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T00:00:00Z")
+}
+
+/// `search_body` with the time given (Trending's 30 days are counted back from `now`).
+pub fn search_body_at(domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool, now: u64) -> String {
     let mut filter = format!("\"op\":\"AND\",\"gameDomainName\":[{{\"value\":{},\"op\":\"EQUALS\"}}]", quote(domain));
     let t = text.trim();
     if !t.is_empty() {
@@ -528,6 +599,10 @@ pub fn search_body(domain: &str, text: &str, sort: SearchSort, offset: u32, coun
     }
     if !adult {
         filter.push_str(",\"adultContent\":[{\"value\":false,\"op\":\"EQUALS\"}]");
+    }
+    if sort == SearchSort::Trending {
+        let since = iso_day(now.saturating_sub(TRENDING_DAYS * 86_400));
+        filter.push_str(&format!(",\"updatedAt\":[{{\"value\":{},\"op\":\"GTE\"}}]", quote(&since)));
     }
     let (field, dir) = sort.field();
     format!(
@@ -556,6 +631,8 @@ pub struct SearchMod {
 pub struct SearchPage {
     pub total: u64,
     pub mods: Vec<SearchMod>,
+    /// Nexus refused the asked-for sort (Trending or Newest) and this page is Most endorsed instead.
+    pub relaxed: bool,
 }
 
 /// Reads a GraphQL search answer. GraphQL errors become one plain sentence.
@@ -569,6 +646,7 @@ pub fn parse_search(text: &str) -> Result<SearchPage, String> {
     }
     let mods = j.get("data").and_then(|d| d.get("mods")).ok_or("Nexus's answer has no results")?;
     Ok(SearchPage {
+        relaxed: false,
         total: n(mods.get("totalCount")) as u64,
         mods: mods
             .get("nodes")
@@ -737,6 +815,131 @@ pub fn parse_requirements(text: &str, domain: &str) -> Result<Vec<Requirement>, 
     Ok(out)
 }
 
+// ---- A mod's details and files without a key (v2 GraphQL) ----
+//
+// legacyModsByDomain answers a mod's page facts and, in the same request, its requirements (the same node
+// parse_requirements reads). modFiles needs the game's numeric id, which the details answer carries (game.id).
+// Field names follow Nexus's published v2 schema (api.nexusmods.com/v2/graphql): ModFile has fileId, name, version,
+// category (MAIN, UPDATE, OPTIONAL, OLD_VERSION, MISCELLANEOUS, ARCHIVED, REMOVED), date (seconds since 1970),
+// size (KB), sizeInBytes (a string) and primary.
+
+const DETAILS_QUERY: &str = "query TurbineMod($ids: [CompositeDomainWithIdInput!]!) { \
+legacyModsByDomain(ids: $ids) { nodes { modId name summary version author pictureUrl thumbnailUrl endorsements \
+downloads adultContent status updatedAt game { id domainName } modRequirements { \
+nexusRequirements(count: 100) { totalCount nodes { id modId modName gameId url notes externalRequirement } } \
+dlcRequirements { notes gameExpansion { id name } } } } } }";
+
+const FILES_QUERY: &str = "query TurbineFiles($modId: ID!, $gameId: ID!) { modFiles(modId: $modId, gameId: $gameId) { \
+fileId name version category date size sizeInBytes primary description } }";
+
+/// The JSON body asking for a mod's details and requirements in one request.
+pub fn details_body(domain: &str, mod_id: u64) -> String {
+    format!("{{\"query\":{},\"variables\":{{\"ids\":[{{\"gameDomain\":{},\"modId\":{mod_id}}}]}}}}", quote(DETAILS_QUERY), quote(domain))
+}
+
+/// The JSON body asking for a mod's files (`game_id`: Nexus's number for the game, from the details).
+pub fn files_body(game_id: u64, mod_id: u64) -> String {
+    format!("{{\"query\":{},\"variables\":{{\"modId\":\"{mod_id}\",\"gameId\":\"{game_id}\"}}}}", quote(FILES_QUERY))
+}
+
+fn graphql_error(j: &Json, what: &str) -> Option<String> {
+    let e = j.get("errors").map(Json::as_array).and_then(|e| e.first())?;
+    Some(format!("Nexus couldn't {what} ({})", e.str_at("message").unwrap_or("unknown error")))
+}
+
+/// Seconds since 1970 for "2025-01-01T00:00:00Z" (the date part and the time; 0 when it can't be read).
+pub fn iso_secs(t: &str) -> u64 {
+    let b = t.as_bytes();
+    let num = |a: usize, z: usize| t.get(a..z).and_then(|x| x.parse::<i64>().ok());
+    let (Some(y), Some(m), Some(d)) = (num(0, 4), num(5, 7), num(8, 10)) else { return 0 };
+    if b.len() < 10 || b[4] != b'-' || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return 0;
+    }
+    let (hh, mm, ss) = (num(11, 13).unwrap_or(0), num(14, 16).unwrap_or(0), num(17, 19).unwrap_or(0));
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    (days * 86_400 + hh * 3600 + mm * 60 + ss).max(0) as u64
+}
+
+/// A mod's page facts from the details answer, with Nexus's number for its game.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModDetails {
+    pub info: ModInfo,
+    pub game_id: u64,
+    pub thumbnail_url: String,
+}
+
+/// Reads the details answer (`details_body`). Requirements come from the same text through `parse_requirements`.
+pub fn parse_mod_details(text: &str, domain: &str) -> Result<ModDetails, String> {
+    let j = parse(text)?;
+    let node = j.get("data").and_then(|d| d.get("legacyModsByDomain")).and_then(|m| m.get("nodes")).and_then(|l| l.as_array().first());
+    let Some(m) = node else {
+        return Err(graphql_error(&j, "read the mod").unwrap_or_else(|| "Nexus doesn't know that mod".into()));
+    };
+    let mod_id = n(m.get("modId")) as u64;
+    if mod_id == 0 {
+        return Err("Nexus's answer has no mod in it".into());
+    }
+    let status = s(m, "status");
+    let updated = s(m, "updatedAt");
+    Ok(ModDetails {
+        info: ModInfo {
+            mod_id,
+            domain: m.get("game").and_then(|g| g.str_at("domainName")).filter(|d| !d.is_empty()).unwrap_or(domain).to_string(),
+            name: s(m, "name"),
+            summary: s(m, "summary"),
+            version: s(m, "version"),
+            author: s(m, "author"),
+            picture_url: s(m, "pictureUrl"),
+            endorsements: n(m.get("endorsements")) as u64,
+            downloads: n(m.get("downloads")) as u64,
+            adult: b(m, "adultContent"),
+            available: status.is_empty() || status.eq_ignore_ascii_case("published"),
+            status,
+            updated_timestamp: iso_secs(&updated),
+        },
+        game_id: n(m.get("game").and_then(|g| g.get("id"))) as u64,
+        thumbnail_url: s(m, "thumbnailUrl"),
+    })
+}
+
+/// Reads the files answer (`files_body`) into the same list v1 gives (without its replacement links).
+pub fn parse_mod_files(text: &str) -> Result<FileList, String> {
+    let j = parse(text)?;
+    let Some(list) = j.get("data").and_then(|d| d.get("modFiles")) else {
+        return Err(graphql_error(&j, "list the files").unwrap_or_else(|| "Nexus's answer has no files in it".into()));
+    };
+    let files = list
+        .as_array()
+        .iter()
+        .filter_map(|f| {
+            let file_id = n(f.get("fileId")) as u64;
+            if file_id == 0 {
+                return None;
+            }
+            let cat = s(f, "category").to_ascii_uppercase();
+            let bytes = n(f.get("sizeInBytes")) as u64;
+            Some(FileInfo {
+                file_id,
+                name: s(f, "name"),
+                version: s(f, "version"),
+                category: if cat == "REMOVED" { "DELETED".into() } else { cat },
+                file_name: String::new(),
+                size_bytes: if bytes > 0 { bytes } else { (n(f.get("size")) as u64) * 1024 },
+                uploaded_timestamp: n(f.get("date")) as u64,
+                is_primary: n(f.get("primary")) > 0.0 || b(f, "primary"),
+                description: s(f, "description"),
+            })
+        })
+        .collect();
+    Ok(FileList { files, updates: Vec::new() })
+}
+
 /// A mod's requirements sorted against what is installed.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct RequirementCheck {
@@ -887,18 +1090,40 @@ pub fn source_info(domain: &str, mod_id: u64, file: &FileInfo, sha256: Option<St
 
 // ---- Network ----
 
-/// A Nexus session with the player's key. Remembers the last rate limit headers it saw and stops before a call
-/// that would be refused.
+/// A Nexus session, with the player's key or without one (`public`: browsing only). Remembers the last rate limit
+/// headers it saw and stops before a call that would be refused; after a "too many requests" answer it waits
+/// `BACKOFF_SECS` before asking again.
 pub struct Nexus {
     pub client: Client,
-    key: String,
+    key: Option<String>,
     app_version: String,
     pub limits: Cell<RateLimit>,
+    /// No requests before this time (seconds since 1970) after a 429.
+    pub backoff_until: Cell<u64>,
 }
 
 impl Nexus {
     pub fn new(client: Client, key: &str, app_version: &str) -> Nexus {
-        Nexus { client, key: key.trim().to_string(), app_version: app_version.into(), limits: Cell::new(RateLimit::default()) }
+        Nexus::with_key(client, Some(key), app_version)
+    }
+
+    /// Browsing without a key: search, a mod's details, requirements and files (v2 GraphQL).
+    pub fn public(client: Client, app_version: &str) -> Nexus {
+        Nexus::with_key(client, None, app_version)
+    }
+
+    pub fn with_key(client: Client, key: Option<&str>, app_version: &str) -> Nexus {
+        Nexus {
+            client,
+            key: key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()),
+            app_version: app_version.into(),
+            limits: Cell::new(RateLimit::default()),
+            backoff_until: Cell::new(0),
+        }
+    }
+
+    pub fn has_key(&self) -> bool {
+        self.key.is_some()
     }
 
     fn request(&self, req: Request) -> Result<Response, NetError> {
@@ -908,21 +1133,36 @@ impl Nexus {
         if let Some(why) = blocked {
             return Err(NetError::Failed(why));
         }
+        let now = net_now();
+        if self.backoff_until.get() > now {
+            return Err(NetError::RateLimited);
+        }
         let mut req = req;
-        for (k, v) in headers(&self.key, &self.app_version) {
+        let hs = match &self.key {
+            Some(k) => headers(k, &self.app_version),
+            None => headers_public(&self.app_version),
+        };
+        for (k, v) in hs {
             req = req.header(&k, &v);
         }
         let resp = self.client.send(&req, None);
-        if let Ok(r) = &resp {
-            let rl = rate_limit(&r.headers);
-            if rl.hourly_remaining.is_some() || rl.daily_remaining.is_some() {
-                self.limits.set(rl);
+        match &resp {
+            Ok(r) => {
+                let rl = rate_limit(&r.headers);
+                if rl.hourly_remaining.is_some() || rl.daily_remaining.is_some() {
+                    self.limits.set(rl);
+                }
             }
+            Err(NetError::RateLimited) => self.backoff_until.set(now + BACKOFF_SECS),
+            Err(_) => {}
         }
         resp
     }
 
     fn get(&self, path: &str) -> Result<String, NetError> {
+        if self.key.is_none() {
+            return Err(NetError::Failed(NEEDS_KEY.into()));
+        }
         self.request(Request::get(&format!("{API}{path}")).max_bytes(32 << 20).max_time(60))?.take_text()
     }
 
@@ -936,7 +1176,7 @@ impl Nexus {
 
     /// Checks the key and returns the account. A refused key gets a plain message.
     pub fn validate(&self) -> Result<Account, NetError> {
-        if !plausible_key(&self.key) {
+        if !self.key.as_deref().is_some_and(plausible_key) {
             return Err(NetError::Failed("That doesn't look like a Nexus API key. Copy it again from your Nexus account page.".into()));
         }
         let text = self.get("/v1/users/validate.json").map_err(|e| match e {
@@ -1101,11 +1341,52 @@ impl Nexus {
         resp?.take_text()
     }
 
-    /// Browses mods for a game through GraphQL.
+    /// Browses mods for a game through GraphQL. Trending and Newest that Nexus refuses (a GraphQL error) are asked
+    /// again as Most endorsed, with `relaxed` set; any other failure is returned.
     pub fn search(&self, domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> Result<SearchPage, NetError> {
         Self::check_domain(domain)?;
-        let text = self.graphql(&search_body(domain, text, sort, offset, count, adult))?;
-        parse_search(&text).map_err(|e| NetError::Failed(format!("{e}.")))
+        let answer = self.graphql(&search_body(domain, text, sort, offset, count, adult))?;
+        match parse_search(&answer) {
+            Ok(p) => Ok(p),
+            Err(_) if matches!(sort, SearchSort::Trending | SearchSort::Newest) => {
+                let again = self.graphql(&search_body(domain, text, SearchSort::Endorsements, offset, count, adult))?;
+                let mut p = parse_search(&again).map_err(|e| NetError::Failed(format!("{e}.")))?;
+                p.relaxed = true;
+                Ok(p)
+            }
+            Err(e) => Err(NetError::Failed(format!("{e}."))),
+        }
+    }
+
+    /// A mod's page facts and its requirements, in one GraphQL request (no key needed).
+    pub fn details(&self, domain: &str, mod_id: u64) -> Result<(ModDetails, Vec<Requirement>), NetError> {
+        Self::check_domain(domain)?;
+        let text = self.graphql(&details_body(domain, mod_id))?;
+        let d = parse_mod_details(&text, domain).map_err(|e| NetError::Failed(format!("{e}.")))?;
+        let reqs = parse_requirements(&text, domain).unwrap_or_default();
+        Ok((d, reqs))
+    }
+
+    /// A mod's files through GraphQL (no key needed). `game_id` from `details`.
+    pub fn files_public(&self, game_id: u64, mod_id: u64) -> Result<FileList, NetError> {
+        let text = self.graphql(&files_body(game_id, mod_id))?;
+        parse_mod_files(&text).map_err(|e| NetError::Failed(format!("{e}.")))
+    }
+
+    /// A mod's files: v1 with a key (it has the replacement links), otherwise GraphQL (the game's number is read
+    /// from the details first when not given).
+    pub fn files_any(&self, domain: &str, mod_id: u64, game_id: Option<u64>) -> Result<FileList, NetError> {
+        if self.key.is_some() {
+            return self.files(domain, mod_id);
+        }
+        let gid = match game_id.filter(|g| *g > 0) {
+            Some(g) => g,
+            None => self.details(domain, mod_id)?.0.game_id,
+        };
+        if gid == 0 {
+            return Err(NetError::Failed("Nexus didn't say which game this mod is for.".into()));
+        }
+        self.files_public(gid, mod_id)
     }
 }
 

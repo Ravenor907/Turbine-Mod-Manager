@@ -535,3 +535,31 @@ fn downloads_lists_zips_newest_first() {
     assert_eq!(names, ["archive.7z", "new.ZIP", "mid.zip", "old.zip"]);
     assert!(downloads(&w.root.join("nobody")).is_empty());
 }
+
+#[test]
+fn removed_mods_can_be_deleted_for_good() {
+    let w = world("purge");
+    let mut s = w.open();
+    for n in ["one", "two", "three"] {
+        s.import_zip(&w.zip(&format!("{n}.zip"), &[(&format!("{n}.esp"), n)])).unwrap();
+    }
+    let ids: Vec<String> = s.mods().iter().map(|m| m.id.clone()).collect();
+    s.remove(&ids[0]).unwrap();
+    s.remove(&ids[1]).unwrap();
+    assert_eq!(s.removed().len(), 2);
+    let removed_dir = s.root().join("removed");
+    assert!(removed_dir.join(&ids[0]).exists());
+    s.purge_removed(&ids[0]).unwrap();
+    assert!(!removed_dir.join(&ids[0]).exists(), "its files are gone from Turbine's store");
+    assert_eq!(s.removed().len(), 1);
+    assert!(s.undo_remove(&ids[0]).is_err(), "it can't be put back");
+    assert!(s.purge_removed("nope").is_err());
+    // Still gone after opening again.
+    drop(s);
+    let mut s = w.open();
+    assert_eq!(s.removed().len(), 1);
+    assert_eq!(s.purge_all_removed().unwrap(), 1);
+    assert!(s.removed().is_empty());
+    assert_eq!(s.mods().len(), 1, "mods in the list are untouched");
+    assert!(w.root.join("Downloads/one.zip").exists(), "the player's archive is never touched");
+}
