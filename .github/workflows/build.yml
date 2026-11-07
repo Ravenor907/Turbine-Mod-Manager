@@ -91,6 +91,17 @@ jobs:
           rustc +1.97.0 --edition 2021 --test app/src/pointer.rs -o /tmp/pointer-tests
           /tmp/pointer-tests
 
+  nexus:
+    name: Nexus without a key (live)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Ask Nexus's public GraphQL the questions Get mods and updates ask, with no key
+        shell: bash
+        run: |
+          # Said as notices and warnings only: Nexus being down must never fail the build.
+          sh tools/nexus-live.sh || echo "::warning title=Nexus live check::It couldn't finish"
+
   vendor:
     name: Rust crates for the offline Flatpak build
     runs-on: ubuntu-latest

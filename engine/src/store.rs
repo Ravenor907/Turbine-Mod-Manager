@@ -1262,13 +1262,17 @@ impl Store {
 
     /// Empties Recently removed for good. Returns how many mods were deleted.
     pub fn purge_all_removed(&mut self) -> io::Result<usize> {
+        // One at a time: each entry leaves the list (and the list is saved) right after its folder is gone, so a
+        // failure partway leaves only the mods that are really still there.
         let ids: Vec<String> = self.removed_extra.iter().map(|r| r.removed.item.id.clone()).collect();
+        let mut done = 0;
         for id in &ids {
             remove_dir(&self.removed_dir(id))?;
+            self.removed_extra.retain(|r| r.removed.item.id != *id);
+            self.save()?;
+            done += 1;
         }
-        self.removed_extra.clear();
-        self.save()?;
-        Ok(ids.len())
+        Ok(done)
     }
 
     /// Every file the enabled mods put in the game, in order (later ones win).
