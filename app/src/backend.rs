@@ -508,6 +508,9 @@ pub struct TurbineRust {
     /// Looks until the pointer's place is sent again after a click (what was under it may have been redrawn, so
     /// its outline comes back without moving the stick).
     pub(crate) rehover: u8,
+    /// Time since the pointer's place was last sent: while it shows and rests, it is sent again now and then, so
+    /// a list redrawn under it (a mod turned on, a sheet opened) gets its outline back.
+    pub(crate) resend_ms: f64,
 }
 
 impl Default for TurbineRust {
@@ -564,6 +567,7 @@ impl Default for TurbineRust {
             pointer_at: None,
             mouse_down: [false, false],
             rehover: 0,
+            resend_ms: 0.0,
         }
     }
 }
@@ -1009,7 +1013,20 @@ impl qobject::Turbine {
                 n == 1 && self.rust().pointer.shown
             }
         };
-        if t.moved || again {
+        let resend = {
+            let mut rm = self.as_mut().rust_mut();
+            if t.moved || again || !rm.pointer.shown {
+                rm.resend_ms = 0.0;
+                false
+            } else {
+                rm.resend_ms += dt;
+                rm.resend_ms >= 400.0 && rm.mouse_down == [false, false]
+            }
+        };
+        if resend {
+            self.as_mut().rust_mut().resend_ms = 0.0;
+        }
+        if t.moved || again || resend {
             crate::pad::send(crate::pad::Kind::Move, x, y, 0, self.mouse_mask(), 0);
         }
         if t.hid {

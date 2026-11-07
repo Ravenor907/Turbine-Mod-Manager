@@ -715,6 +715,7 @@ Window {
     readonly property int railCount: games.length + 3   // games, add, Downloads, Settings
     onSheetChanged: {
         note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset()
+        pickHover()
         if (sheet === "" && fomod) sheet = "fomod"
         else if (sheet === "" && found) { infoIndex = 0; sheet = "found" }
         else if (sheet === "" && pendingNotes) { pendingNotes = false; infoIndex = 0; sheet = "notes" }
@@ -1873,6 +1874,7 @@ Window {
         moving: app.active || shot.on
     }
     Row {
+        id: mainRow
         anchors.fill: parent
 
         // ===== Rail
@@ -3074,9 +3076,24 @@ Window {
     // stick stops; A and the D-pad work as always.
     property Item hoverItem: null
     property rect hoverBox: Qt.rect(0, 0, 0, 0)
+    // Everything under the pointer that takes a tap; the outline goes on the innermost one (a row's ON pill
+    // rather than the row). With a sheet open, the page under it doesn't count.
+    property var hoverList: []
     function hover(item, on) {
-        if (on) hoverItem = item
-        else if (hoverItem === item) hoverItem = null
+        let list = hoverList.filter(x => !!x && x !== item)
+        if (on) list.push(item)
+        hoverList = list
+        pickHover()
+    }
+    function inside(item, top) {
+        for (let p = item; p; p = p.parent) if (p === top) return true
+        return false
+    }
+    function pickHover() {
+        const live = hoverList.filter(x => !!x && x.visible && !(sheet !== "" && inside(x, mainRow)))
+        let best = null
+        for (const x of live) if (!live.some(y => y !== x && inside(y, x))) { best = x; break }
+        hoverItem = best
         placeHover()
     }
     function placeHover() {

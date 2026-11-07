@@ -13,10 +13,11 @@ import QtQuick.Shapes
 //   ui.bodyFont   font family for everything else
 Item {
     id: root
-    // Plain words as StyledText, with options that start with two hyphens ("--launcher-skip") in a fixed-width font.
+    // Plain words as StyledText. Options that start with two hyphens ("--launcher-skip") get a thin space between
+    // the hyphens and show in bold: in Barlow the two hyphens otherwise touch and read as one long dash.
     function styled(t) {
         const esc = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")
-        return esc.replace(/(^|\s)(--[A-Za-z0-9][A-Za-z0-9-]*)/g, '$1<font face="monospace">$2</font>')
+        return esc.replace(/(^|\s)--([A-Za-z0-9][A-Za-z0-9-]*)/g, "$1<b>-\u2009-$2</b>")
     }
 
     required property var ui
@@ -159,7 +160,7 @@ Item {
                         Text {
                             visible: (checkRow.modelData.detail || "") !== ""
                             width: parent.width
-                            // Commands like --launcher-skip in a fixed-width font, so the two hyphens show apart.
+                            // Options like --launcher-skip with their two hyphens shown apart.
                             textFormat: Text.StyledText
                             text: root.styled(checkRow.modelData.detail || "")
                             wrapMode: Text.WordWrap
