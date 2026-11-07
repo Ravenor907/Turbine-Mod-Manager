@@ -995,6 +995,7 @@ Window {
     function quickExit(gameId, secs) {
         const i = games.findIndex(g => g.id === gameId)
         if (i < 0) return
+        const shortName = i === current ? gameTitle : games[i].name
         if (i !== current) current = i
         note("launch", games[i].name + " closed after " + secs + " seconds: offering a way back")
         const onNow = mods.filter(m => m.enabled)
@@ -1004,7 +1005,7 @@ Window {
         const worked = setups.filter(x => x.played === true && key(x.on || []) !== nowKey).sort((a, b) => b.savedAt - a.savedAt)[0] || null
         const added = worked ? onNow.filter(m => (worked.on || []).indexOf(m.id) < 0) : []
         if (!shot.on) Turbine.markNotWorking()
-        quick = { game: gameId, name: gameTitle, seconds: secs, added: added, worked: worked }
+        quick = { game: gameId, name: shortName, seconds: secs, added: added, worked: worked }
         page = "game"; zone = "main"; tab = 0; modPage = false
         if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
     }
