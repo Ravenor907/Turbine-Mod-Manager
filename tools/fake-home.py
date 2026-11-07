@@ -191,6 +191,11 @@ def downloads(folder):
         "textures/lanterns/lantern01_n.dds": b"DDS " + b"\0" * 124,
         "readme.txt": "Brighter lanterns for the roads of Skyrim.\n",
     }, now - 3600)
+    # Skyrim: a second lantern mod that changes one of the same files (who wins: the later one in the list).
+    zip_file(os.path.join(folder, "Lantern Colors 1.1.zip"), {
+        "textures/lanterns/lantern01.dds": b"DDS " + b"\1" * 124,
+        "textures/lanterns/lantern02.dds": b"DDS " + b"\1" * 124,
+    }, now - 3000)
     # Skyrim: a mod with an SKSE plugin, so it needs the script loader.
     zip_file(os.path.join(folder, "Lantern Glow SKSE 2.0.zip"), {
         "Data/SKSE/Plugins/LanternGlow.dll": fake_dll,

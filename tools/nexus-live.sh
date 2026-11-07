@@ -30,4 +30,13 @@ done
 # The query names Nexus offers (for a mod's picture gallery, if it has one).
 printf '%s' '{"query":"{ __schema { queryType { fields { name } } } }"}' > /tmp/nexus-schema.json
 post "query names" /tmp/nexus-schema.json
+# Pictures of a mod (for flipping on the mod page): the media query's arguments and what it returns.
+printf '%s' '{"query":"{ __schema { queryType { fields { name args { name type { name kind ofType { name kind ofType { name } } } } type { name kind ofType { name } } } } } }"}' > /tmp/nexus-schema2.json
+out=$(curl -sS --max-time 30 -H 'Content-Type: application/json' -H 'Application-Name: TurbineModManager' -H 'Application-Version: 0.51' --data-binary @/tmp/nexus-schema2.json "$api" 2>&1)
+echo "== media query"
+printf '%s' "$out" | grep -o '{"name":"media","args":\[[^]]*\][^}]*}[^}]*}' | head -c 2000; echo
+for t in Media MediaPage Image ImageType MediaFilter; do
+  printf '%s' '{"query":"{ __type(name: \"'"$t"'\") { kind fields { name type { name kind ofType { name } } } inputFields { name type { name kind ofType { name } } } enumValues { name } } }"}' > /tmp/nexus-type.json
+  post "type $t" /tmp/nexus-type.json
+done
 exit 0

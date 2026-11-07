@@ -311,6 +311,34 @@ jobs:
             shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
             shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
           done
+          # 0.51: Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
+          # the next requirement for a free account, and the bar over My mods.
+          shoot "getmods-cyberpunk-1280x800" 1280x800 getmods "$PWD/home" --game=steam:1091500
+          fresh "overlaps"; h="$PWD/fh/overlaps"
+          shoot "overlaps-1280x800" 1280x800 overlaps "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip"
+          fresh "quickexit"; h="$PWD/fh/quickexit"
+          shoot "quickexit-1280x800" 1280x800 quickexit "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip"
+          shoot "chain-1280x800" 1280x800 chain "$PWD/home" --game=steam:292030
+          fresh "listbar"; h="$PWD/fh/listbar"
+          shoot "listbar-1280x800" 1280x800 listbar "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+          log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
+          if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
+          else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
+          log="$PWD/data/getmods-start-1280x800/turbine-mod-manager/activity.log"
+          if grep -q "categories" "$log"; then echo "::notice title=Get mods categories::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
+          else echo "::error title=No categories in Get mods::"; fail=1; fi
+          log="$PWD/data/overlaps/turbine-mod-manager/activity.log"
+          if grep -q "Mod menu: .*Loses 1 file to Lantern Colors" "$log"; then echo "::notice title=Who wins::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
+          else echo "::error title=The mod menu didn't say which mod wins the shared file::"; (grep -h "Mod menu\|shot" "$log" | tail -n 5 || true); fail=1; fi
+          log="$PWD/data/quickexit/turbine-mod-manager/activity.log"
+          if grep -q "closed after 12 seconds: offering a way back" "$log"; then echo "::notice title=Closed early::offered"
+          else echo "::error title=No closed-early prompt::"; fail=1; fi
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/check-kcd2-$size/turbine-mod-manager/activity.log"
+            if grep -Eq "KCD1.* is made for Kingdom Come: Deliverance(;|$)" "$log"; then
+              echo "::notice title=KCD II check $size::$(grep -h 'Check before Play' "$log" | head -n1 | cut -c1-200)"
+            else echo "::error title=KCD II check didn't flag the first game's mod ($size)::"; (grep -h "Check before Play\|Add " "$log" | tail -n 5 || true); fail=1; fi
+          done
           # Controls: hold Start (Play options), R3 Find on My mods, Select several.
           for p in playoptions findmods selectmods; do
             fresh "$p-1280x800"; h="$PWD/fh/$p-1280x800"

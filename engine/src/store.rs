@@ -1414,6 +1414,54 @@ impl Store {
         Ok(())
     }
 
+    /// The game closed right after starting with the mods as they are now (the check after Play): this setup no
+    /// longer counts as one that worked, so "the setup that worked" is the one before it. Returns true when a
+    /// setup was unmarked.
+    pub fn mark_not_working(&mut self) -> io::Result<bool> {
+        let on = |o: &[(String, bool)]| o.iter().filter(|(_, e)| *e).cloned().collect::<Vec<_>>();
+        let now = on(&self.current_order());
+        let Some(i) = self.saved.iter().position(|s| s.setup.played && on(&s.order) == now) else { return Ok(false) };
+        self.saved[i].setup.played = false;
+        self.sync_lists();
+        self.save()?;
+        Ok(true)
+    }
+
+    /// The turned-on mods of a saved setup, in its order (for "since it last worked, you added ...").
+    pub fn setup_on(&self, setup_id: &str) -> Vec<String> {
+        self.saved
+            .iter()
+            .find(|s| s.setup.id == setup_id)
+            .map(|s| s.order.iter().filter(|(_, on)| *on).map(|(id, _)| id.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Puts the turned-on mods in the game except `skip` (Play without the script extender: the loader and the mods
+    /// that need it stay out for this one run). Nothing about the mods changes and no setup is saved; the next
+    /// apply puts everything back.
+    pub fn apply_except(&mut self, skip: &[String]) -> io::Result<Report> {
+        let wanted = self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id)).flat_map(|m| walk_files(&self.mod_dir(&m.id))).collect();
+        self.deploy(wanted, None)
+    }
+
+    /// The mods that are the game's script loader itself (their files hold everything the loader is detected by).
+    pub fn loader_mods(&self, rules: &GameRules) -> Vec<String> {
+        let Some(l) = &rules.loader else { return Vec::new() };
+        self.mods
+            .iter()
+            .filter(|m| {
+                let files: Vec<String> = self.staged_files(&self.mod_dir(&m.id)).iter().map(|f| f.to_lowercase()).collect();
+                l.detect.iter().all(|d| {
+                    d.split('|').any(|choice| {
+                        let c = choice.to_lowercase();
+                        files.iter().any(|f| *f == c || f.starts_with(&format!("{c}/")))
+                    })
+                })
+            })
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
     /// What "Restore last working setup" goes back to: the newest setup the game was played with.
     pub fn restore_target(&self) -> Option<&Setup> {
         self.setup_list.iter().find(|s| s.played)
@@ -1523,7 +1571,10 @@ impl Store {
         let setups: Vec<String> = self
             .setup_list
             .iter()
-            .map(|s| format!("{{\"id\":{},\"savedAt\":{},\"modsOn\":{},\"played\":{}}}", quote(&s.id), s.saved_at, s.mods_on, s.played))
+            .map(|s| {
+                let on: Vec<String> = self.setup_on(&s.id).iter().map(|id| quote(id)).collect();
+                format!("{{\"id\":{},\"savedAt\":{},\"modsOn\":{},\"played\":{},\"on\":[{}]}}", quote(&s.id), s.saved_at, s.mods_on, s.played, on.join(","))
+            })
             .collect();
         format!(
             "{{\"mods\":[{}],\"removed\":[{}],\"setups\":[{}],\"lastBuild\":{}}}",

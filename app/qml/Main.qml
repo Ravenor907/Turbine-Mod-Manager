@@ -90,7 +90,7 @@ Window {
                                       "removed", "newmod", "opening", "opening8s", "desktop", "desktopgrid", "tv", "rail", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
-                                      "playoptions", "findmods", "selectmods"].indexOf(page) >= 0
+                                      "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         // --layout=desktop or tv (not saved from a picture); --external-display pretends an HDMI display is there.
@@ -214,6 +214,18 @@ Window {
             else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("r3"); askView.open("Find a mod", "", "glow", "", 60, false, "Show them"); askView.accept() }
             else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.startSelect(app.mods[0]); app.act("down") }
             else if (shot.page === "opening8s") { app.getArea = "fallback"; app.getAct("a"); app.openHelpNow() }
+            // 0.51: the mod menu of a mod that loses a file; the closed-early prompt; the next requirement; the list bar.
+            else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; ")) }
+            else if (shot.page === "quickexit" && app.game && app.mods.length > 0) {
+                // A setup from yesterday that worked, with only the first mod on.
+                app.setups = [{ id: "s1", savedAt: Math.floor(Date.now() / 1000) - 86400, modsOn: 1, played: true, on: [app.mods[0].id] }]
+                app.quickExit(app.game.id, 12)
+            }
+            else if (shot.page === "chain") {
+                app.chainQueue = [{ name: "Community Patch", url: "https://www.nexusmods.com/witcher3/mods/3652?tab=files" }]
+                app.showChain("Better Torches")
+            }
+            else if (shot.page === "listbar") { app.tab = 0; app.zone = "main"; app.listShow = "on"; app.modIndex = -1; app.listBarIndex = 1 }
         }
     }
     Timer {
@@ -393,10 +405,45 @@ Window {
     // Find (R3): only the mods whose name has every word typed, as it is typed.
     property string findText: ""
     property string findBefore: ""
+    // The bar over My mods: [Find] at any size, plus [Show] and [Sort] from 15 mods. Show narrows the list; Sort
+    // orders it (other sorts than Load order hide the numbers, and reorder waits for Load order).
+    property string listShow: "all"       // all, on, off, attention, new, update
+    property string listSort: "order"     // order, az, recent
+    readonly property var showKeys: ["all", "on", "off", "attention", "new", "update"]
+    readonly property var showNames: ({ all: "All", on: "On", off: "Off", attention: "Needs attention", new: "New", update: "Update ready" })
+    readonly property var sortKeys2: ["order", "az", "recent"]
+    readonly property var sortNames2: ({ order: ordered ? "Load order" : "List order", az: "A to Z", recent: "Recently added" })
+    readonly property bool listBarFull: mods.length >= 15 || listShow !== "all" || listSort !== "order" || shot.page === "listbar"
+    readonly property var listBar: [{ key: "find", label: findText !== "" ? "Find: " + findText : "Find" }]
+        .concat(listBarFull ? [{ key: "show", label: "Show: " + showNames[listShow] }, { key: "sort", label: "Sort: " + sortNames2[listSort] }] : [])
+    property int listBarIndex: 0
+    function needsAttention(m) { return (m.needsLoader && loaderMissing) || (m.enabled && (missingNeeds(m).length > 0 || isHidden(m))) }
     readonly property var shownMods: {
         const words = findText.toLowerCase().split(/\s+/).filter(w => w !== "")
-        if (words.length === 0) return mods
-        return mods.filter(m => { const n = (m.name || "").toLowerCase(); return words.every(w => n.indexOf(w) >= 0) })
+        let list = mods.filter(m => {
+            const n = (m.name || "").toLowerCase()
+            if (!words.every(w => n.indexOf(w) >= 0)) return false
+            if (listShow === "on") return m.enabled
+            if (listShow === "off") return !m.enabled
+            if (listShow === "attention") return needsAttention(m)
+            if (listShow === "new") return isNew(m)
+            if (listShow === "update") return !!updateMap[m.id]
+            return true
+        })
+        if (listSort === "az") list = list.slice().sort((a, b) => (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase()))
+        else if (listSort === "recent") list = list.slice().sort((a, b) => b.added - a.added)
+        return list
+    }
+    readonly property bool listFiltered: findText !== "" || listShow !== "all" || listSort !== "order"
+    function listBarRun(i) {
+        const k = listBar[i] ? listBar[i].key : ""
+        if (k === "find") openFind()
+        else if (k === "show") listCycle("show", 1)
+        else if (k === "sort") listCycle("sort", 1)
+    }
+    function listCycle(k, d) {
+        if (k === "show") { listShow = showKeys[(showKeys.indexOf(listShow) + d + showKeys.length) % showKeys.length]; note("action", "My mods: show " + showNames[listShow]) }
+        else if (k === "sort") { listSort = sortKeys2[(sortKeys2.indexOf(listSort) + d + sortKeys2.length) % sortKeys2.length]; note("action", "My mods: sort " + sortNames2[listSort]) }
     }
     function openFind() {
         note("action", "Find a mod")
@@ -454,8 +501,12 @@ Window {
         openPick("Play options", gameTitle, [
             { icon: "play", title: "Play with mods", detail: plural(mods.filter(m => m.enabled).length, "mod", "mods") + " on", run: () => startPlay() },
             { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", run: () => Turbine.playOriginal() }
-        ].concat(others.map(p => ({ icon: "play", title: "Play with profile " + p.name, detail: "Switches to it, then plays", run: () => { Turbine.profileSwitch(p.name); startPlay() } }))), "")
+        ].concat(canSkipLoader ? [
+            { icon: "play", title: rules.kind === "bethesda" ? "Play without the script extender" : "Play without " + loaderShort,
+              detail: "Leaves out " + loaderShort + " and the mods that need it, this time only", run: () => { autoApply.stop(); Turbine.playWithoutLoader() } }
+        ] : []).concat(others.map(p => ({ icon: "play", title: "Play with profile " + p.name, detail: "Switches to it, then plays", run: () => { Turbine.profileSwitch(p.name); startPlay() } }))), "")
     }
+    readonly property bool canSkipLoader: !!rules && !!rules.loader && rules.loaderInstalled === true && mods.some(m => m.enabled)
     // X on a profile: Rename, Delete (hold A).
     function profileMenu(n) {
         const inUse = profileData && profileData.active === n
@@ -509,6 +560,8 @@ Window {
             app.mods = v.mods || []
             app.removedMods = v.removed || []
             app.setups = v.setups || []
+            app.overlapsMap = v.overlaps || {}
+            app.linksMap = v.links || {}
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
             if (app.removedIndex > app.removedMods.length) app.removedIndex = app.removedMods.length
@@ -529,7 +582,11 @@ Window {
         }
         function onMessage(text, level) { app.say(text, level) }
         function onChecked(json) { app.checked(app.parse(json, [])) }
-        function onLaunch(url) { if (!shot.on) Qt.openUrlExternally(url) }
+        function onLaunch(url) { app.playAt = Date.now(); app.playGame = app.game ? app.game.id : ""; if (!shot.on) Qt.openUrlExternally(url) }
+        function onGameEnded(gameId, seconds, known) {
+            if (known) { if (seconds < 60) app.quickExit(gameId, seconds) }
+            else app.measureAway = gameId
+        }
         function onPages(title, json) { app.openPages(title, app.parse(json, [])) }
         function onHandlerJsonChanged() { app.handler = app.parse(Turbine.handlerJson, { state: "unknown" }) }
         // Catching browser downloads (catch.rs).
@@ -558,6 +615,7 @@ Window {
             const v = app.parse(Turbine.browseJson, null)
             if (!v || !app.game || v.game !== app.game.id) return
             app.loadingMore = false
+            if (!v.append && (v.items || []).length > 0) app.note("net", "Get mods for " + app.game.name + ": " + v.items.length + " mods, first " + v.items[0].name + (v.categories && v.categories.length > 0 ? ", " + v.categories.length + " categories" : ""))
             if (v.fallback === true) {
                 // Browsing without a key failed: Open on Nexus instead, for the rest of this session.
                 if (!app.browseData || !v.append) { app.nexusPublic = "failed"; app.browseData = v }
@@ -572,6 +630,8 @@ Window {
                 return
             }
             app.nexusPublic = v.source === "nexus" ? "ok" : app.nexusPublic
+            if (!v.category && (v.categories || []).length > 0) app.catList = v.categories
+            else if (v.source !== "nexus") app.catList = v.categories || []
             app.browseData = v
             app.noMore = (v.items || []).length < 30
             app.browseLoading = false
@@ -657,7 +717,7 @@ Window {
         modPage = false
         history = []
         landedOn = ""
-        browseData = null
+        browseData = null; catList = []
         getArea = "bar"; getIndex = 0; getText = ""; getCategory = ""
         order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
@@ -708,13 +768,13 @@ Window {
         if (openState === "opening") return { level: "busy", words: "Opening Nexus in " + openName + "...", detail: "" }
         if (openState === "open") return { level: "ok", words: "Nexus is open in " + openName + ". Turbine adds your download by itself.", detail: "" }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
-        if (Turbine.pending > 0)
-            return { level: "busy", words: plural(Turbine.pending, "change", "changes") + " waiting", detail: "They go into the game in a few seconds" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
         const on = mods.filter(m => m.enabled).length
+        // Changes still on their way in show as a pill (only on the game they belong to); the line says how it stands.
+        const waiting = Turbine.pending > 0 && Turbine.pendingGame === game.id
         return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on",
-                 pill: updateCount > 0 ? plural(updateCount, "update", "updates") + " ready" : "" }
+                 pill: waiting ? plural(Turbine.pending, "change", "changes") + " going in" : updateCount > 0 ? plural(updateCount, "update", "updates") + " ready" : "" }
     }
 
     // ---------------------------------------------------------------- applying changes
@@ -736,8 +796,16 @@ Window {
     onClosing: Turbine.finish()
 
     // ---------------------------------------------------------------- mod actions
-    function toggle(m) {
+    function toggle(m, sure) {
         const on = !m.enabled
+        const users = on ? [] : neededByOn(m)
+        if (!on && !sure && users.length > 0) {
+            openPick(plural(users.length, "mod needs", "mods need") + " " + m.name, users.map(x => x.name).slice(0, 3).join(", ") + (users.length > 3 ? " and " + (users.length - 3) + " more" : "") + ". They will stop working.", [
+                { icon: "power", title: "Turn off anyway", detail: "They stay on, without it", danger: true, run: () => toggle(m, true) },
+                { icon: "back", title: "Keep it on", detail: "", run: () => {} }
+            ], "")
+            return
+        }
         note("action", "Turn " + (on ? "on " : "off ") + m.name)
         mods = mods.map(x => x.id === m.id ? Object.assign({}, x, { enabled: on }) : x)
         Turbine.setEnabled(m.id, on)
@@ -809,6 +877,7 @@ Window {
     property var moveSaved: []
     function startMove() {
         if (!ordered || !focusedItem || focusedItem.kind !== "mod") return
+        if (listSort !== "order" || listShow !== "all") { toast.info("Reorder works in Load order sort, showing all mods."); return }
         moving = true
         moveFrom = modIndex
         moveSaved = mods.slice()
@@ -900,6 +969,67 @@ Window {
         else if (what === "Play without mods") Turbine.playOriginal()
     }
 
+    // ---------------------------------------------------------------- the game closed right after Play
+    // The engine watches the game's process after a modded Play (gameEnded). Under a minute means a mod likely broke
+    // it: Turbine offers the way back when the player returns. Without a process to watch, the time Turbine was away
+    // stands in for it.
+    property real playAt: 0
+    property string playGame: ""
+    property real awayAt: 0
+    property string measureAway: ""
+    property var quick: null              // {game, seconds, added: [mods], worked: setup or null}
+    Connections {
+        target: app
+        function onActiveChanged() {
+            if (!app.active && app.playAt > 0 && Date.now() - app.playAt < 120000) app.awayAt = Date.now()
+            else if (app.active && app.measureAway !== "" && app.awayAt > 0) {
+                const secs = Math.round((Date.now() - app.awayAt) / 1000)
+                const g = app.measureAway
+                app.measureAway = ""; app.awayAt = 0
+                app.note("launch", "Back after " + secs + " seconds away")
+                if (secs < 60) app.quickExit(g, secs)
+            }
+            if (app.active && app.quick && app.sheet === "") { app.infoIndex = 0; app.sheet = "quick" }
+        }
+    }
+    function quickExit(gameId, secs) {
+        const i = games.findIndex(g => g.id === gameId)
+        if (i < 0) return
+        if (i !== current) current = i
+        note("launch", games[i].name + " closed after " + secs + " seconds: offering a way back")
+        const onNow = mods.filter(m => m.enabled)
+        const key = list => list.slice().sort().join("|")
+        const nowKey = key(onNow.map(m => m.id))
+        // The setup that worked: the newest played one that isn't what just closed.
+        const worked = setups.filter(x => x.played === true && key(x.on || []) !== nowKey).sort((a, b) => b.savedAt - a.savedAt)[0] || null
+        const added = worked ? onNow.filter(m => (worked.on || []).indexOf(m.id) < 0) : []
+        if (!shot.on) Turbine.markNotWorking()
+        quick = { game: gameId, name: games[i].name, seconds: secs, added: added, worked: worked }
+        page = "game"; zone = "main"; tab = 0; modPage = false
+        if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
+    }
+    readonly property string quickText: !quick ? "" : quick.added.length === 1 ? "Since it last worked, you added " + quick.added[0].name + "."
+        : quick.added.length > 1 ? "Since it last worked (" + when(quick.worked.savedAt) + "), " + plural(quick.added.length, "mod was", "mods were") + " added or turned on."
+        : "A mod may have stopped it from starting. Playing without mods shows whether the game itself is fine."
+    function quickRun(label) {
+        const q = quick
+        quick = null
+        sheet = ""
+        if (!q) return
+        note("action", "Closed early: " + label)
+        if (label === "Turn that off and play") { const m = mods.find(x => x.id === q.added[0].id); if (m && m.enabled) toggle(m, true); startPlay() }
+        else if (label.indexOf("Go back to the setup that worked") === 0) { Turbine.restoreSetup(q.worked.id); startPlay() }
+        else if (label === "Play without mods") Turbine.playOriginal()
+    }
+    // Free accounts: what a mod needs, one page at a time ("Next: Address Library").
+    property var chainQueue: []
+    property string chainAfter: ""
+    function showChain(arrived) {
+        if (chainQueue.length === 0) return
+        chainAfter = arrived
+        if (sheet === "") { infoIndex = 0; sheet = "chain" }
+    }
+
     // ---------------------------------------------------------------- game menu
     // The setup to go back to: the newest one the game was played with (the engine's restore target).
     readonly property var lastGood: {
@@ -931,7 +1061,9 @@ Window {
                   : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
     ] : []).concat([
         { icon: "profile", title: "Profiles", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
-    ]).concat(updateCount > 0 ? [
+    ]).concat(overlapCount > 0 ? [
+        { icon: "info", title: "Overlaps: " + plural(overlapCount, "mod shares", "mods share") + " files", detail: "Which mod's copy the game gets", ok: true, act: "overlaps" }
+    ] : []).concat(updateCount > 0 ? [
         { icon: "update", title: "Update all", detail: plural(updateCount, "mod has", "mods have") + " a newer version", ok: true, act: "updateall" }
     ] : []).concat([
         { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" }
@@ -944,7 +1076,8 @@ Window {
         else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
         else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
         else if (item.act === "profiles") openProfiles()
-        else if (item.act === "updateall") { sheet = ""; Turbine.updateAll() }
+        else if (item.act === "overlaps") openOverlaps()
+        else if (item.act === "updateall") { sheet = ""; if (account.premium === true || updateList.every(x => x.u.kind !== "nexus")) Turbine.updateAll(); else openUpdates() }
         else sheet = "details"
     }
 
@@ -963,7 +1096,7 @@ Window {
         // The build's pictures add their test mods this way: only the new-mod picture follows them.
         if (shot.on && shot.page !== "newmod") return
         // Installed from the mod page of the game on screen: stay on the page (its button says Installed).
-        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); return }
+        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); showChain(name); return }
         if (i >= 0 && i !== current) current = i
         if (page !== "game") { page = "game" }
         if (sheet === "add" || sheet === "found") sheet = ""
@@ -971,19 +1104,92 @@ Window {
         arrivedMod = { id: id, name: name }
         focusArrived()
         toast.done(words)
+        showChain(name)
     }
     function focusArrived() {
         if (!arrivedMod) return
         const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === arrivedMod.id)
         if (i >= 0) { modIndex = i; arrivedMod = null }
     }
+    // Who wins shared files (overlaps.rs) and requirements both ways (needs.rs), from the engine with the mods.
+    property var overlapsMap: ({})
+    property var linksMap: ({})
+    function isHidden(m) { const o = overlapsMap[m.id]; return !!o && o.hidden === true }
+    function missingNeeds(m) { const l = linksMap[m.id]; return l ? (l.needs || []).filter(n => !n.id || !mods.some(x => x.id === n.id && x.enabled)) : [] }
+    function neededByOn(m) { const l = linksMap[m.id]; return l ? (l.neededBy || []).map(id => mods.find(x => x.id === id)).filter(x => !!x && x.enabled) : [] }
+    readonly property int overlapCount: Object.keys(overlapsMap).filter(k => mods.some(m => m.id === k)).length
+    function modName(id) { const m = mods.find(x => x.id === id); return m ? m.name : id }
+    // The Overlaps sheet for one pair: the shared files, and "Make this one win" (ordered games) when it loses them.
+    function openOverlap(m, other, loses) {
+        const files = other.files || []
+        const more = other.count > files.length ? [{ icon: "info", title: "And " + (other.count - files.length) + " more", detail: "", run: () => {} }] : []
+        openPick(loses ? m.name + " loses to " + other.name : m.name + " wins over " + other.name,
+                 plural(other.count, "shared file", "shared files") + (loses ? ". The game gets " + other.name + "'s copy." : ". The game gets this mod's copy."),
+                 (loses && ordered ? [{ icon: "move", title: "Make this one win", detail: "Moves it just after " + other.name + " in the list", run: () => makeWin(m, other.id) }] : [])
+                 .concat(files.map(f => ({ icon: "info", title: f, detail: "", run: () => {} }))).concat(more), "")
+    }
+    function makeWin(m, otherId) {
+        const to = mods.findIndex(x => x.id === otherId)
+        const from = mods.findIndex(x => x.id === m.id)
+        if (to < 0 || from < 0) return
+        note("action", "Make " + m.name + " win over " + modName(otherId))
+        moveMod(m, from < to ? to : to + 1)
+        toast.done(m.name + " now wins its shared files over " + modName(otherId) + ".")
+    }
+    function openOverlaps() {
+        const list = mods.filter(m => !!overlapsMap[m.id])
+        openPick("Overlaps", plural(list.length, "mod shares", "mods share") + " files. Lower in the list wins.", list.map(m => {
+            const o = overlapsMap[m.id]
+            const w = (o.wins || []).reduce((a, x) => a + x.count, 0), l = (o.loses || []).reduce((a, x) => a + x.count, 0)
+            return { icon: "info", title: m.name, detail: (o.hidden ? "Hidden by another mod. " : "") + "Wins " + plural(w, "file", "files") + ", loses " + l,
+                     run: () => { goToMod(m.id); sheet = "modmenu" } }
+        }), "")
+    }
+    function openNeeds(m) {
+        const l = linksMap[m.id] || { needs: [] }
+        openPick(m.name + " needs", "", (l.needs || []).map(n => {
+            const have = n.id ? mods.find(x => x.id === n.id) : null
+            return { icon: have ? "power" : "info", title: n.name, detail: !have ? "Not installed. Its page on Nexus has it." : have.enabled ? "Installed and on" : "Installed, turned off",
+                     run: () => { if (have) goToMod(have.id) } }
+        }), "")
+    }
+    function openNeededBy(m) {
+        const l = linksMap[m.id] || { neededBy: [] }
+        openPick("Mods that need " + m.name, "", (l.neededBy || []).map(id => {
+            const x = mods.find(y => y.id === id)
+            return { icon: "info", title: x ? x.name : id, detail: x ? (x.enabled ? "On" : "Off") : "", run: () => goToMod(id) }
+        }), "")
+    }
+    // Put it after...: type part of a mod's name; the mod goes just after the first one that matches.
+    property var putAfterMod: null
+    function putAfter(text) {
+        const m = putAfterMod
+        putAfterMod = null
+        if (!m || text.trim() === "") return
+        const words = text.toLowerCase().split(/\s+/).filter(w => w !== "")
+        const target = mods.find(x => x.id !== m.id && words.every(w => (x.name || "").toLowerCase().indexOf(w) >= 0))
+        if (!target) { toast.info("No mod has \"" + text + "\" in its name."); return }
+        const from = mods.findIndex(x => x.id === m.id), to = mods.findIndex(x => x.id === target.id)
+        moveMod(m, from < to ? to : to + 1)
+        toast.done(m.name + " is now after " + target.name + ".")
+    }
     readonly property var modMenuItems: !menuMod ? [] : [
         { icon: "power", title: menuMod.enabled ? "Turn off" : "Turn on", detail: menuMod.enabled ? "Stays installed" : "Goes into the game", act: "toggle" }
     ].concat(updateMap[menuMod.id] ? [
         { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
+    ] : []).concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].wins || []).slice(0, 2).map(o => (
+        { icon: "info", title: "Wins " + plural(o.count, "file", "files") + " over " + o.name, detail: "The game gets this mod's copy", act: "overlap", other: o, loses: false })) : [])
+    .concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].loses || []).slice(0, 2).map(o => (
+        { icon: "info", title: "Loses " + plural(o.count, "file", "files") + " to " + o.name, detail: ordered ? "A shows them, and Make this one win" : "The game gets " + o.name + "'s copy", act: "overlap", other: o, loses: true })) : [])
+    .concat(linksMap[menuMod.id] && (linksMap[menuMod.id].needs || []).length > 0 ? [
+        { icon: "info", title: "Needs: " + linksMap[menuMod.id].needs.map(n => n.name).join(", "),
+          detail: missingNeeds(menuMod).length === 0 ? "All installed and on" : missingNeeds(menuMod).length + " missing or turned off", act: "needs" }
+    ] : []).concat(linksMap[menuMod.id] && (linksMap[menuMod.id].neededBy || []).length > 0 ? [
+        { icon: "info", title: "Needed by: " + plural(linksMap[menuMod.id].neededBy.length, "mod", "mods"), detail: linksMap[menuMod.id].neededBy.map(modName).slice(0, 3).join(", "), act: "neededby" }
     ] : []).concat(ordered ? [
         { icon: "move", title: "Move to top", detail: "First in the load order. Mods below it win when files overlap.", act: "top" },
-        { icon: "move", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" }
+        { icon: "move", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" },
+        { icon: "move", title: "Put it after...", detail: "Type part of another mod's name; it goes just after that one", act: "putafter" }
     ] : []).concat(mods.length > 1 ? [
         { icon: "info", title: "Select several", detail: "Tick mods with A, then X acts on all of them", act: "select" }
     ] : []).concat([
@@ -1000,7 +1206,11 @@ Window {
         else if (item.act === "bottom") { moveMod(m, mods.length - 1); modIndex = mods.length }
         else if (item.act === "remove") uninstall(m)
         else if (item.act === "select") startSelect(m)
-        else if (item.act === "update") { Turbine.updateMod(m.id); edited() }
+        else if (item.act === "overlap") openOverlap(m, item.other, item.loses)
+        else if (item.act === "needs") openNeeds(m)
+        else if (item.act === "neededby") openNeededBy(m)
+        else if (item.act === "putafter") { putAfterMod = m; openAsk("putafter", "Put " + m.name + " after...", "Part of the name of the mod it goes after.", "", "Mod name", 60, false, "Move it") }
+        else if (item.act === "update") updateOne(m)
     }
     function modWords(m) {
         let parts = []
@@ -1246,7 +1456,7 @@ Window {
             else if (b === "down") menuIndex = Math.min(cardMenuItems.length - 1, menuIndex + 1)
             else if (b === "a") cardMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
-        } else if (["nobrowser", "helper", "notes", "found"].indexOf(sheet) >= 0) infoAct(b)
+        } else if (["nobrowser", "helper", "notes", "found", "quick", "chain"].indexOf(sheet) >= 0) infoAct(b)
         else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "ask") {
             // X shows Steam's keyboard again (closed by mistake); Y clears the field.
@@ -1311,12 +1521,22 @@ Window {
             else if (b === "b" && tab === 2) tab = 0
             else if (b === "b" && tab === 1) tab = 0
             else if (tab === 0 && game && selecting) selectAct(b)
-            else if (b === "b" && tab === 0 && findText !== "") { findText = ""; modIndex = 0; note("action", "Find cleared") }
+            else if (b === "b" && tab === 0 && listFiltered) { findText = ""; listShow = "all"; listSort = "order"; modIndex = 0; note("action", "Find, Show and Sort cleared") }
             else if (b === "b") { zone = "rail"; railIndex = current }
             else if (tab === 0 && game && b === "r3") openFind()
+            else if (tab === 0 && game && modIndex < 0) {
+                // The bar over the list.
+                const k = listBar[listBarIndex] ? listBar[listBarIndex].key : ""
+                if (b === "left") { if (listBarIndex > 0) listBarIndex--; else { zone = "rail"; railIndex = current } }
+                else if (b === "right") listBarIndex = Math.min(listBar.length - 1, listBarIndex + 1)
+                else if (b === "down") modIndex = 0
+                else if (b === "a") listBarRun(listBarIndex)
+                else if (b === "x" && (k === "show" || k === "sort")) listCycle(k, -1)
+            }
             else if (tab === 0 && game) {
                 const it = focusedItem
-                if (b === "up") modIndex = Math.max(0, modIndex - 1)
+                if (b === "up" && modIndex === 0) { modIndex = -1; listBarIndex = Math.min(listBarIndex, listBar.length - 1) }
+                else if (b === "up") modIndex = Math.max(0, modIndex - 1)
                 else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
                 else if (b === "a" && it && it.kind === "get") tab = 1
                 else if (b === "a" && it && it.kind === "removed") openRemoved()
@@ -1365,6 +1585,13 @@ Window {
         selecting = false; findText = ""
         railIndex = current
     }
+    // The rail's label: the game's name, and where it comes from when two copies share a name (Steam and Heroic).
+    function railName(i) {
+        const g = games[i]
+        if (!g) return ""
+        const twins = games.filter(x => x.name === g.name).length > 1
+        return g.name + (twins ? " · " + (g.launcher === "Steam" ? "Steam" : (g.storeLabel || g.launcher) + " (Heroic)") : "")
+    }
     function railSelect(i) {
         note("action", "Rail " + (i < games.length ? games[i].name : "Settings"))
         if (i < games.length) { current = i; page = "game"; zone = "main" }
@@ -1392,10 +1619,23 @@ Window {
     // Nexus browsing without a key: "" until tried this session, "ok", or "failed" (Open on Nexus instead).
     property string nexusPublic: ""
     readonly property bool nexusFallback: srcNow === "nexus" && (nexusPublic === "failed" || (browseData && browseData.fallback === true))
-    readonly property var getCats: browseData && browseData.categories && browseData.categories.length > 0 ? [""].concat(browseData.categories) : []
-    readonly property var getItems: browseData && browseData.items ? browseData.items : []
-    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
-                                   { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }]
+    // Categories come with every Nexus answer; kept from the last one without a category, so the list stays whole
+    // while one is picked.
+    property var catList: []
+    readonly property var getCats: catList.length > 0 ? [""].concat(catList) : []
+    // The Nexus mod each installed mod came from ("<domain>:<mod>[:<file>]"), so cards say Installed or Update ready
+    // even for mods added after the grid was read.
+    function nexusModOf(m) { if (!m || m.sourceKind !== "nexus") return ""; const p = String(m.sourceId || "").split(":"); return p.length >= 2 ? p[1] : p[0] }
+    readonly property var installedNexus: { let o = {}; for (const m of mods) { const k = nexusModOf(m); if (k !== "") o[k] = m.id } return o }
+    readonly property var getItems: (browseData && browseData.items ? browseData.items : []).map(x => {
+        const mine = srcNow === "nexus" ? installedNexus[String(x.id)] : undefined
+        return (mine === undefined && !x.installed) ? x : Object.assign({}, x, { installed: true, update: mine !== undefined && !!updateMap[mine] })
+    })
+    // Updates for your mods, on the Get mods start page.
+    readonly property var updateList: Object.keys(updateMap).map(k => ({ u: updateMap[k], m: mods.find(x => x.id === k) })).filter(x => !!x.m)
+    readonly property var getBar: (updateList.length > 0 && getText === "" ? [{ key: "updates", label: "Updates for your mods (" + updateList.length + ")" }] : [])
+        .concat([{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
+                                   { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }])
         .concat(getCats.length > 0 ? [{ key: "category", label: "Category: " + (getCategory || "All") }] : [])
         .concat(sources.length > 1 ? [{ key: "source", label: "From: " + srcName(srcNow) }] : [])
         .concat([{ key: "add", label: "Add a file from Downloads" }])
@@ -1490,7 +1730,7 @@ Window {
     function getAct(b) {
         const cols = gridColumns
         if (b === "b") { getBack(); return }
-        if (b === "r3") { getBarRun(0); return }
+        if (b === "r3") { getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))); return }
         if (getArea === "fallback") {
             if (b === "a") openNexusMods()
             else if (b === "x") retryBrowse()
@@ -1535,6 +1775,26 @@ Window {
         if (k === "search") openAsk("search", "Search " + gameTitle + " mods", "Words from the mod's name or what it does.", getText, "Search", 100, false, "Search")
         else if (k === "sort" || k === "category" || k === "source") cycleBar(k, 1)
         else if (k === "add") openAdd()
+        else if (k === "updates") openUpdates()
+    }
+    function openUpdates() {
+        openPick("Updates for your mods", plural(updateList.length, "mod has", "mods have") + " a newer version", updateList.map(x => ({
+            icon: "update", title: x.m.name + " " + x.u.to, detail: (x.u.from ? "You have " + x.u.from + ". " : "") + "Keeps its place and on or off",
+            run: () => updateOne(x.m) })), "")
+    }
+    // Update one mod: Premium and Thunderstore download it; a free Nexus account opens the new file's page, and that
+    // download takes the old one's place.
+    function updateOne(m) {
+        const u = updateMap[m.id]
+        if (!u) return
+        if (u.kind === "nexus" && account.premium !== true) {
+            if (!u.page) return
+            note("action", "Update " + m.name + " on Nexus")
+            Turbine.expectUpdate(m.id)
+            openNexus(u.page)
+            return
+        }
+        Turbine.updateMod(m.id); edited()
     }
     // X on a card: Other files and Open on Nexus.
     readonly property var cardItem: getArea === "grid" ? getItems[getIndex] : null
@@ -1660,6 +1920,8 @@ Window {
         if (detailsData.source === "nexus" && detailsData.premium === false) {
             const url = detailsData.filePage || detailsData.page
             note("action", "Get it on Nexus: " + detailsData.name + " (" + url + ")")
+            const miss = (detailsData.needs && detailsData.needs.missing ? detailsData.needs.missing : []).filter(r => r.modId > 0 && r.url)
+            chainQueue = miss.map(r => ({ name: r.name, url: r.url + (r.url.indexOf("?") < 0 ? "?tab=files" : "") }))
             openNexus(url)
             return
         }
@@ -1801,13 +2063,25 @@ Window {
         else pendingNotes = true
     }
     property bool pendingNotes: false
-    readonly property var infoButtons: sheet === "nobrowser" ? [{ key: "a", label: "Check again" }, { key: "b", label: "Close" }]
+    readonly property var infoButtons: sheet === "quick" && quick ? (quick.added.length === 1 ? [{ key: "a", label: "Turn that off and play" }]
+                                                                   : quick.added.length > 1 && quick.worked ? [{ key: "a", label: "Go back to the setup that worked (" + when(quick.worked.savedAt) + ")" }] : [])
+                                          .concat([{ key: "x", label: "Play without mods" }, { key: "b", label: "Keep my mods" }])
+        : sheet === "chain" ? [{ key: "a", label: "Open its page" }, { key: "b", label: "Later" }]
+        : sheet === "nobrowser" ? [{ key: "a", label: "Check again" }, { key: "b", label: "Close" }]
         : sheet === "helper" ? [{ key: "a", label: "Pair" }, { key: "b", label: "Close" }]
         : sheet === "found" ? (found && found.game ? [{ key: "a", label: "Add it" }] : []).concat([{ key: "x", label: found && found.game ? "Other game" : "Pick the game" }, { key: "b", label: "Not a mod" }])
         : [{ key: "a", label: "OK" }]
     function infoRun(i) {
         const label = infoButtons[i] ? infoButtons[i].label : ""
         note("action", "Sheet " + sheet + ": " + label)
+        if (sheet === "quick") { quickRun(label); return }
+        if (sheet === "chain") {
+            const next = chainQueue[0]
+            sheet = ""
+            if (label === "Open its page" && next) { chainQueue = chainQueue.slice(1); note("action", "Next requirement: " + next.name); openNexus(next.url) }
+            else { chainQueue = []; note("action", "Requirements: later") }
+            return
+        }
         if (sheet === "nobrowser") { if (label === "Check again") { Turbine.browserCheck(); toast.showPlain("Looking for a browser...") } else sheet = "" }
         else if (sheet === "helper") { if (label === "Pair") { sheet = ""; pair(false) } else sheet = "" }
         else if (sheet === "found") {
@@ -2007,7 +2281,7 @@ Window {
     readonly property int updateCount: Object.keys(updateMap).length
     property var updatesChecked: ({})
     function maybeCheckUpdates() {
-        if (!game || updatesChecked[game.id] || shot.on) return
+        if (!game || updatesChecked[game.id] || (shot.on && shot.page !== "getmods")) return
         const any = mods.some(m => m.source === "Thunderstore" || m.source === "Nexus Mods")
         if (!any) return
         let c = Object.assign({}, updatesChecked); c[game.id] = true; updatesChecked = c
@@ -2036,6 +2310,7 @@ Window {
         if (askPurpose === "search") { getText = text; getArea = "bar"; getIndex = 0; note("action", "Get Mods search"); browseNow() }
         else if (askPurpose === "nexusKey" && text !== "") Turbine.setNexusKey(text)
         else if (askPurpose === "newProfile" && text !== "") Turbine.profileCreate(text)
+        else if (askPurpose === "putafter") putAfter(text)
         else if (askPurpose === "find") { findText = text; modIndex = shownMods.length > 0 ? 1 : 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
         else if (askPurpose.indexOf("renameProfile:") === 0 && text !== "" && text !== askPurpose.substring(14)) Turbine.profileRename(askPurpose.substring(14), text)
         else if (askPurpose === "code" && text !== "") Turbine.profileImportCode(text)
@@ -2232,6 +2507,10 @@ Window {
           expect: "The file arrives in Downloads and Turbine asks to add it. If it doesn't, say in the report where the file went (or that Steam didn't download it)." },
         { id: "cyberpunk", title: "Cyberpunk 2077 mods", how: "Cyberpunk 2077: add Cyber Engine Tweaks, RED4ext and a mod that needs them, plus a REDmod mod; press Play.",
           expect: "The check names missing frameworks and explains REDmod once; Proton settings get winmm and version; the mods load in the game." },
+        { id: "kcd-mods", title: "KCD mods load", how: "Kingdom Come: Deliverance: add a mod from Nexus (a folder with mod.manifest and Data), reorder two mods, press Play.",
+          expect: "Mods go in Mods/<name>; Mods/mod_order.txt lists them in Turbine's order; the mods work in the game." },
+        { id: "kcd2-mods", title: "KCD II mods load", how: "Kingdom Come: Deliverance II: add two mods from Nexus, turn one off, press Play.",
+          expect: "Mods go in the game's mods folder; mod_order.txt lists only the one that is on; it works in the game." },
         { id: "witcher3", title: "The Witcher 3 mods", how: "The Witcher 3: add two mods, reorder them, press Play (start the game once first if it never ran).",
           expect: "Mods go in mods/modName; their order is written to mods.settings; scripts that clash show in the check; settings notes show after adding." },
         { id: "skyrim-nexus", title: "Skyrim from Nexus", how: "Skyrim Special Edition: get SKSE, Address Library and an SKSE plugin mod from Nexus (Mod Manager Download or Slow download).",
@@ -2665,9 +2944,13 @@ Window {
                             width: parent.width - app.px(6)
                             visible: !art.visible
                             horizontalAlignment: Text.AlignHCenter
+                            height: parent.height - app.px(8)
+                            verticalAlignment: Text.AlignVCenter
                             wrapMode: Text.WordWrap
                             maximumLineCount: 4
-                            elide: Text.ElideRight
+                            // Long words ("Cyberpunk", "Deliverance") shrink to fit the tile instead of being cut.
+                            fontSizeMode: Text.Fit
+                            minimumPixelSize: Math.max(6, app.px(6))
                             text: tileItem.g ? tileItem.g.name : ""
                             color: c.soft
                             font.family: app.bodyFont
@@ -2884,14 +3167,37 @@ Window {
                     }
 
                     // My mods: "+ Get mods for <game>", the mods, then the collapsed Removed row.
+                    Row {
+                        id: listBarRow
+                        visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage && app.mods.length > 0
+                        height: visible ? app.px(36) : 0
+                        x: app.px(4)
+                        spacing: app.px(8)
+                        Repeater {
+                            model: app.listBar
+                            Rectangle {
+                                required property int index
+                                required property var modelData
+                                readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex < 0 && app.listBarIndex === index
+                                width: chipText.implicitWidth + app.px(28); height: app.px(32); radius: app.px(6)
+                                color: foc ? c.focusFill : c.card
+                                border.color: foc ? c.accent : c.line
+                                border.width: foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
+                                Text { id: chipText; anchors.centerIn: parent; text: parent.modelData.label; color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(14); font.weight: Font.DemiBold }
+                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                TapHandler { onTapped: { app.modIndex = -1; app.listBarIndex = parent.index; app.listBarRun(parent.index) } }
+                            }
+                        }
+                    }
                     Label {
                         id: moveLine
-                        visible: app.page === "game" && app.tab === 0 && (app.moving || app.findText !== "" || app.selecting)
+                        y: listBarRow.height
+                        visible: app.page === "game" && app.tab === 0 && (app.moving || app.findText !== "" || app.selecting || app.listShow !== "all")
                         height: visible ? app.px(26) : 0
                         x: app.px(6)
                         text: app.moving ? "Lower in the list wins when two mods change the same file."
                               : app.selecting ? app.plural(app.tickedCount, "mod", "mods") + " ticked. A ticks, X acts on them, B done."
-                              : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + " with \"" + app.findText + "\" · B Show all"
+                              : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + " · B Show all"
                         color: c.soft
                         font.pixelSize: app.px(14)
                     }
@@ -2899,13 +3205,13 @@ Window {
                         id: modList
                         visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage
                         anchors.fill: parent
-                        anchors.topMargin: moveLine.height
+                        anchors.topMargin: listBarRow.height + moveLine.height
                         topMargin: app.px(4)
                         bottomMargin: app.px(4)
                         clip: true
                         spacing: app.px(app.desktopLayout ? 3 : 6)
                         model: app.listItems
-                        currentIndex: app.modIndex
+                        currentIndex: Math.max(0, app.modIndex)
                         highlightFollowsCurrentItem: false
                         onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
                         // After the left stick scrolls, focus the nearest row still in view.
@@ -2933,15 +3239,18 @@ Window {
                                 name: entry.m.name || ""
                                 detail: app.modWords(entry.m)
                                 isOn: entry.m.enabled === true
-                                ordered: app.ordered
+                                ordered: app.ordered && app.listSort === "order"
                                 compact: app.desktopLayout
                                 order: entry.kind === "mod" ? app.mods.findIndex(x => x.id === entry.m.id) + 1 : 0
                                 ticked: app.selecting && entry.kind === "mod" ? (app.ticked[entry.m.id] ? 1 : 0) : -1
                                 aLabel: app.selecting ? (app.ticked[entry.m.id] ? "Untick" : "Tick") : (entry.m.enabled === true ? "Turn off" : "Turn on")
                                 xLabel: app.selecting ? (app.tickedCount > 0 ? "Act on " + app.tickedCount : "") : "More"
                                 focused: entry.foc
-                                badge: app.moving && entry.foc ? "Moving" : (entry.m.needsLoader && app.loaderMissing ? "Needs " + app.loaderShort : app.updateMap[entry.m.id] ? "Update ready" : entry.kind === "mod" && app.isNew(entry.m) ? "New" : "")
-                                badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) ? "warn" : "info"
+                                badge: app.moving && entry.foc ? "Moving" : (entry.m.needsLoader && app.loaderMissing ? "Needs " + app.loaderShort
+                                       : entry.kind === "mod" && entry.m.enabled && app.missingNeeds(entry.m).length > 0 ? "Missing requirement"
+                                       : app.updateMap[entry.m.id] ? "Update ready" : entry.kind === "mod" && entry.m.enabled && app.isHidden(entry.m) ? "Hidden by another mod"
+                                       : entry.kind === "mod" && app.isNew(entry.m) ? "New" : "")
+                                badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) || (entry.kind === "mod" && entry.m.enabled && app.missingNeeds(entry.m).length > 0) ? "warn" : "info"
                                 showHints: entry.foc && !app.moving
                                 onClicked: app.modIndex = entry.index
                                 onToggleClicked: { app.modIndex = entry.index; app.toggle(entry.m) }
@@ -3583,12 +3892,16 @@ Window {
     // The no-browser warning, the browser helper's steps, install notes, and "Add this file?".
     InfoSheet {
         ui: kit
-        visible: ["nobrowser", "helper", "notes", "found"].indexOf(app.sheet) >= 0
-        title: app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
+        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain"].indexOf(app.sheet) >= 0
+        title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
+               : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
+               : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
                : app.sheet === "helper" ? "Set up the browser helper"
                : app.sheet === "found" ? "Found a download"
                : "Added " + app.notesName
-        text: app.sheet === "nobrowser" ? (app.browser.text || "")
+        text: app.sheet === "quick" ? app.quickText
+              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". A opens its page: press Slow download there, and Turbine adds it too."
+              : app.sheet === "nobrowser" ? (app.browser.text || "")
               : app.sheet === "helper" ? "Optional: mods download without it. It only adds installer choices on the Nexus page. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
               : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
                     + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
@@ -3722,7 +4035,7 @@ Window {
         color: c.raised
         border.color: c.accent
         border.width: Math.max(1, app.px(1))
-        Text { id: railLabelText; anchors.centerIn: parent; text: app.games[app.railIndex] ? app.games[app.railIndex].name : ""; color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(15); font.weight: Font.DemiBold }
+        Text { id: railLabelText; anchors.centerIn: parent; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(15); font.weight: Font.DemiBold }
     }
     // The status card over other apps (see showOverlay).
     StatusOverlay {
@@ -3806,13 +4119,15 @@ Window {
         if (s === "plugin" && pluginOwner) return [["a", "Go to its mod"], ["b", "Close"]]
         if (s === "plugin" || s === "details" || s === "notice") return [["b", "Close"]]
         if (s === "pickgame") return [["▲▼", "Choose"], ["a", "Add here"], ["b", "Back"]]
-        if (s === "removed") return [["▲▼", "Choose"], ["a", removedIndex === 0 ? "Empty" : "Put back"]].concat(removedIndex > 0 ? [["x", "Delete now"]] : []).concat([["b", "Close"], ["start", "Play"]])
+        if (s === "removed") return [["▲▼", "Choose"], ["b", "Close"], ["start", "Play"]]
         if (s === "confirm") return [["a", "Hold to delete"], ["b", "Keep"]]
         if (s === "keepsize") return [["a", "Keep"], ["b", "Go back"]]
         if (s === "openhelp") return [["a", "Open in Steam's browser"], ["b", "Close"]]
         if (s === "nobrowser" || s === "helper") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Close"]]
         if (s === "found") return [["◀▶", "Choose"], ["x", found && found.game ? "Other game" : "Pick the game"], ["b", "Not a mod"]]
         if (s === "notes") return [["a", "OK"]]
+        if (s === "quick") return [["◀▶", "Choose"], ["x", "Play without mods"], ["b", "Keep my mods"]]
+        if (s === "chain") return [["a", "Open its page"], ["b", "Later"]]
         if (s === "fomod") return [["a", "Choose"], ["start", "Next"], ["b", "Back a step"]]
         if (s === "ask") return [["a", "Done"], ["b", "Cancel"]].concat(Turbine.gamemode ? [["x", "Keyboard"]] : []).concat([["y", "Clear"]])
         if (s === "perf") return [["◀▶", "Choose"], ["b", "Close"]]
@@ -3830,8 +4145,9 @@ Window {
         if (tab === 0 && selecting) return [["b", "Done"], ["lb+rb", "Switch game"], ["lt+rt", "Tabs"]]
         if (tab === 0) {
             if (undoShown) h.push(["y", "Undo"])
-            else if (ordered && focusedItem && focusedItem.kind === "mod" && mods.length > 1 && findText === "") h.push(["y", "Reorder"])
-            h.push(["b", findText !== "" ? "Show all" : "Game list"])
+            else if (ordered && focusedItem && focusedItem.kind === "mod" && mods.length > 1 && findText === "") h.push(["y", listSort === "order" && listShow === "all" ? "Reorder" : "Reorder works in Load order sort"])
+            if (modIndex < 0 && listBar[listBarIndex]) h = [["a", listBar[listBarIndex].key === "find" ? "Find" : "Change"]].concat(h)
+            h.push(["b", listFiltered ? "Show all" : "Game list"])
             if (mods.length >= 20 || findText !== "") h.push(["r3", "Find"])
         } else if (tab === 1 && sources.length > 0) {
             if (getArea === "fallback") h = [["b", "My mods"]]

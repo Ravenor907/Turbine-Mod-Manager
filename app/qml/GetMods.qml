@@ -3,7 +3,7 @@ import QtQuick.Shapes
 
 // Get mods: the bar (search with Steam's keyboard, sort, category, where from, Add a file from Downloads), then a
 // "Recently viewed" strip on the start page and the mods as picture cards: thumbnail, name (two lines at most),
-// author, "12K endorsements · 3.1M downloads", an "Installed" ribbon and a "Code mod" chip where known. 3 columns on
+// author, "12K endorsements · 3.1M downloads", an "Installed" or "Update ready" ribbon and a "Code mod" chip where known. 3 columns on
 // a handheld, 4 when the design width is 1100 or more. When browsing failed (no key and Nexus refused), one big card
 // opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "bar", "recent", "grid" or "fallback"
 // with focusIndex) and passes taps through the signals.
@@ -244,8 +244,8 @@ Item {
                             anchors.margins: gm.ui.px(6)
                             width: rib.implicitWidth + gm.ui.px(14); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
-                            border.color: gm.ui.c.ok
-                            Text { id: rib; anchors.centerIn: parent; text: "Installed"; color: gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                            border.color: cell.modelData.update === true ? gm.ui.c.accent : gm.ui.c.ok
+                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "Update ready" : "Installed"; color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
                         }
                         Rectangle {
                             visible: cell.modelData.code === true

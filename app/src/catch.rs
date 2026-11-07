@@ -829,17 +829,33 @@ impl qobject::Turbine {
         let domain = hint.as_ref().map(|(r, _)| r.domain.clone()).or_else(|| nexus::domain_for_store_id(&game.store_id).map(str::to_string));
         let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
             let found = known.or_else(|| domain.as_deref().filter(|d| !d.is_empty()).and_then(|d| identify(d, &path)));
-            let source = found
+            let mut source = found
                 .or_else(|| hint.as_ref().map(|(r, v)| hint_source(r, v.clone())))
                 .unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..Default::default() });
-            post(&qt, move |t| {
+            // What it needs, from its Nexus page (no key needed), for "Needs" and "Needed by" in the mod menu.
+            if source.needs.is_empty() {
+                if let Some((d, m)) = nexus::source_mod(&source).filter(|(d, _)| !d.is_empty()) {
+                    source.needs = crate::online::nexus_needs(&d, m);
+                }
+            }
+            post(&qt, move |mut t| {
                 let name = format!("Add {label} (caught download)");
+                // A free account's Update: this download of the mod's page takes the installed mod's place (keeping
+                // its place in the list, on or off, and installer choices).
+                let replaces = nexus::source_mod(&source).and_then(|(_, m)| {
+                    let mut r = t.as_mut().rust_mut();
+                    let i = r.update_waits.iter().position(|(x, _)| *x == m)?;
+                    Some(r.update_waits.remove(i).1)
+                });
+                if let Some(id) = &replaces {
+                    crate::log::line("catch", &format!("{label} is the update of {id}"));
+                }
                 t.send(
                     Some(game.id()),
                     &name,
                     true,
                     Box::new(move |w: &mut Worker| {
-                        let out = crate::actions::add_archive(w, &game, &path, source, None, &label);
+                        let out = crate::actions::add_archive(w, &game, &path, source, replaces, &label);
                         report(w, &game, out);
                     }),
                 )

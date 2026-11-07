@@ -1,3 +1,29 @@
+        // Nexus without a key: one GraphQL lookup for all of the game's Nexus mods (version and last change), then
+        // the files of the ones that changed since they were added.
+        if let Some(domain) = game.domain.clone() {
+            if installed.iter().any(|m| m.kind == "nexus") {
+                let ids = updates::nexus_mod_ids(&domain, &installed);
+                let stamps = if self.sample.is_some() {
+                    match self.sample_text("nexus_graphql_by_id.json") {
+                        Some(Ok(t)) => nexus::parse_by_id(&t).map_err(|e| e.to_string()),
+                        _ => Ok(Vec::new()),
+                    }
+                } else {
+                    self.nexus_any().mods_by_id(&domain, &ids).map_err(err)
+                };
+                match stamps {
+                    Ok(stamps) => {
+                        for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
+                            match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
+                                Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
+                                Err(e) => notes.push(e),
+                            }
+                        }
+                    }
+                    Err(e) => notes.push(e),
+                }
+            }
+        }
 //! The download lane: everything that talks to the internet (Thunderstore, Nexus Mods, the loaders' homes, Turbine's
 //! own releases) runs here, on its own thread, so browsing never waits for a download and the mod worker never waits
 //! for the network. Nothing here touches a game's files: downloads are handed to the mod worker to add.
@@ -583,7 +609,7 @@ impl Net {
 
     /// Get mods for a Nexus game: one page of 30 from `offset`. Without a key (or when the keyed call fails) it asks
     /// without one; the error tells the app to fall back to opening Nexus in the browser.
-    pub fn browse_nexus(&mut self, game: &GameInfo, text: &str, sort: &str, offset: u32) -> Result<String, String> {
+    pub fn browse_nexus(&mut self, game: &GameInfo, text: &str, category: &str, sort: &str, offset: u32) -> Result<String, String> {
         let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
         let s = nexus::SearchSort::from_key(sort);
         let keyless = self.key.is_none();
@@ -591,8 +617,13 @@ impl Net {
             if self.sample_nexus_fail {
                 return Err("Nexus answered 401 (test run)".into());
             }
-            let t = self.sample_text("nexus_graphql_search.json").ok_or("The search sample is missing.")??;
+            // Each game's own sample when there is one (Cyberpunk's grid shows Cyberpunk mods), else the shared one.
+            let own = format!("nexus_graphql_search_{domain}.json");
+            let t = self.sample_text(&own).filter(|t| t.is_ok()).or_else(|| self.sample_text("nexus_graphql_search.json")).ok_or("The search sample is missing.")??;
             let mut p = nexus::parse_search(&t)?;
+            if !category.is_empty() {
+                p.mods.retain(|m| m.category == category);
+            }
             // A search in the samples keeps the mods whose name has the words.
             let words = text.trim().to_lowercase();
             if !words.is_empty() {
@@ -603,12 +634,12 @@ impl Net {
             }
             p
         } else {
-            let first = self.nexus_any().search(&domain, text, s, offset, 30, false);
+            let first = self.nexus_any().search_in(&domain, text, category, s, offset, 30, false);
             match first {
                 Ok(p) => p,
                 Err(e) if !keyless => {
                     crate::log::line("net", &format!("Nexus browse with the key failed ({e}); trying without it"));
-                    self.nexus_public().search(&domain, text, s, offset, 30, false).map_err(err)?
+                    self.nexus_public().search_in(&domain, text, category, s, offset, 30, false).map_err(err)?
                 }
                 Err(e) => return Err(err(e)),
             }
@@ -624,7 +655,7 @@ impl Net {
             .iter()
             .map(|m| {
                 format!(
-                    "{{\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"downloads\":{},\"rating\":{},\"icon\":{},\"code\":false,\"version\":{},\"size\":0,\"updated\":{},\"installed\":{}}}",
+                    "{{\"id\":{},\"name\":{},\"owner\":{},\"summary\":{},\"downloads\":{},\"rating\":{},\"icon\":{},\"code\":false,\"version\":{},\"size\":0,\"updated\":{},\"category\":{},\"installed\":{}}}",
                     quote(&m.mod_id.to_string()),
                     quote(&m.name),
                     quote(&m.author),
@@ -634,15 +665,18 @@ impl Net {
                     quote(&self.pic(if m.thumbnail_url.is_empty() { &m.picture_url } else { &m.thumbnail_url })),
                     quote(&m.version),
                     quote(&day(&m.updated_at)),
+                    quote(&m.category),
                     game.have.iter().any(|h| h.source.kind == "nexus"
                         && nexus::parse_source_id(&h.source.id).map(|(_, id, _)| id).or_else(|| nexus::source_mod(&h.source).map(|(_, m)| m)).is_some_and(|id| id == m.mod_id))
                 )
             })
             .collect();
         Ok(format!(
-            "{{\"source\":\"nexus\",\"total\":{},\"offset\":{offset},\"relaxed\":{},\"keyless\":{keyless},\"note\":\"\",\"categories\":[],\"items\":[{}]}}",
+            "{{\"source\":\"nexus\",\"total\":{},\"offset\":{offset},\"relaxed\":{},\"keyless\":{keyless},\"note\":\"\",\"category\":{},\"categories\":[{}],\"items\":[{}]}}",
             page.total,
             page.relaxed,
+            quote(category),
+            page.categories.iter().map(|(c, _)| quote(c)).collect::<Vec<_>>().join(","),
             items.join(",")
         ))
     }
@@ -918,7 +952,8 @@ impl Net {
             progress(&label, got, total);
             !CANCEL.load(Ordering::SeqCst)
         };
-        let (d, source) = nx.download(&account, &domain, mod_id, &file, Some(&mut cb)).map_err(err)?;
+        let (d, mut source) = nx.download(&account, &domain, mod_id, &file, Some(&mut cb)).map_err(err)?;
+        source.needs = nexus_needs(&domain, mod_id);
         let path = rename(&d, &label, &ext_of(&file.file_name));
         each(Fetched { path, source, label, replaces });
         Ok(1)
@@ -1022,20 +1057,23 @@ impl Net {
                         let (d, m, _) = nexus::parse_source_id(&u.id)?;
                         game.have
                             .iter()
-                            .find(|h| h.source.kind == "nexus" && nexus::parse_source_id(&h.source.id).is_some_and(|(hd, hm, _)| hd == d && hm == m))
+                            .find(|h| nexus::source_mod(&h.source).is_some_and(|(hd, hm)| (hd == d || hd.is_empty()) && hm == m))
                             .map(|h| h.mod_id.clone())?
                     }
                     _ => game.mod_for(&u.kind, &u.id)?,
                 };
+                // Free accounts open the new file's page (the download then takes the old one's place).
+                let page = nexus::parse_source_id(&u.id).map(|(d, m, f)| nexus::file_page_url(&d, m, f)).unwrap_or_default();
                 Some(format!(
-                    "{{\"mod\":{},\"kind\":{},\"id\":{},\"from\":{},\"to\":{},\"target\":{},\"deprecated\":{}}}",
+                    "{{\"mod\":{},\"kind\":{},\"id\":{},\"from\":{},\"to\":{},\"target\":{},\"deprecated\":{},\"page\":{}}}",
                     quote(&mod_id),
                     quote(&u.kind),
                     quote(&u.id),
                     quote(u.installed_version.as_deref().unwrap_or("")),
                     quote(&u.new_version),
                     quote(&u.target),
-                    u.deprecated
+                    u.deprecated,
+                    quote(&page)
                 ))
             })
             .collect();
@@ -1057,7 +1095,7 @@ impl Net {
             "thunderstore" => self.install_ts(game, &[target.to_string()], true, each, progress),
             "nexus" => {
                 let have = game.have.iter().find(|h| h.mod_id == mod_id).ok_or("That mod isn't installed any more.")?;
-                let (_, nexus_mod, _) = nexus::parse_source_id(&have.source.id).ok_or("Turbine doesn't know where that mod came from.")?;
+                let (_, nexus_mod) = nexus::source_mod(&have.source).ok_or("Turbine doesn't know where that mod came from.")?;
                 let file_id: u64 = target.parse().map_err(|_| "Nexus's answer can't be read.".to_string())?;
                 self.install_nexus(game, nexus_mod, file_id, Some(mod_id.to_string()), each, progress)
             }
@@ -1155,6 +1193,26 @@ impl Net {
         }
         crate::log::line("update", &format!("Installed Turbine {}", release.version));
         Ok(())
+    }
+}
+
+/// What a Nexus mod needs, as recorded with it (needs::nexus_need entries), read from its page without a key. Empty
+/// in the build's screenshot checks or when Nexus can't be reached (the mod menu then just says nothing about it).
+pub fn nexus_needs(domain: &str, mod_id: u64) -> Vec<String> {
+    if using_samples() {
+        return Vec::new();
+    }
+    let nx = Nexus::public(Client::new(crate::VERSION, &temp_dir()), crate::VERSION);
+    match nx.requirements(domain, mod_id) {
+        Ok(list) => list
+            .iter()
+            .filter(|r| r.mod_id > 0 && !r.external && !r.is_dlc)
+            .map(|r| turbine_engine::needs::nexus_need(if r.domain.is_empty() { domain } else { &r.domain }, r.mod_id, &r.name))
+            .collect(),
+        Err(e) => {
+            crate::log::line("net", &format!("What {domain} {mod_id} needs couldn't be read: {e}"));
+            Vec::new()
+        }
     }
 }
 

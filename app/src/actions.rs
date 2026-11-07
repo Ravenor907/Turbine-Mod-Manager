@@ -799,7 +799,7 @@ impl qobject::Turbine {
         }
     }
 
-    fn info(&self) -> GameInfo {
+    pub(crate) fn info(&self) -> GameInfo {
         self.rust().game_info.clone()
     }
 
@@ -890,7 +890,7 @@ impl qobject::Turbine {
         self.net_send(
             &name,
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let r = if source == "nexus" { net.browse_nexus(&info, &text, &sort, offset) } else { net.browse_ts(&info, &text, &category, &sort) };
+                let r = if source == "nexus" { net.browse_nexus(&info, &text, &category, &sort, offset) } else { net.browse_ts(&info, &text, &category, &sort) };
                 let j = match r {
                     Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{}", quote(&info.id), quote(&text), offset > 0, &j[1..]),
                     Err(e) if source == "nexus" => {

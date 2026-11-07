@@ -16,6 +16,7 @@ pub mod json;
 pub mod kcd;
 pub mod loaders;
 pub mod md5;
+pub mod needs;
 pub mod net;
 pub mod nexus;
 pub mod nxm;

@@ -28,6 +28,8 @@ pub mod qobject {
         #[qproperty(QString, check_json, cxx_name = "checkJson")]
         #[qproperty(bool, busy)]
         #[qproperty(i32, pending)]
+        /// The game the waiting changes belong to (the header only counts them on that game).
+        #[qproperty(QString, pending_game, cxx_name = "pendingGame")]
         #[qproperty(QString, reset_for, cxx_name = "resetFor")]
         #[qproperty(QString, browse_json, cxx_name = "browseJson")]
         #[qproperty(QString, details_json, cxx_name = "detailsJson")]
@@ -433,6 +435,26 @@ pub mod qobject {
         #[cxx_name = "statusDone"]
         fn status_done(self: Pin<&mut Self>);
 
+        /// Play options: Play without the script extender (or the game's mod loader) and the mods that need it, this
+        /// one time.
+        #[qinvokable]
+        #[cxx_name = "playWithoutLoader"]
+        fn play_without_loader(self: Pin<&mut Self>);
+        /// The game closed right after a modded Play: that setup no longer counts as one that worked.
+        #[qinvokable]
+        #[cxx_name = "markNotWorking"]
+        fn mark_not_working(self: Pin<&mut Self>);
+        /// Free accounts' Update: the next download of this mod's Nexus page replaces the installed mod `mod_id`.
+        #[qinvokable]
+        #[cxx_name = "expectUpdate"]
+        fn expect_update(self: Pin<&mut Self>, mod_id: &QString);
+
+        /// After a modded Play: the game ran `seconds` (known: Turbine could see the game's process; otherwise the
+        /// interface measures the time it was away).
+        #[qsignal]
+        #[cxx_name = "gameEnded"]
+        fn game_ended(self: Pin<&mut Self>, game: QString, seconds: i32, known: bool);
+
         /// A mod was added with notes the player may want to act on: its name, then the notes as a JSON list.
         #[qsignal]
         fn added(self: Pin<&mut Self>, name: QString, notes: QString);
@@ -509,6 +531,9 @@ pub struct TurbineRust {
     pub(crate) check_json: QString,
     pub(crate) busy: bool,
     pub(crate) pending: i32,
+    pub(crate) pending_game: QString,
+    /// Free accounts' updates waiting for their download: (Nexus mod id, installed mod id).
+    pub(crate) update_waits: Vec<(u64, String)>,
     pub(crate) reset_for: QString,
     pub(crate) reader: Option<Pads>,
     /// The games from the last scan, to hand to the worker.
@@ -585,6 +610,8 @@ impl Default for TurbineRust {
             check_json: QString::from("[]"),
             busy: false,
             pending: 0,
+            pending_game: QString::default(),
+            update_waits: Vec::new(),
             reset_for: QString::default(),
             reader: None,
             found: Vec::new(),
@@ -718,6 +745,10 @@ impl Worker {
         let key = game.id();
         let Some(slot) = self.slots.get(&key) else { return };
         let mods = slot.store.to_json();
+        // Who wins shared files, and requirements both ways, for the list and the mod menu.
+        let overlaps = turbine_engine::overlaps::to_json(&slot.store.overlaps());
+        let links = turbine_engine::needs::links_json(&turbine_engine::needs::links(&slot.store.installed_sources()));
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links}}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);
@@ -1298,7 +1329,8 @@ impl qobject::Turbine {
             // Changes for another game are still waiting; put them in before starting on this one.
             self.as_mut().apply_now();
         }
-        self.as_mut().rust_mut().dirty = cur;
+        self.as_mut().rust_mut().dirty = cur.clone();
+        self.as_mut().set_pending_game(QString::from(cur.as_str()));
         let n = *self.pending() + 1;
         self.as_mut().set_pending(n);
     }
@@ -1648,6 +1680,7 @@ impl qobject::Turbine {
                             None => w.say(applied_words(&r, &game), "ok"),
                         }
                         launch(w, &game);
+                        watch_game(w, &game);
                         w.show(&game, false);
                     }
                     Err(e) => {
@@ -1660,6 +1693,67 @@ impl qobject::Turbine {
                 }
             }),
         );
+    }
+
+    pub fn play_without_loader(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        let (_, n) = self.as_mut().take_pending();
+        self.as_mut().say("Getting the game ready without the script extender...", "work");
+        self.send(
+            Some(game.id()), &format!("Play {} without the loader", game.name),
+            true,
+            Box::new(move |w: &mut Worker| {
+                let result = w.slot(&game).and_then(|s| {
+                    let mut skip = s.store.loader_mods(&s.rules);
+                    skip.extend(s.store.mods().iter().filter(|m| m.enabled && m.needs_loader).map(|m| m.id.clone()));
+                    let left = skip.len();
+                    s.store.apply_except(&skip).map(|r| (r, left)).map_err(|e| e.to_string())
+                });
+                match result {
+                    Ok((r, left)) => {
+                        w.note(&game, &r);
+                        crate::log::line("launch", &format!("{} without the loader: {left} mods left out this time", game.name));
+                        w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
+                        launch(w, &game);
+                    }
+                    Err(e) => {
+                        w.post(move |mut t| {
+                            let p = *t.pending() + n;
+                            t.as_mut().set_pending(p);
+                        });
+                        w.say(format!("Couldn't take the script extender out, so the game wasn't started: {e}"), "error");
+                    }
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
+    pub fn mark_not_working(self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.send(
+            Some(game.id()), "Setup closed early",
+            false,
+            Box::new(move |w: &mut Worker| {
+                match w.slot(&game).and_then(|s| s.store.mark_not_working().map_err(|e| e.to_string())) {
+                    Ok(done) => crate::log::line("engine", &format!("{}: this setup closed early{}", game.name, if done { "; no longer the one that worked" } else { "" })),
+                    Err(e) => crate::log::line("engine", &format!("Couldn't note the setup as not working: {e}")),
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
+    pub fn expect_update(mut self: Pin<&mut Self>, mod_id: &QString) {
+        let id = mod_id.to_string();
+        let info = self.info();
+        let Some(m) = info.have.iter().find(|h| h.mod_id == id).and_then(|h| turbine_engine::nexus::source_mod(&h.source)).map(|(_, m)| m) else {
+            return;
+        };
+        crate::log::line("catch", &format!("Waiting for the update of {id} (Nexus mod {m}): its download replaces it"));
+        let mut r = self.as_mut().rust_mut();
+        r.update_waits.retain(|(x, _)| *x != m);
+        r.update_waits.push((m, id));
     }
 
     pub fn list_downloads(self: Pin<&mut Self>) {
@@ -1812,6 +1906,57 @@ fn apply_job(game: Game, n: i32) -> Job {
         }
         w.show(&game, false);
     })
+}
+
+/// After a modded Play: watches the game's process on its own thread (asked on the host every 2 seconds) and says
+/// how long it ran. A game that closes within a minute is likely broken by a mod; the interface offers a way back.
+/// When the process can't be seen at all, `known` is false and the interface measures the time Turbine was away.
+fn watch_game(w: &Worker, game: &Game) {
+    if crate::online::using_samples() {
+        return;
+    }
+    let qt = w.qt.clone();
+    let (id, name, dir) = (game.id(), game.name.clone(), game.install_dir.clone());
+    let _ = std::thread::Builder::new().name("turbine-game-watch".into()).spawn(move || {
+        let tick = Duration::from_secs(2);
+        let mut seen: Option<std::time::Instant> = None;
+        let mut unknown = 0;
+        // Up to 3 minutes for the game to start, then until it closes (at most 10 minutes of watching).
+        for i in 0..300 {
+            std::thread::sleep(tick);
+            match crate::system::game_running(&dir) {
+                Some(true) => {
+                    if seen.is_none() {
+                        seen = Some(std::time::Instant::now());
+                    }
+                    if seen.is_some_and(|t| t.elapsed() > Duration::from_secs(90)) {
+                        crate::log::line("launch", &format!("{name} is still running after 90 seconds"));
+                        return;
+                    }
+                }
+                Some(false) => {
+                    if let Some(t) = seen {
+                        let secs = t.elapsed().as_secs() as i32;
+                        crate::log::line("launch", &format!("{name} closed after {secs} seconds"));
+                        let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), secs, true));
+                        return;
+                    }
+                    if i >= 90 {
+                        crate::log::line("launch", &format!("{name} wasn't seen running"));
+                        return;
+                    }
+                }
+                None => {
+                    unknown += 1;
+                    if unknown >= 3 {
+                        crate::log::line("launch", "Can't see the game's process; the interface measures the time away instead");
+                        let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), -1, false));
+                        return;
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn launch(w: &Worker, game: &Game) {
