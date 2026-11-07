@@ -99,11 +99,11 @@ jobs:
       - name: Send Nexus's public GraphQL the exact requests Turbine sends, with no key
         shell: bash
         run: |
-          # The bodies come from the engine itself; said as notices and warnings only (Nexus being down must
-          # never fail the build).
+          # The bodies come from the engine itself. Nexus being down or slow is only a warning; a GraphQL errors
+          # answer to one of Turbine's own requests fails the job (every player would get it too).
           rustup toolchain install 1.97.0 --profile minimal > /dev/null
-          (cd engine && TURBINE_QUERY_OUT=/tmp/nexus-queries cargo +1.97.0 test --release -q --test complexity) || echo "::warning title=Nexus live check::The query bodies couldn't be made"
-          sh tools/nexus-live.sh /tmp/nexus-queries || echo "::warning title=Nexus live check::It couldn't finish"
+          (cd engine && TURBINE_QUERY_OUT=/tmp/nexus-queries cargo +1.97.0 test --release -q --test complexity)
+          sh tools/nexus-live.sh /tmp/nexus-queries
 
   vendor:
     name: Rust crates for the offline Flatpak build

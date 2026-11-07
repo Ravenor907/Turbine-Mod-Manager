@@ -167,7 +167,9 @@ fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
     let body = json::parse(&nexus::search_body_at("witcher3", "", SearchSort::Trending, 0, 30, false, now)).unwrap();
     let vars = body.get("variables").unwrap();
     let up = &vars.get("filter").unwrap().get("updatedAt").unwrap().as_array()[0];
-    assert_eq!(up.str_at("value"), Some("2025-10-08T00:00:00Z"));
+    // A plain day: Nexus reads a full time's ':' as a new search term and refuses the whole search.
+    assert_eq!(up.str_at("value"), Some("2025-10-08"));
+    assert!(!up.str_at("value").unwrap().contains(':'));
     assert_eq!(vars.get("sort").unwrap().as_array()[0].get("endorsements").unwrap().str_at("direction"), Some("DESC"));
     let newest = json::parse(&nexus::search_body("witcher3", "", SearchSort::Newest, 0, 30, false)).unwrap();
     assert!(newest.get("variables").unwrap().get("sort").unwrap().as_array()[0].get("createdAt").is_some());
@@ -189,6 +191,7 @@ fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
 fn dates_round_trip() {
     assert_eq!(nexus::iso_day(0), "1970-01-01T00:00:00Z");
     assert_eq!(nexus::iso_day(1_709_164_800), "2024-02-29T00:00:00Z");
+    assert_eq!(nexus::date_day(1_709_164_800), "2024-02-29");
     assert_eq!(nexus::iso_secs("2024-02-29T00:00:00Z"), 1_709_164_800);
     assert_eq!(nexus::iso_secs("2025-03-04T10:20:30Z"), 1_741_083_630);
     assert_eq!(nexus::iso_secs("nonsense"), 0);

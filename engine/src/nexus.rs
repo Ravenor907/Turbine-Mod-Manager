@@ -584,6 +584,13 @@ fn net_now() -> u64 {
 
 /// "2026-11-07T00:00:00Z" for seconds since 1970 (UTC, whole days are enough here).
 pub fn iso_day(secs: u64) -> String {
+    format!("{}T00:00:00Z", date_day(secs))
+}
+
+/// "2026-11-07" for seconds since 1970 (UTC). Trending's updatedAt filter sends this form: Nexus puts the value into
+/// a search query as it is, where the ':' of a full time is read as the start of another term and the whole search
+/// is refused with a 400 parse_exception (the build's live check, Nov 7 2026).
+pub fn date_day(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     // Civil date from days since 1970 (Howard Hinnant's algorithm).
     let z = days + 719_468;
@@ -595,7 +602,7 @@ pub fn iso_day(secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}T00:00:00Z")
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// `search_body` with the time given (Trending's 30 days are counted back from `now`).
@@ -618,7 +625,7 @@ pub fn search_body_in(domain: &str, text: &str, category: &str, sort: SearchSort
         filter.push_str(",\"adultContent\":[{\"value\":false,\"op\":\"EQUALS\"}]");
     }
     if sort == SearchSort::Trending {
-        let since = iso_day(now.saturating_sub(TRENDING_DAYS * 86_400));
+        let since = date_day(now.saturating_sub(TRENDING_DAYS * 86_400));
         filter.push_str(&format!(",\"updatedAt\":[{{\"value\":{},\"op\":\"GTE\"}}]", quote(&since)));
     }
     let (field, dir) = sort.field();
