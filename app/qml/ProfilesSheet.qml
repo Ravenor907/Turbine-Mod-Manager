@@ -38,7 +38,7 @@ Item {
             x: ps.ui.px(18); y: ps.ui.px(18)
             width: parent.width - ps.ui.px(36)
             spacing: ps.ui.px(8)
-            Text { text: ps.plan ? "Import a profile" : "Profiles"; color: ps.ui.c.text; font.family: ps.ui.titleFont; font.pixelSize: ps.ui.px(18); font.bold: true }
+            Text { text: ps.plan ? "Import a loadout" : "Loadouts"; color: ps.ui.c.text; font.family: ps.ui.titleFont; font.pixelSize: ps.ui.px(18); font.bold: true }
             Text {
                 width: parent.width; wrapMode: Text.WordWrap
                 text: ps.plan ? (ps.plan.error ? ps.plan.error : "\"" + ps.plan.profile + "\" for " + ps.gameName)
@@ -63,7 +63,7 @@ Item {
                 }
             }
             Repeater {
-                model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the profile", detail: ps.plan.error ? "" : "Downloads what Turbine can get, then switches to it" },
+                model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the loadout", detail: ps.plan.error ? "" : "Downloads what Turbine can get, then switches to it" },
                                   { label: "Cancel", detail: "" }].slice(ps.plan.error ? 1 : 0)
                          : ps.profiles.map(p => ({ label: p.name, detail: p.on + " of " + p.mods + " mods on" + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
                            .concat(ps.actions)

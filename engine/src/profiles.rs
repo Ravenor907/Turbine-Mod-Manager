@@ -51,7 +51,7 @@ fn clean_profile_name(name: &str) -> Result<String, String> {
     let n: String = name.chars().filter(|c| !c.is_control()).collect();
     let n = n.trim().to_string();
     if n.is_empty() {
-        return Err("A profile needs a name.".into());
+        return Err("A loadout needs a name.".into());
     }
     if n.chars().count() > 60 {
         return Err("That name is too long (60 letters at most).".into());
@@ -131,44 +131,44 @@ impl Profiles {
     pub fn create(&mut self, store: &Store, name: &str) -> Result<(), String> {
         let name = clean_profile_name(name)?;
         if self.find(&name).is_some() {
-            return Err(format!("There's already a profile called {name}."));
+            return Err(format!("There's already a loadout called {name}."));
         }
         self.list.push(Profile { name, order: store.order() });
-        self.save().map_err(|e| format!("The profile couldn't be saved ({e})."))
+        self.save().map_err(|e| format!("The loadout couldn't be saved ({e})."))
     }
 
     pub fn rename(&mut self, old: &str, new: &str) -> Result<(), String> {
         let new = clean_profile_name(new)?;
-        let i = self.find(old).ok_or_else(|| format!("There's no profile called {old}."))?;
+        let i = self.find(old).ok_or_else(|| format!("There's no loadout called {old}."))?;
         if self.find(&new).is_some_and(|j| j != i) {
-            return Err(format!("There's already a profile called {new}."));
+            return Err(format!("There's already a loadout called {new}."));
         }
         if self.active.eq_ignore_ascii_case(old) {
             self.active = new.clone();
         }
         self.list[i].name = new;
-        self.save().map_err(|e| format!("The profile couldn't be saved ({e})."))
+        self.save().map_err(|e| format!("The loadout couldn't be saved ({e})."))
     }
 
     /// Deletes a profile (not the one in use).
     pub fn delete(&mut self, name: &str) -> Result<(), String> {
-        let i = self.find(name).ok_or_else(|| format!("There's no profile called {name}."))?;
+        let i = self.find(name).ok_or_else(|| format!("There's no loadout called {name}."))?;
         if self.list[i].name == self.active {
-            return Err("This profile is in use. Switch to another one first.".into());
+            return Err("This loadout is in use. Switch to another one first.".into());
         }
         self.list.remove(i);
-        self.save().map_err(|e| format!("The profiles couldn't be saved ({e})."))
+        self.save().map_err(|e| format!("The loadouts couldn't be saved ({e})."))
     }
 
     /// Switches: saves the current setup into the profile in use, loads `name` into the store and applies it.
     pub fn switch(&mut self, store: &mut Store, name: &str) -> Result<Report, String> {
-        let i = self.find(name).ok_or_else(|| format!("There's no profile called {name}."))?;
-        self.save_current(store).map_err(|e| format!("The current profile couldn't be saved ({e})."))?;
+        let i = self.find(name).ok_or_else(|| format!("There's no loadout called {name}."))?;
+        self.save_current(store).map_err(|e| format!("The current loadout couldn't be saved ({e})."))?;
         let order = self.list[i].order.clone();
-        store.set_order(&order).map_err(|e| format!("The profile couldn't be loaded ({e})."))?;
+        store.set_order(&order).map_err(|e| format!("The loadout couldn't be loaded ({e})."))?;
         self.active = self.list[i].name.clone();
-        self.save().map_err(|e| format!("The profiles couldn't be saved ({e})."))?;
-        store.apply().map_err(|e| format!("The profile was loaded, but the game couldn't be updated ({e})."))
+        self.save().map_err(|e| format!("The loadouts couldn't be saved ({e})."))?;
+        store.apply().map_err(|e| format!("The loadout was loaded, but the game couldn't be updated ({e})."))
     }
 
     /// The order saved in a profile (for the active one, the store's current order).
@@ -295,7 +295,7 @@ pub fn share_json(share: &Share) -> String {
 
 /// Writes a profile to a share file in ~/Downloads and returns its path.
 pub fn export(profiles: &Profiles, store: &Store, name: &str, home: &Path) -> Result<PathBuf, String> {
-    let order = profiles.order_of(store, name).ok_or_else(|| format!("There's no profile called {name}."))?;
+    let order = profiles.order_of(store, name).ok_or_else(|| format!("There's no loadout called {name}."))?;
     let game = store.game();
     let share = Share {
         game_name: game.name.clone(),

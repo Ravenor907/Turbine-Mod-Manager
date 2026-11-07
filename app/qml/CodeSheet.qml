@@ -37,7 +37,7 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: cs.info ? "Profile \"" + cs.info.profile + "\"" : ""
+                text: cs.info ? "Loadout \"" + cs.info.profile + "\"" : ""
                 color: cs.ui.c.soft
                 font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15)
             }
@@ -68,9 +68,9 @@ Item {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: cs.state_ === "working" ? "Uploading the profile's Thunderstore mods and its BepInEx settings to Thunderstore..."
+                text: cs.state_ === "working" ? "Uploading the loadout's Thunderstore mods and its BepInEx settings to Thunderstore..."
                       : cs.state_ === "error" ? (cs.info.message || "The code couldn't be made.")
-                      : "Copied. Anyone can paste this code into Turbine (Profiles, Import a Thunderstore profile code) or another Thunderstore mod tool to get the same mods."
+                      : "Copied. Anyone can paste this code into Turbine (Loadouts, Import a Thunderstore profile code) or another Thunderstore mod tool to get the same mods."
                 color: cs.state_ === "error" ? cs.ui.c.warn : cs.ui.c.text
                 font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15)
             }

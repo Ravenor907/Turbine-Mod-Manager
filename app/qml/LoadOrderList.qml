@@ -13,6 +13,7 @@ Item {
     property string error: ""
     property var messages: ({})           // LOOT's notes: plugin name lowercased -> [{level, text}]
     property string note: ""              // what the last sort did
+    property var owners: ({})             // plugin name lowercased -> the name of the mod that placed it
     function notesFor(name) { return lo.messages[(name || "").toLowerCase()] || [] }
     function lootBadge(name) {
         const n = notesFor(name)
@@ -126,7 +127,18 @@ Item {
                         color: row.p.active ? lo.ui.c.text : lo.ui.c.soft
                         font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(16); font.bold: true
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, row.width * 0.5)
+                        width: Math.min(implicitWidth, row.width * 0.4)
+                        elide: Text.ElideRight
+                    }
+                    // Which of your mods put it there.
+                    Text {
+                        readonly property string from: lo.owners[(row.p.name || "").toLowerCase()] || ""
+                        visible: from !== ""
+                        text: "From: " + from
+                        color: lo.ui.c.muted
+                        font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(14)
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(implicitWidth, row.width * 0.22)
                         elide: Text.ElideRight
                     }
                     Repeater {

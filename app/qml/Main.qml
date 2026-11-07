@@ -552,16 +552,16 @@ Window {
         ].concat(canSkipLoader ? [
             { icon: "play", title: rules.kind === "bethesda" ? "Play without the script extender" : "Play without " + loaderShort,
               detail: "Leaves out " + loaderShort + " and the mods that need it, this time only", run: () => { autoApply.stop(); Turbine.playWithoutLoader() } }
-        ] : []).concat(others.map(p => ({ icon: "play", title: "Play with profile " + p.name, detail: "Switches to it, then plays", run: () => { Turbine.profileSwitch(p.name); startPlay() } }))), "")
+        ] : []).concat(others.map(p => ({ icon: "play", title: "Play with loadout " + p.name, detail: "Switches to it, then plays", run: () => { Turbine.profileSwitch(p.name); startPlay() } }))), "")
     }
     readonly property bool canSkipLoader: !!rules && !!rules.loader && rules.loaderInstalled === true && mods.some(m => m.enabled)
     // X on a profile: Rename, Delete (hold A).
     function profileMenu(n) {
         const inUse = profileData && profileData.active === n
-        openPick(n, inUse ? "In use now" : "Profile", [
-            { icon: "info", title: "Rename", detail: "Give it a new name", run: () => { sheet = "profiles"; openAsk("renameProfile:" + n, "Rename " + n, "A new name for this profile.", n, "Profile name", 60, false, "Rename") } }
+        openPick(n, inUse ? "In use now" : "Loadout", [
+            { icon: "info", title: "Rename", detail: "Give it a new name", run: () => { sheet = "profiles"; openAsk("renameProfile:" + n, "Rename " + n, "A new name for this loadout.", n, "Loadout name", 60, false, "Rename") } }
         ].concat(inUse ? [] : [
-            { icon: "remove", title: "Delete", detail: "Hold A to delete it for good", danger: true, run: () => askDelete("profile:" + n, "Delete the profile " + n + " for good? Its mods stay installed.") }
+            { icon: "remove", title: "Delete", detail: "Hold A to delete it for good", danger: true, run: () => askDelete("profile:" + n, "Delete the loadout " + n + " for good? Its mods stay installed.") }
         ]), "profiles")
     }
     // Load order: the mod that placed a plugin.
@@ -787,6 +787,8 @@ Window {
         order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
         Turbine.select(game.id)
+        // Its loadouts, for the header chip (shown with two or more).
+        Turbine.profiles()
         if (tab === 1) Qt.callLater(browseNow)
     }
     Component.onCompleted: {
@@ -842,7 +844,8 @@ Window {
         // Changes still on their way in show as a pill (only on the game they belong to); the line says how it stands.
         const waiting = Turbine.pending > 0 && Turbine.pendingGame === game.id
         return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on",
-                 pill: waiting ? plural(Turbine.pending, "change", "changes") + " going in" : updateCount > 0 ? plural(updateCount, "update", "updates") + " ready" : "" }
+                 pill: waiting ? plural(Turbine.pending, "change", "changes") + " going in" : updateCount > 0 ? plural(updateCount, "update", "updates") + " ready"
+                       : profileData && profileList.length > 1 ? "Loadout: " + profileData.active : "" }
     }
 
     // ---------------------------------------------------------------- applying changes
@@ -1181,10 +1184,12 @@ Window {
                   : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
     ] : []).concat(loaderMissing ? [
         { icon: "update", title: (loaderCanGet ? "Install " : "Get ") + loaderShort, detail: needLoader.length > 0 ? plural(needLoader.length, "mod needs", "mods need") + " it" : "The mod loader for " + gameTitle, ok: true, act: "loader" }
+    ] : []).concat(setups.length > 1 ? [
+        { icon: "restore", title: "Go back to an earlier setup", detail: plural(setups.length, "setup", "setups") + " saved, newest first", ok: true, act: "setups" }
     ] : []).concat(kcdRestore ? [
         { icon: "restore", title: "Put back my mod_order.txt", detail: "As it was before Turbine changed it. Turbine's mods that are on go back in at the next change or Play.", ok: true, act: "kcdrestore" }
     ] : []).concat([
-        { icon: "profile", title: "Profiles", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
+        { icon: "profile", title: "Loadouts", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
     ]).concat(overlapCount > 0 ? [
         { icon: "info", title: "Overlaps: " + plural(overlapCount, "mod shares", "mods share") + " files", detail: "Which mod's copy the game gets", ok: true, act: "overlaps" }
     ] : []).concat(updateCount > 0 ? [
@@ -1192,6 +1197,13 @@ Window {
     ] : []).concat([
         { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" }
     ])
+    // Every saved setup, newest first ("Nov 4, 9:12 PM · 16 mods on · Played"); A puts one back.
+    function openSetups() {
+        const list = setups.slice().sort((a, b) => b.savedAt - a.savedAt)
+        openPick("Go back to an earlier setup", gameTitle, list.map(x => ({
+            icon: "restore", title: when(x.savedAt), detail: plural(x.modsOn, "mod", "mods") + " on" + (x.played ? " · Played" : ""),
+            run: () => { note("action", "Go back to the setup of " + when(x.savedAt)); Turbine.restoreSetup(x.id) } })), "gamemenu")
+    }
     function gameMenuRun(i) {
         const item = gameMenuItems[i]
         if (!item || !item.ok) return
@@ -1202,6 +1214,7 @@ Window {
         else if (item.act === "profiles") openProfiles()
         else if (item.act === "loader") { sheet = ""; getLoader() }
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
+        else if (item.act === "setups") openSetups()
         else if (item.act === "overlaps") openOverlaps()
         else if (item.act === "updateall") { sheet = ""; if (account.premium === true || updateList.every(x => x.u.kind !== "nexus")) Turbine.updateAll(); else openUpdates() }
         else sheet = "details"
@@ -2421,7 +2434,7 @@ Window {
     property int profIndex: 0
     readonly property var profileList: profileData ? profileData.profiles : []
     readonly property var profileActions: [
-        { key: "new", label: "New profile", detail: "From the mods as they are now" },
+        { key: "new", label: "New loadout", detail: "From the mods as they are now" },
         { key: "export", label: "Export to a share file", detail: "Saves \"" + (profileData ? profileData.active : "") + "\" to Downloads, to share" },
         { key: "importFile", label: "Import a share file", detail: "A Turbine profile file in Downloads" }
     ].concat(rules && rules.community ? [
@@ -2435,8 +2448,8 @@ Window {
                 note("action", "Import profile: get them")
                 Turbine.profileImportGo(); sheet = ""
                 const steps = account.premium ? (importData.nexusPremium || []) : (importData.nexusFree || [])
-                const open = steps.filter(x => x.action === "open").map(x => ({ name: x.mod.name, url: x.url, note: "From the shared profile" }))
-                if (open.length > 0) { importData = null; openPages("Open these pages for the profile", open); return }
+                const open = steps.filter(x => x.action === "open").map(x => ({ name: x.mod.name, url: x.url, note: "From the shared loadout" }))
+                if (open.length > 0) { importData = null; openPages("Open these pages for the loadout", open); return }
             }
             importData = null
             if (sheet === "profiles") profIndex = 0
@@ -2453,7 +2466,7 @@ Window {
         const a = profileActions[i - profileList.length]
         if (!a) return
         note("action", "Profiles: " + a.label)
-        if (a.key === "new") openAsk("newProfile", "New profile", "A name for the mods as they are now.", "", "Profile name", 60, false, "Make it")
+        if (a.key === "new") openAsk("newProfile", "New loadout", "A name for the mods as they are now.", "", "Loadout name", 60, false, "Make it")
         else if (a.key === "export" && profileData) Turbine.profileExport(profileData.active)
         else if (a.key === "code" && profileData) { Turbine.profileCode(profileData.active); sheet = "code" }
         else if (a.key === "importFile") { Turbine.listShares(); shareIndex = 0; sheet = "shares" }
@@ -2645,8 +2658,8 @@ Window {
           expect: "One question per page with pictures; B goes back; the files of the chosen options go in." },
         { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one with Y, then Sort automatically.",
           expect: "The game loads plugins in that order; masters stay first; missing masters are named." },
-        { id: "ts-code", title: "Thunderstore code", how: "Lethal Company or another Thunderstore game, online: game menu (View), Profiles, Create a Thunderstore code.",
-          expect: "A code shows big and is copied; importing it on another device (or Profiles, Import a Thunderstore profile code) gets the same mods." },
+        { id: "ts-code", title: "Thunderstore code", how: "Lethal Company or another Thunderstore game, online: game menu (View), Loadouts, Create a Thunderstore code.",
+          expect: "A code shows big and is copied; importing it on another device (or Loadouts, Import a Thunderstore profile code) gets the same mods." },
         { id: "other-versions", title: "Other versions", how: "Get mods, a mod page, X Other files, then A on an older version.",
           expect: "That version downloads and takes the installed one's place, same spot and on or off." },
         { id: "nxm-handler", title: "Mod Manager Download", how: "Settings, Accounts: Use Turbine for Nexus downloads. Then in Desktop Mode press Mod Manager Download on a Nexus mod's Files tab, with Turbine open and with it closed.",
@@ -2655,16 +2668,16 @@ Window {
           expect: "The page opens in the browser; Mod Manager Download there sends the file to Turbine. In Game Mode Turbine says it works best in Desktop Mode." },
         { id: "nexus-requirements", title: "Nexus requirements", how: "Skyrim: details of a Nexus mod that needs others (like SkyUI needs SKSE).",
           expect: "Also needs lists them as Have it, Missing, Game DLC or Outside Nexus; Premium installs the missing ones with the mod, free accounts get their pages." },
-        { id: "profile-nexus", title: "Profile import with Nexus mods", how: "Import a share file that has Nexus mods.",
-          expect: "Premium: Turbine downloads them too. Free: it lists the pages to open, and the profile is made with what's there." },
+        { id: "profile-nexus", title: "Loadout import with Nexus mods", how: "Import a share file that has Nexus mods.",
+          expect: "Premium: Turbine downloads them too. Free: it lists the pages to open, and the loadout is made with what's there." },
         { id: "loot-sort", title: "LOOT sorting", how: "Skyrim with a few plugin mods, online: Load order tab, A on Sort automatically, then X on a plugin with a badge.",
           expect: "The line at the top says Sorted with LOOT's masterlist; the game starts with that order; badges like Dirty show LOOT's notes, and X lists them." },
         { id: "nexus-key", title: "Nexus Mods key", how: "Settings, Accounts: add your personal API key with Steam's keyboard.",
           expect: "It says your name and Premium or Free; Nexus Mods browsing works; Sign out removes the key." },
         { id: "mod-updates", title: "Mod updates", how: "Have an older Thunderstore or Nexus mod, open its game.",
           expect: "Update ready shows on it; X Update or the game menu's Update all brings the new version, same place and on or off." },
-        { id: "profiles", title: "Profiles", how: "Game menu (View), Profiles: make one, switch, export a share file, import it or a Thunderstore code.",
-          expect: "Switching changes which mods are on right away; an import gets the mods and makes the profile." },
+        { id: "profiles", title: "Loadouts", how: "Game menu (View), Loadouts: make one, switch, export a share file, import it or a Thunderstore code.",
+          expect: "Switching changes which mods are on right away; an import gets the mods and makes the loadout." },
         { id: "self-update", title: "Turbine updates itself", how: "Settings, Updates: Check now, Install, then Restart.",
           expect: "The new version installs and opens. With Pre-release in Labs, test builds show; Go back to stable returns to stable." },
         { id: "archives", title: "7z and rar mods", how: "Add a .7z and a .rar mod from Downloads.",
@@ -3314,7 +3327,7 @@ Window {
                                 border.color: c.accentLo
                                 Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(13); font.bold: true }
                                 // Updates ready: the list of them (a free account picks each one's page there).
-                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active && !(Turbine.pending > 0 && Turbine.pendingGame === app.game.id)) app.openUpdates() }
+                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active && !(Turbine.pending > 0 && Turbine.pendingGame === app.game.id)) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
                             }
                         }
                     }
@@ -3585,6 +3598,7 @@ Window {
                         error: app.orderError
                         messages: app.orderMessages
                         note: app.orderNote
+                        owners: { let o = {}; for (const k in app.orderOwners) o[k] = app.modName(app.orderOwners[k]); return o }
                         focusIndex: app.orderIndex
                         moving: app.orderMoving
                         active: app.zone === "main" && app.sheet === ""
@@ -4114,11 +4128,11 @@ Window {
         ui: kit
         visible: app.sheet === "shares"
         title: "Import a share file"
-        subtitle: "Turbine profile files in your Downloads folder, newest first"
+        subtitle: "Shared loadout files in your Downloads folder, newest first"
         files: app.shares.map(x => ({ name: x.name, size: "", age: "" }))
         focusIndex: app.shareIndex
         actionLabel: "Read"
-        emptyText: "No Turbine profile files in Downloads. Someone makes one with Profiles, Export to a share file."
+        emptyText: "No shared loadout files in Downloads. Someone makes one with Loadouts, Export to a share file."
         laterText: ""
         onActivated: (index) => { app.shareIndex = index; app.act("a") }
         onClosed: app.act("b")

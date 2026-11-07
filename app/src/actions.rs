@@ -617,7 +617,7 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
 }
 
 fn profiles_json(w: &mut Worker, game: &Game) -> String {
-    match w.slot(game).and_then(|s| Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))) {
+    match w.slot(game).and_then(|s| Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))) {
         Ok(p) => format!("{{\"game\":{},\"data\":{},\"error\":\"\"}}", quote(&game.id()), p.to_json()),
         Err(e) => format!("{{\"game\":{},\"data\":{{\"active\":\"\",\"profiles\":[]}},\"error\":{}}}", quote(&game.id()), quote(&e)),
     }
@@ -657,7 +657,7 @@ fn finish_share(w: &mut Worker, game: &Game) {
         return;
     }
     let result = w.slot(game).and_then(|s| {
-        let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+        let mut p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
         let names = p.names();
         let mut name = share.profile.trim().to_string();
         if name.is_empty() {
@@ -671,10 +671,10 @@ fn finish_share(w: &mut Worker, game: &Game) {
         }
         let order = profiles::share_order(&share, &s.store);
         let old = s.store.order();
-        p.save_current(&s.store).map_err(|e| format!("The current profile couldn't be saved ({e})."))?;
-        s.store.set_order(&order).map_err(|e| format!("The profile couldn't be made ({e})."))?;
+        p.save_current(&s.store).map_err(|e| format!("The current loadout couldn't be saved ({e})."))?;
+        s.store.set_order(&order).map_err(|e| format!("The loadout couldn't be made ({e})."))?;
         let made = p.create(&s.store, &name);
-        s.store.set_order(&old).map_err(|e| format!("The profile couldn't be made ({e})."))?;
+        s.store.set_order(&old).map_err(|e| format!("The loadout couldn't be made ({e})."))?;
         made?;
         let r = p.switch(&mut s.store, &name)?;
         Ok((name, r))
@@ -682,7 +682,7 @@ fn finish_share(w: &mut Worker, game: &Game) {
     match result {
         Ok((name, r)) => {
             w.note(game, &r);
-            w.say(format!("Profile {name} is ready and in use"), "ok");
+            w.say(format!("Loadout {name} is ready and in use"), "ok");
         }
         Err(e) => w.say(e, "error"),
     }
@@ -1184,13 +1184,13 @@ impl qobject::Turbine {
         let name = name.to_string();
         self.profile_job("Switch profile", move |w, game| {
             let r = w.slot(game).and_then(|s| {
-                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
                 p.switch(&mut s.store, &name)
             });
             match r {
                 Ok(r) => {
                     w.note(game, &r);
-                    w.say(format!("Using profile {name}"), "ok");
+                    w.say(format!("Using loadout {name}"), "ok");
                 }
                 Err(e) => w.say(e, "error"),
             }
@@ -1202,11 +1202,11 @@ impl qobject::Turbine {
         let name = name.to_string();
         self.profile_job("New profile", move |w, game| {
             let r = w.slot(game).and_then(|s| {
-                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
                 p.create(&s.store, &name)
             });
             match r {
-                Ok(()) => w.say(format!("Made profile {name} from the mods as they are now"), "ok"),
+                Ok(()) => w.say(format!("Made loadout {name} from the mods as they are now"), "ok"),
                 Err(e) => w.say(e, "error"),
             }
         });
@@ -1216,11 +1216,11 @@ impl qobject::Turbine {
         let (old, new) = (from.to_string(), to.to_string());
         self.profile_job("Rename profile", move |w, game| {
             let r = w.slot(game).and_then(|s| {
-                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
                 p.rename(&old, &new)
             });
             match r {
-                Ok(()) => w.say(format!("Renamed profile {old} to {new}"), "ok"),
+                Ok(()) => w.say(format!("Renamed loadout {old} to {new}"), "ok"),
                 Err(e) => w.say(e, "error"),
             }
         });
@@ -1230,11 +1230,11 @@ impl qobject::Turbine {
         let name = name.to_string();
         self.profile_job("Delete profile", move |w, game| {
             let r = w.slot(game).and_then(|s| {
-                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
                 p.delete(&name)
             });
             match r {
-                Ok(()) => w.say(format!("Deleted profile {name}"), "ok"),
+                Ok(()) => w.say(format!("Deleted loadout {name}"), "ok"),
                 Err(e) => w.say(e, "error"),
             }
         });
@@ -1245,7 +1245,7 @@ impl qobject::Turbine {
         self.profile_job("Export profile", move |w, game| {
             let home = turbine_engine::home_dir();
             let r = w.slot(game).and_then(|s| {
-                let p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                let p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
                 profiles::export(&p, &s.store, &name, &home)
             });
             match r {
@@ -1270,8 +1270,8 @@ impl qobject::Turbine {
             false,
             Box::new(move |w: &mut Worker| {
                 let r = w.slot(&game).and_then(|s| {
-                    let p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
-                    let order = p.order_of(&s.store, &name).ok_or_else(|| format!("The profile {name} isn't there any more."))?;
+                    let p = Profiles::open(&s.store).map_err(|e| format!("Loadouts couldn't be read ({e})."))?;
+                    let order = p.order_of(&s.store, &name).ok_or_else(|| format!("The loadout {name} isn't there any more."))?;
                     Ok(profiles::share_mods(&s.store, &order))
                 });
                 let mods = match r {
