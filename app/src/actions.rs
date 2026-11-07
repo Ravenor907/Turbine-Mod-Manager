@@ -468,11 +468,35 @@ pub(crate) fn sync_order(w: &mut Worker, game: &Game) {
 /// The Load order tab's data: the plugins, LOOT's messages for them, and which sort ran last (with its note).
 fn order_json(w: &Worker, game: &Game, lo: Result<plugins::LoadOrder, String>, sorted_by: &str, note: &str) -> String {
     let msgs = w.loot.get(&game.id()).map(|(_, m)| crate::loot::messages_json(m)).unwrap_or_else(|| "{}".into());
+    // Which of Turbine's mods placed each plugin (by file name, any case), for the details sheet's "Go to its mod".
+    let owners: Vec<String> = w
+        .slots
+        .get(&game.id())
+        .map(|s| {
+            let mut seen = std::collections::HashSet::new();
+            s.store
+                .mod_files()
+                .into_iter()
+                .filter(|m| s.store.mods().iter().any(|x| x.id == m.id))
+                .flat_map(|m| {
+                    let id = m.id.clone();
+                    m.files.into_iter().filter_map(move |f| {
+                        let base = f.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
+                        let plugin = base.ends_with(".esp") || base.ends_with(".esm") || base.ends_with(".esl");
+                        plugin.then(|| (base, id.clone()))
+                    })
+                })
+                .filter(|(b, _)| seen.insert(b.clone()))
+                .map(|(b, id)| format!("{}:{}", quote(&b), quote(&id)))
+                .collect()
+        })
+        .unwrap_or_default();
     match lo {
         Ok(lo) => format!(
-            "{{\"game\":{},\"plugins\":{},\"messages\":{},\"sortedBy\":{},\"note\":{},\"error\":\"\"}}",
+            "{{\"game\":{},\"plugins\":{},\"owners\":{{{}}},\"messages\":{},\"sortedBy\":{},\"note\":{},\"error\":\"\"}}",
             quote(&game.id()),
             lo.to_json(),
+            owners.join(","),
             msgs,
             quote(sorted_by),
             quote(note)
@@ -1183,6 +1207,34 @@ impl qobject::Turbine {
             });
             match r {
                 Ok(()) => w.say(format!("Made profile {name} from the mods as they are now"), "ok"),
+                Err(e) => w.say(e, "error"),
+            }
+        });
+    }
+
+    pub fn profile_rename(self: Pin<&mut Self>, old: &QString, new: &QString) {
+        let (old, new) = (old.to_string(), new.to_string());
+        self.profile_job("Rename profile", move |w, game| {
+            let r = w.slot(game).and_then(|s| {
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                p.rename(&old, &new)
+            });
+            match r {
+                Ok(()) => w.say(format!("Renamed profile {old} to {new}"), "ok"),
+                Err(e) => w.say(e, "error"),
+            }
+        });
+    }
+
+    pub fn profile_delete(self: Pin<&mut Self>, name: &QString) {
+        let name = name.to_string();
+        self.profile_job("Delete profile", move |w, game| {
+            let r = w.slot(game).and_then(|s| {
+                let mut p = Profiles::open(&s.store).map_err(|e| format!("Profiles couldn't be read ({e})."))?;
+                p.delete(&name)
+            });
+            match r {
+                Ok(()) => w.say(format!("Deleted profile {name}"), "ok"),
                 Err(e) => w.say(e, "error"),
             }
         });

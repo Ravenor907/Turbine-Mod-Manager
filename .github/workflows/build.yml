@@ -291,6 +291,15 @@ jobs:
             shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
             shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
           done
+          # Controls: hold Start (Play options), R3 Find on My mods, Select several.
+          for p in playoptions findmods selectmods; do
+            fresh "$p-1280x800"; h="$PWD/fh/$p-1280x800"
+            shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim \
+              "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+          done
+          log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
+          if grep -q "Play options open: true" "$log"; then echo "::notice title=Hold Start::Play options opened"
+          else echo "::error title=Holding Start didn't open Play options::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
           # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
           shoot "size150-1280x800" 1280x800 size150 "$PWD/home"
           shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \

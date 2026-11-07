@@ -82,11 +82,11 @@ Item {
         id: view
         visible: !md.loading && !(md.info && md.info.error)
         anchors.fill: parent
-        contentHeight: md.stacked ? left.implicitHeight + right.implicitHeight + md.ui.px(24) : Math.max(left.implicitHeight, right.implicitHeight) + md.ui.px(8)
+        contentHeight: md.stacked ? leftCol.implicitHeight + rightCol.implicitHeight + md.ui.px(24) : Math.max(leftCol.implicitHeight, rightCol.implicitHeight) + md.ui.px(8)
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         Column {
-            id: left
+            id: leftCol
             width: md.stacked ? view.width : view.width * 0.6 - md.ui.px(8)
             spacing: md.ui.px(8)
             Rectangle {
@@ -142,9 +142,9 @@ Item {
             }
         }
         Column {
-            id: right
+            id: rightCol
             x: md.stacked ? 0 : view.width * 0.6 + md.ui.px(8)
-            y: md.stacked ? left.implicitHeight + md.ui.px(16) : 0
+            y: md.stacked ? leftCol.implicitHeight + md.ui.px(16) : 0
             width: md.stacked ? view.width : view.width * 0.4 - md.ui.px(8)
             spacing: md.ui.px(10)
             Rectangle {
@@ -249,7 +249,7 @@ Item {
                     required property int index
                     required property var modelData
                     readonly property bool foc: md.focused && md.focusIndex === index + 2
-                    width: right.width; height: md.ui.px(44); radius: md.ui.px(6)
+                    width: rightCol.width; height: md.ui.px(44); radius: md.ui.px(6)
                     color: foc ? md.ui.c.focusFill : md.ui.c.card
                     border.color: md.ui.c.accent
                     border.width: foc ? md.ui.px(2) : 0

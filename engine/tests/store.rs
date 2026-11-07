@@ -537,6 +537,28 @@ fn downloads_lists_zips_newest_first() {
 }
 
 #[test]
+fn downloads_all_includes_game_mods_folders() {
+    let w = world("downloads-all");
+    let dl = w.root.join("Downloads");
+    let base = SystemTime::now() - Duration::from_secs(10_000);
+    for (name, age) in [("top.zip", 50u64), ("Game Mods/The Witcher 3/aqom.zip", 10), ("Game Mods/Skyrim Special Edition/sky.7z", 30),
+                        ("Game Mods/loose.zip", 40), ("Game Mods/The Witcher 3/aqom.zip.crdownload", 0), ("Game Mods/x/y/deep.zip", 0)] {
+        let p = dl.join(name);
+        write(&p, "x");
+        let f = fs::File::options().write(true).open(&p).unwrap();
+        f.set_modified(base - Duration::from_secs(age)).unwrap();
+    }
+    let got: Vec<(String, String)> = turbine_engine::store::downloads_all(&w.root)
+        .into_iter()
+        .map(|(p, f)| (p.file_name().unwrap().to_string_lossy().into_owned(), f))
+        .collect();
+    let want = [("aqom.zip", "The Witcher 3"), ("sky.7z", "Skyrim Special Edition"), ("loose.zip", ""), ("top.zip", "")];
+    assert_eq!(got, want.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>());
+    // The plain list still only looks in Downloads itself.
+    assert_eq!(downloads(&w.root).len(), 1);
+}
+
+#[test]
 fn removed_mods_can_be_deleted_for_good() {
     let w = world("purge");
     let mut s = w.open();

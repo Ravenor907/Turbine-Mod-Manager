@@ -57,6 +57,7 @@ Rectangle {
 
     implicitWidth: ui.px(600)
     property bool compact: false          // Desktop layout: 38 px rows
+    property int ticked: -1               // Select several: -1 no box, 0 empty box, 1 ticked
     implicitHeight: ui.px(compact ? 38 : 54)
     radius: ui.px(6)
     color: ui.c.card
@@ -94,6 +95,22 @@ Rectangle {
         anchors.leftMargin: root.ui.px(12)
         anchors.verticalCenter: parent.verticalCenter
         spacing: root.ui.px(12)
+
+        // Select several: a box, ticked with A.
+        Rectangle {
+            visible: root.ticked >= 0
+            width: root.ui.px(22); height: width; radius: root.ui.px(4)
+            anchors.verticalCenter: parent.verticalCenter
+            color: root.ticked === 1 ? root.ui.c.accent : "transparent"
+            border.width: Math.max(1, root.ui.px(2))
+            border.color: root.ticked === 1 ? root.ui.c.accent : root.ui.c.soft
+            Rectangle {
+                anchors.centerIn: parent
+                visible: root.ticked === 1
+                width: root.ui.px(10); height: width; radius: root.ui.px(2)
+                color: root.ui.c.onAccent
+            }
+        }
 
         Rectangle {
             visible: root.ordered

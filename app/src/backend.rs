@@ -21,6 +21,7 @@ pub mod qobject {
         #[qproperty(bool, steamos)]
         #[qproperty(bool, gamemode)]
         #[qproperty(bool, pads)]
+        #[qproperty(QString, pad_name, cxx_name = "padName")]
         #[qproperty(QString, mods_json, cxx_name = "modsJson")]
         #[qproperty(QString, rules_json, cxx_name = "rulesJson")]
         #[qproperty(QString, downloads_json, cxx_name = "downloadsJson")]
@@ -316,6 +317,13 @@ pub mod qobject {
         #[cxx_name = "profileCreate"]
         fn profile_create(self: Pin<&mut Self>, name: &QString);
         #[qinvokable]
+        #[cxx_name = "profileRename"]
+        fn profile_rename(self: Pin<&mut Self>, old: &QString, new: &QString);
+        /// Deletes a profile (never the one in use).
+        #[qinvokable]
+        #[cxx_name = "profileDelete"]
+        fn profile_delete(self: Pin<&mut Self>, name: &QString);
+        #[qinvokable]
         #[cxx_name = "profileExport"]
         fn profile_export(self: Pin<&mut Self>, name: &QString);
         /// Share files in Downloads, into `sharesJson`.
@@ -493,6 +501,8 @@ pub struct TurbineRust {
     pub(crate) steamos: bool,
     pub(crate) gamemode: bool,
     pub(crate) pads: bool,
+    /// The first controller SDL sees ("" when none), so the button glyphs can follow it.
+    pub(crate) pad_name: QString,
     pub(crate) mods_json: QString,
     pub(crate) rules_json: QString,
     pub(crate) downloads_json: QString,
@@ -568,6 +578,7 @@ impl Default for TurbineRust {
             steamos: crate::system::is_steamos(),
             gamemode: crate::system::in_game_mode(),
             pads: false,
+            pad_name: QString::default(),
             mods_json: QString::default(),
             rules_json: QString::default(),
             downloads_json: QString::from("[]"),
@@ -890,10 +901,12 @@ fn checks_json(checks: &[rules::Check]) -> String {
     format!("[{}]", items.join(","))
 }
 
-fn downloads_json(home: &Path) -> String {
-    let items: Vec<String> = store::downloads(home)
+/// Archives in Downloads and its Game Mods folders. `folder`: the Game Mods folder ("" in Downloads itself);
+/// `here`: in Downloads itself or in the Game Mods folder of the game on screen (`here_folder`).
+fn downloads_json(home: &Path, here_folder: &str) -> String {
+    let items: Vec<String> = store::downloads_all(home)
         .iter()
-        .map(|p| {
+        .map(|(p, folder)| {
             let meta = std::fs::metadata(p).ok();
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
             let modified = meta
@@ -902,12 +915,15 @@ fn downloads_json(home: &Path) -> String {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let here = folder.is_empty() || folder.eq_ignore_ascii_case(here_folder);
             format!(
-                "{{\"name\":{},\"path\":{},\"size\":{},\"modified\":{}}}",
+                "{{\"name\":{},\"path\":{},\"size\":{},\"modified\":{},\"folder\":{},\"here\":{}}}",
                 quote(&name),
                 quote(&p.to_string_lossy()),
                 size,
-                modified
+                modified,
+                quote(folder),
+                here
             )
         })
         .collect();
@@ -1011,6 +1027,8 @@ impl qobject::Turbine {
         };
         if *self.pads() != connected {
             self.as_mut().set_pads(connected);
+            let name = self.rust().reader.as_ref().and_then(|r| r.names().into_iter().next()).unwrap_or_default();
+            self.as_mut().set_pad_name(QString::from(name.as_str()));
         }
         self.as_mut().pointer_tick(&sticks);
         for (button, pressed) in events {
@@ -1601,11 +1619,12 @@ impl qobject::Turbine {
 
     pub fn list_downloads(self: Pin<&mut Self>) {
         let home = turbine_engine::home_dir();
+        let here = self.current_game().map(|g| turbine_engine::watch::game_folder_name(&g.name)).unwrap_or_default();
         self.send(
             None, "List Downloads",
             false,
             Box::new(move |w: &mut Worker| {
-                let json = downloads_json(&home);
+                let json = downloads_json(&home, &here);
                 w.post(move |t| t.set_downloads_json(QString::from(json.as_str())));
             }),
         );

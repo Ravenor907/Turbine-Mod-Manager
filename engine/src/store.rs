@@ -1502,6 +1502,38 @@ impl Store {
     }
 }
 
+/// Mod archives in Downloads and in each Downloads/Game Mods/<game> folder (where the browser helper saves Nexus
+/// downloads), newest first, each with its Game Mods folder name ("" for Downloads itself and Game Mods itself).
+/// Links are not followed.
+pub fn downloads_all(home: &Path) -> Vec<(PathBuf, String)> {
+    let dl = home.join("Downloads");
+    let gm = dl.join(crate::watch::GAME_MODS);
+    let mut dirs: Vec<(PathBuf, String)> = vec![(dl.clone(), String::new()), (gm.clone(), String::new())];
+    if let Ok(rd) = fs::read_dir(&gm) {
+        for e in rd.flatten() {
+            if e.file_type().is_ok_and(|t| t.is_dir()) {
+                dirs.push((e.path(), e.file_name().to_string_lossy().into_owned()));
+            }
+        }
+    }
+    let mut found: Vec<(SystemTime, PathBuf, String)> = Vec::new();
+    for (d, folder) in dirs {
+        let Ok(rd) = fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.file_name().is_some_and(|n| archives::is_archive_name(&n.to_string_lossy())) {
+                continue;
+            }
+            let Ok(m) = fs::symlink_metadata(&p) else { continue };
+            if m.is_file() {
+                found.push((m.modified().unwrap_or(UNIX_EPOCH), p, folder.clone()));
+            }
+        }
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    found.into_iter().map(|(_, p, f)| (p, f)).collect()
+}
+
 /// Mod archives (zip, 7z, rar) in the Downloads folder, newest first.
 pub fn downloads(home: &Path) -> Vec<PathBuf> {
     let Ok(rd) = fs::read_dir(home.join("Downloads")) else { return Vec::new() };

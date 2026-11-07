@@ -17,6 +17,7 @@ Item {
 
     signal accepted(string text)
     signal cancelled()
+    signal edited(string text)            // every change, for filters that follow the typing
 
     function open(t, n, start, ph, max, hide, done) {
         title = t; note = n || ""; placeholder = ph || ""
@@ -29,6 +30,7 @@ Item {
     function close() { visible = false }
     function accept() { const t = field.text.trim(); visible = false; accepted(t) }
     function cancel() { visible = false; cancelled() }
+    function clear() { field.text = "" }
     function handleButton(b) {
         if (b === "a" || b === "start") accept()
         else if (b === "b") cancel()
@@ -80,6 +82,7 @@ Item {
                     maximumLength: ask.maxLength
                     echoMode: ask.secret ? TextInput.Password : TextInput.Normal
                     clip: true
+                    onTextChanged: if (ask.visible) ask.edited(text)
                     Keys.onReturnPressed: ask.accept()
                     Keys.onEnterPressed: ask.accept()
                     Keys.onEscapePressed: ask.cancel()
