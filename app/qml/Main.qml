@@ -90,7 +90,8 @@ Window {
                                       "removed", "newmod", "opening", "opening8s", "desktop", "desktopgrid", "tv", "rail", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
-                                      "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar"].indexOf(page) >= 0
+                                      "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
+                                      "checkfocus", "menuskse"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck"].indexOf(page) >= 0
         // --layout=desktop or tv (not saved from a picture); --external-display pretends an HDMI display is there.
@@ -226,6 +227,16 @@ Window {
                 app.showChain("Better Torches")
             }
             else if (shot.page === "listbar") { app.tab = 0; app.zone = "main"; app.listShow = "on"; app.modIndex = -1; app.listBarIndex = 1 }
+            // 0.52: A on Before you play runs the highlighted button; the mod and game menus offer the missing loader.
+            else if (shot.page === "checkfocus") { app.startPlay(); checkFocusShot.start() }
+            else if (shot.page === "menuskse") {
+                app.tab = 0; app.zone = "main"
+                app.modIndex = Math.max(0, app.listItems.findIndex(x => x.kind === "mod" && x.m.needsLoader))
+                app.note("shot", "Game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                app.sheet = "modmenu"
+                app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; "))
+            }
+            if (shot.page === "mods") app.note("shot", "Row warnings: " + app.mods.filter(m => !!app.modWarns[m.id]).map(m => m.name + ": " + app.modWarns[m.id]).join("; "))
         }
     }
     Timer {
@@ -235,6 +246,19 @@ Window {
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
     Timer { id: removedShot; interval: 900; onTriggered: app.openRemoved() }
+    // checkfocus: the highlight moved to Not now, A pressed (the check must close without playing); then the check
+    // again with the highlight on Not now for the picture.
+    Timer {
+        id: checkFocusShot
+        interval: 800
+        property int stepNo: 0
+        onTriggered: {
+            if (app.sheet !== "check") { app.note("shot", "Check focus: no check sheet"); return }
+            for (let i = 0; i < app.checkChoices.length; i++) app.act("right")
+            app.note("shot", "Check focus on: " + app.checkChoices[app.checkIndex])
+            if (stepNo === 0) { app.act("a"); app.note("shot", "After A: sheet \"" + app.sheet + "\""); stepNo = 1; app.startPlay(); start() }
+        }
+    }
     Timer { id: playOptionsShot; interval: 900; onTriggered: { app.note("shot", "Play options open: " + (app.sheet === "pick" && app.pickTitle === "Play options")); app.release("start") } }
     // getmodsback: the 5th card of the "lantern" search, its page, then B.
     Timer {
@@ -255,8 +279,19 @@ Window {
     readonly property bool tv: layoutNow === "tv"
     readonly property bool desktopLayout: layoutNow === "desktop"
     readonly property int sizeDefault: tv ? 120 : desktopLayout ? 80 : 100
-    readonly property int sizeNow: sizeTrial > 0 ? sizeTrial : look.size > 0 ? look.size : sizeDefault
     readonly property real fit: Math.max(0.5, Math.min(width / 883, height / 514))
+    // The largest Interface size that still fits this window (the interface never grows past 760 x 460 design units):
+    // about 116% at 1280 x 800 and 112% at 1920 x 1080. The slider ends there ("Largest that fits").
+    readonly property int sizeCap: Math.max(80, Math.min(150, Math.floor(Math.min(width / 760, height / 460) / fit * 100)))
+    readonly property int sizeNow: Math.min(sizeCap, sizeTrial > 0 ? sizeTrial : look.size > 0 ? look.size : sizeDefault)
+    // The sizes the slider steps through: every 10% up to the cap, then the cap itself.
+    readonly property var sizeSteps: { let l = []; for (let v = 80; v < sizeCap; v += 10) l.push(v); l.push(sizeCap); return l }
+    function sizeStep(d) {
+        let i = sizeSteps.findIndex(v => v >= sizeNow)
+        if (i < 0) i = sizeSteps.length - 1
+        else if (sizeSteps[i] !== sizeNow && d < 0) i++   // between two steps: Left goes to the lower one
+        return sizeSteps[Math.max(0, Math.min(sizeSteps.length - 1, i + d))]
+    }
     readonly property real s: Math.max(0.4, Math.min(fit * sizeNow / 100, width / 760, height / 460))
     function px(v) { return Math.round(v * s) }
     // Design width: 3 grid columns on a handheld, 4 from 1100 (TV and Desktop layouts), 2 below 860.
@@ -280,14 +315,21 @@ Window {
     property string layoutBefore: ""
     property int sizeBefore: 0
     property int keepLeft: 10
+    // What "Keep this size?" is trying: "size" or "layout". Left and Right keep changing it while the sheet is open.
+    property string keepWhat: "size"
     function sizePreview(v) {
         if (sheet !== "keepsize") { sizeBefore = look.size; layoutBefore = look.layout }
+        v = Math.max(80, Math.min(sizeCap, v))
+        if (v === sizeNow && sheet !== "keepsize") return   // already this size: nothing to try
         sizeTrial = v
+        keepWhat = "size"
+        note("action", "Try size " + v + "% (largest that fits " + sizeCap + "%)")
         keepLeft = 10; keepTimer.restart(); sheet = "keepsize"
     }
     function layoutPreview(v) {
         if (sheet !== "keepsize") { sizeBefore = look.size; layoutBefore = look.layout }
         look.layout = v
+        keepWhat = "layout"
         keepLeft = 10; keepTimer.restart(); sheet = "keepsize"
     }
     function keepSize(yes) {
@@ -309,7 +351,7 @@ Window {
         modPage = false
         history = []
         if (tab === 1 && !browseData) browseNow()
-        else if (tab === 2) { orderIndex = 0; Turbine.loadOrder() }
+        else if (tab === 2) { orderIndex = 0; orderLand = true; Turbine.loadOrder() }
     }
     onZoneChanged: note("page", "Focus zone " + zone)
     onSetSectionChanged: {
@@ -412,12 +454,12 @@ Window {
     readonly property var showKeys: ["all", "on", "off", "attention", "new", "update"]
     readonly property var showNames: ({ all: "All", on: "On", off: "Off", attention: "Needs attention", new: "New", update: "Update ready" })
     readonly property var sortKeys2: ["order", "az", "recent"]
-    readonly property var sortNames2: ({ order: ordered ? "Load order" : "List order", az: "A to Z", recent: "Recently added" })
+    readonly property var sortNames2: ({ order: "My order", az: "A to Z", recent: "Recently added" })
     readonly property bool listBarFull: mods.length >= 15 || listShow !== "all" || listSort !== "order" || shot.page === "listbar"
     readonly property var listBar: [{ key: "find", label: findText !== "" ? "Find: " + findText : "Find" }]
         .concat(listBarFull ? [{ key: "show", label: "Show: " + showNames[listShow] }, { key: "sort", label: "Sort: " + sortNames2[listSort] }] : [])
     property int listBarIndex: 0
-    function needsAttention(m) { return (m.needsLoader && loaderMissing) || (m.enabled && (missingNeeds(m).length > 0 || isHidden(m))) }
+    function needsAttention(m) { return (m.needsLoader && loaderMissing) || (m.enabled && (missingNeeds(m).length > 0 || isHidden(m) || !!modWarns[m.id])) }
     readonly property var shownMods: {
         const words = findText.toLowerCase().split(/\s+/).filter(w => w !== "")
         let list = mods.filter(m => {
@@ -438,8 +480,14 @@ Window {
     function listBarRun(i) {
         const k = listBar[i] ? listBar[i].key : ""
         if (k === "find") openFind()
-        else if (k === "show") listCycle("show", 1)
-        else if (k === "sort") listCycle("sort", 1)
+        else if (k === "show" || k === "sort") {
+            const keys = k === "show" ? showKeys : sortKeys2, names = k === "show" ? showNames : sortNames2
+            const now = keys.indexOf(k === "show" ? listShow : listSort)
+            openPick(k === "show" ? "Show" : "Sort", gameTitle, keys.map((key, i) => ({
+                icon: i === now ? "power" : "info", title: names[key], detail: i === now ? "Showing now" : "",
+                run: () => { if (k === "show") listShow = key; else listSort = key; note("action", "My mods: " + k + " " + names[key]) } })), "")
+            menuIndex = now
+        }
     }
     function listCycle(k, d) {
         if (k === "show") { listShow = showKeys[(showKeys.indexOf(listShow) + d + showKeys.length) % showKeys.length]; note("action", "My mods: show " + showNames[listShow]) }
@@ -521,7 +569,7 @@ Window {
     readonly property string pluginOwner: orderPlugin ? (orderOwners[orderPlugin.name.toLowerCase()] || "") : ""
     function goToMod(id) {
         note("action", "Go to its mod: " + id)
-        sheet = ""; tab = 0; findText = ""
+        sheet = ""; tab = 0; findText = ""; listShow = "all"; modPage = false
         const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
         if (i >= 0) modIndex = i
     }
@@ -562,8 +610,16 @@ Window {
             app.setups = v.setups || []
             app.overlapsMap = v.overlaps || {}
             app.linksMap = v.links || {}
+            app.modWarns = v.warns || {}
+            app.kcdRestore = v.kcdRestore === true
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
+            if (app.landFocus && app.game) {
+                app.landFocus = false
+                const want = app.lastFocusId[app.game.id]
+                const i = want ? app.listItems.findIndex(x => x.kind === "mod" && x.m.id === want) : -1
+                app.modIndex = i >= 0 ? i : app.listItems.length > 1 && app.listItems[1].kind === "mod" ? 1 : 0
+            }
             if (app.removedIndex > app.removedMods.length) app.removedIndex = app.removedMods.length
             if (app.sheet === "removed" && app.removedMods.length === 0) app.sheet = ""
             app.focusArrived()
@@ -609,7 +665,7 @@ Window {
             if (app.found && app.sheet === "") { app.infoIndex = 0; app.sheet = "found" }
             else if (!app.found && (app.sheet === "found" || app.sheet === "pickgame")) app.sheet = ""
         }
-        function onPad(button, pressed) { pressed ? app.press(button) : app.release(button) }
+        function onPad(button, pressed) { if (pressed) app.lastInput = "pad"; pressed ? app.press(button) : app.release(button) }
         // 0.3
         function onBrowseJsonChanged() {
             const v = app.parse(Turbine.browseJson, null)
@@ -630,6 +686,7 @@ Window {
                 return
             }
             app.nexusPublic = v.source === "nexus" ? "ok" : app.nexusPublic
+            app.gridReturn = -1
             if (!v.category && (v.categories || []).length > 0) app.catList = v.categories
             else if (v.source !== "nexus") app.catList = v.categories || []
             app.browseData = v
@@ -665,6 +722,8 @@ Window {
             app.orderError = v.error || ""
             app.orderMessages = v.messages || {}
             if (v.note) app.orderNote = v.note
+            // Focus starts on the first plugin that can move (the game's own files are fixed at the top).
+            if (app.orderLand && app.order.length > 0) { app.orderLand = false; app.orderIndex = Math.max(0, app.order.findIndex(x => !x.fixed)) }
             if (shot.page === "lootsort" && v.sortedBy === "loot") app.orderIndex = app.order.length - 1
             if (shot.page === "lootnotes" && v.sortedBy === "loot") {
                 const i = app.order.findIndex(x => (app.orderMessages[x.name.toLowerCase()] || []).length > 1)
@@ -708,11 +767,17 @@ Window {
             if (app.selfUpd.state === "ready" && app.backToStable) { app.backToStable = false; updates.prerelease = false }
         }
     }
+    // The mod last focused in each game: switching back lands on it (else on the first mod, not the Get mods row).
+    property var lastFocusId: ({})
+    property bool landFocus: true
+    onModIndexChanged: if (game && !moving && focusedItem && focusedItem.kind === "mod") lastFocusId[game.id] = focusedItem.m.id
     onGameChanged: {
         if (!game) return
         seen.lastGame = game.id
         moving = false
         modIndex = 0
+        landFocus = true
+        checks = []
         if (tab >= 2) tab = 0
         modPage = false
         history = []
@@ -770,6 +835,9 @@ Window {
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
+        const warned = mods.filter(m => m.enabled && !!modWarns[m.id])
+        if (warned.length > 0)
+            return { level: "warn", words: warned.length === 1 ? warned[0].name + ": " + modWarns[warned[0].id] : plural(warned.length, "mod", "mods") + " may not work here", detail: "Before you play says why" }
         const on = mods.filter(m => m.enabled).length
         // Changes still on their way in show as a pill (only on the game they belong to); the line says how it stands.
         const waiting = Turbine.pending > 0 && Turbine.pendingGame === game.id
@@ -801,7 +869,7 @@ Window {
         const users = on ? [] : neededByOn(m)
         if (!on && !sure && users.length > 0) {
             openPick(plural(users.length, "mod needs", "mods need") + " " + m.name, users.map(x => x.name).slice(0, 3).join(", ") + (users.length > 3 ? " and " + (users.length - 3) + " more" : "") + ". They will stop working.", [
-                { icon: "power", title: "Turn off anyway", detail: "They stay on, without it", danger: true, run: () => toggle(m, true) },
+                { icon: "power", title: "Turn off anyway", detail: "Those mods stay on but won't work.", danger: true, run: () => toggle(m, true) },
                 { icon: "back", title: "Keep it on", detail: "", run: () => {} }
             ], "")
             return
@@ -847,7 +915,8 @@ Window {
     // Hold A to confirm (data that can't come back): the same hold the game menu's Reset uses.
     property string confirmWhat: ""
     property string confirmText: ""
-    readonly property int holdNeeded: 5
+    // 2 seconds for a mod already in Removed mods; 5 for a loadout or profile.
+    readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 ? 5 : 2
     function askDelete(what, text) { confirmWhat = what; confirmText = text; infoIndex = 0; stopReset(); sheet = "confirm" }
     function confirmDone() {
         const w = confirmWhat
@@ -877,7 +946,15 @@ Window {
     property var moveSaved: []
     function startMove() {
         if (!ordered || !focusedItem || focusedItem.kind !== "mod") return
-        if (listSort !== "order" || listShow !== "all") { toast.info("Reorder works in Load order sort, showing all mods."); return }
+        if (listFiltered) {
+            // Moving needs the whole list in your order: switch to it, keep the same mod focused, then move.
+            const id = focusedItem.m.id
+            findText = ""; listShow = "all"; listSort = "order"
+            const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
+            if (i < 0) return
+            modIndex = i
+            note("action", "Move: the full list in your order")
+        }
         moving = true
         moveFrom = modIndex
         moveSaved = mods.slice()
@@ -945,13 +1022,27 @@ Window {
         if (list.length === 0) list = [{ level: "ok", title: "Ready to play", detail: "Everything checks out." }]
         checks = list
         note("engine", "Check before Play: " + list.map(x => x.level + " " + x.title).join("; "))
+        note("engine", "Check before Play buttons: " + checkChoices.join("; "))
         const trouble = list.some(x => x.level === "stop" || x.level === "warn")
         if (msgLevel === "work" && msgText === "Checking before Play...") msgText = ""
-        if (trouble || shot.page === "check" || shot.page === "checkend") { checkIndex = 0; sheet = "check" }
+        if (trouble || shot.page === "check" || shot.page === "checkend" || shot.page === "checkfocus") { checkIndex = 0; sheet = "check" }
         else Turbine.play(game.id)
     }
     readonly property bool checkStops: checks.some(x => x.level === "stop")
-    readonly property var checkChoices: checkStops ? ["Play without mods", "Not now"] : ["Play anyway", "Play without mods", "Not now"]
+    // One fix the check can do in a press (Y): turn off the newer of two Witcher 3 mods that change the same script,
+    // or install the missing loader (SKSE, BepInEx, SMAPI).
+    readonly property var checkOffer: {
+        const w = checks.find(x => x.offer && x.offer.mod && mods.some(m => m.id === x.offer.mod && m.enabled))
+        if (w) return { label: w.offer.label, mod: w.offer.mod }
+        if (loaderMissing && needLoader.length > 0) return { label: (loaderCanGet ? "Install " : "Get ") + loaderShort, loader: true }
+        return null
+    }
+    readonly property var checkChoices: (checkStops ? ["Play without mods"] : ["Play anyway", "Play without mods"])
+        .concat(checkOffer ? [checkOffer.label] : []).concat(["Not now"])
+    // Each button's own key; A always runs the highlighted one.
+    function checkKey(label) { return label === "Play without mods" ? "x" : label === "Not now" ? "b" : checkOffer && label === checkOffer.label ? "y" : "" }
+    // Script paths from the last check (Game details shows them).
+    readonly property var checkPaths: checks.filter(x => x.paths && x.paths.length > 0).map(x => x.paths.join(", "))
     property int checkIndex: 0
     function checkChoose(i) {
         const what = checkChoices[i]
@@ -967,6 +1058,22 @@ Window {
         }
         if (what === "Play anyway") Turbine.play(game.id)
         else if (what === "Play without mods") Turbine.playOriginal()
+        else if (checkOffer && what === checkOffer.label) runOffer(checkOffer)
+    }
+    function runOffer(o) {
+        if (o.mod) {
+            // Turned off, then checked again: Play goes on when nothing else is in the way.
+            const m = mods.find(x => x.id === o.mod)
+            if (m && m.enabled) toggle(m, true)
+            startPlay()
+        } else if (o.loader) getLoader()
+    }
+    // Install the missing loader (from the check, the mod menu or the game menu); where it can't be fetched, the
+    // prompt says where it comes from.
+    function getLoader() {
+        loaderFor = needLoader.map(m => m.name)
+        if (loaderCanGet) { sheet = ""; note("action", "Install the loader"); Turbine.installLoader() }
+        else openLoader()
     }
 
     // ---------------------------------------------------------------- the game closed right after Play
@@ -1010,8 +1117,14 @@ Window {
         if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
     }
     readonly property string quickText: !quick ? "" : quick.added.length === 1 ? "Since it last worked, you added " + quick.added[0].name + "."
-        : quick.added.length > 1 ? "Since it last worked (" + when(quick.worked.savedAt) + "), " + plural(quick.added.length, "mod was", "mods were") + " added or turned on."
+        : quick.added.length > 1 ? "Since it last worked (" + when(quick.worked.savedAt) + "), you added or turned on " + nameList(quick.added.map(m => m.name)) + "."
         : "A mod may have stopped it from starting. Playing without mods shows whether the game itself is fine."
+    // "Bright Torches, Faster Roach and 1 more"
+    function nameList(names) {
+        if (names.length <= 1) return names.join("")
+        if (names.length === 2) return names[0] + " and " + names[1]
+        return names[0] + ", " + names[1] + " and " + (names.length - 2) + " more"
+    }
     function quickRun(label) {
         const q = quick
         quick = null
@@ -1019,6 +1132,12 @@ Window {
         if (!q) return
         note("action", "Closed early: " + label)
         if (label === "Turn that off and play") { const m = mods.find(x => x.id === q.added[0].id); if (m && m.enabled) toggle(m, true); startPlay() }
+        else if (label === "Turn off the newest and play") {
+            const newest = q.added.slice().sort((a, b) => (b.added || 0) - (a.added || 0))[0]
+            const m = newest ? mods.find(x => x.id === newest.id) : null
+            if (m && m.enabled) { note("action", "Turn off the newest: " + m.name); toggle(m, true) }
+            startPlay()
+        }
         else if (label.indexOf("Go back to the setup that worked") === 0) { Turbine.restoreSetup(q.worked.id); startPlay() }
         else if (label === "Play without mods") Turbine.playOriginal()
     }
@@ -1060,6 +1179,10 @@ Window {
         { icon: "restore", title: "Reset game files", act: "reset", danger: true, ok: true,
           detail: resetHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(5 - resetHeld)) + "..."
                   : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
+    ] : []).concat(loaderMissing ? [
+        { icon: "update", title: (loaderCanGet ? "Install " : "Get ") + loaderShort, detail: needLoader.length > 0 ? plural(needLoader.length, "mod needs", "mods need") + " it" : "The mod loader for " + gameTitle, ok: true, act: "loader" }
+    ] : []).concat(kcdRestore ? [
+        { icon: "restore", title: "Put back my mod_order.txt", detail: "As it was before Turbine changed it. Turbine's mods that are on go back in at the next change or Play.", ok: true, act: "kcdrestore" }
     ] : []).concat([
         { icon: "profile", title: "Profiles", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
     ]).concat(overlapCount > 0 ? [
@@ -1077,6 +1200,8 @@ Window {
         else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
         else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
         else if (item.act === "profiles") openProfiles()
+        else if (item.act === "loader") { sheet = ""; getLoader() }
+        else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
         else if (item.act === "overlaps") openOverlaps()
         else if (item.act === "updateall") { sheet = ""; if (account.premium === true || updateList.every(x => x.u.kind !== "nexus")) Turbine.updateAll(); else openUpdates() }
         else sheet = "details"
@@ -1115,6 +1240,9 @@ Window {
     // Who wins shared files (overlaps.rs) and requirements both ways (needs.rs), from the engine with the mods.
     property var overlapsMap: ({})
     property var linksMap: ({})
+    // Mods that may not work in this game ({id: "Made for KCD"}), and whether the player's mod_order.txt can be put back.
+    property var modWarns: ({})
+    property bool kcdRestore: false
     function isHidden(m) { const o = overlapsMap[m.id]; return !!o && o.hidden === true }
     function missingNeeds(m) { const l = linksMap[m.id]; return l ? (l.needs || []).filter(n => !n.id || !mods.some(x => x.id === n.id && x.enabled)) : [] }
     function neededByOn(m) { const l = linksMap[m.id]; return l ? (l.neededBy || []).map(id => mods.find(x => x.id === id)).filter(x => !!x && x.enabled) : [] }
@@ -1174,9 +1302,13 @@ Window {
         moveMod(m, from < to ? to : to + 1)
         toast.done(m.name + " is now after " + target.name + ".")
     }
-    readonly property var modMenuItems: !menuMod ? [] : [
+    readonly property var modMenuItems: !menuMod ? [] : (menuMod.needsLoader && loaderMissing ? [
+        { icon: "update", title: "Get " + loaderShort, detail: loaderCanGet ? "This mod needs it. Turbine gets it from its official page." : "This mod needs it. Shows where it comes from.", act: "loader" }
+    ] : []).concat([
         { icon: "power", title: menuMod.enabled ? "Turn off" : "Turn on", detail: menuMod.enabled ? "Stays installed" : "Goes into the game", act: "toggle" }
-    ].concat(updateMap[menuMod.id] ? [
+    ]).concat(modWarns[menuMod.id] ? [
+        { icon: "info", title: modWarns[menuMod.id], detail: "Before you play says why. It may not work in " + gameTitle + ".", act: "check" }
+    ] : []).concat(updateMap[menuMod.id] ? [
         { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
     ] : []).concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].wins || []).slice(0, 2).map(o => (
         { icon: "info", title: "Wins " + plural(o.count, "file", "files") + " over " + o.name, detail: "The game gets this mod's copy", act: "overlap", other: o, loses: false })) : [])
@@ -1203,6 +1335,8 @@ Window {
         note("action", "Mod menu: " + item.title + " for " + m.name)
         sheet = ""
         if (item.act === "toggle") toggle(m)
+        else if (item.act === "loader") getLoader()
+        else if (item.act === "check") startPlay()
         else if (item.act === "top") { moveMod(m, 0); modIndex = 1 }
         else if (item.act === "bottom") { moveMod(m, mods.length - 1); modIndex = mods.length }
         else if (item.act === "remove") uninstall(m)
@@ -1216,7 +1350,8 @@ Window {
     function modWords(m) {
         let parts = []
         if (m.version) parts.push(m.version)
-        if (m.source) parts.push(m.source)
+        // Files added by hand say nothing more ("Zip file" on every row told nothing).
+        if (m.source && m.source !== "Zip file") parts.push(m.source)
         return parts.join(" · ")
     }
 
@@ -1339,6 +1474,8 @@ Window {
         id: keyRoot
         anchors.fill: parent
         focus: true
+        // A real mouse (not the controller pointer, which Turbine draws itself).
+        HoverHandler { onPointChanged: if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse" }
         Keys.onPressed: (e) => {
             const map = {}
             map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
@@ -1353,6 +1490,7 @@ Window {
             const b = map[e.key]
             if (!b) return
             e.accepted = true
+            if (Turbine.pads && app.lastInput !== "keys") app.lastInput = "keys"
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
             if (b === "start") { if (!e.isAutoRepeat) app.press("start"); return }
             if (b === "view" && !e.isAutoRepeat) app.holdStart("V")
@@ -1403,18 +1541,19 @@ Window {
             else if (b === "y") { addAll = !addAll; addIndex = 0; note("action", addAll ? "Add: all files" : "Add: this game's files") }
             else if (b === "b") sheet = ""
         } else if (sheet === "check") {
-            // Direct keys: A Play anyway, X Play without mods, B Not now; Start plays when nothing stops it.
+            // A runs the highlighted button (as on every sheet); X, Y and B are each button's own key. Start plays
+            // when nothing stops it.
             if (b === "left") checkIndex = Math.max(0, checkIndex - 1)
             else if (b === "right") checkIndex = Math.min(checkChoices.length - 1, checkIndex + 1)
-            else if (b === "a" && !checkStops) checkChoose(checkChoices.indexOf("Play anyway"))
-            else if (b === "a") checkChoose(checkChoices.indexOf("Play without mods"))
+            else if (b === "a") checkChoose(Math.min(checkIndex, checkChoices.length - 1))
             else if (b === "start" && !checkStops) checkChoose(checkChoices.indexOf("Play anyway"))
             else if (b === "x") checkChoose(checkChoices.indexOf("Play without mods"))
+            else if (b === "y" && checkOffer) checkChoose(checkChoices.indexOf(checkOffer.label))
             else if (b === "up" || b === "down") checkView.scroll(b === "up" ? -1 : 1)
             else if (b === "b") checkChoose(checkChoices.indexOf("Not now"))
         } else if (sheet === "loader") {
             // Direct keys: A Get it, B Not now.
-            if (b === "a" && loaderCanGet) { sheet = ""; note("action", "Install the loader"); Turbine.installLoader() }
+            if (b === "a" && loaderCanGet) getLoader()
             else if (b === "a" && !loaderSourceShown) loaderSourceShown = true
             else if (b === "a" || b === "b") sheet = ""
         } else if (sheet === "pages") {
@@ -1449,6 +1588,11 @@ Window {
         } else if (sheet === "keepsize") {
             if (b === "a") keepSize(true)
             else if (b === "b") keepSize(false)
+            else if (b === "left" || b === "right") {
+                // Keep changing it; the countdown starts again.
+                const r = lookRows.find(x => x.key === keepWhat)
+                if (r) r.step(b === "left" ? -1 : 1)
+            }
         } else if (sheet === "openhelp") {
             if (b === "a") { sheet = ""; steamOpen() }
             else if (b === "b") { sheet = ""; note("action", "Didn't see it open: Close") }
@@ -1482,6 +1626,7 @@ Window {
     readonly property bool loaderCanGet: !!rules && !!rules.loader && ["bethesda", "bepinex", "smapi"].indexOf(rules.kind) >= 0
 
     function act(b) {
+        landFocus = false
         if (sheet !== "") { sheetAct(b); return }
         if (moving) {
             if (b === "up") stepMove(-1)
@@ -1532,7 +1677,6 @@ Window {
                 else if (b === "right") listBarIndex = Math.min(listBar.length - 1, listBarIndex + 1)
                 else if (b === "down") modIndex = 0
                 else if (b === "a") listBarRun(listBarIndex)
-                else if (b === "x" && (k === "show" || k === "sort")) listCycle(k, -1)
             }
             else if (tab === 0 && game) {
                 const it = focusedItem
@@ -1544,7 +1688,7 @@ Window {
                 else if (b === "a" && it && it.kind === "mod") toggle(it.m)
                 else if (b === "x" && menuMod) sheet = "modmenu"
                 else if (b === "x" && it && it.kind === "removed") openRemoved()
-                else if (b === "y" && findText === "") startMove()
+                else if (b === "y") startMove()
             } else if (tab === 1 && game) {
                 if (b === "a") openAdd()
             }
@@ -1617,6 +1761,8 @@ Window {
     property bool noMore: false
     property string getArea: "bar"        // bar, recent, grid, fallback
     property int getIndex: 0
+    // The card B left from (Down from the bar goes back to it); -1 when there is none.
+    property int gridReturn: -1
     // Nexus browsing without a key: "" until tried this session, "ok", or "failed" (Open on Nexus instead).
     property string nexusPublic: ""
     readonly property bool nexusFallback: srcNow === "nexus" && (nexusPublic === "failed" || (browseData && browseData.fallback === true))
@@ -1634,13 +1780,13 @@ Window {
     })
     // Updates for your mods, on the Get mods start page.
     readonly property var updateList: Object.keys(updateMap).map(k => ({ u: updateMap[k], m: mods.find(x => x.id === k) })).filter(x => !!x.m)
-    readonly property var getBar: (updateList.length > 0 && getText === "" ? [{ key: "updates", label: "Updates for your mods (" + updateList.length + ")" }] : [])
-        .concat([{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
-                                   { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }])
+    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
+                                   { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }]
         .concat(getCats.length > 0 ? [{ key: "category", label: "Category: " + (getCategory || "All") }] : [])
         .concat(sources.length > 1 ? [{ key: "source", label: "From: " + srcName(srcNow) }] : [])
-        // With the Updates chip there too, the last one is shorter so the bar fits a handheld.
-        .concat([{ key: "add", label: updateList.length > 0 && getText === "" ? "Add a file" : "Add a file from Downloads" }])
+        .concat([{ key: "add", label: "Add a file" }])
+        // Last, so the search field keeps its room.
+        .concat(updateList.length > 0 && getText === "" ? [{ key: "updates", label: "Updates (" + updateList.length + ")" }] : [])
     // Recently viewed: the last 8 mod pages opened in this game.
     property var recentSeed: null
     readonly property var recentViewed: recentSeed ? recentSeed : (game ? (parse(getSet.recent, {})[game.id] || []).filter(x => x.source === srcNow) : [])
@@ -1699,7 +1845,11 @@ Window {
             note("action", "Back to the results")
             return
         }
-        if (getArea === "grid" || getArea === "recent") { getArea = "bar"; getIndex = 0; return }
+        if (getArea === "grid" || getArea === "recent") {
+            // Back to the search bar; Down comes back to the same card.
+            if (getArea === "grid") gridReturn = getIndex
+            getArea = "bar"; getIndex = Math.max(0, getBar.findIndex(x => x.key === "search")); return
+        }
         if (getText !== "") { getText = ""; getArea = "bar"; getIndex = 0; note("action", "Search cleared"); browseNow(); return }
         tab = 0
     }
@@ -1736,6 +1886,7 @@ Window {
         if (getArea === "fallback") {
             if (b === "a") openNexusMods()
             else if (b === "x") retryBrowse()
+            else if (b === "y") openAdd()
             else if (b === "left") { zone = "rail"; railIndex = current }
             return
         }
@@ -1743,9 +1894,12 @@ Window {
             const k = getBar[getIndex] ? getBar[getIndex].key : ""
             if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") getIndex = Math.min(getBar.length - 1, getIndex + 1)
-            else if (b === "down") { if (recentViewed.length > 0 && getText === "") { getArea = "recent"; getIndex = 0 } else if (getItems.length > 0) { getArea = "grid"; getIndex = 0 } }
+            else if (b === "down") {
+                if (gridReturn >= 0 && gridReturn < getItems.length) { getArea = "grid"; getIndex = gridReturn; gridReturn = -1 }
+                else if (recentViewed.length > 0 && getText === "") { getArea = "recent"; getIndex = 0 }
+                else if (getItems.length > 0) { getArea = "grid"; getIndex = 0 }
+            }
             else if (b === "a") getBarRun(getIndex)
-            else if (b === "x" && (k === "sort" || k === "category" || k === "source")) cycleBar(k, -1)
         } else if (getArea === "recent") {
             if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") getIndex = Math.min(recentViewed.length - 1, getIndex + 1)
@@ -1764,7 +1918,23 @@ Window {
             if (getIndex >= getItems.length - cols) browseMore()
         }
     }
-    // Left and Right (or A) cycle Sort, Category and From.
+    // A on Sort, Category or From: every choice in one list; one read when one is chosen.
+    function pickBar(k) {
+        const names = k === "sort" ? sortNames : k === "category" ? getCats.map(x => x || "All") : sources.map(srcName)
+        const now = k === "sort" ? getSortIndex : k === "category" ? Math.max(0, getCats.indexOf(getCategory)) : Math.max(0, sources.indexOf(srcNow))
+        openPick(k === "sort" ? "Sort" : k === "category" ? "Category" : "Get mods from", gameTitle, names.map((n, i) => ({
+            icon: i === now ? "power" : "info", title: n, detail: i === now ? "Showing now" : "",
+            run: () => {
+                if (i === now) return
+                if (k === "sort") getSortIndex = i
+                else if (k === "category") getCategory = getCats[i]
+                else { getSource = sources[i]; getCategory = ""; getSortIndex = 0; browseData = null }
+                note("action", "Get mods " + k + " " + n)
+                browseNow()
+            } })), "")
+        menuIndex = now
+    }
+    // Steps Sort, Category or From (kept for the pointer and tests).
     function cycleBar(k, d) {
         if (k === "sort") { getSortIndex = (getSortIndex + d + sortNames.length) % sortNames.length; note("action", "Get mods sort " + sortNames[getSortIndex]) }
         else if (k === "category") { getCategory = getCats[(getCats.indexOf(getCategory) + d + getCats.length) % getCats.length]; note("action", "Get mods category " + (getCategory || "All")) }
@@ -1775,7 +1945,7 @@ Window {
         const k = getBar[i] ? getBar[i].key : ""
         getArea = "bar"; getIndex = i
         if (k === "search") openAsk("search", "Search " + gameTitle + " mods", "Words from the mod's name or what it does.", getText, "Search", 100, false, "Search")
-        else if (k === "sort" || k === "category" || k === "source") cycleBar(k, 1)
+        else if (k === "sort" || k === "category" || k === "source") pickBar(k)
         else if (k === "add") openAdd()
         else if (k === "updates") openUpdates()
     }
@@ -1858,13 +2028,20 @@ Window {
     }
     onDetailsDataChanged: if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails() }
     readonly property bool pageInstalled: !!detailsData && (detailsData.installed === true || (detailsItem && detailsItem.installed === true))
-    readonly property string mainLabel: !detailsData || detailsData.loading ? "" : detailsData.error ? "" : detailsData.partial ? (detailsData.page ? "Open on Nexus" : "") : pageInstalled ? "Installed · On"
+    // The installed mod this page is about (to say On or Off, turn it on, or show it in My mods).
+    readonly property var pageMod: {
+        if (!detailsData || !detailsData.id) return null
+        const id = String(detailsData.id), src = detailsData.source || srcNow
+        return mods.find(m => src === "nexus" ? nexusModOf(m) === id : m.sourceKind === src && (m.sourceId === id || String(m.sourceId || "").split(":")[0] === id)) || null
+    }
+    readonly property bool pageModOff: pageInstalled && !!pageMod && !pageMod.enabled
+    readonly property string mainLabel: !detailsData || detailsData.loading ? "" : detailsData.error ? "" : detailsData.partial ? (detailsData.page ? "Open on Nexus" : "") : pageInstalled ? (pageModOff ? "Installed · Off" : "Show in My mods")
         : busyHere ? (dl.active ? "Installing " + Math.round(Math.max(0, dlPart) * 100) + "%" : "Installing...")
         : detailsData.source === "nexus" && detailsData.premium === false ? (nexusFallback ? "Open on Nexus" : "Get it on Nexus")
         : "Install"
     readonly property string mainLine: !detailsData || detailsData.loading || detailsData.error ? ""
-        : detailsData.partial ? "Turbine couldn't read the rest of this page. " + detailsData.problem
-        : pageInstalled ? "Already in your mods. X: Other files"
+        : detailsData.partial ? (detailsData.page ? "Some details didn't load. A opens it on Nexus." : "Some details didn't load.")
+        : pageInstalled ? (pageModOff ? "In your mods, turned off. A turns it on." : "In your mods and on.") + (otherVersions.length > 0 ? " X: Other files" : "")
         : detailsData.source === "nexus" && detailsData.premium === false ? "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself."
         : ""
     property bool busyHere: false
@@ -1890,7 +2067,11 @@ Window {
         else if (b === "x") openVersions()
         else if (b === "y" && pageMissing >= 0) { pageIndex = pageMissing + 2; openNeed(pageMissing) }
         else if (b === "up") { if (pageIndex > 0) pageIndex = pageIndex === 2 && otherVersions.length === 0 ? 0 : pageIndex - 1; else modView.scroll(-1) }
-        else if (b === "down") { if (pageIndex < pageRows - 1) pageIndex = pageIndex === 0 && otherVersions.length === 0 ? Math.min(2, pageRows - 1) : pageIndex + 1; else modView.scroll(1) }
+        else if (b === "down") {
+            // The Other files row (1) is hidden when there are none: skip it, and scroll when no row is left.
+            const next = pageIndex === 0 && otherVersions.length === 0 ? 2 : pageIndex + 1
+            if (next <= pageRows - 1) pageIndex = next; else modView.scroll(1)
+        }
         else if (b === "left") { zone = "rail"; railIndex = current }
         else if (b === "lt") { modPage = false; history = []; tab = Math.max(0, tab - 1) }
         else if (b === "rt") { modPage = false; history = []; tab = Math.min(tabs.length - 1, tab + 1) }
@@ -1918,7 +2099,12 @@ Window {
     function installFromDetails() {
         if (!detailsData || detailsData.loading || detailsData.error) return
         if (detailsData.partial) { if (detailsData.page) openNexus(detailsData.page); return }
-        if (pageInstalled) { toast.info("Already in your mods. X: Other files"); return }
+        if (pageInstalled) {
+            // Off: A turns it on (the button then says Show in My mods). On: A shows it in My mods.
+            if (pageModOff) toggle(pageMod)
+            else if (pageMod) goToMod(pageMod.id)
+            return
+        }
         if (detailsData.source === "nexus" && detailsData.premium === false) {
             const url = detailsData.filePage || detailsData.page
             note("action", "Get it on Nexus: " + detailsData.name + " (" + url + ")")
@@ -2066,7 +2252,7 @@ Window {
     }
     property bool pendingNotes: false
     readonly property var infoButtons: sheet === "quick" && quick ? (quick.added.length === 1 ? [{ key: "a", label: "Turn that off and play" }]
-                                                                   : quick.added.length > 1 && quick.worked ? [{ key: "a", label: "Go back to the setup that worked" }] : [])
+                                                                   : quick.added.length > 1 ? [{ key: "a", label: "Turn off the newest and play" }].concat(quick.worked ? [{ key: "y", label: "Go back to the setup that worked" }] : []) : [])
                                           .concat([{ key: "x", label: "Play without mods" }, { key: "b", label: "Keep my mods" }])
         : sheet === "chain" ? [{ key: "a", label: "Open its page" }, { key: "b", label: "Later" }]
         : sheet === "nobrowser" ? [{ key: "a", label: "Check again" }, { key: "b", label: "Close" }]
@@ -2099,7 +2285,7 @@ Window {
         if (b === "left" || b === "up") infoIndex = Math.max(0, infoIndex - 1)
         else if (b === "right" || b === "down") infoIndex = Math.min(infoButtons.length - 1, infoIndex + 1)
         else if (b === "a") infoRun(infoIndex)
-        else if (b === "x" && infoButtons.findIndex(x => x.key === "x") >= 0) infoRun(infoButtons.findIndex(x => x.key === "x"))
+        else if ((b === "x" || b === "y") && infoButtons.findIndex(x => x.key === b) >= 0) infoRun(infoButtons.findIndex(x => x.key === b))
         else if (b === "b") {
             const i = infoButtons.findIndex(x => x.key === "b")
             if (i >= 0) infoRun(i); else sheet = ""
@@ -2194,6 +2380,7 @@ Window {
     readonly property var orderPlugin: orderIndex >= 0 && orderIndex < order.length ? order[orderIndex] : null
     property int orderIndex: 0
     property bool orderMoving: false
+    property bool orderLand: false
     property var orderSaved: []
     property int orderFrom: -1
     function orderAct(b) {
@@ -2326,7 +2513,12 @@ Window {
     // ---------------------------------------------------------------- Labs
     readonly property var settingsSections: ["Getting mods", "Look", "Updates", "About"].concat(labsOn ? ["Labs"] : [])
     readonly property string sec: settingsSections[setSection] || "Getting mods"
-    function openSettings() { page = "settings"; zone = "settings"; setRow = 0; if (sec === "Look") checkDisplays() }
+    // With a newer Turbine ready, Settings opens on Updates.
+    function openSettings() {
+        page = "settings"; zone = "settings"; setRow = 0
+        if (selfUpd.state === "available" && settingsSections.indexOf("Updates") >= 0) setSection = settingsSections.indexOf("Updates")
+        if (sec === "Look") checkDisplays()
+    }
     function openSection(name) { openSettings(); setSection = Math.max(0, settingsSections.indexOf(name)); setRow = 0 }
     onLabsOnChanged: if (!labsOn && setSection >= settingsSections.length) { setSection = settingsSections.indexOf("About"); setRow = 0 }
     // Accounts, Updates and Labs: rows of one kind each. action (A does it), toggle and choice (Left, Right or A
@@ -2706,8 +2898,9 @@ Window {
     // ---------------------------------------------------------------- Look settings rows
     readonly property var layoutOptions: externalShown ? ["handheld", "desktop", "tv"] : ["handheld", "desktop"]
     readonly property var lookRows: [
-        { label: "Interface size", key: "size", slider: true, min: 80, max: 150, unit: "%", now: sizeNow,
-          step: (d) => sizePreview(Math.max(80, Math.min(150, sizeNow + d * 10))) },
+        { label: "Interface size", key: "size", slider: true, min: 80, max: sizeCap, unit: "%", now: sizeNow,
+          words: sizeNow === sizeCap && sizeCap < 150 ? "Largest that fits" : "",
+          step: (d) => sizePreview(sizeStep(d)) },
         { label: "Layout", options: layoutOptions, names: layoutOptions.map(o => o === "tv" ? "TV" : o.charAt(0).toUpperCase() + o.substring(1)), key: "layout", now: layoutNow,
           step: (d) => layoutPreview(layoutOptions[(layoutOptions.indexOf(layoutNow) + d + layoutOptions.length) % layoutOptions.length]) },
         { label: "Theme", options: ["brass", "black", "light"], names: ["Brass", "Black", "Light"], key: "theme",
@@ -2784,7 +2977,13 @@ Window {
         if (/xbox|series|steam deck|ally|steam virtual/.test(n)) return "menu"
         return ""
     }
+    // Desktop Mode with a mouse or keyboard: the legend shows keys ("Enter Open · Esc Back · Q E Switch game").
+    // Keys count only when Turbine sees the pad itself (otherwise Steam may be sending the pad as keys).
+    property string lastInput: "pad"      // pad, keys, mouse
+    readonly property bool keysLegend: !Turbine.gamemode && !shot.on && (lastInput === "mouse" || (lastInput === "keys" && Turbine.pads))
+    readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "PgUp", rt: "PgDn", view: "V", start: "P", r3: "F" })
     function glyph(k) {
+        if (keysLegend && keyNames[k]) return keyNames[k]
         if (k === "view" && padKind === "360") return "BACK"
         if (k === "start" && padKind === "menu") return "MENU"
         return k.toUpperCase()
@@ -2941,23 +3140,41 @@ Window {
                             sourceSize.height: app.px(132)
                             asynchronous: true
                         }
+                        // No art: the whole name (shrunk to fit, never cut, so "Deliverance II" keeps its II) and
+                        // the store under it, so two copies or two games with long names still look different.
                         Text {
-                            anchors.centerIn: parent
-                            width: parent.width - app.px(6)
+                            id: tileName
                             visible: !art.visible
+                            x: app.px(3); y: app.px(4)
+                            width: parent.width - app.px(6)
+                            height: parent.height - app.px(8) - tileStore.height
                             horizontalAlignment: Text.AlignHCenter
-                            height: parent.height - app.px(8)
                             verticalAlignment: Text.AlignVCenter
                             wrapMode: Text.WordWrap
-                            maximumLineCount: 4
+                            maximumLineCount: 6
+                            elide: Text.ElideNone
                             // Long words ("Cyberpunk", "Deliverance") shrink to fit the tile instead of being cut.
                             fontSizeMode: Text.Fit
-                            minimumPixelSize: Math.max(6, app.px(6))
+                            minimumPixelSize: Math.max(5, app.px(5))
                             text: tileItem.g ? tileItem.g.name : ""
                             color: c.soft
                             font.family: app.bodyFont
                             font.pixelSize: app.px(10)
                             font.bold: true
+                        }
+                        Text {
+                            id: tileStore
+                            visible: !art.visible
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: app.px(3)
+                            width: parent.width
+                            horizontalAlignment: Text.AlignHCenter
+                            text: tileItem.g ? (tileItem.g.launcher === "Steam" ? "Steam" : (tileItem.g.storeLabel || tileItem.g.launcher || "")) : ""
+                            color: c.muted
+                            font.family: app.bodyFont
+                            font.pixelSize: app.px(8)
+                            fontSizeMode: Text.HorizontalFit
+                            minimumPixelSize: Math.max(5, app.px(5))
                         }
                     }
                     // A mod waiting or an update ready.
@@ -2987,6 +3204,15 @@ Window {
                     anchors.centerIn: parent
                     tint: app.page === "settings" ? c.accent : c.muted
                     d: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                }
+                // A newer Turbine is ready to install.
+                Rectangle {
+                    visible: app.selfUpd.state === "available"
+                    anchors.right: parent.right; anchors.top: parent.top
+                    anchors.margins: -app.px(2)
+                    width: app.px(10); height: width; radius: width / 2
+                    color: c.accentHi
+                    border.color: c.rail; border.width: app.px(2)
                 }
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                 TapHandler { onTapped: app.openSettings() }
@@ -3087,7 +3313,8 @@ Window {
                                 color: c.raised
                                 border.color: c.accentLo
                                 Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(13); font.bold: true }
-                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active) Turbine.updateAll() }
+                                // Updates ready: the list of them (a free account picks each one's page there).
+                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active && !(Turbine.pending > 0 && Turbine.pendingGame === app.game.id)) app.openUpdates() }
                             }
                         }
                     }
@@ -3249,10 +3476,11 @@ Window {
                                 xLabel: app.selecting ? (app.tickedCount > 0 ? "Act on " + app.tickedCount : "") : "More"
                                 focused: entry.foc
                                 badge: app.moving && entry.foc ? "Moving" : (entry.m.needsLoader && app.loaderMissing ? "Needs " + app.loaderShort
+                                       : entry.kind === "mod" && app.modWarns[entry.m.id] ? app.modWarns[entry.m.id]
                                        : entry.kind === "mod" && entry.m.enabled && app.missingNeeds(entry.m).length > 0 ? "Missing requirement"
                                        : app.updateMap[entry.m.id] ? "Update ready" : entry.kind === "mod" && entry.m.enabled && app.isHidden(entry.m) ? "Hidden by another mod"
                                        : entry.kind === "mod" && app.isNew(entry.m) ? "New" : "")
-                                badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) || (entry.kind === "mod" && entry.m.enabled && app.missingNeeds(entry.m).length > 0) ? "warn" : "info"
+                                badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) || (entry.kind === "mod" && entry.m.enabled && (!!app.modWarns[entry.m.id] || app.missingNeeds(entry.m).length > 0)) ? "warn" : "info"
                                 showHints: entry.foc && !app.moving
                                 onClicked: app.modIndex = entry.index
                                 onToggleClicked: { app.modIndex = entry.index; app.toggle(entry.m) }
@@ -3327,6 +3555,7 @@ Window {
                         onBarClicked: (i) => app.getBarRun(i)
                         onRecentClicked: (i) => { app.getArea = "recent"; app.getIndex = i; app.getAct("a") }
                         onItemClicked: (i) => { app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
+                        onItemMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.getArea = "grid"; app.getIndex = i; app.menuIndex = 0; app.sheet = "cardmenu" } }
                         onFallbackClicked: (k) => { app.getArea = "fallback"; app.getAct(k) }
                     }
                     ModDetails {
@@ -3471,7 +3700,7 @@ Window {
                                         Rectangle {
                                             id: track
                                             readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
-                                            width: parent.width - app.px(70); height: app.px(6); radius: height / 2
+                                            width: parent.width - app.px(srow.modelData.words ? 200 : 70); height: app.px(6); radius: height / 2
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: c.line
                                             Rectangle { width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent }
@@ -3481,7 +3710,7 @@ Window {
                                                 width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                                             }
                                         }
-                                        Label { text: srow.now + (srow.modelData.unit || ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                        Label { text: srow.now + (srow.modelData.unit || "") + (srow.modelData.words ? " · " + srow.modelData.words : ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                     }
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -3716,7 +3945,9 @@ Window {
                         ["Folder", app.game.installDir],
                         ["Version", app.game.build || "Not reported"],
                         ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"]
-                    ].concat(app.rules && app.rules.launchOption ? [
+                    ].concat(app.checkPaths.length > 0 ? [
+                        ["Same scripts", app.checkPaths.join("; ")]
+                    ] : []).concat(app.rules && app.rules.launchOption ? [
                         ["Loader setup", app.rules.launchHelp || ""],
                         ["Launch Option", app.rules.launchOption]
                     ] : []) : []
@@ -3793,7 +4024,7 @@ Window {
         ui: kit
         visible: app.sheet === "check"
         checks: app.checks
-        buttons: app.checkChoices.map((label, i) => ({ key: label === "Play anyway" ? "a" : label === "Play without mods" ? (app.checkStops ? "a" : "x") : "b", label: label }))
+        buttons: app.checkChoices.map(label => ({ key: app.checkKey(label), label: label }))
         focusIndex: app.checkIndex
         note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
         onActivated: (index, key) => { app.checkIndex = index; app.checkChoose(index) }
@@ -3903,9 +4134,9 @@ Window {
                : app.sheet === "found" ? "Found a download"
                : "Added " + app.notesName
         text: app.sheet === "quick" ? app.quickText
-              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". A opens its page: press Slow download there, and Turbine adds it too."
+              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". A opens its files on Nexus: pick the file for your " + app.gameTitle + " version and press Slow download. Turbine adds it too."
               : app.sheet === "nobrowser" ? (app.browser.text || "")
-              : app.sheet === "helper" ? "Optional: mods download without it. It only adds installer choices on the Nexus page. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
+              : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
               : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
                     + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
               : app.sheet === "notes" ? "Something to know about this mod:" : ""
@@ -4003,21 +4234,21 @@ Window {
                 anchors.centerIn: parent
                 spacing: keepSheet.kp(10)
                 Text { text: "Keep this size?"; color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(20); font.weight: Font.DemiBold }
-                Text { text: "Going back in " + app.keepLeft + " · Interface size " + app.sizeNow + "% · " + (app.layoutNow === "tv" ? "TV" : app.layoutNow.charAt(0).toUpperCase() + app.layoutNow.substring(1)); color: c.soft; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(15) }
+                Text { text: "Going back in " + app.keepLeft + " · Interface size " + app.sizeNow + "%" + (app.sizeNow === app.sizeCap && app.sizeCap < 150 ? " (largest that fits)" : "") + " · " + (app.layoutNow === "tv" ? "TV" : app.layoutNow.charAt(0).toUpperCase() + app.layoutNow.substring(1)); color: c.soft; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(15) }
                 Row {
                     spacing: keepSheet.kp(18)
                     Repeater {
-                        model: [["a", "Keep"], ["b", "Go back"]]
+                        model: [["◀▶", "Change"], ["a", "Keep"], ["b", "Go back"]]
                         Row {
                             required property var modelData
                             spacing: keepSheet.kp(8)
                             Rectangle {
-                                width: keepSheet.kp(26); height: width; radius: width / 2
+                                width: Math.max(keepSheet.kp(26), capText.implicitWidth + keepSheet.kp(12)); height: keepSheet.kp(26); radius: height / 2
                                 color: c.raised; border.color: c.accentLo
-                                Text { anchors.centerIn: parent; text: parent.parent.modelData[0].toUpperCase(); color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(14); font.bold: true }
+                                Text { id: capText; anchors.centerIn: parent; text: parent.parent.modelData[0].toUpperCase(); color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(14); font.bold: true }
                             }
                             Text { text: parent.modelData[1]; color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                            TapHandler { onTapped: app.keepSize(parent.modelData[0] === "a") }
+                            TapHandler { onTapped: if (parent.modelData[0] !== "◀▶") app.keepSize(parent.modelData[0] === "a") }
                         }
                     }
                 }
@@ -4108,13 +4339,13 @@ Window {
         const s = sheet
         if (moving) return [["▲▼", "Move"], ["◀▶", "10 rows"], ["lt+rt", "Top or bottom"], ["a", "Done"], ["b", "Cancel"]]
         if (orderMoving) return [["▲▼", "Move"], ["◀▶", "10 rows"], ["lt+rt", "Top or bottom"], ["a", "Done"], ["b", "Cancel"]]
-        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return [["▲▼", "Choose"], ["a", "Choose"], ["b", "Close"], ["start", "Play"]]
-        if (s === "pick") return [["▲▼", "Choose"], ["a", "Choose"], ["b", pickBack !== "" ? "Back" : "Close"]]
+        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return [["a", "Choose"], ["b", "Close"], ["start", "Play"]]
+        if (s === "pick") return [["a", "Choose"], ["b", pickBack !== "" ? "Back" : "Close"]]
         if (s === "add") return [["▲▼", "Choose"], ["a", "Add"], ["y", addAll ? "This game's files" : "All files"], ["b", "Close"]]
         if (s === "shares") return [["▲▼", "Choose"], ["a", "Read"], ["b", "Back"]]
-        if (s === "profiles") return [["▲▼", "Choose"], ["a", "Choose"]].concat(!importData && profIndex < profileList.length ? [["x", "Rename or delete"]] : []).concat([["b", "Close"]])
-        if (s === "check") return (checkStops ? [["a", "Play without mods"]] : [["a", "Play anyway"], ["x", "Play without mods"], ["start", "Play"]])
-            .concat(checkView.scrolls ? [["▲▼", "Scroll"]] : []).concat([["b", "Not now"]])
+        if (s === "profiles") return [["a", "Choose"]].concat(!importData && profIndex < profileList.length ? [["x", "Rename or delete"]] : []).concat([["b", "Close"]])
+        // Sheets with buttons: the buttons show their own keys; the legend only says how to choose.
+        if (s === "check") return [["◀▶", "Choose"], ["a", "Choose"]].concat(checkView.scrolls ? [["▲▼", "Scroll"]] : []).concat([["b", "Not now"]])
         if (s === "loader") return [["a", loaderCanGet ? "Get it" : "Where it comes from"], ["b", "Not now"]]
         if (s === "pages") return [["▲▼", "Choose"], ["a", "Open"], ["b", "Close"]]
         if (s === "versions") return [["▲▼", "Choose"], ["a", detailsData && detailsData.premium === false ? "Get it on Nexus" : "Install"], ["b", "Close"]]
@@ -4124,23 +4355,28 @@ Window {
         if (s === "pickgame") return [["▲▼", "Choose"], ["a", "Add here"], ["b", "Back"]]
         if (s === "removed") return [["▲▼", "Choose"], ["b", "Close"], ["start", "Play"]]
         if (s === "confirm") return [["a", "Hold to delete"], ["b", "Keep"]]
-        if (s === "keepsize") return [["a", "Keep"], ["b", "Go back"]]
+        if (s === "keepsize") return [["◀▶", "Change"], ["a", "Keep"], ["b", "Go back"]]
         if (s === "openhelp") return [["a", "Open in Steam's browser"], ["b", "Close"]]
         if (s === "nobrowser" || s === "helper") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Close"]]
-        if (s === "found") return [["◀▶", "Choose"], ["x", found && found.game ? "Other game" : "Pick the game"], ["b", "Not a mod"]]
+        if (s === "found") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Not a mod"]]
         if (s === "notes") return [["a", "OK"]]
-        if (s === "quick") return [["◀▶", "Choose"], ["x", "Play without mods"], ["b", "Keep my mods"]]
-        if (s === "chain") return [["a", "Open its page"], ["b", "Later"]]
+        if (s === "quick" || s === "chain") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Close"]]
         if (s === "fomod") return [["a", "Choose"], ["start", "Next"], ["b", "Back a step"]]
         if (s === "ask") return [["a", "Done"], ["b", "Cancel"]].concat(Turbine.gamemode ? [["x", "Keyboard"]] : []).concat([["y", "Clear"]])
         if (s === "perf") return [["◀▶", "Choose"], ["b", "Close"]]
         if (s === "report") return reportView.editing ? [["b", "Done typing"]] : [["▲▼", "Move"], ["b", "Close"]]
         if (s !== "") return [["b", "Close"]]
         if (zone === "rail") return [["a", "Open"], ["b", "Back"]].concat(railIndex < games.length ? [["x", "Game menu"]] : []).concat([["lb+rb", "Switch game"]])
-        if (page === "settings") return [["lt+rt", "Sections"]]
-            .concat(sec === "Look" || (!!rowsNow[setRow] && ["choice", "toggle"].indexOf(rowsNow[setRow].kind) >= 0) ? [["◀▶", "Change"]] : [])
-            .concat(!!rowsNow[setRow] && rowsNow[setRow].kind === "item" ? [["◀▶", "Choose"]] : [])
-            .concat([["b", "Back to the game"], ["◀", "Game list"]])
+        if (page === "settings") {
+            // Left changes the value on Look, choice and toggle rows and moves between a checklist item's answers;
+            // only on the other rows does it go to the game list.
+            const kind = sec === "Look" ? "look" : sec === "About" ? "about" : rowsNow[setRow] ? rowsNow[setRow].kind : ""
+            return [["lt+rt", "Sections"]]
+                .concat(kind === "look" || kind === "choice" || kind === "toggle" ? [["◀▶", "Change"]] : [])
+                .concat(kind === "item" ? [["◀▶", "Choose"]] : [])
+                .concat([["b", "Back to the game"]])
+                .concat(kind === "look" || kind === "choice" || kind === "toggle" || kind === "item" ? [] : [["◀", "Game list"]])
+        }
         if (page === "perf") return [["▲▼", "Scroll"], ["b", "Back"]]
         if (!game) return [["a", "Look again"]]
         if (modPage) return [["b", "Back to the results"]].concat(pageMissing >= 0 ? [["y", "Get what it needs"]] : []).concat([["lb+rb", "Prev / next mod"], ["▲▼", "Scroll"], ["view", "Game menu"]])
@@ -4148,18 +4384,18 @@ Window {
         if (tab === 0 && selecting) return [["b", "Done"], ["lb+rb", "Switch game"], ["lt+rt", "Tabs"]]
         if (tab === 0) {
             if (undoShown) h.push(["y", "Undo"])
-            else if (ordered && focusedItem && focusedItem.kind === "mod" && mods.length > 1 && findText === "") h.push(["y", listSort === "order" && listShow === "all" ? "Reorder" : "Reorder works in Load order sort"])
-            if (modIndex < 0 && listBar[listBarIndex]) h = [["a", listBar[listBarIndex].key === "find" ? "Find" : "Change"]].concat(h)
+            else if (ordered && focusedItem && focusedItem.kind === "mod" && mods.length > 1) h.push(["y", "Move"])
+            if (modIndex < 0 && listBar[listBarIndex]) h = [["a", listBar[listBarIndex].key === "find" ? "Find" : "Choose"]].concat(h)
             h.push(["b", listFiltered ? "Show all" : "Game list"])
             if (mods.length >= 20 || findText !== "") h.push(["r3", "Find"])
         } else if (tab === 1 && sources.length > 0) {
-            if (getArea === "fallback") h = [["b", "My mods"]]
-            else if (getArea === "grid") h = [["y", "Get it"], ["b", "Back"]]
-            else if (getArea === "bar" && getBar[getIndex] && ["sort", "category", "source"].indexOf(getBar[getIndex].key) >= 0) h = [["a", "Change"], ["b", getText !== "" ? "Clear search" : "My mods"]]
+            if (getArea === "fallback") h = [["b", "My mods"]]   // the card shows A, X and Y
+            else if (getArea === "grid") h = [["a", "Open"], ["y", "Get it"], ["x", "More"], ["b", "Search bar"]]
+            else if (getArea === "bar" && getBar[getIndex] && ["sort", "category", "source"].indexOf(getBar[getIndex].key) >= 0) h = [["a", "Choose"], ["b", getText !== "" ? "Clear search" : "My mods"]]
             else h = [["a", "Choose"], ["b", getText !== "" ? "Clear search" : "My mods"]]
             if (getArea !== "fallback") h.push(["r3", "Search"])
         } else if (tab === 1) h = [["b", "My mods"]]
-        else if (tab === 2) h = (orderIndex >= 0 ? [["y", "Move"], ["x", "Details"]] : []).concat([["b", "My mods"]])
+        else if (tab === 2) h = (orderPlugin && !orderPlugin.fixed ? [["y", "Move"]] : []).concat(orderPlugin ? [["x", "Details"]] : []).concat([["b", "My mods"]])
         return h.concat([["lb+rb", "Switch game"], ["lt+rt", "Tabs"], ["view", "Game menu"]]).concat(gripsSeen ? [["l4+r4", "Page"]] : [])
     }
     Rectangle {

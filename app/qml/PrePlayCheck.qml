@@ -25,7 +25,7 @@ Item {
     property string title: "Before you play"
     // Each check: { level: "ok" | "warn" | "stop", title, detail }
     property var checks: []
-    // Up to 3 buttons: { key (optional, e.g. "a" or "b"), label }
+    // Up to 4 buttons: { key (the button's own key: "x", "y", "b", or "" for none), label }. A runs the focused one.
     property var buttons: []
     property int focusIndex: 0
     property string note: ""              // e.g. "Wait checks again every few hours."
@@ -179,12 +179,13 @@ Item {
                 spacing: root.ui.px(10)
                 topPadding: root.ui.px(6)
                 Repeater {
-                    model: (root.buttons || []).slice(0, 3)
+                    model: (root.buttons || []).slice(0, 4)
                     ActionButton {
                         required property int index
                         required property var modelData
                         ui: root.ui
-                        k: modelData.key || ""
+                        // A runs the highlighted button, so A is drawn on it; the others show their own key.
+                        k: index === root.focusIndex ? "a" : (modelData.key && modelData.key !== "a" ? modelData.key : "")
                         label: modelData.label || ""
                         focused: index === root.focusIndex
                         onClicked: root.activated(index, modelData.key || "")

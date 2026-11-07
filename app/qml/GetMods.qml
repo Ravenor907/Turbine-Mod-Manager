@@ -32,6 +32,7 @@ Item {
     signal barClicked(int index)
     signal recentClicked(int index)
     signal itemClicked(int index)
+    signal itemMenu(int index)            // right-click on a card (its X menu)
     signal fallbackClicked(string key)
 
     function count(n) {
@@ -183,10 +184,13 @@ Item {
                     spacing: gm.ui.px(10)
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(20); font.weight: Font.DemiBold }
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads. No key needed."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15) }
-                    Row {
-                        spacing: gm.ui.px(18)
+                    Flow {
+                        width: parent.width
+                        spacing: gm.ui.px(14)
                         ActionKey { k: "a"; label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
                         ActionKey { k: "x"; label: "Try again here"; onClicked: gm.fallbackClicked("x") }
+                        // A file that landed but wasn't caught can still be added from here.
+                        ActionKey { k: "y"; label: "Add a file from Downloads"; onClicked: gm.fallbackClicked("y") }
                     }
                 }
                 HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -280,6 +284,7 @@ Item {
                         }
                         HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
                         TapHandler { onTapped: gm.itemClicked(cell.index) }
+                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: gm.itemMenu(cell.index) }
                     }
                 }
             }

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 
 // The Load order tab (Skyrim): the game's plugins in the order they load, each ON or OFF, with Master and Light
 // marked, the game's own files fixed at the top, and a warning on plugins whose masters are missing. Sort
@@ -97,14 +98,28 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: lo.ui.px(10)
                     Text { width: lo.ui.px(30); horizontalAlignment: Text.AlignRight; text: row.index + 1; color: lo.ui.c.muted; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+                    // The game's own files can't be turned off or moved: a lock, and a dimmed pill.
+                    Shape {
+                        opacity: row.p.fixed === true ? 1 : 0
+                        width: lo.ui.px(16); height: lo.ui.px(16)
+                        anchors.verticalCenter: parent.verticalCenter
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: lo.ui.c.muted; strokeWidth: 2; fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap; joinStyle: ShapePath.RoundJoin
+                            scale: Qt.size(lo.ui.px(16) / 24, lo.ui.px(16) / 24)
+                            PathSvg { path: "M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3" }
+                        }
+                    }
                     Rectangle {
                         width: lo.ui.px(44); height: lo.ui.px(24); radius: lo.ui.px(5)
                         anchors.verticalCenter: parent.verticalCenter
+                        opacity: row.p.fixed === true ? 0.45 : 1
                         color: row.p.active ? lo.ui.c.raised : lo.ui.c.ground
                         border.color: row.p.active ? "transparent" : lo.ui.c.line
                         Text { anchors.centerIn: parent; text: row.p.active ? "ON" : "OFF"; color: row.p.active ? lo.ui.c.accentText : lo.ui.c.muted; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(13); font.bold: true }
-                        HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
-                        TapHandler { onTapped: lo.toggleClicked(row.index) }
+                        HoverHandler { enabled: row.p.fixed !== true; onHoveredChanged: lo.ui.hover(parent, hovered) }
+                        TapHandler { enabled: row.p.fixed !== true; onTapped: lo.toggleClicked(row.index) }
                     }
                     Text {
                         text: row.p.name

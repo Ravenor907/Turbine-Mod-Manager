@@ -9,6 +9,11 @@ Item {
     anchors.fill: parent
 
     property string modName: ""
+    // "2025-03-04" reads as "Mar 4, 2025".
+    function niceDate(t) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t || "")
+        return m ? Qt.formatDate(new Date(+m[1], +m[2] - 1, +m[3]), "MMM d, yyyy") : (t || "")
+    }
     property var versions: []             // [{id, version, name, size, date, downloads, installed, group, note}]
     property int focusIndex: 0
     property string note: ""              // a line under the title (e.g. Premium is needed)
@@ -95,7 +100,7 @@ Item {
                         Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(16); font.bold: true }
                         Text {
                             width: parent.width; elide: Text.ElideRight
-                            text: [row.modelData.version ? "Version " + row.modelData.version : "", row.modelData.date || "", vs.size(row.modelData.size)].filter(s => s !== "").join(" · ")
+                            text: [row.modelData.version ? "Version " + row.modelData.version : "", vs.niceDate(row.modelData.date), vs.size(row.modelData.size)].filter(s => s !== "").join(" · ")
                             color: vs.ui.c.soft; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(14)
                         }
                         Text { visible: !!row.modelData.note; width: parent.width; elide: Text.ElideRight; text: row.modelData.note || ""; color: vs.ui.c.muted; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.px(13) }

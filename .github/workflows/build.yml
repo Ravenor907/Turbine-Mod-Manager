@@ -348,8 +348,34 @@ jobs:
           log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
           if grep -q "Play options open: true" "$log"; then echo "::notice title=Hold Start::Play options opened"
           else echo "::error title=Holding Start didn't open Play options::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
+          # 0.52: A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
+          # offer the missing script extender; KCD II rows say a first-game mod may not work; Witcher's clash offers
+          # turning off the newer mod; Interface size stops at the largest that fits.
+          fresh "checkfocus"; h="$PWD/fh/checkfocus"
+          shoot "checkfocus-1280x800" 1280x800 checkfocus "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
+          fresh "menuskse"; h="$PWD/fh/menuskse"
+          shoot "menuskse-1280x800" 1280x800 menuskse "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+          log="$PWD/data/checkfocus-1280x800/turbine-mod-manager/activity.log"
+          if grep -q "Check before Play: Not now" "$log" && ! grep -q "Check before Play: Play anyway" "$log" && grep -q 'After A: sheet ""' "$log"; then
+            echo "::notice title=Before you play::$(grep -h 'Check focus on\|After A' "$log" | head -n2 | tr '\n' ' ' | cut -c1-200)"
+          else echo "::error title=A on Before you play didn't run the highlighted button::"; (grep -h "Check\|shot" "$log" | tail -n 10 || true); fail=1; fi
+          log="$PWD/data/menuskse-1280x800/turbine-mod-manager/activity.log"
+          if grep -q "Mod menu: Get SKSE" "$log" && grep -Eq "Game menu: .*(Install|Get) SKSE" "$log"; then
+            echo "::notice title=SKSE way back::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
+          else echo "::error title=No way back to SKSE in the mod or game menu::"; (grep -h "menu:" "$log" | tail -n 4 || true); fail=1; fi
+          for size in 1280x800 1920x1080; do
+            log="$PWD/data/mods-kcd2-$size/turbine-mod-manager/activity.log"
+            if grep -q "Row warnings: .*Fast Travel KCD1 2.0: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
+            else echo "::error title=KCD II row has no warning for the first game's mod ($size)::"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
+            log="$PWD/data/check-witcher-$size/turbine-mod-manager/activity.log"
+            if grep -q "Check before Play buttons: .*Turn off Faster Roach" "$log"; then echo "::notice title=Witcher clash $size::$(grep -h 'Check before Play buttons' "$log" | head -n1 | cut -c1-200)"
+            else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
+          done
           # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
           shoot "size150-1280x800" 1280x800 size150 "$PWD/home"
+          log="$PWD/data/size150-1280x800/turbine-mod-manager/activity.log"
+          if grep -Eq "Try size 11[0-9]% \(largest that fits 11[0-9]%\)" "$log"; then echo "::notice title=Largest size that fits::$(grep -h 'Try size' "$log" | head -n1)"
+          else echo "::error title=Interface size went past what fits::"; (grep -h "size" "$log" | tail -n 4 || true); fail=1; fi
           shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
             "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
           shoot "desktopgrid-1920x1080" 1920x1080 desktopgrid "$PWD/home" --game=$skyrim --layout=desktop

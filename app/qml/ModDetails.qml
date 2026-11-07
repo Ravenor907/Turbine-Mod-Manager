@@ -45,6 +45,13 @@ Item {
         if (b >= 1024) return Math.round(b / 1024) + " KB"
         return b + " bytes"
     }
+    // "2025-03-04" reads as "Mar 4, 2025"; anything else stays as it is.
+    function niceDate(t) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t || "")
+        return m ? Qt.formatDate(new Date(+m[1], +m[2] - 1, +m[3]), "MMM d, yyyy") : (t || "")
+    }
+    // A size stays together and with what comes before it ("24.0 MB" never breaks before MB).
+    function keepTogether(t) { return (t || "").replace(/ (bytes|KB|MB|GB)\b/g, "\u00a0$1").replace(/ · /g, "\u00a0· ") }
     function count(n) {
         n = n || 0
         if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".0", "") + "M"
@@ -124,7 +131,7 @@ Item {
                     md.info.owner ? "By " + md.info.owner : "",
                     md.info.version ? "Version " + md.info.version : "",
                     md.info.size ? md.size(md.info.size) : "",
-                    (md.info.updatedText || md.info.updated) ? "Updated " + (md.info.updatedText || md.info.updated) : ""
+                    (md.info.updatedText || md.info.updated) ? "Updated " + md.niceDate(md.info.updatedText || md.info.updated) : ""
                 ].filter(x => x !== "").join(" · ")
                 color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
             }
@@ -196,7 +203,7 @@ Item {
                 visible: !!md.info && !!md.info.mainLine
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: md.info && md.info.mainLine ? md.info.mainLine : ""
+                text: md.info && md.info.mainLine ? md.keepTogether(md.info.mainLine) : ""
                 color: md.ui.c.text
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.px(14)

@@ -2,7 +2,8 @@ import QtQuick
 
 // A plain sheet: a title, a few sentences, numbered steps or a list of notes, and one or two buttons. Used for the
 // no-browser warning, the browser helper's setup steps, a mod's install notes and "Add this file?" for a download
-// the watcher could only guess. A runs the focused button, B closes. Main.qml handles the keys.
+// the watcher could only guess. A runs the focused button (drawn with A); the others show their own key (X, Y, B).
+// Main.qml handles the keys.
 Item {
     id: sh
     required property var ui
@@ -98,7 +99,8 @@ Item {
                 color: sh.ui.c.muted
                 font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(14)
             }
-            Row {
+            Flow {
+                width: parent.width
                 spacing: sh.ui.px(10)
                 topPadding: sh.ui.px(4)
                 Repeater {
@@ -116,11 +118,14 @@ Item {
                             id: btnRow
                             anchors.centerIn: parent
                             spacing: sh.ui.px(8)
+                            // A runs the highlighted button, so A is drawn on it; the others show their own key.
                             Rectangle {
-                                visible: !!modelData.key
+                                id: capKey
+                                readonly property string k: parent.parent.foc ? "a" : (modelData.key && modelData.key !== "a" ? modelData.key : "")
+                                visible: k !== ""
                                 width: sh.ui.px(24); height: width; radius: width / 2; color: sh.ui.c.raised; border.color: sh.ui.c.accentLo
                                 anchors.verticalCenter: parent.verticalCenter
-                                Text { anchors.centerIn: parent; text: (modelData.key || "").toUpperCase(); color: sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(13); font.bold: true }
+                                Text { anchors.centerIn: parent; text: capKey.k.toUpperCase(); color: sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(13); font.bold: true }
                             }
                             Text { text: modelData.label; color: parent.parent.foc ? sh.ui.c.accentText : sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }

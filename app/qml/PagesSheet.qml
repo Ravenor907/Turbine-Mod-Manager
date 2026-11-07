@@ -48,12 +48,11 @@ Item {
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(15)
             }
             Text {
-                visible: pg.gameMode || !pg.handlerSet
+                visible: !pg.handlerSet
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: [pg.gameMode ? "This works best in Desktop Mode, with the browser and Turbine side by side." : "",
-                       !pg.handlerSet ? "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Accounts. Slow download needs nothing." : ""].filter(s => s !== "").join(" ")
-                color: pg.ui.c.warn
+                text: "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Getting mods. Slow download needs nothing."
+                color: pg.ui.c.soft
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(14)
             }
             Repeater {
