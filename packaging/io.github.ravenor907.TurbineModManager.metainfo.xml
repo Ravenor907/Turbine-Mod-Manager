@@ -15,6 +15,17 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.41" date="2026-11-07" type="development">
+      <description>
+        <p>Fixes from the owner's 0.4 test:</p>
+        <ul>
+          <li>Mods downloaded in any browser are found in Downloads with no setup, even while Turbine was closed</li>
+          <li>Controller pointer: right stick moves it, RT clicks, LT right clicks, turning the left stick scrolls</li>
+          <li>Mod Manager Download without a Nexus key explains how to use Slow download instead</li>
+          <li>The browser helper is optional</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.4" date="2026-11-07" type="development">
       <description>
         <p>Nexus downloads through your own browser, for testing on the owner's handhelds:</p>
