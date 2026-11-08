@@ -109,7 +109,9 @@ Item {
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
         // under the bar when they don't fit (pillFull).
         readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
-        readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd - signinNeed
+        // The page's title keeps a little room too (a long hint in the pill used to take it all).
+        readonly property real titleMin: nb.width * 0.09
+        readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd - signinNeed - titleMin
         readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)
         readonly property int signinFit: {
             if (!nb.signinShown) return 0
@@ -275,16 +277,20 @@ Item {
         }
     }
 
-    // The pill's whole words under the bar when they are cut short there (a message to read: done or a warning).
+    // The pill's whole words under the bar when they are cut short there (a message to read: done, a warning or what
+    // to press), for their first 6 seconds; then only the pill keeps them, so nothing stays over the page's corner.
+    property bool fullFresh: false
+    onPillTextChanged: { fullFresh = pillText !== ""; fullTimer.restart() }
+    Timer { id: fullTimer; interval: 6000; onTriggered: nb.fullFresh = false }
     Rectangle {
         id: pillFull
-        visible: pill.visible && nb.noteFresh && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok")
+        visible: pill.visible && nb.noteFresh && nb.fullFresh && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok" || nb.pillLevel === "hint")
         anchors.top: bar.bottom; anchors.topMargin: nb.ui.px(4)
         anchors.right: parent.right; anchors.rightMargin: nb.ui.px(10)
         width: Math.min(bar.pillWant, nb.width - nb.ui.px(20)); height: fullText.implicitHeight + nb.ui.px(12)
         radius: nb.ui.px(6)
         color: nb.ui.c.panel
-        border.color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.ok
+        border.color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.pillLevel === "hint" ? nb.ui.c.accent : nb.ui.c.ok
         border.width: Math.max(1, nb.ui.px(1.5))
         z: 3
         Text {

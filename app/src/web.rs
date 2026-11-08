@@ -663,7 +663,7 @@ impl qobject::Turbine {
 }
 
 /// What the sign-in button says when the browser helper isn't set up (one line).
-pub const NO_HELPER: &str = "Google sign-in needs the browser helper and Chrome, set up in Desktop Mode (Settings, Labs). Email and password sign-in works right here without it.";
+pub const NO_HELPER: &str = "Google sign-in needs Chrome and the browser helper, set up once in Desktop Mode (Settings, Labs, Use Chrome in Game Mode; then Settings, Getting mods, Using your own browser). Email and password sign-in works right here without it.";
 /// Game Mode with no Chrome-family browser in Steam: Steam's browser opens, but only Chrome with the helper can hand
 /// the sign-in back.
 pub const STEAM_ONLY: &str = "Steam's browser opened, but it can't hand the sign-in back to Turbine. Add Chrome to Steam (Settings, Getting mods), or sign in with email and password right here.";

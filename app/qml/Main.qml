@@ -3719,7 +3719,7 @@ Window {
         const n = app.browserNoteNow
         if (n && n.level !== "warn" && app.browserNoKeyPage === "" && Date.now() - n.at > 15000) app.browserNoteNow = null
     } }
-    readonly property bool browserNoteFresh: !!browserNoteNow && (noteClock === 0 || noteClock - browserNoteNow.at < 6000)
+    readonly property bool browserNoteFresh: !browserNoteNow || noteClock === 0 || noteClock - browserNoteNow.at < 6000
     readonly property bool browserIsFilePage: !!nexusView && /[?&]tab=files/.test(nexusView.url) && Turbine.browserIsNexus(nexusView.url)
     // The Downloads tab's rows.
     readonly property var browserRows: { webDlTick; return webDls.map(x => ({ name: x.name, game: x.game, state: x.state, got: x.got, total: x.total, words: x.words })) }
@@ -3890,7 +3890,7 @@ Window {
         note("action", "Google page: use Chrome instead")
         if (bridge.paired === true) { signinStart(); return }
         const t = Turbine.gamemode
-            ? "Chrome needs Desktop Mode once: add Chrome to Steam and set up the browser helper (Settings, Labs). Then Google sign-in shows here."
+            ? "Chrome needs Desktop Mode once: add Chrome to Steam (Settings, Labs, Use Chrome in Game Mode) and set up the browser helper (Settings, Getting mods, Using your own browser). Then Google sign-in shows here."
             : "Chrome needs the browser helper once (Settings, Getting mods, Using your own browser). Then Google sign-in shows here."
         browserSay(t, "warn")
         toast.showPlain(t)
@@ -4507,7 +4507,7 @@ Window {
           action: "Sign in" }
     ] : []).concat([
         { kind: "action", key: "webSignOut", title: "Sign out of Nexus in Turbine", how: "Forgets the sign-in in Turbine's own Nexus page (your key stays)", action: "Sign out" },
-        { kind: "choice", key: "zoom", title: "Nexus page size", how: "How large Nexus pages show in Turbine (also X, Zoom in or Zoom out on the page)",
+        { kind: "choice", key: "zoom", title: "Nexus page size", how: "How large Nexus pages show in Turbine (also on the page: X, then Left or Right on Zoom)",
           value: "", options: ["-", "+"], names: ["Smaller", "Larger (" + Math.round(browserZoom * 100) + "% now)"] }
     ]).concat(keyRowsShown ? [
         { kind: "action", key: "pasteKey", head: "Optional: Nexus account key", title: "Nexus Mods key", how: accountWords, action: account.hasKey ? "Paste a new key" : "Paste" },
@@ -6136,7 +6136,7 @@ Window {
                 googleShown: app.browserOnGoogle
                 googlePasswordWords: "Nexus emails you a link. Open it (on your phone is fine), set a password, then sign in here with your email and that password. Nothing else to set up."
                 googleChromeWords: app.bridge.paired === true ? "Opens Nexus's sign-in in Chrome. Sign in with Google there; Turbine takes the sign-in and comes back."
-                                   : Turbine.gamemode ? "Needs Desktop Mode once: Chrome added to Steam, and the browser helper set up in Chrome (Settings, Labs)."
+                                   : Turbine.gamemode ? "Needs Desktop Mode once: Chrome added to Steam (Settings, Labs, Use Chrome in Game Mode) and the browser helper in Chrome (Settings, Getting mods, Using your own browser)."
                                    : "Needs the browser helper set up in Chrome once (Settings, Getting mods, Using your own browser)."
             }
         }
