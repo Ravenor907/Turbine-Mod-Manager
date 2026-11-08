@@ -2940,17 +2940,18 @@ Window {
             { name: "loaded", max: 45000, wait: () => !!nexusView && !!nexusView.view && !nexusView.loading && /tab=files/.test(nexusView.url),
               act: () => check("Browser check: second run loaded " + nexusView.url) },
             { name: "tries", after: 9000, act: () => { check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")"))
-                                                         // H1b: A on a link to an outside site that sends the view straight back to a Nexus page
-                                                         // that goes to its Mod Manager Download link by itself.
-                                                         btClick(700, 452) } },
-            { name: "bounced", max: 20000, wait: () => pageIs(/file_id=55/), after: 6000,
-              act: () => { check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no"))
-                           // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
-                           btClick(700, 452) } },
+                                                         // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
+                                                         btClick(700, 512) } },
             { name: "another mod asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
               act: () => { const o = binds(); check("Browser check: another mod's link asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
+            { name: "auto page again", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load(browserAddress(btFiles + "&links=1")) } },
+            // H1b: A on a link to an outside site that sends the view straight back to a Nexus page that goes to its
+            // Mod Manager Download link by itself (after the page's own tries are over).
+            { name: "outside link", max: 20000, wait: () => pageIs(/links=1/), after: 800, act: () => btClick(700, 452) },
+            { name: "bounced", max: 20000, wait: () => pageIs(/file_id=55/), after: 6000,
+              act: () => check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")) },
             // H1c: an outside page read for a while; a tap on it sends the view to mod 1's page that does the same.
-            { name: "outside page", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load("http://127.0.0.1:47801/tapme") } },
+            { name: "outside page", after: 300, act: () => nexusView.load("http://127.0.0.1:47801/tapme") },
             { name: "tap outside", max: 15000, wait: () => pageIs(/tapme/), after: 800, act: () => btClick(190, 80) },
             { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
               act: () => { const o = binds(); check("Browser check: a tap off Nexus asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },

@@ -600,9 +600,9 @@ PY
   pneed "1b: going to an outside site drops the press" "The page left Nexus \(http://127.0.0.1:47801/bounce\)"
   pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
   pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
-  pneed "1c (M5): another mod's link asks first" "Browser check: another mod's link asks: Get .* for .*, A Get it, B Not now"
+  pneed "1c (M5): another mod's link asks first" "Browser check: another mod's link asks: Get .* \(.*\) for .*\?, A Not now, B Not now"
   pneed "1c (M5): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/2/files/57"
-  pneed "1c (H1c): a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* for .*, A Get it, B Not now"
+  pneed "1c (H1c): a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* \(.*\) for .*\?, A Not now, B Not now"
   pneed "1c (H1c): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/56"
   pneed "1c: Not now downloads nothing" "Browser check: after Not now, nothing downloaded: yes"
   asked=$(printf '%s\n' "$after" | grep -E "pretending to download nxm://skyrimspecialedition/mods/(1/files/56|2/files/57)" || true)

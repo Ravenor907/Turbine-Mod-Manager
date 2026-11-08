@@ -10,14 +10,15 @@ Serves on 127.0.0.1 only:
       (/files/TurbineTest-Bigger_Pockets-1.0.3.zip, sent as an attachment over about 3 seconds) or to an nxm:// link;
       a link to a setup program (refused by Turbine), a link to "Dupe Test 1.0.zip" (a name already in the game's
       folder), a link to the description page and a text field. Everything sits at a fixed place on the page.
+  ...&links=1  the file page with the two links below (an outside site, another mod) and nothing else.
   ...&auto=1  the same file page, which also tries everything by itself with no press (as an ad or a hostile page
       would): it goes to an nxm:// link from a script, a frame inside it goes to one and loads one as an image, it
       opens a pop-up and it starts a download. Turbine must take none of them.
   /frame  that frame. The auto page also links to an outside site (a second stand-in on --outside-port) whose /bounce
       at once sends the view back to a file page with &go=nxm, which goes to its nxm:// link as soon as it loads (the
-      way Nexus's Mod Manager Download address does for Premium): Turbine must not count the press on the link. That
-      page (mod 1) links to another mod's such page ("Another mod"), and the outside site's /tapme has a button that,
-      tapped, sends the view to mod 1's: both must ask first ("Get <mod> for <game>?").
+      way Nexus's Mod Manager Download address does for Premium): Turbine must not count the press on the link. The
+      auto page (mod 1) also links to another mod's such page ("Another mod"), and the outside site's /tapme has a
+      button that, tapped, sends the view to mod 1's: both must ask first ("Get <mod> (<file>) for <game>?").
   /<domain>/mods/<id>?tab=description  a second page with a link back.
   /files/<name>  the files above.
   /log?event=<what>  the page's own report of a press; /mark?name=<what>  a mark from the check.
@@ -38,8 +39,11 @@ LOCK = threading.Lock()
 OUTSIDE_PORT = 47801
 
 
-AUTO = """
+LINKS = """
   <a id="out" class="at" style="left:640px; top:440px;" href="http://127.0.0.1:OUTSIDE/bounce">Outside site</a>
+  <a id="other" class="at" style="left:640px; top:500px;" href="/skyrimspecialedition/mods/2?tab=files&file_id=57&go=nxm">Another mod</a>"""
+
+AUTO = """
   <iframe class="at" style="left:640px; top:300px; width:200px; height:120px; border:0;" src="/frame"></iframe>
 <script>
   const soon = () => String(Math.floor(Date.now() / 1000) + 3600);
@@ -55,14 +59,12 @@ FRAME = """<!doctype html><html><body style="margin:0">
 </script></body></html>"""
 
 
-def page(domain, mod_id, file_id, auto=False, go_nxm=False):
+def page(domain, mod_id, file_id, auto=False, go_nxm=False, links=False):
     """The file page. Places are fixed (CSS pixels from the page's top left) so the check can put the pointer there."""
     nxm = f"nxm://{domain}/mods/{mod_id}/files/{file_id}?key=abc&expires=EXPIRES&user_id=1"
     go = ""
     if go_nxm:
         go = "<script>location.assign(\"" + nxm.replace("EXPIRES", "4102444800") + "\");</script>"
-        if mod_id == 1:
-            go += f'<a id="other" class="at" style="left:640px; top:440px;" href="/{domain}/mods/2?tab=files&file_id=57&go=nxm">Another mod</a>'
 
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Stand-in file page {mod_id}</title>
@@ -98,7 +100,7 @@ def page(domain, mod_id, file_id, auto=False, go_nxm=False):
   }}
   document.getElementById("slow").onclick = () => wait("slow", () => location.assign("/files/TurbineTest-Bigger_Pockets-1.0.3.zip"));
   document.getElementById("mmd").onclick = () => wait("mmd", () => location.assign("{nxm}".replace("EXPIRES", String(Math.floor(Date.now() / 1000) + 3600))));
-</script>{AUTO.replace("OUTSIDE", str(OUTSIDE_PORT)) if auto else ""}{go}
+</script>{LINKS.replace("OUTSIDE", str(OUTSIDE_PORT)) if auto or links else ""}{AUTO if auto else ""}{go}
 </body></html>"""
 
 
@@ -169,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(self.send_body(200, description(domain, mod_id)))
             else:
                 file_id = int(q.get("file_id", ["2"])[0] or 2) if q.get("file_id", ["2"])[0].isdigit() else 2
-                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id, q.get("auto", [""])[0] == "1", q.get("go", [""])[0] == "nxm")))
+                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id, q.get("auto", [""])[0] == "1", q.get("go", [""])[0] == "nxm", q.get("links", [""])[0] == "1")))
             return
         if len(parts) == 2 and parts[0] == "files":
             name = urllib.parse.unquote(parts[1])
