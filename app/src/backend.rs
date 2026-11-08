@@ -1280,8 +1280,49 @@ impl qobject::Turbine {
         let mut this = self;
         this.as_mut().set_problems(QString::from(scan.problems.join("\n").as_str()));
         let json = scan.games_json();
+        let missing: Vec<(String, String, bool, bool)> = scan
+            .games
+            .iter()
+            .filter(|g| g.store == turbine_engine::Store::Steam && (g.cover.is_none() || g.header.is_none()))
+            .map(|g| (g.store_id.clone(), g.name.clone(), g.cover.is_none(), g.header.is_none()))
+            .collect();
         this.as_mut().rust_mut().found = scan.games;
         this.as_mut().set_games(QString::from(json.as_str()));
+        this.as_mut().fetch_missing_art(missing);
+    }
+
+    /// Steam games with no cover or wide picture on the device: Steam's store has them. Downloaded once, in the
+    /// background, one game after another (at most 30 a run), into Turbine's own cache; a game whose art couldn't be
+    /// had is left alone for a week. When something was saved, the games are read again so the art shows.
+    fn fetch_missing_art(self: Pin<&mut Self>, missing: Vec<(String, String, bool, bool)>) {
+        static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if missing.is_empty() || crate::online::using_samples() || std::env::args().any(|a| a.starts_with("--screenshot=")) {
+            return;
+        }
+        let Some(cache) = turbine_engine::steam::art_cache() else { return };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let due: Vec<_> = missing.into_iter().filter(|(id, _, _, _)| turbine_engine::steam::cdn_art_due(&cache, id, now)).take(30).collect();
+        if due.is_empty() || RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        crate::log::line("art", &format!("{} Steam game(s) have no art on this device: asking Steam's store once", due.len()));
+        let qt = self.qt_thread();
+        let spawned = std::thread::Builder::new().name("turbine-art".into()).spawn(move || {
+            let client = turbine_engine::net::Client::new(crate::VERSION, &crate::online::temp_dir());
+            let mut any = false;
+            for (id, name, cover, header) in due {
+                let (saved, said) = turbine_engine::steam::cdn_art(&client, &cache, &id, cover, header, now);
+                crate::log::line("art", &format!("{name} ({id}): {said}"));
+                any |= !saved.is_empty();
+            }
+            RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+            if any {
+                let _ = qt.queue(|t| t.scan());
+            }
+        });
+        if spawned.is_err() {
+            RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     pub fn wake(mut self: Pin<&mut Self>) {

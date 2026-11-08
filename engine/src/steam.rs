@@ -76,6 +76,125 @@ pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
     out
 }
 
+/// Turbine's own folder for art it downloaded from Steam's store: <XDG_CACHE_HOME>/turbine-mod-manager/art (TURBINE_ART
+/// overrides it; tests). None when no cache folder is known.
+pub fn art_cache() -> Option<PathBuf> {
+    if let Some(v) = std::env::var_os("TURBINE_ART").filter(|v| !v.is_empty()) {
+        return Some(v.into());
+    }
+    let base = std::env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    Some(base.join("turbine-mod-manager").join("art"))
+}
+
+/// A Steam game's portrait cover, looked for in this order: the player's own grid art in Steam
+/// (userdata/<account>/config/grid/<appid>p.png or .jpg), Steam's library cache (library_600x900, then
+/// library_capsule, the name newer Steam uses), then a copy Turbine downloaded once from Steam's store
+/// (`art_cache`, see `cdn_art`).
+pub fn find_cover(root: &Path, app_id: &str, art_cache: Option<&Path>) -> Option<PathBuf> {
+    grid_art(root, app_id, "p")
+        .or_else(|| find_art(root, app_id, "library_600x900"))
+        .or_else(|| find_art(root, app_id, "library_capsule"))
+        .or_else(|| art_cache.and_then(|c| cached_cdn_art(c, app_id, "cover")))
+}
+
+/// A Steam game's wide picture: the player's own wide grid art (<appid>.png or .jpg), Steam's library cache header,
+/// then Turbine's downloaded copy.
+pub fn find_header(root: &Path, app_id: &str, art_cache: Option<&Path>) -> Option<PathBuf> {
+    grid_art(root, app_id, "")
+        .or_else(|| find_art(root, app_id, "header"))
+        .or_else(|| art_cache.and_then(|c| cached_cdn_art(c, app_id, "header")))
+}
+
+/// The player's custom art in Steam's grid folders (any account), <appid><suffix>.png or .jpg.
+pub fn grid_art(root: &Path, app_id: &str, suffix: &str) -> Option<PathBuf> {
+    let mut accounts: Vec<PathBuf> = fs::read_dir(root.join("userdata")).ok()?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    accounts.sort();
+    accounts.iter().find_map(|a| {
+        ["png", "jpg"].iter().map(|ext| a.join("config/grid").join(format!("{app_id}{suffix}.{ext}"))).find(|p| p.is_file())
+    })
+}
+
+/// Where Steam's store keeps a game's art: (what it is for, address), tried in order. The cover first as
+/// library_600x900, then library_capsule; the wide picture as header.
+pub fn cdn_art_urls(app_id: &str) -> Vec<(&'static str, String)> {
+    if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
+        return Vec::new();
+    }
+    let base = format!("https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/{app_id}");
+    vec![
+        ("cover", format!("{base}/library_600x900.jpg")),
+        ("cover", format!("{base}/library_capsule.jpg")),
+        ("header", format!("{base}/header.jpg")),
+    ]
+}
+
+/// The file a downloaded picture is kept in: <cache>/<appid>_<cover|header>.jpg.
+pub fn cdn_art_file(art_cache: &Path, app_id: &str, what: &str) -> PathBuf {
+    art_cache.join(format!("{app_id}_{what}.jpg"))
+}
+
+fn cached_cdn_art(art_cache: &Path, app_id: &str, what: &str) -> Option<PathBuf> {
+    let p = cdn_art_file(art_cache, app_id, what);
+    p.is_file().then_some(p)
+}
+
+/// Does this look like a picture (JPEG or PNG), and not an error page?
+pub fn is_picture(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0xFF, 0xD8, 0xFF]) || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
+/// How long a game whose art couldn't be downloaded is left alone before Turbine tries once more.
+pub const CDN_RETRY_SECS: u64 = 7 * 24 * 3600;
+
+/// Should Turbine try Steam's store for this game's art now? Not when it tried in the last week (the file
+/// <cache>/<appid>.tried holds when).
+pub fn cdn_art_due(art_cache: &Path, app_id: &str, now: u64) -> bool {
+    match fs::read_to_string(art_cache.join(format!("{app_id}.tried"))).ok().and_then(|t| t.trim().parse::<u64>().ok()) {
+        Some(at) => now.saturating_sub(at) >= CDN_RETRY_SECS,
+        None => true,
+    }
+}
+
+/// Downloads a game's missing art from Steam's store once (the cover, then the wide picture, each from the first
+/// address that answers with a picture), into `art_cache`. Writes when it tried, so a failure isn't retried for a
+/// week. Answers what it saved, and a line for the log.
+pub fn cdn_art(client: &crate::net::Client, art_cache: &Path, app_id: &str, want_cover: bool, want_header: bool, now: u64) -> (Vec<PathBuf>, String) {
+    let mut saved = Vec::new();
+    let mut said = Vec::new();
+    let _ = fs::create_dir_all(art_cache);
+    let _ = fs::write(art_cache.join(format!("{app_id}.tried")), now.to_string());
+    for what in ["cover", "header"] {
+        if (what == "cover" && !want_cover) || (what == "header" && !want_header) {
+            continue;
+        }
+        let mut got = false;
+        for (_, url) in cdn_art_urls(app_id).into_iter().filter(|(k, _)| *k == what) {
+            match client.download(&url, &crate::net::Expect::up_to(8 << 20), None) {
+                Ok(d) => {
+                    let head = fs::read(&d.path).map(|b| b.into_iter().take(8).collect::<Vec<u8>>()).unwrap_or_default();
+                    if !is_picture(&head) {
+                        let _ = fs::remove_file(&d.path);
+                        said.push(format!("{url}: not a picture"));
+                        continue;
+                    }
+                    let to = cdn_art_file(art_cache, app_id, what);
+                    if fs::rename(&d.path, &to).is_ok() || (fs::copy(&d.path, &to).is_ok() && fs::remove_file(&d.path).is_ok()) {
+                        said.push(format!("{what} from {url}"));
+                        saved.push(to);
+                        got = true;
+                        break;
+                    }
+                }
+                Err(e) => said.push(format!("{url}: {e}")),
+            }
+        }
+        if !got {
+            said.push(format!("no {what}"));
+        }
+    }
+    (saved, said.join("; "))
+}
+
 /// Art Steam keeps in appcache/librarycache. Older Steam used flat files ("489830_library_600x900.jpg"); newer Steam
 /// keeps a folder per game, sometimes with a hashed subfolder. Both are checked.
 pub fn find_art(root: &Path, app_id: &str, kind: &str) -> Option<PathBuf> {
@@ -222,8 +341,8 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                     library: lib.clone(),
                     build: app.str_at(&["buildid"]).map(str::to_string),
                     runtime,
-                    cover: find_art(&root, app_id, "library_600x900"),
-                    header: find_art(&root, app_id, "header"),
+                    cover: find_cover(&root, app_id, art_cache().as_deref()),
+                    header: find_header(&root, app_id, art_cache().as_deref()),
                     prefix,
                 });
             }
