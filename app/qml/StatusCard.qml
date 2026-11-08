@@ -84,6 +84,15 @@ Rectangle {
             color: ui.c.soft
             font.family: ui.bodyFont; font.pixelSize: ui.px(15)
         }
+        // Added: how to get back (Turbine is behind the browser).
+        Text {
+            visible: !!card.status && !!card.status.added && !!card.status.done && !card.interactive
+            width: parent.width
+            wrapMode: Text.WordWrap
+            text: "Back to Turbine: Steam button, then Turbine"
+            color: ui.c.accentText
+            font.family: ui.bodyFont; font.pixelSize: ui.px(15); font.bold: true
+        }
         // Progress
         Item {
             visible: card.progress >= 0 && !(card.status && card.status.done)

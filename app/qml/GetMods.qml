@@ -3,7 +3,7 @@ import QtQuick.Shapes
 
 // Get mods: the bar (search with Steam's keyboard, sort, category, where from, Add a file from Downloads), then a
 // "Recently viewed" strip on the start page and the mods as picture cards: thumbnail, name (two lines at most),
-// author, "12K endorsements · 3.1M downloads", an "Installed" or "Update ready" ribbon and a "Code mod" chip where known. 3 columns on
+// author, "12K likes · 3.1M downloads", an "Installed" or "Update ready" ribbon and a "Code mod" chip where known. 3 columns on
 // a handheld, 4 when the design width is 1100 or more. When browsing failed (no key and Nexus refused), one big card
 // opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "bar", "recent", "grid" or "fallback"
 // with focusIndex) and passes taps through the signals.
@@ -34,6 +34,8 @@ Item {
     signal itemClicked(int index)
     signal itemMenu(int index)            // right-click on a card (its X menu)
     signal fallbackClicked(string key)
+    // After a scroll by the wheel or a swipe: the first and last cards in view (the focus follows into view).
+    signal scrolled(int first, int last)
 
     function count(n) {
         n = n || 0
@@ -183,7 +185,7 @@ Item {
                     width: parent.width - gm.ui.px(40)
                     spacing: gm.ui.px(10)
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(20); font.weight: Font.DemiBold }
-                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads. No key needed."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15) }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15) }
                     Flow {
                         width: parent.width
                         spacing: gm.ui.px(14)
@@ -214,6 +216,7 @@ Item {
                 cellWidth: width / gm.columns
                 cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + gm.ui.px(84)
                 model: gm.items
+                onMovementEnded: gm.scrolled(indexAt(gm.ui.px(10), contentY + gm.ui.px(10)), indexAt(width - gm.ui.px(10), contentY + height - gm.ui.px(10)))
                 footer: Item {
                     width: grid.width
                     height: gm.loadingMore ? gm.ui.px(36) : 0
@@ -277,7 +280,7 @@ Item {
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: (cell.modelData.source === "thunderstore" || gm.result && gm.result.source === "thunderstore"
-                                       ? gm.count(cell.modelData.rating) + " ratings" : gm.count(cell.modelData.rating) + " endorsements")
+                                       ? gm.count(cell.modelData.rating) + " ratings" : gm.count(cell.modelData.rating) + " likes")
                                       + " · " + gm.count(cell.modelData.downloads) + " downloads"
                                 color: gm.ui.c.muted; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13)
                             }

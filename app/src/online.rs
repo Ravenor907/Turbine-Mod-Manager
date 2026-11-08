@@ -134,7 +134,7 @@ pub const NEXUS_MOD: &str = "nexus-mod:";
 
 /// Said instead of Install for free accounts.
 pub const FREE_WORDS: &str =
-    "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself.";
+    "Opens Nexus. Sign in if asked (free). Press Slow download, wait 5 seconds, then Steam button, Turbine. It's added by itself.";
 
 /// "2026-11-06" from seconds since 1970 (UTC).
 pub fn date_of(secs: u64) -> String {

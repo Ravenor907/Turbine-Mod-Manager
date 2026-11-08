@@ -26,8 +26,8 @@ Rectangle {
     property string aLabel: isOn ? "Turn off" : "Turn on"
     property string xLabel: "More"
 
+    // A tap or click anywhere on the row (the pill included) is clicked(): Main.qml runs A on it.
     signal clicked()
-    signal toggleClicked()
     signal menuClicked()
     readonly property Item pillItem: pill
 
@@ -150,8 +150,6 @@ Rectangle {
                 font.bold: true
                 font.letterSpacing: root.ui.px(0.4)
             }
-            HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
-            TapHandler { onTapped: root.toggleClicked() }
         }
     }
 

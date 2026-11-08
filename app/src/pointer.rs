@@ -20,8 +20,16 @@ pub const LET_GO: f64 = 0.35;
 /// A push that stays within `CONE` of where it started for `COMMIT_MS` is one direction press.
 pub const COMMIT_MS: f64 = 80.0;
 pub const CONE: f64 = 25.0 * PI / 180.0;
-/// Swept this far from where it started (before or after the press) it is the scroll wheel instead.
+/// Swept this far from where it started before the press, it is the scroll wheel instead. A push that drifts less
+/// than this (a curved thumb) is still a press, in the direction it points when `COMMIT_MS` is up.
 pub const SWEEP: f64 = 40.0 * PI / 180.0;
+/// Once a direction is held, a wobble doesn't scroll: the wheel needs this much turning from where the push began.
+pub const HELD_SWEEP: f64 = SWEEP + NOTCH;
+/// Held, then snapped across the middle in one look (up to down along the rim): a new press, not the wheel.
+pub const SNAP: f64 = 135.0 * PI / 180.0;
+/// While only directions count (the quick wheel), a held push moves on to the next direction this far from the
+/// held one's axis (45 degrees plus a margin, so the line between two never flickers).
+pub const DPAD_TURN: f64 = 55.0 * PI / 180.0;
 /// One wheel notch (three rows) for this much turning.
 pub const NOTCH: f64 = 30.0 * PI / 180.0;
 
@@ -75,6 +83,9 @@ pub enum Left {
     Dir { dir: &'static str, from: f64 },
     /// Turning the wheel: the angle at the last look and the turning not yet sent as a notch.
     Wheel { last: f64, turned: f64 },
+    /// Let go of in Turbine's eyes (the window went to the back, or the keyboard came up) while still pushed:
+    /// nothing until the stick is back in the middle.
+    Spent,
 }
 
 #[derive(Clone, Debug)]
@@ -87,11 +98,13 @@ pub struct Pointer {
     pub left: Left,
     /// Held down by a trigger or R3 (keeps the pointer showing while dragging).
     pub holding: bool,
+    /// Only directions, never the scroll wheel (while the quick wheel is open, so every slot can be reached).
+    pub dpad_only: bool,
 }
 
 impl Default for Pointer {
     fn default() -> Self {
-        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, left: Left::Idle, holding: false }
+        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, left: Left::Idle, holding: false, dpad_only: false }
     }
 }
 
@@ -104,6 +117,16 @@ pub fn direction(a: f64) -> &'static str {
         "down"
     } else {
         "up"
+    }
+}
+
+/// The angle of a direction's axis (y down).
+fn axis(dir: &str) -> f64 {
+    match dir {
+        "right" => 0.0,
+        "down" => PI / 2.0,
+        "left" => PI,
+        _ => -PI / 2.0,
     }
 }
 
@@ -125,6 +148,20 @@ impl Pointer {
         self.y = y;
         self.shown = true;
         self.idle_ms = 0.0;
+    }
+
+    /// Turbine stops listening to the left stick for now (it went to the back, or the keyboard came up): a held
+    /// direction is let go (returned, so it can be sent as a release) and nothing more happens until the stick has
+    /// been back in the middle.
+    pub fn let_go(&mut self) -> Option<&'static str> {
+        let held = match self.left {
+            Left::Dir { dir, .. } => Some(dir),
+            _ => None,
+        };
+        if self.left != Left::Idle {
+            self.left = Left::Spent;
+        }
+        held
     }
 
     /// One look at the sticks, `dt_ms` after the last one, in a window `w` x `h`.
@@ -181,12 +218,14 @@ impl Pointer {
                 } else {
                     let d = wrap(a - from);
                     let ms = ms + dt_ms;
-                    if d.abs() >= SWEEP {
+                    if d.abs() >= SWEEP && !self.dpad_only {
                         let mut w = Left::Wheel { last: from, turned: 0.0 };
                         Self::turn(&mut w, a, out);
                         w
-                    } else if ms >= COMMIT_MS && d.abs() <= CONE {
-                        let dir = direction(from);
+                    } else if ms >= COMMIT_MS {
+                        // Held long enough without sweeping: the direction it points now (a push that drifted on
+                        // the way out still counts).
+                        let dir = direction(a);
                         out.press = Some(dir);
                         Left::Dir { dir, from }
                     } else {
@@ -195,17 +234,40 @@ impl Pointer {
                 }
             }
             Left::Dir { dir, from } => {
+                let d = wrap(a - from);
                 if m < LET_GO {
                     out.release = Some(dir);
                     Left::Idle
-                } else if wrap(a - from).abs() >= SWEEP {
-                    // Started out still, then swept around: the wheel after all.
+                } else if self.dpad_only {
+                    // Turned on to another direction (Up, then on round to Right): that one, so the quick wheel's
+                    // in-between slots can be reached the way the D-pad reaches them.
+                    let now = direction(a);
+                    if now != dir && wrap(a - axis(dir)).abs() >= DPAD_TURN {
+                        out.release = Some(dir);
+                        out.press = Some(now);
+                        Left::Dir { dir: now, from: a }
+                    } else {
+                        Left::Dir { dir, from }
+                    }
+                } else if d.abs() >= SNAP {
+                    // Snapped across in one look (up to down): let go, and the new way is a new push.
+                    out.release = Some(dir);
+                    Left::Pending { from: a, ms: 0.0 }
+                } else if d.abs() >= HELD_SWEEP {
+                    // Held, then swept well round: the wheel after all (a wobble while holding never scrolls).
                     out.release = Some(dir);
                     let mut w = Left::Wheel { last: from, turned: 0.0 };
                     Self::turn(&mut w, a, out);
                     w
                 } else {
                     Left::Dir { dir, from }
+                }
+            }
+            Left::Spent => {
+                if m < LET_GO {
+                    Left::Idle
+                } else {
+                    Left::Spent
                 }
             }
             Left::Wheel { last, turned } => {
@@ -400,6 +462,108 @@ mod tests {
         assert_eq!(presses, vec!["up"]);
         assert_eq!(releases, vec!["up"]);
         assert_eq!(wheel, 3);
+    }
+
+    #[test]
+    fn a_push_that_drifts_still_presses() {
+        // Starts straight up and drifts 35 degrees toward the right on the way out: one press, Up, no wheel.
+        let mut p = Pointer::default();
+        let mut path = sweep(-90.0, -55.0, 6);
+        path.extend(vec![((-55f64).to_radians().cos() * 0.9, (-55f64).to_radians().sin() * 0.9); 10]);
+        path.push((0.0, 0.0));
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["up"]);
+        assert_eq!(releases, vec!["up"]);
+        assert_eq!(wheel, 0);
+    }
+
+    #[test]
+    fn a_wobble_while_holding_does_not_scroll() {
+        // Held Right, then wobbled 40 degrees each way and back: still one Right, no wheel notches.
+        let mut p = Pointer::default();
+        let mut path = vec![(0.9, 0.0); 7];
+        path.extend(sweep(0.0, 40.0, 5));
+        path.extend(sweep(40.0, -40.0, 10));
+        path.extend(sweep(-40.0, 0.0, 5));
+        path.extend(vec![(0.9, 0.0); 5]);
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["right"]);
+        assert!(releases.is_empty(), "{releases:?}");
+        assert_eq!(wheel, 0);
+    }
+
+    #[test]
+    fn snapped_across_is_the_new_direction() {
+        let mut p = Pointer::default();
+        let mut path = vec![(0.0, -0.9); 7];
+        path.extend(vec![(0.0, 0.9); 7]);
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["up", "down"]);
+        assert_eq!(releases, vec!["up"]);
+        assert_eq!(wheel, 0);
+    }
+
+    #[test]
+    fn the_quick_wheel_reaches_the_slots_in_between() {
+        // D-pad only (the quick wheel open): Up, then on round to Right is Up then Right, never wheel notches.
+        let mut p = Pointer { dpad_only: true, ..Default::default() };
+        let mut path = vec![(0.0, -0.9); 7];
+        path.extend(sweep(-90.0, 0.0, 10));
+        path.extend(vec![(0.9, 0.0); 3]);
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["up", "right"]);
+        assert_eq!(releases, vec!["up"]);
+        assert_eq!(wheel, 0);
+        // A quick sweep from the middle is a direction too, not the wheel.
+        let mut p = Pointer { dpad_only: true, ..Default::default() };
+        let (presses, _, wheel) = left(&mut p, &sweep(-90.0, 0.0, 8));
+        assert_eq!(wheel, 0);
+        assert!(!presses.is_empty());
+    }
+
+    #[test]
+    fn let_go_releases_and_waits_for_the_middle() {
+        let mut p = Pointer::default();
+        left(&mut p, &vec![(0.0, -0.9); 7]);
+        assert_eq!(p.let_go(), Some("up"));
+        // Still pushed: nothing more, however long.
+        let (presses, releases, _) = left(&mut p, &vec![(0.0, -0.9); 30]);
+        assert!(presses.is_empty() && releases.is_empty());
+        // Back to the middle, then a new push presses again.
+        let mut path = vec![(0.0, 0.0)];
+        path.extend(vec![(0.0, 0.9); 7]);
+        let (presses, _, _) = left(&mut p, &path);
+        assert_eq!(presses, vec!["down"]);
+        assert_eq!(Pointer::default().let_go(), None);
+    }
+
+    #[test]
+    fn presses_and_releases_always_balance() {
+        // A long pseudo-random walk of the stick: every release follows its own press.
+        let mut p = Pointer::default();
+        let mut seed: u64 = 12345;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f64) / f64::from(u32::MAX >> 1) - 1.0
+        };
+        let mut held: Option<&'static str> = None;
+        let (mut x, mut y) = (0.0f64, 0.0f64);
+        for i in 0..20000 {
+            if i % 500 == 0 {
+                p.dpad_only = !p.dpad_only;
+            }
+            x = (x + rnd() * 0.3).clamp(-1.0, 1.0);
+            y = (y + rnd() * 0.3).clamp(-1.0, 1.0);
+            let t = p.tick(&Sticks { lx: x, ly: y, ..Default::default() }, 16.0, W, H);
+            if let Some(r) = t.release {
+                assert_eq!(held, Some(r));
+                held = None;
+            }
+            if let Some(d) = t.press {
+                assert_eq!(held, None);
+                held = Some(d);
+            }
+        }
     }
 
     #[test]

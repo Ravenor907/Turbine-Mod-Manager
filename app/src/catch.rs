@@ -33,7 +33,8 @@ pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
 /// The folder in Downloads the helper is copied to, for Load unpacked.
 pub const HELPER_FOLDER: &str = "Turbine browser helper";
 /// What the status says while a Nexus file page is open for a free account.
-pub const SLOW_DOWNLOAD: &str = "Press Slow download on this page. Turbine adds the mod when it finishes.";
+pub const SLOW_DOWNLOAD: &str =
+    "Sign in to Nexus if it asks (free). Press Slow download on this page. Then Steam button, Turbine to come back: the mod is added by itself.";
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 
@@ -276,7 +277,7 @@ impl qobject::Turbine {
         let _ = bridge::VERSION.set(crate::VERSION.to_string());
         let _ = bridge::BUNDLED.set(manifest_version(&helper_source()).unwrap_or_default());
         let _ = bridge::BEFORE_RELOAD.set(refresh_helper_copy);
-        refresh_helper_copy();
+        let _ = refresh_helper_copy();
         let qt = self.qt_thread();
         let handler: bridge::Handler = Arc::new(move |kind: &str, msg: &Json| {
             let (kind, msg) = (kind.to_string(), msg.clone());
@@ -905,7 +906,7 @@ impl qobject::Turbine {
             "connected" => {
                 // A newer helper goes into its folder in Downloads now too, so a reload (Turbine's, or the
                 // player's own in chrome://extensions) picks it up.
-                refresh_helper_copy();
+                let _ = refresh_helper_copy();
                 bridge::set_games(games_json(&self.rust().found));
                 self.as_mut().bridge_refresh();
                 // The status now, if there is one, then any installer choices already waiting.
@@ -1121,49 +1122,30 @@ fn manifest_version(dir: &Path) -> Option<String> {
 
 /// At start, and before Turbine asks a helper to reload: when the helper in Downloads (the folder Turbine placed for
 /// Load unpacked) is older than the one Turbine carries, the newer files are copied over it. Chrome loads an unpacked
-/// helper from that folder, so its next reload is the new one. A folder that isn't Turbine's helper is left alone.
-pub fn refresh_helper_copy() {
+/// helper from that folder, so its next reload is the new one. A folder that isn't Turbine's helper is left alone,
+/// and so is anything in it that is a link (nothing is ever written through one, inside the folder or out of it).
+/// True when the folder now holds Turbine's version, so asking the helper to reload is worth it.
+pub fn refresh_helper_copy() -> bool {
     let (from, to) = (helper_source(), helper_folder());
-    let Some(have) = manifest_version(&to) else { return };
-    let Some(new) = manifest_version(&from) else { return };
+    if bridge::is_link(&to) || bridge::is_link(&to.join("manifest.json")) {
+        crate::log::line("bridge", &format!("Left the browser helper in {} alone: it is a link", to.display()));
+        return false;
+    }
+    let Some(have) = manifest_version(&to) else { return false };
+    let Some(new) = manifest_version(&from) else { return false };
     if !bridge::version_older(&have, &new) {
-        return;
+        return true;
     }
-    match copy_helper(&from, &to) {
-        Ok(n) => crate::log::line("bridge", &format!("Updated the browser helper in {} from {have} to {new} ({n} files)", to.display())),
-        Err(e) => crate::log::line("bridge", &format!("Couldn't update the browser helper in {} from {have} to {new}: {e}", to.display())),
-    }
-}
-
-/// Copies the helper's files (plain files only, tests left out) into `to`. Returns how many were copied.
-fn copy_helper(from: &Path, to: &Path) -> Result<usize, String> {
-    if !from.join("manifest.json").is_file() {
-        return Err("this build has no browser helper in it".into());
-    }
-    fn walk(from: &Path, to: &Path, depth: usize, n: &mut usize) -> Result<(), String> {
-        if depth > 6 {
-            return Ok(());
+    match bridge::copy_helper(&from, &to) {
+        Ok(n) => {
+            crate::log::line("bridge", &format!("Updated the browser helper in {} from {have} to {new} ({n} files)", to.display()));
+            true
         }
-        std::fs::create_dir_all(to).map_err(|e| e.to_string())?;
-        let rd = std::fs::read_dir(from).map_err(|e| e.to_string())?;
-        for e in rd.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') || (depth == 0 && name == "test") {
-                continue;
-            }
-            let Ok(m) = std::fs::symlink_metadata(e.path()) else { continue };
-            if m.is_dir() {
-                walk(&e.path(), &to.join(&name), depth + 1, n)?;
-            } else if m.is_file() && m.len() <= 8 << 20 {
-                std::fs::copy(e.path(), to.join(&name)).map_err(|err| format!("{name}: {err}"))?;
-                *n += 1;
-            }
+        Err(e) => {
+            crate::log::line("bridge", &format!("Couldn't update the browser helper in {} from {have} to {new}: {e}", to.display()));
+            false
         }
-        Ok(())
     }
-    let mut n = 0;
-    walk(from, to, 0, &mut n)?;
-    Ok(n)
 }
 
 extern "C" {

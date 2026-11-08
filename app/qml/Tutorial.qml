@@ -2,8 +2,8 @@ import QtQuick
 
 // The beginner tutorial: four cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
 // X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus,
-// Turbine adds it). 4: Start plays, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
-// Left back, B or Start skip) and remembers it was seen; Settings, Help shows it again.
+// the Steam button and Turbine to come back, Turbine adds it). 4: Press START to play, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
+// Left back, B skips, Start finishes) and remembers it was seen; Settings, Help shows it again.
 Item {
     id: tut
     required property var ui
@@ -55,16 +55,16 @@ Item {
         property string tile: ""
         property string words: ""
         property bool face: false
-        width: tut.ui.px(150)
+        width: tut.ui.px(136)
         spacing: tut.ui.px(8)
         Rectangle {
             anchors.horizontalCenter: parent.horizontalCenter
-            width: tut.ui.px(136); height: tut.ui.px(72); radius: tut.ui.px(10)
+            width: tut.ui.px(126); height: tut.ui.px(72); radius: tut.ui.px(10)
             color: tut.ui.c.card
             border.color: tut.ui.c.accent; border.width: Math.max(1, tut.ui.px(2))
             Rectangle {
                 anchors.centerIn: parent
-                width: st.face ? tut.ui.px(46) : Math.min(tut.ui.px(126), stepTop.implicitWidth + tut.ui.px(16))
+                width: st.face ? tut.ui.px(46) : Math.min(tut.ui.px(116), stepTop.implicitWidth + tut.ui.px(16))
                 height: tut.ui.px(46); radius: st.face ? width / 2 : tut.ui.px(8)
                 color: tut.ui.c.accent
                 Text { id: stepTop; anchors.centerIn: parent; text: st.tile; color: tut.ui.c.onAccent; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(st.face ? 24 : 14); font.bold: true }
@@ -91,10 +91,10 @@ Item {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: ["A picks and B goes back. X shows options for what's highlighted, and Y finds things.",
-                   "Press View for the quick wheel: Find, Sort, Settings, your games and more, from anywhere.",
-                   "Open Get mods and press A on a mod. On Nexus press Slow download. Turbine adds it to your game by itself.",
-                   "Start plays the game with your mods on. That's all you need."][tut.card] || ""
+            text: ["A picks and B goes back. X shows options for what's highlighted, and Y searches this list. LB and RB switch tabs. The right stick moves a pointer, and RT clicks.",
+                   "Press View for the quick wheel: Find, Sort, Settings, your games and more, from anywhere. Games: Left to the rail, or View then Left.",
+                   "Open Get mods and press A on a mod, then A on Get it on Nexus. Sign in to Nexus if it asks (free), press Slow download, then the Steam button and Turbine to come back. Turbine adds the mod by itself.",
+                   "Press START to play the game with your mods on. That's all you need."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(18)
         }
@@ -134,15 +134,16 @@ Item {
                 }
             }
         }
-        // 3: the four steps of getting a mod.
+        // 3: the five steps of getting a mod, coming back to Turbine included.
         Row {
             visible: tut.card === 2
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: tut.ui.px(10)
+            spacing: tut.ui.px(8)
             Step { n: 1; tile: "Get mods"; words: "Open Get mods (RB)" }
-            Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it" }
-            Step { n: 3; tile: "Slow download"; words: "Press Slow download on Nexus" }
-            Step { n: 4; tile: "Added"; words: "Turbine adds it to your game" }
+            Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it on Nexus" }
+            Step { n: 3; tile: "Slow download"; words: "Sign in to Nexus (free), press Slow download" }
+            Step { n: 4; tile: "STEAM"; words: "Steam button, then Turbine, to come back" }
+            Step { n: 5; tile: "Added"; words: "Turbine adds it to your game" }
         }
         // 4: Start.
         Column {

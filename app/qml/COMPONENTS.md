@@ -150,7 +150,7 @@ One mod in the list. Height 54 (design px); set `width`.
 | `aLabel` | string | "Turn off" / "Turn on" | follows `isOn`; "" hides the A hint |
 | `xLabel` | string | "More" | "" hides the X hint |
 
-Signals: `clicked()` (row tapped), `toggleClicked()` (ON/OFF pill tapped), `menuClicked()` (right click, or a 0.5 s
+Signals: `clicked()` (the row tapped or clicked anywhere, the pill included: the whole row is the target), `menuClicked()` (right click, or a 0.5 s
 hold on touch: the quick menu).
 
 ```qml
@@ -312,24 +312,21 @@ A short message at the bottom center of its parent, above the legend. Hidden unt
 
 | Property | Type | Default | What |
 | --- | --- | --- | --- |
-| `text` | string | "" | e.g. "Recently removed:" |
+| `text` | string | "" | e.g. "Deleted for good:" |
 | `strong` | string | "" | bold part after it, e.g. "Epic Loot" (shown as plain text, never as markup) |
 | `detail` | string | "" | muted, e.g. "Kept 7 days" |
-| `actionKey`, `actionLabel` | string | "" | e.g. "y", "Undo"; both empty hides the action |
 | `timeout` | int | 5000 | ms before it hides itself; 0 keeps it up |
 | `bottomMargin` | real | `ui.px(58)` | distance from the parent's bottom |
-| `shown` | bool | false | read it to know whether Y should undo |
+| `shown` | bool | false | whether it is up |
 
-Functions: `show(text, strong, detail, actionKey, actionLabel)` (the last four optional), `hide()`.
-Signals: `actionClicked()`, `hidden()`.
+Functions: `show(text, strong, detail)` (the last two optional), `hide()`. Signal: `hidden()`.
 
 ```qml
 Toast {
     id: toast
     ui: kit
-    onActionClicked: app.act("y")
 }
-// later: toast.show("Recently removed:", "Epic Loot", "Kept 7 days", "y", "Undo")
+// later: toast.show("Deleted for good:", "Epic Loot")
 ```
 
 Note: Main.qml's current toast has id `toast` and a `show(m)` function; this one takes the same first argument, so

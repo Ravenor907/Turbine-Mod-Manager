@@ -574,8 +574,9 @@ pub const OLD_HELPER_TEXT: &str =
 
 /// The helper version this Turbine carries (from its manifest), set once at start; "" when it has none.
 pub static BUNDLED: OnceLock<String> = OnceLock::new();
-/// Run before Turbine asks a helper to reload: puts Turbine's newer helper files in the folder it loads from.
-pub static BEFORE_RELOAD: OnceLock<fn()> = OnceLock::new();
+/// Run before Turbine asks a helper to reload: puts Turbine's newer helper files in the folder it loads from. False
+/// when that didn't fully work (the reload is then not asked for: it would load a half-updated helper, or the old one).
+pub static BEFORE_RELOAD: OnceLock<fn() -> bool> = OnceLock::new();
 
 /// Compares two dotted versions ("0.53", "0.41", "1.2"): numbers part by part, missing parts are 0. Anything that
 /// isn't a number counts as 0, so a broken version is always "older".
@@ -1020,11 +1021,13 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
             }
             if reload {
                 // Turbine's newer files go into its folder first (catch.rs), so the reload picks them up.
-                if let Some(f) = BEFORE_RELOAD.get() {
-                    f();
+                let copied = BEFORE_RELOAD.get().is_none_or(|f| f());
+                if copied {
+                    let sent = send(&out, OP_TEXT, reload_message().as_bytes());
+                    log(&format!("Asked helper {hv} to reload itself from its folder (Turbine has {bundled}){}", if sent { "" } else { " (it didn't take it)" }));
+                } else {
+                    log(&format!("Didn't ask helper {hv} to reload: Turbine's {bundled} files didn't all go into its folder"));
                 }
-                let sent = send(&out, OP_TEXT, reload_message().as_bytes());
-                log(&format!("Asked helper {hv} to reload itself from its folder (Turbine has {bundled}){}", if sent { "" } else { " (it didn't take it)" }));
             }
             handler("connected", &msg);
             continue;
@@ -1045,6 +1048,108 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
 pub static VERSION: OnceLock<String> = OnceLock::new();
 
 // ---------------------------------------------------------------------------------------------------- tests
+
+// ------------------------------------------------------------------------------------------------ the open guard
+
+/// The guard against opening the same page twice while the browser is still coming up (launch.rs): `opened` holds
+/// each page opened in the last `window`. Some(milliseconds since) when `url` is one of them; otherwise it is
+/// remembered as opened `now` and the answer is None.
+pub fn page_guard(opened: &mut Vec<(String, Instant)>, url: &str, now: Instant, window: Duration) -> Option<u128> {
+    opened.retain(|(_, at)| now.saturating_duration_since(*at) < window);
+    if let Some((_, at)) = opened.iter().find(|(u, _)| u == url) {
+        return Some(now.saturating_duration_since(*at).as_millis());
+    }
+    opened.push((url.to_string(), now));
+    None
+}
+
+// ------------------------------------------------------------------------------------------------ the helper's copy
+
+/// A symbolic link (never followed).
+pub fn is_link(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Copies the helper's files (plain files only, tests left out) into `to`, Turbine's own helper folder. Every file
+/// is first written new into a staging folder inside `to`, then renamed into place, so a failure part way leaves
+/// the old files as they were, and a link at a file's place is replaced, never written through. Nothing is copied
+/// when any folder on the way is a link. Returns how many files were copied.
+pub fn copy_helper(from: &Path, to: &Path) -> Result<usize, String> {
+    if !from.join("manifest.json").is_file() {
+        return Err("this build has no browser helper in it".into());
+    }
+    if is_link(to) || !to.is_dir() {
+        return Err("the helper folder isn't a plain folder".into());
+    }
+    // The files to copy, as paths inside the helper (folders first need checking: none may be a link).
+    fn walk(from: &Path, rel: &Path, depth: usize, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        if depth > 6 {
+            return Ok(());
+        }
+        let rd = std::fs::read_dir(from.join(rel)).map_err(|e| e.to_string())?;
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || (depth == 0 && name == "test") {
+                continue;
+            }
+            let Ok(m) = std::fs::symlink_metadata(e.path()) else { continue };
+            if m.is_dir() {
+                walk(from, &rel.join(&name), depth + 1, out)?;
+            } else if m.is_file() && m.len() <= 8 << 20 {
+                out.push(rel.join(&name));
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    walk(from, Path::new(""), 0, &mut files)?;
+    for f in &files {
+        let mut p = to.to_path_buf();
+        for part in f.parent().into_iter().flat_map(|d| d.components()) {
+            p.push(part);
+            if is_link(&p) {
+                return Err(format!("{} is a link", p.display()));
+            }
+        }
+    }
+    let stage = to.join(".turbine-update");
+    if is_link(&stage) {
+        return Err("the staging folder is a link".into());
+    }
+    let _ = std::fs::remove_dir_all(&stage);
+    std::fs::create_dir(&stage).map_err(|e| format!("staging folder: {e}"))?;
+    let staged = (|| -> Result<(), String> {
+        for (i, f) in files.iter().enumerate() {
+            let bytes = std::fs::read(from.join(f)).map_err(|e| format!("{}: {e}", f.display()))?;
+            // create_new: a fresh file in the fresh staging folder, never an existing one or a link.
+            let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(stage.join(i.to_string())).map_err(|e| format!("{}: {e}", f.display()))?;
+            std::io::Write::write_all(&mut out, &bytes).map_err(|e| format!("{}: {e}", f.display()))?;
+            out.sync_all().map_err(|e| format!("{}: {e}", f.display()))?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = staged {
+        let _ = std::fs::remove_dir_all(&stage);
+        return Err(e);
+    }
+    let mut result = Ok(files.len());
+    for (i, f) in files.iter().enumerate() {
+        let dest = to.join(f);
+        if let Some(dir) = dest.parent() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                result = Err(format!("{}: {e}", f.display()));
+                break;
+            }
+        }
+        // A rename replaces whatever is at `dest` (a link included) instead of writing through it.
+        if let Err(e) = std::fs::rename(stage.join(i.to_string()), &dest) {
+            result = Err(format!("{}: {e}", f.display()));
+            break;
+        }
+    }
+    let _ = std::fs::remove_dir_all(&stage);
+    result
+}
 
 #[cfg(test)]
 mod tests {
@@ -1385,5 +1490,88 @@ mod tests {
         assert_eq!(helper_age("0.54", "0.55"), HelperAge::Reload);
         assert_eq!(reload_message(), "{\"type\":\"reload\"}");
         assert!(OLD_HELPER_TEXT.contains("chrome://extensions"));
+    }
+
+    // ---------------------------------------------------------------- the helper's copy (catch.rs runs it)
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("turbine-copy-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn helper_at(dir: &Path, version: &str) {
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::create_dir_all(dir.join("test")).unwrap();
+        std::fs::write(dir.join("manifest.json"), format!("{{\"name\":\"Turbine browser helper\",\"version\":\"{version}\"}}")).unwrap();
+        std::fs::write(dir.join("background.js"), format!("// {version}")).unwrap();
+        std::fs::write(dir.join("lib/bridge.js"), format!("// lib {version}")).unwrap();
+        std::fs::write(dir.join("test/test.js"), "// tests stay behind").unwrap();
+    }
+
+    #[test]
+    fn helper_copy_replaces_files_and_leaves_nothing_behind() {
+        let root = temp("plain");
+        let (from, to) = (root.join("new"), root.join("Downloads/helper"));
+        helper_at(&from, "0.54");
+        helper_at(&to, "0.53");
+        std::fs::remove_dir_all(to.join("test")).unwrap();
+        assert_eq!(copy_helper(&from, &to), Ok(3));
+        assert!(std::fs::read_to_string(to.join("manifest.json")).unwrap().contains("0.54"));
+        assert_eq!(std::fs::read_to_string(to.join("lib/bridge.js")).unwrap(), "// lib 0.54");
+        assert!(!to.join("test").exists(), "tests are left out");
+        assert!(!to.join(".turbine-update").exists(), "the staging folder is gone");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn helper_copy_never_writes_through_a_link() {
+        use std::os::unix::fs::symlink;
+        // A file in the helper folder that is a link to a file outside it: the link is replaced, the outside file
+        // keeps its words.
+        let root = temp("link");
+        let (from, to) = (root.join("new"), root.join("Downloads/helper"));
+        helper_at(&from, "0.54");
+        helper_at(&to, "0.53");
+        let outside = root.join("precious.txt");
+        std::fs::write(&outside, "mine").unwrap();
+        std::fs::remove_file(to.join("background.js")).unwrap();
+        symlink(&outside, to.join("background.js")).unwrap();
+        assert!(copy_helper(&from, &to).is_ok());
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "mine");
+        assert!(!is_link(&to.join("background.js")));
+        // A folder in it that is a link: nothing is copied at all.
+        let elsewhere = root.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir_all(to.join("lib")).unwrap();
+        symlink(&elsewhere, to.join("lib")).unwrap();
+        std::fs::write(to.join("manifest.json"), "{\"name\":\"Turbine browser helper\",\"version\":\"0.53\"}").unwrap();
+        assert!(copy_helper(&from, &to).is_err());
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none(), "nothing written through the folder link");
+        assert!(std::fs::read_to_string(to.join("manifest.json")).unwrap().contains("0.53"), "nothing replaced");
+        // The helper folder itself a link: refused.
+        let real = root.join("real");
+        helper_at(&real, "0.53");
+        let linked = root.join("Downloads/linked");
+        symlink(&real, &linked).unwrap();
+        assert!(copy_helper(&from, &linked).is_err());
+        assert!(std::fs::read_to_string(real.join("manifest.json")).unwrap().contains("0.53"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_open_guard_remembers_each_page() {
+        let w = Duration::from_secs(8);
+        let t0 = Instant::now();
+        let mut l = Vec::new();
+        assert_eq!(page_guard(&mut l, "a", t0, w), None);
+        assert_eq!(page_guard(&mut l, "b", t0 + Duration::from_secs(1), w), None);
+        // A, B, then A again within 8 seconds: A is held back (the old guard kept only the last page).
+        assert_eq!(page_guard(&mut l, "a", t0 + Duration::from_secs(2), w), Some(2000));
+        assert_eq!(page_guard(&mut l, "b", t0 + Duration::from_secs(3), w), Some(2000));
+        // After 8 seconds a page opens again.
+        assert_eq!(page_guard(&mut l, "a", t0 + Duration::from_secs(9), w), None);
+        assert_eq!(l.len(), 1, "old pages are forgotten");
     }
 }

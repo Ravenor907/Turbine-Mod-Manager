@@ -31,8 +31,12 @@ Item {
 
     // index counts the fixed items too; key is "original", "restore" or the extra item's key.
     signal activated(int index, string key)
+    // A finger or the pointer pressed down on a row (true) and let go or slid off (false): the holds (Reset).
+    signal held(int index, bool down)
     signal closed()
 
+    // A row's item (the build's checks click it through the pointer).
+    function entryItem(i) { return itemRepeater.itemAt(i) }
     readonly property var allItems: [
         { key: "original", label: "Play without mods", detail: originalDetail, icon: "play", enabled: true },
         { key: "restore", label: "Restore last working setup", detail: restoreAvailable ? restoreDate : restoreEmptyText,
@@ -168,6 +172,7 @@ Item {
                         iconShown: y >= flick.contentY - 1 && y + height <= flick.contentY + flick.height + 1
                         dangerColor: root.readable(root.ui.c.warn, root.ui.c.panel)
                         onClicked: root.activated(index, modelData.key || "")
+                        onHeld: (down) => root.held(index, down)
                     }
                 }
             }
@@ -200,6 +205,7 @@ Item {
         property color dangerColor: ui.c.warn
         property bool iconShown: true
         signal clicked()
+        signal held(bool down)
 
         implicitHeight: Math.max(ui.px(48), entryText.implicitHeight + ui.px(14))
         radius: ui.px(6)
@@ -220,7 +226,7 @@ Item {
         }
 
         HoverHandler { onHoveredChanged: entry.ui.hover(parent, hovered) }
-        TapHandler { onTapped: entry.clicked() }
+        TapHandler { onTapped: entry.clicked(); onPressedChanged: entry.held(pressed) }
 
         Rectangle {
             id: entryIcon

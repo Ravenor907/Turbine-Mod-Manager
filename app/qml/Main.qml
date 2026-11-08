@@ -50,6 +50,7 @@ Window {
         property string played: "[]"        // game ids, last played first (the rail's order)
         property string bannerDone: "[]"    // games whose "No mods yet" line on Get mods was seen
         property bool tutorialDone: false
+        property bool railHintDone: false   // "Up and Down pick a game, A opens it" was shown until a game was opened
         property string playedWarn: "[]"    // "<game>|<mods on>|<warnings>" played through with Play anyway   // the four first-run cards were seen (Settings, Help shows them again)
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
@@ -107,7 +108,7 @@ Window {
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
                                       "wheel", "ghost", "railmenu"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -281,7 +282,7 @@ Window {
     }
     Timer {
         running: shot.on
-        interval: shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -368,13 +369,18 @@ Window {
     // ---------------------------------------------------------------- Labs mode and the activity log
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
     function note(kind, text) { Turbine.log(kind, text) }
-    onPageChanged: note("page", "Page " + page)
+    onPageChanged: { note("page", "Page " + page); stopDangerHolds() }
     onTabChanged: {
         note("page", "Tab " + (tabs[tab] || tab))
+        stopDangerHolds()
         selecting = false
         modPage = false
         history = []
-        if (tab === 1 && !browseData) browseNow()
+        if (tab === 1 && !browseData) {
+            // A first visit lands on the first card (Up reaches the search bar).
+            if (!restoreFocus && getText === "") restoreFocus = { area: "grid", index: 0 }
+            browseNow()
+        }
         else if (tab === 2) { if (orderMemo < 0 && order.length > 0) orderMemo = orderIndex; orderLand = true; Turbine.loadOrder() }
     }
     onZoneChanged: note("page", "Focus zone " + zone)
@@ -473,7 +479,15 @@ Window {
         return l.concat(removedMods.length > 0 ? [{ kind: "removed", m: { id: "", name: "" } }] : [])
     }
     property var ghost: null              // {game, id, name, index}
-    Timer { id: ghostTimer; interval: 8000; onTriggered: app.ghost = null }
+    Timer { id: ghostTimer; interval: 8000; onTriggered: app.ghostExpired() }
+    // The removed row just went (the next mod slid under the highlight): an A in the next 400 ms still means
+    // "Put back", never the mod that slid in.
+    property var ghostGone: null          // {id, at, index}
+    function ghostExpired() {
+        if (ghost && focusedItem && focusedItem.kind === "ghost") ghostGone = { id: ghost.id, at: Date.now(), index: modIndex }
+        ghost = null
+    }
+    function ghostJustWent() { return !!ghostGone && Date.now() - ghostGone.at < 400 && modIndex === ghostGone.index }
     // Find (R3): only the mods whose name has every word typed, as it is typed.
     property string findText: ""
     property string findBefore: ""
@@ -701,7 +715,12 @@ Window {
             if (app.found && app.sheet === "") { app.infoIndex = 0; app.sheet = "found" }
             else if (!app.found && (app.sheet === "found" || app.sheet === "pickgame")) app.sheet = ""
         }
-        function onPad(button, pressed) { if (pressed) app.lastInput = "pad"; pressed ? app.press(button) : app.release(button) }
+        function onPad(button, pressed) {
+            app.padEvents++
+            if (button === "wheel") { app.stickWheel(pressed ? 1 : -1); return }
+            if (pressed) app.lastInput = "pad"
+            pressed ? app.press(button) : app.release(button)
+        }
         // 0.3
         function onBrowseJsonChanged() {
             const v = app.parse(Turbine.browseJson, null)
@@ -731,7 +750,8 @@ Window {
             if (app.restoreFocus) {
                 const r = app.restoreFocus
                 app.restoreFocus = null
-                app.getArea = r.area; app.getIndex = Math.max(0, Math.min(r.index, (v.items || []).length - 1))
+                app.getArea = r.area === "grid" && (v.items || []).length === 0 ? "bar" : r.area
+                app.getIndex = Math.max(0, Math.min(r.index, (v.items || []).length - 1))
             } else if (app.getArea === "grid") app.getIndex = Math.max(0, Math.min(app.getIndex, (v.items || []).length - 1))
             else if (app.getArea === "fallback") { app.getArea = "bar"; app.getIndex = 0 }
         }
@@ -811,11 +831,13 @@ Window {
     // screen stays the same game when the order changes.
     property var allGames: []
     readonly property var pinnedIds: parse(railSet.pinned, [])
-    readonly property var hiddenIds: parse(railSet.hidden, [])
+    readonly property var hiddenIds: hiddenTest !== null ? hiddenTest : parse(railSet.hidden, [])
+    // The build's check of a rail with every game hidden (the saved list is never touched there).
+    property var hiddenTest: null
     function orderGames(want) {
         const keep = want !== undefined ? want : (game ? game.id : "")
         const order = parse(seen.played, []), pins = pinnedIds, hide = hiddenIds
-        let list = allGames.map((g, i) => ({ g: g, i: i })).filter(x => hide.indexOf(x.g.id) < 0 || x.g.id === shot.arg("game"))
+        let list = allGames.map((g, i) => ({ g: g, i: i })).filter(x => hide.indexOf(x.g.id) < 0 || (x.g.id === shot.arg("game") && hiddenTest === null))
         const rank = x => { const p = pins.indexOf(x.g.id), o = order.indexOf(x.g.id); return p >= 0 ? p : 1000 + (o < 0 ? 1e6 + x.i : o) }
         list.sort((a, b) => rank(a) - rank(b))
         list = list.map(x => x.g)
@@ -831,7 +853,8 @@ Window {
     function setRailList(which, id, on) {
         let l = parse(which === "pinned" ? railSet.pinned : railSet.hidden, []).filter(x => x !== id)
         if (on) l.push(id)
-        if (!shot.on) { if (which === "pinned") railSet.pinned = JSON.stringify(l); else railSet.hidden = JSON.stringify(l) }
+        if (which === "hidden" && hiddenTest !== null) hiddenTest = l
+        else if (!shot.on) { if (which === "pinned") railSet.pinned = JSON.stringify(l); else railSet.hidden = JSON.stringify(l) }
         note("action", (which === "pinned" ? (on ? "Pin " : "Unpin ") : (on ? "Hide from rail " : "Show on rail ")) + id)
         orderGames()
     }
@@ -919,6 +942,7 @@ Window {
         else msgTimer.stop()
     }
     readonly property bool msgShown: msgText !== "" && (msgLevel === "work" || msgTimer.running)
+    readonly property bool savingNow: Turbine.busy && msgShown && msgLevel === "work" && msgText.indexOf("Saving ") === 0
     function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
     readonly property var statusNow: {
         if (page === "settings") return { level: "ok", words: "Changes show right away", detail: "" }
@@ -929,7 +953,7 @@ Window {
         // A free account presses Slow download on the page itself; the status says so (catch.rs, watchPage).
         const slow = status.active && !status.done && status.level === "wait" && status.text.indexOf("Slow download") >= 0
         if (openState === "opening") return { level: "busy", words: slow ? status.text : "Opening Nexus in " + openName + "...", detail: slow ? "Opening Nexus in " + openName + "..." : "" }
-        if (openState === "open") return { level: slow ? "busy" : "ok", words: slow ? status.text : "Nexus is open in " + openName + ". Turbine adds your download by itself.", detail: "" }
+        if (openState === "open") return { level: slow ? "busy" : "ok", words: slow ? status.text : "Nexus is open in " + openName + ". Sign in if asked (free), press Slow download, then Steam button, Turbine.", detail: "" }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
@@ -937,10 +961,9 @@ Window {
         if (warned.length > 0)
             return { level: "warn", words: warned.length === 1 ? warned[0].name + ": " + modWarns[warned[0].id] : plural(warned.length, "mod", "mods") + " may not work here", detail: "Before you play says why" }
         const on = mods.filter(m => m.enabled).length
-        // Changes still on their way in show as a pill (only on the game they belong to); the line says how it stands.
-        const waiting = Turbine.pending > 0 && Turbine.pendingGame === game.id
+        // Changes waiting to be saved show nothing (they go in by themselves); while saving, the line says Saving.
         return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on",
-                 pill: waiting ? plural(Turbine.pending, "change", "changes") + " going in" : updateCount > 0 ? plural(updateCount, "update", "updates") + " ready"
+                 pill: updateCount > 0 ? plural(updateCount, "update", "updates") + " ready"
                        : profileData && profileList.length > 1 ? "Loadout: " + profileData.active : "" }
     }
 
@@ -948,16 +971,22 @@ Window {
     // Changes go into the game 3 seconds after the last edit, when Turbine loses focus and when it closes.
     Timer { id: autoApply; interval: 3000; onTriggered: if (!shot.on) Turbine.applyNow() }
     function edited() { autoApply.restart() }
-    onActiveChanged: {
+    onActiveChanged: windowActive(active)
+    // The window came to the front (true) or went to the back (false). The build's input check calls it too.
+    function windowActive(active) {
         note("window", active ? "Turbine in front" : "Turbine in the background")
+        // Every hold and the D-pad repeat stop both ways: a release made while Turbine was in the background
+        // can't be seen here, so nothing may still be counting when it comes back.
+        stopHolds(active ? "back in front" : "in the background")
         if (active) {
             // Back from a game: presses made there (still queued) must not act here.
-            repeater.stop()
-            repeatButton = ""
             Turbine.wake()
-        } else if (!shot.on && Turbine.pending > 0) {
-            autoApply.stop()
-            Turbine.applyNow()
+        } else {
+            Turbine.sleep()
+            if (!shot.on && Turbine.pending > 0) {
+                autoApply.stop()
+                Turbine.applyNow()
+            }
         }
     }
     onClosing: Turbine.finish()
@@ -1012,7 +1041,6 @@ Window {
     function removedDelete(i) {
         const m = removedMods[i - 1]
         if (m) askDelete(m.id, "Delete " + m.name + " for good? It can't be put back.")
-        else if (i === 0) removedRun(0)
     }
     // Hold A to confirm (data that can't come back): the same hold the game menu's Reset uses.
     property string confirmWhat: ""
@@ -1023,6 +1051,7 @@ Window {
     property int confirmIndex: 0
     function confirmDone() {
         const w = confirmWhat
+        if (w.indexOf("check:") === 0) { note("check", "Delete for good would run now"); sheet = ""; return }
         if (w.indexOf("profile:") === 0) {
             const n = w.substring(8)
             note("action", "Delete profile " + n)
@@ -1050,15 +1079,17 @@ Window {
     property var moveSaved: []
     function startMove() {
         if (!ordered || !focusedItem || focusedItem.kind !== "mod") return
+        const id = focusedItem.m.id
+        // The dimmed removed row goes first: it shifts the rows under it, and in move mode row n must be mods[n].
+        if (ghost) { ghost = null; ghostTimer.stop() }
         if (listFiltered) {
             // Moving needs the whole list in your order: switch to it, keep the same mod focused, then move.
-            const id = focusedItem.m.id
             findText = ""; listShow = "all"; listSort = "order"
-            const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
-            if (i < 0) return
-            modIndex = i
             note("action", "Move: the full list in your order")
         }
+        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
+        if (i < 0 || !mods[i] || mods[i].id !== id) return
+        modIndex = i
         moving = true
         moveFrom = modIndex
         moveSaved = mods.slice()
@@ -1274,6 +1305,7 @@ Window {
     }
     // Free accounts: what a mod needs, one page at a time ("Next: Address Library").
     property var chainQueue: []
+    property bool chainKeep: false
     property string chainAfter: ""
     function showChain(arrived) {
         if (chainQueue.length === 0) return
@@ -1289,18 +1321,46 @@ Window {
     }
     function when(sec) { return Qt.formatDateTime(new Date(sec * 1000), "MMM d, h:mm AP") }
     // Reset shows only when the engine found records it couldn't read for this game. It runs after A is held 5 s.
-    readonly property bool canReset: game !== null && Turbine.resetFor === game.id
+    readonly property bool canReset: game !== null && (Turbine.resetFor === game.id || shot.page === "inputcheck")
     property real resetHeld: 0
     Timer {
         id: resetHold
         interval: 100
         repeat: true
         onTriggered: {
+            // Only while a real press is held (A, or a finger or the pointer on the row).
+            if (!app.holdAllowed()) { app.stopReset(); return }
             app.resetHeld += 0.1
-            if (app.resetHeld >= 5) { stop(); app.resetHeld = 0; app.sheet = ""; Turbine.resetGame() }
+            if (app.resetHeld >= 5) {
+                stop(); app.resetHeld = 0; app.sheet = ""
+                app.holdsDone++
+                if (shot.page === "inputcheck") app.note("check", "Reset would run now")
+                else Turbine.resetGame()
+            }
         }
     }
     function stopReset() { resetHold.stop(); resetHeld = 0 }
+    // A real press is down: A (pad or Enter), or a finger or the pointer held on a hold button. A tap, a click,
+    // R3 or a press whose release was lost never runs a hold to its end.
+    property bool aHeld: false
+    property bool bHeld: false
+    property bool clickHeld: false
+    property int holdsDone: 0
+    function holdAllowed() { return aHeld || clickHeld }
+    function holdHint(what) { toast.info("Hold A for " + what + ". A tap doesn't do it.") }
+    // Stops every hold and the D-pad repeat: the window going to the back, a controller going away.
+    function stopHolds(why) {
+        const was = resetHold.running || confirmHold.running || homeHold.running || startHold.running || repeater.running
+        stopReset(); stopConfirm()
+        homeHold.stop(); startHold.stop()
+        repeater.stop(); repeatButton = ""
+        aHeld = false; bHeld = false; clickHeld = false
+        if (was) note("pad", "Holds stopped (" + why + ")")
+    }
+    // The danger holds stop whenever the sheet or the page changes.
+    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop() }
+    // (onPageChanged and onTabChanged, near the top, call it too.)
+    onModPageChanged: stopDangerHolds()
     readonly property var gameMenuItems: [
         { icon: "play", title: "Play without mods", detail: "Starts the game with no mods. Nothing is deleted.", ok: true },
         { icon: "back", title: "Restore last working setup",
@@ -1340,7 +1400,11 @@ Window {
         note("action", "Game menu: " + item.title)
         if (i === 0) { sheet = ""; Turbine.playOriginal() }
         else if (i === 1) { sheet = ""; Turbine.restoreSetup("") }
-        else if (item.act === "reset") { if (resetHold.running) stopReset(); else { resetHeld = 0; resetHold.start() } }
+        else if (item.act === "reset") {
+            if (resetHold.running) stopReset()
+            else if (holdAllowed()) { resetHeld = 0; resetHold.start() }
+            else holdHint("5 seconds to reset the game files")
+        }
         else if (item.act === "profiles") openProfiles()
         else if (item.act === "loader") { sheet = ""; getLoader() }
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
@@ -1363,11 +1427,17 @@ Window {
     function modArrived(gameId, id, name, on) {
         note("action", "New mod " + name + " in " + gameId)
         const i = games.findIndex(g => g.id === gameId)
-        const words = "New: " + name + (on ? " (on)" : " (off)") + ". Start: Play"
+        const words = on ? name + ": added and on. Press START to play." : name + ": added, turned off. A turns it on."
         // The build's pictures add their test mods this way: only the new-mod picture (and the press count) follow them.
         if (shot.on && shot.page !== "newmod" && shot.page !== "presscount") return
         // Installed from the mod page of the game on screen: stay on the page (its button says Installed).
-        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); zone = "play"; note("focus", "New mod: focus on Play"); showChain(name); return }
+        if (modPage && game && game.id === gameId) {
+            busyHere = false; toast.done(words)
+            // While it still needs something, the focus stays on the page (A must never start the game there).
+            if (chainQueue.length === 0 && pageMissing < 0) { zone = "play"; note("focus", "New mod: focus on Play") }
+            else note("focus", "New mod: still needs something, focus stays on the page")
+            showChain(name); return
+        }
         if (i >= 0 && i !== current) current = i
         if (page !== "game") { page = "game" }
         if (sheet === "add" || sheet === "found") sheet = ""
@@ -1473,8 +1543,17 @@ Window {
         ] : []).concat(updateMap[menuMod.id] ? [
             { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
         ] : [])
-        const room = Math.max(0, 6 - first.length - 2)
-        return first.concat(modMenuFacts.slice(0, room)).concat([
+        // Other files (another version from the same page) for mods from Nexus or Thunderstore, and the folder its
+        // files are kept in.
+        const src = menuMod.sourceKind === "nexus" && rules && rules.domain && nexusModOf(menuMod) !== "" ? "nexus"
+                  : menuMod.sourceKind === "thunderstore" && menuMod.sourceId ? "thunderstore" : ""
+        const extras = (src !== "" ? [
+            { icon: "update", title: "Other files", detail: "Another version or file from its page", act: "files", src: src }
+        ] : []).concat([
+            { icon: "info", title: "Open folder", detail: "Where Turbine keeps this mod's files", act: "folder" }
+        ])
+        const room = Math.max(0, 7 - first.length - 2 - extras.length)
+        return first.concat(modMenuFacts.slice(0, room)).concat(extras).concat([
             { icon: "info", title: "Details", detail: [modWords(menuMod), menuMod.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), act: "details" },
             { icon: "remove", title: "Uninstall", detail: "The row stays for 8 seconds: A puts it back. Then kept in Removed mods for 7 days.", act: "remove", danger: true }
         ])
@@ -1512,6 +1591,19 @@ Window {
         else if (item.act === "update") updateOne(m)
         else if (item.act === "move") startMove()
         else if (item.act === "details") openModDetails(m)
+        else if (item.act === "files") {
+            const id = item.src === "nexus" ? nexusModOf(m) : String(m.sourceId).split(":")[0]
+            if (sources.indexOf(item.src) >= 0) getSource = item.src
+            page = "game"; tab = 1; zone = "main"
+            pendingFiles = true
+            openDetails({ id: id, name: m.name, source: item.src, icon: "" })
+        }
+        else if (item.act === "folder") {
+            const dir = Turbine.modFolder(m.id)
+            if (dir === "") { toast.info("This mod's folder isn't there."); return }
+            note("action", "Open folder " + dir)
+            if (!Qt.openUrlExternally("file://" + encodeURI(dir))) toast.showPlain("Its files are in " + dir)
+        }
     }
     function modWords(m) {
         let parts = []
@@ -1555,7 +1647,17 @@ Window {
     property int setSection: 0            // 0 Look, 1 About
     property int setRow: 0
     property int perfIndex: 0
-    readonly property int railCount: games.length + 1   // the games, then Settings
+    // The games, then "Show hidden games" when every game is hidden, then Settings.
+    readonly property int railExtra: games.length === 0 && hiddenIds.length > 0 ? 1 : 0
+    readonly property int railCount: games.length + railExtra + 1
+    function showHiddenGames() {
+        note("action", "Show hidden games")
+        if (hiddenTest !== null) hiddenTest = []
+        else if (!shot.on) railSet.hidden = "[]"
+        orderGames()
+        zone = "rail"; railIndex = 0
+        toast.done("Every game is back on the rail.")
+    }
     // Sheets open from a press. The ones that come from outside Turbine (a download that arrived, an installer's
     // questions, install notes) and the first-run tutorial say why; anything else with no press near it is a bug.
     readonly property var sheetReasons: ({ found: "a download arrived", fomod: "the installer asks", notes: "install notes", chain: "the next requirement",
@@ -1565,12 +1667,13 @@ Window {
         else if (pressRecent() || (shot.on && !shot.strictSheets)) note("page", "Sheet " + sheet + " (after " + (lastInputName || "start") + ")")
         else if (sheetReasons[sheet]) note("page", "Sheet " + sheet + " (" + sheetReasons[sheet] + ")")
         else note("page", "Sheet " + sheet + " opened with no press")
-        menuIndex = 0; stopReset(); stopConfirm()
+        menuIndex = 0; stopDangerHolds()
         if (sheet !== "") closeWheel()
         pickHover()
         if (sheet === "" && fomod) sheet = "fomod"
         else if (sheet === "" && found) { infoIndex = 0; sheet = "found" }
         else if (sheet === "" && pendingNotes) { pendingNotes = false; infoIndex = 0; sheet = "notes" }
+        else if (sheet === "" && pendingOldHelper) { pendingOldHelper = false; infoIndex = 0; sheet = "oldhelper" }
         else if (sheet === "") offerLoader()
     }
 
@@ -1593,7 +1696,7 @@ Window {
     Timer {
         id: homeHold
         interval: 1000
-        onTriggered: app.goHome()
+        onTriggered: if (app.bHeld) app.goHome()
     }
     function goHome() {
         note("action", "Hold B: home")
@@ -1615,7 +1718,9 @@ Window {
         if (lastInput === "touch") lastInput = "pad"
         const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
         if (grip[b]) b = grip[b]
-        // R3 here means the pointer was hidden: it shows at the focused item and clicks it, the same as A.
+        if (b === "a") aHeld = true
+        if (b === "b") bHeld = true
+        // R3 here means the pointer was hidden: the same as A on the focused item (never the start of a hold).
         if (b === "r3") { r3Click(); return }
         if (b === "start" && sheet === "" && !wheelOpen && !moving && !orderMoving && page === "game" && game) { startHold.restart(); return }
         if (["up", "down", "left", "right"].indexOf(b) >= 0) {
@@ -1632,6 +1737,10 @@ Window {
     function release(b) {
         const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
         if (grip[b]) b = grip[b]
+        // A controller went away (pad.rs let go of its buttons first).
+        if (b === "lost") { stopHolds("a controller went away"); return }
+        if (b === "a") aHeld = false
+        if (b === "b") bHeld = false
         if (b === "start" && startHold.running) { startHold.stop(); act("start"); return }
         if (b === repeatButton) { repeater.stop(); repeatButton = "" }
         if (b === "a" && resetHold.running) stopReset()
@@ -1639,19 +1748,34 @@ Window {
         if (b === "b") homeHold.stop()
         if (b === "view") wheelRelease()
     }
-    // R3 with the pointer hidden: the pointer appears on the focused item and A runs (a click there does the same).
+    // R3 with the pointer hidden: A on the focused item. The pointer stays hidden, so the triggers keep paging.
+    // A hold (Delete for good, Reset) never starts from R3: it says to hold A instead.
     function r3Click() {
-        const p = focusCenter()
-        Turbine.pointerShowAt(p.x, p.y)
-        note("pad", "R3: pointer shown on the focus, same as A")
+        note("pad", "R3: same as A on the focus")
         act("a")
+    }
+    // One tap, one action: a chip's own handler and its row's both see the same tap (the chip's comes first).
+    property real lastTapAt: 0
+    function tapOnce() { const now = Date.now(); if (now - lastTapAt < 150) return false; lastTapAt = now; return true }
+    // A click or tap on a row: the focus goes there (focus()), then A runs, exactly as the button would.
+    function rowA(focus, settings) {
+        if (sheet !== "" || wheelOpen || !tapOnce()) return
+        focus()
+        if (!settings) zone = "main"
+        note("action", "Click on a row: A")
+        act("a")
+    }
+    // The left stick's wheel with the pointer hidden: at the focused item, which then follows what is in view.
+    function stickWheel(d) {
+        const p = focusCenter()
+        Turbine.wheelAt(p.x, p.y, d)
     }
     // The middle of whatever has the focus ring, in window pixels.
     function focusCenter() {
         let it = null
         try {
             if (sheet === "" && !wheelOpen) {
-                if (zone === "rail") it = railIndex < games.length ? railList.itemAtIndex(railIndex) : gear
+                if (zone === "rail") it = railIndex < games.length ? railList.itemAtIndex(railIndex) : railIndex < games.length + railExtra ? hiddenTile : gear
                 else if (zone === "play") it = playBtn
                 else if (page === "game" && tab === 0 && !modPage && modIndex >= 0) it = modList.itemAtIndex(modIndex)
                 else if (page === "game" && modPage) it = modView.focusItem ? modView.focusItem() : null
@@ -1666,11 +1790,16 @@ Window {
         interval: 100
         repeat: true
         onTriggered: {
+            if (!app.holdAllowed()) { app.stopConfirm(); return }
             app.confirmHeld += 0.1
-            if (app.confirmHeld >= app.holdNeeded) { stop(); app.confirmHeld = 0; app.confirmDone() }
+            if (app.confirmHeld >= app.holdNeeded) { stop(); app.confirmHeld = 0; app.holdsDone++; app.confirmDone() }
         }
     }
-    function startConfirm() { if (!confirmHold.running) { confirmHeld = 0; confirmHold.start() } }
+    function startConfirm() {
+        if (confirmHold.running) return
+        if (!holdAllowed()) { holdHint(holdNeeded + " seconds to delete for good"); return }
+        confirmHeld = 0; confirmHold.start()
+    }
     function stopConfirm() { confirmHold.stop(); confirmHeld = 0 }
 
     Item {
@@ -1697,7 +1826,8 @@ Window {
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
             app.inputCount++; app.lastInputAt = Date.now(); app.lastInputName = b
             if (b === "start" || b === "view") { if (!e.isAutoRepeat) app.press(b); return }
-            if (b === "b" && !e.isAutoRepeat) homeHold.restart()
+            if (b === "b" && !e.isAutoRepeat) { app.bHeld = true; homeHold.restart() }
+            if (b === "a" && !e.isAutoRepeat) app.aHeld = true
             // Holding a key repeats it, except A (Reset waits for A to be held down).
             if (b === "a" && app.sheet === "confirm" && app.confirmIndex === 0) { if (!e.isAutoRepeat) app.startConfirm(); return }
             if (!(b === "a" && e.isAutoRepeat)) app.act(b)
@@ -1706,7 +1836,7 @@ Window {
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
             if (!e.isAutoRepeat && e.key === Qt.Key_V) app.release("view")
             if (!e.isAutoRepeat && e.key === Qt.Key_P) app.release("start")
-            if (!e.isAutoRepeat && (e.key === Qt.Key_Escape || e.key === Qt.Key_Backspace)) homeHold.stop()
+            if (!e.isAutoRepeat && (e.key === Qt.Key_Escape || e.key === Qt.Key_Backspace)) { app.bHeld = false; homeHold.stop() }
         }
     }
 
@@ -1743,22 +1873,30 @@ Window {
         if ((b === "up" || b === "down") && bs.scrolls) bs.scroll(b === "down" ? 1 : -1)
         else if (b === "left" || b === "up") bs.set(Math.max(0, bs.index - 1))
         else if (b === "right" || b === "down") bs.set(Math.min(n - 1, bs.index + 1))
-        else if (b === "a") { if (sheet === "ask" && askIndex < 0) askKeyboard(); else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1)) }
+        else if (b === "a") {
+            if (sheet === "ask" && askIndex < 0) askKeyboard()
+            else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1))
+            // A that isn't a held A (R3, a tap): Delete needs the hold.
+            else if (!sheetDry && !confirmHold.running) holdHint(holdNeeded + " seconds to delete for good")
+        }
         else if (b === "b") { if (bs.cancel >= 0) runIt(bs.cancel); else if (!sheetDry) sheet = "" }
-        else if (b === "start") runIt(bs.main)
+        else if (b === "start" && sheetStartPlays(bs)) runIt(bs.main)
     }
+    function sheetStartPlays(bs) { return bs.main >= 0 && /play/i.test(bs.labels[bs.main] || "") }
     function sheetBinds() {
         const bs = buttonSheet()
         if (bs) {
             const hl = sheet === "ask" && askIndex < 0 ? (Turbine.gamemode ? "Keyboard" : "") : sheet === "confirm" && confirmIndex === 0 ? "Delete" : bs.labels[bs.index] || ""
             let o = { a: bind(hl, () => sheetAct("a"), sheet === "confirm" && confirmIndex === 0 ? "hold" : ""), b: bind(bs.cancel >= 0 ? bs.labels[bs.cancel] : "Close", () => sheetAct("b")) }
-            if (bs.main >= 0) o.start = bind(bs.labels[bs.main], () => sheetAct("start"))
+            // Start only ever means Play: in the legend (and on the button) only when the main button plays.
+            if (sheetStartPlays(bs)) o.start = bind(bs.labels[bs.main], () => sheetAct("start"))
             return o
         }
         const s = sheet
         const k = key => () => sheetAct(key)
         if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
-        if (s === "pick") return { a: bind("Choose", k("a")), b: bind(pickBack !== "" ? "Back" : "Close", k("b")) }
+        if (s === "pick") return Object.assign({ a: bind("Choose", k("a")), b: bind(pickBack !== "" ? "Back" : "Close", k("b")) },
+                                               page === "game" && game ? { start: bind("Play", k("start")) } : {})
         if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
         if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
         if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
@@ -1783,7 +1921,7 @@ Window {
                 if (sheet === "notice") seen.notSteamOS = true
                 sheet = ""
             }
-        } else if (["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 && b === "start") {
+        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game)) && b === "start") {
             // Start plays from any menu (the legend shows it while a menu covers the Play button).
             stopReset(); sheet = ""; startPlay()
         } else if (sheet === "pick") {
@@ -1800,7 +1938,7 @@ Window {
             if (b === "up") { stopReset(); menuIndex = Math.max(0, menuIndex - 1) }
             else if (b === "down") { stopReset(); menuIndex = Math.min(gameMenuItems.length - 1, menuIndex + 1) }
             else if (b === "a") gameMenuRun(menuIndex)
-            else if (b === "b" || b === "view" || b === "x") sheet = ""
+            else if (b === "b" || b === "view" || b === "x") { stopReset(); sheet = "" }
         } else if (sheet === "add") {
             if (b === "up") addIndex = Math.max(0, addIndex - 1)
             else if (b === "down") addIndex = Math.min(addList.length - 1, addIndex + 1)
@@ -1823,7 +1961,7 @@ Window {
             else if (b === "b") sheet = "profiles"
         } else if (sheet === "plugin") {
             if (b === "a" && pluginOwner) goToMod(pluginOwner)
-            else if (b === "b" || b === "x" || b === "a") sheet = ""
+            else if (b === "b" || b === "x") sheet = ""
         } else if (sheet === "pickgame") {
             if (b === "up") pickIndex = Math.max(0, pickIndex - 1)
             else if (b === "down") pickIndex = Math.min(games.length - 1, pickIndex + 1)
@@ -1898,7 +2036,7 @@ Window {
         if (page === "game" && game) o.start = bind("", startPlay)
         if (zone === "rail") {
             const g = railIndex < games.length
-            o.a = bind(g ? "Open" : "Settings", () => railSelect(railIndex))
+            o.a = bind(g ? "Open" : railIndex < games.length + railExtra ? "Show hidden games" : "Settings", () => railSelect(railIndex))
             if (page !== "game" || game) o.b = bind("Back", () => { zone = page === "settings" ? "settings" : page === "perf" ? "perf" : "main" })
             if (g) o.x = bind("Options", openRailMenu)
             o.lt = bind("", () => { railIndex = Math.max(0, railIndex - 5) })
@@ -1920,8 +2058,8 @@ Window {
             o.lb = bind("", () => settingsSection(-1))
             o.rb = bind("", () => settingsSection(1))
             const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
-            o.lt = bind("", () => { setRow = Math.max(0, setRow - pageJump) })
-            o.rt = bind("", () => { setRow = Math.min(rows - 1, setRow + pageJump) })
+            o.lt = bind("", () => { setRow = settingsLand(Math.max(0, setRow - pageJump), -1, rows) })
+            o.rt = bind("", () => { setRow = settingsLand(Math.min(rows - 1, setRow + pageJump), 1, rows) })
             return o
         }
         if (page === "perf") {
@@ -1930,7 +2068,7 @@ Window {
             o.rt = bind("", () => { perfIndex = Math.min(1999, perfIndex + pageJump) })
             return o
         }
-        if (!game) { o.a = bind("Look again", load); return o }
+        if (!game) { o.a = railExtra > 0 ? bind("Show hidden games", showHiddenGames) : bind("Look again", load); return o }
         if (modPage) {
             o.a = bind(pageALabel, () => modPageAct("a"))
             o.b = bind("Back", getBack)
@@ -1969,6 +2107,8 @@ Window {
                 o.a = bind("Open", openRemoved)
                 o.x = bind("Options", openRemoved)
             }
+            // The removed row went a moment ago and another row slid under the highlight: A still means Put back.
+            if (ghostJustWent()) o.a = bind("Put back", () => { note("action", "A just as the removed row went: put back"); const id = ghostGone.id; ghostGone = null; putBack(id) })
             o.b = bind(listFiltered ? "Show all" : "Games", () => {
                 if (listFiltered) { findText = ""; listShow = "all"; listSort = "order"; modIndex = 0; note("action", "Find, Show and Sort cleared") }
                 else { zone = "rail"; railIndex = current }
@@ -1988,7 +2128,7 @@ Window {
                 return o
             }
             o.y = bind("Search", () => getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))))
-            if (getArea === "bar") o.a = bind("Choose", () => getBarRun(getIndex))
+            if (getArea === "bar") o.a = bind(getBar[getIndex] && getBar[getIndex].key === "search" ? "Search" : "Choose", () => getBarRun(getIndex))
             else if (getArea === "recent") o.a = bind("Open", () => getAct("a"))
             else {
                 if (getItems[getIndex]) o.a = bind("Open", () => getAct("a"))
@@ -2007,8 +2147,9 @@ Window {
         o.b = bind("My mods", () => { tab = 0 })
         if (p) o.x = bind("Options", openPluginMenu)
         o.y = bind("Find plugin", openFindPlugin)
-        o.lt = bind("", () => { orderIndex = Math.max(-1, orderIndex - pageJump) })
-        o.rt = bind("", () => { orderIndex = Math.min(order.length - 1, orderIndex + pageJump) })
+        // A page up or down, landing on a plugin that can be changed (the game's own are locked).
+        o.lt = bind("", () => { orderIndex = orderLandOn(Math.max(-1, orderIndex - pageJump), -1) })
+        o.rt = bind("", () => { orderIndex = orderLandOn(Math.min(order.length - 1, orderIndex + pageJump), 1) })
         return o
     }
     // The legend: A, B, X, Y as binds() has them, then one more: the pointer's buttons while it shows, else Start
@@ -2016,7 +2157,8 @@ Window {
     function legendFor(o) {
         let h = []
         for (const k of ["a", "b", "x", "y"]) if (o[k] && o[k].label) h.push([k, o[k].label, o[k].pre || ""])
-        if (Turbine.pointerShown && !keyboardUp) h.push(["rt", "Click", "", "lt", "Menu"])
+        // LT is the right button (options) only where X has options: elsewhere the legend says RT Click alone.
+        if (Turbine.pointerShown && !keyboardUp) h.push(o.x && o.x.label ? ["rt", "Click", "", "lt", "Menu"] : ["rt", "Click", ""])
         else if (o.start && o.start.label) h.push(["start", o.start.label, ""])
         return h.slice(0, 5)
     }
@@ -2031,8 +2173,7 @@ Window {
             const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
             const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
             const kind = r ? r.kind : ""
-            if (b === "up") setRow = Math.max(0, setRow - 1)
-            else if (b === "down") setRow = Math.min(rows - 1, setRow + 1)
+            if (b === "up" || b === "down") settingsMove(b === "up" ? -1 : 1, rows)
             // Left and Right change values; Left never leaves Settings (B does).
             else if (sec === "Look" && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
             else if (kind === "item" && b === "left") labsChip = Math.max(0, labsChip - 1)
@@ -2089,12 +2230,41 @@ Window {
     }
     function settingsSection(d) {
         const s = Math.max(0, Math.min(settingsSections.length - 1, setSection + d))
-        if (s !== setSection) { setSection = s; setRow = 0 }
+        if (s !== setSection) { setSection = s; setRow = firstSettingsRow() }
+    }
+    // Rows with only words (kind "info") are never focused: the D-pad passes them, and the list still scrolls them
+    // into view.
+    function settingsFocusable(i) {
+        if (sec === "Look" || sec === "About") return true
+        const r = rowsNow[i]
+        return !!r && r.kind !== "info"
+    }
+    function firstSettingsRow() {
+        if (sec === "Look" || sec === "About") return 0
+        const i = rowsNow.findIndex(r => r.kind !== "info")
+        return Math.max(0, i)
+    }
+    // The nearest focusable row from i, looking in direction d first.
+    function settingsLand(i, d, rows) {
+        for (let j = i; j >= 0 && j < rows; j += d) if (settingsFocusable(j)) return j
+        for (let j = i; j >= 0 && j < rows; j -= d) if (settingsFocusable(j)) return j
+        return setRow
+    }
+    function settingsMove(d, rows) {
+        let i = setRow + d
+        while (i >= 0 && i < rows && !settingsFocusable(i)) i += d
+        // The words passed over (or above the first row, or below the last) come into view.
+        if (labsList.visible) {
+            if (i < 0) labsList.positionViewAtBeginning()
+            else if (i >= rows) labsList.positionViewAtEnd()
+            else for (let j = setRow + d; j !== i; j += d) labsList.positionViewAtIndex(j, ListView.Contain)
+        }
+        if (i >= 0 && i < rows) setRow = i
     }
     function settingsA() {
         const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
         const kind = r ? r.kind : ""
-        if (sec === "Look") lookRows[setRow].step(1)
+        if (sec === "Look") { const lr = lookRows[setRow]; if (lr.a) lr.a(); else lr.step(1) }
         else if (sec === "About") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
         else if (kind === "item") labsChoose(r, ["works", "problem", ""][labsChip])
         else if (kind === "choice" || kind === "toggle") rowStep(r, 1)
@@ -2152,7 +2322,8 @@ Window {
     }
     function railSelect(i) {
         note("action", "Rail " + (i < games.length ? games[i].name : "Settings"))
-        if (i < games.length) { current = i; page = "game"; zone = "main" }
+        if (i < games.length) { current = i; page = "game"; zone = "main"; if (!shot.on) seen.railHintDone = true }
+        else if (i < games.length + railExtra) showHiddenGames()
         else openSettings()
     }
     // ---------------------------------------------------------------- the quick wheel (View)
@@ -2163,6 +2334,8 @@ Window {
     property int wheelSlot: -1            // 0 Up, 1 Up-right, 2 Right, 3 Down-right, 4 Down, 5 Down-left, 6 Left, 7 Up-left
     property bool wheelHeld: false
     property bool wheelPicked: false
+    // While it is open the left stick is only a D-pad (no scrolling), so Up then on round to Right reaches Up-right.
+    onWheelOpenChanged: Turbine.stickDpad = wheelOpen
     readonly property string wheelKind: !game || page !== "game" ? "none" : tab === 1 || modPage ? "get" : tab === 2 ? "order" : "mods"
     function slot(label, ok, run) { return { label: label, ok: ok, run: run } }
     readonly property var wheelSlots: {
@@ -2239,6 +2412,9 @@ Window {
     property string lastDry: ""
     Timer { id: scriptTimer; interval: 600; repeat: true; onTriggered: app.scriptTick() }
     function pad(b) { Turbine.selftestPad(b, true); Turbine.selftestPad(b, false) }
+    // Presses and releases that reached the interface from the controller (the input check counts them).
+    property int padEvents: 0
+    property bool probeOn: false
     function check(text) { note("check", text) }
     function scriptTick() {
         if (scriptStep >= script.length) { scriptTimer.stop(); return }
@@ -2266,9 +2442,10 @@ Window {
             () => { const it = modList.itemAtIndex(0); const p = it.mapToItem(null, it.width * 0.4, it.height / 2); Turbine.pointerShowAt(p.x, p.y); modIndex = 0; pad("down") },
             () => { m.row = modIndex; m.shown = Turbine.pointerShown; pad("lt"); m.row2 = modIndex; pad("rt")
                     check("After a D-pad press: pointer " + (m.shown ? "still showing" : "hidden") + ", LT row " + (m.row + 1) + " to " + (m.row2 + 1) + ", RT to " + (modIndex + 1) + ", sheet \"" + sheet + "\"") },
-            // R3 with the pointer hidden: shows it on the focus and does what A does; with it showing, a left click.
+            // R3 with the pointer hidden: does what A does (the pointer stays hidden); with it showing, a left click.
             () => { modIndex = 0; m.on = mods[0].enabled; pad("r3") },
-            () => { check("R3 hidden: pointer " + (Turbine.pointerShown ? "shown" : "not shown") + ", " + (mods[0].enabled !== m.on ? "same as A (the mod turned " + (mods[0].enabled ? "on" : "off") + ")" : "A didn't run")); pad("r3") },
+            () => { check("R3 hidden: pointer " + (Turbine.pointerShown ? "shown" : "stays hidden") + ", " + (mods[0].enabled !== m.on ? "same as A (the mod turned " + (mods[0].enabled ? "on" : "off") + ")" : "A didn't run"))
+                    const it = modList.itemAtIndex(0); const p = it.mapToItem(null, it.width * 0.4, it.height / 2); Turbine.pointerShowAt(p.x, p.y); pad("r3") },
             () => { pad("down"); pad("up") },
             // 8: the focus table: toggle keeps the row; a menu closes back to it; tabs and a game round trip keep it.
             () => { modIndex = 1; pad("a"); check("Toggle: focus on row " + (modIndex + 1)); pad("x"); m.sheet = sheet; pad("b"); check("Menu " + m.sheet + " closed: focus on row " + (modIndex + 1)) },
@@ -2356,7 +2533,8 @@ Window {
                     if (!bs) { check("Sheet rule " + c[0] + ": not a button sheet"); problems++; continue }
                     act("right")
                     bs = buttonSheet()
-                    const want = { a: bs.labels[bs.index] || "", b: bs.cancel >= 0 ? bs.labels[bs.cancel] : "", start: bs.main >= 0 ? bs.labels[bs.main] : "" }
+                    // Start runs the main button only when that button plays (Start only ever means Play).
+                    const want = { a: bs.labels[bs.index] || "", b: bs.cancel >= 0 ? bs.labels[bs.cancel] : "", start: sheetStartPlays(bs) ? bs.labels[bs.main] : "" }
                     let got = {}
                     for (const k of ["a", "b", "start"]) { lastDry = ""; act(k); got[k] = lastDry }
                     const ok = got.a === want.a && got.b === want.b && got.start === want.start
@@ -2367,12 +2545,117 @@ Window {
                 check("Sheet rule: " + cases.length + " sheets, " + problems + " problems")
             }
         ]
+        else if (name === "inputcheck") script = [
+            () => { if (mods.length < 2) return false
+                    page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""
+                    m.bad = 0
+                    m.ok = (good, text) => { if (!good) m.bad++; check(text + (good ? "" : "  PROBLEM")) } },
+            // 1. Holds run only while a real press is held: never from a click, a tap, R3, or a lost release.
+            () => { holdsDone = 0; askDelete("check:none", "Test") },
+            () => { const it = confirmSheet.buttonItem(0); if (!it || !confirmSheet.visible) return false
+                    const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 1000) return false
+                    m.ok(holdsDone === 0 && !confirmHold.running && sheet === "confirm", "Hold check: a click on Hold A to delete: " + (confirmHold.running || holdsDone > 0 ? "the hold ran" : "only the highlight moved"))
+                    Turbine.pointerHide(); confirmIndex = 0; pad("r3"); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 1000) return false
+                    m.ok(holdsDone === 0 && !confirmHold.running, "Hold check: R3 on Hold A to delete: " + (confirmHold.running || holdsDone > 0 ? "the hold ran" : "no hold"))
+                    confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; windowActive(false); windowActive(true)
+                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then Turbine in the background: " + (m.run ? "the hold started, " : "the hold never started, ") + (confirmHold.running ? "still running" : "stopped"))
+                    Turbine.selftestPad("a", false) },
+            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; Turbine.selftestPad("lost", false)
+                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the controller went away: " + (confirmHold.running ? "still running" : "stopped"))
+                    Turbine.selftestPad("a", false) },
+            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; sheet = "removed"
+                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the sheet changed: " + (confirmHold.running ? "still running" : "stopped"))
+                    Turbine.selftestPad("a", false); askDelete("check:none", "Test") },
+            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 2600) return false
+                    Turbine.selftestPad("a", false)
+                    m.ok(holdsDone === 1, "Hold check: A really held for 2 seconds: " + (holdsDone === 1 ? "Delete for good ran" : "nothing ran")) },
+            () => { holdsDone = 0; sheet = ""; sheet = "gamemenu"; m.ri = gameMenuItems.findIndex(x => x.act === "reset"); if (m.ri < 0) return false
+                    menuIndex = m.ri; pad("a"); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 1000) return false
+                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: a tap of A on Reset game files: " + (resetHold.running ? "still counting" : "stopped at the release"))
+                    menuIndex = m.ri; Turbine.selftestPad("a", true); m.run = resetHold.running; pad("b")
+                    m.ok(m.run && !resetHold.running && sheet === "", "Hold check: A held on Reset, then B closed the menu: " + (resetHold.running ? "still counting" : "stopped"))
+                    Turbine.selftestPad("a", false) },
+            () => { sheet = "gamemenu"; menuIndex = m.ri; const it = gameMenuView.entryItem(m.ri); if (!it || !gameMenuView.visible) return false
+                    const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 1000) return false
+                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: a click on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
+                    Turbine.pointerHide(); menuIndex = m.ri; pad("r3"); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 1000) return false
+                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: R3 on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
+                    pad("b") },
+            // 7. RT and R3 hold the left button each on their own.
+            () => { sheet = ""; probeOn = true; Turbine.pointerShowAt(width / 2, height / 2); m.pe = padEvents
+                    Turbine.selftestPad("rt", true); const a = inputProbe.pressed
+                    Turbine.selftestPad("r3", true); Turbine.selftestPad("r3", false); const b = inputProbe.pressed
+                    Turbine.selftestPad("rt", false); const c = inputProbe.pressed
+                    Turbine.selftestPad("r3", true); const d = inputProbe.pressed
+                    Turbine.selftestPad("rt", true); Turbine.selftestPad("rt", false); const e = inputProbe.pressed
+                    Turbine.selftestPad("r3", false); const f = inputProbe.pressed
+                    m.ok(a && b && !c && d && e && !f && padEvents === m.pe, "RT and R3: R3 let go while RT holds: " + (b ? "still held" : "dropped") + "; RT let go: " + (c ? "stuck" : "let go")
+                         + "; RT let go while R3 holds: " + (e ? "still held" : "dropped") + "; R3 let go: " + (f ? "stuck" : "let go") + "; presses sent on to the interface: " + (padEvents - m.pe))
+                    probeOn = false; Turbine.pointerHide() },
+            // 2. A click anywhere on a row is A; rows are at least 44 px.
+            () => { page = "game"; zone = "main"; tab = 0; modIndex = 0; const it = modList.itemAtIndex(1); if (!it || mods.length < 2) return false
+                    m.id = listItems[1].m.id; m.on = mods.find(x => x.id === m.id).enabled
+                    const p = it.mapToItem(null, it.width * 0.6, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
+            () => { const x = mods.find(y => y.id === m.id), it = modList.itemAtIndex(1)
+                    m.ok(!!x && x.enabled !== m.on && modIndex === 1, "Click check: a click on a mod row's name: " + (!!x && x.enabled !== m.on ? "turned it " + (x.enabled ? "on" : "off") : "did nothing") + ", focus on row " + (modIndex + 1))
+                    m.ok(!!it && it.height >= 44, "Click check: a mod row is " + (it ? Math.round(it.height) : 0) + " px tall")
+                    Turbine.pointerHide() },
+            () => { if (!ordered || !(rules && rules.plugins)) return
+                    tab = 2; zone = "main"; if (order.length === 0) return false
+                    m.pi = order.findIndex(x => !x.fixed); if (m.pi < 0) return
+                    m.pa = order[m.pi].active; const it = loadOrderView.rowItem(m.pi); if (!it) return false
+                    const p = it.mapToItem(null, it.width * 0.7, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
+            () => { if (tab !== 2 || m.pi === undefined || m.pi < 0) return
+                    const it = loadOrderView.rowItem(m.pi)
+                    m.ok(order[m.pi] && order[m.pi].active !== m.pa, "Click check: a click on a load order row: " + (order[m.pi] && order[m.pi].active !== m.pa ? "turned it " + (order[m.pi].active ? "on" : "off") : "did nothing"))
+                    m.ok(!!it && it.height >= 44, "Click check: a load order row is " + (it ? Math.round(it.height) : 0) + " px tall")
+                    Turbine.pointerHide(); tab = 0 },
+            () => { openSettings(); setSection = settingsSections.indexOf("Look"); m.row = lookRows.findIndex(r => r.key === "theme"); m.theme = look.theme
+                    const it = lookList.itemAtIndex(m.row); if (!it) return false
+                    const p = it.mapToItem(null, app.px(40), it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
+            () => { const it = lookList.itemAtIndex(m.row)
+                    m.ok(look.theme !== m.theme && setRow === m.row, "Click check: a click on a Settings choice row: " + (look.theme !== m.theme ? "changed it" : "did nothing"))
+                    m.ok(!!it && it.height >= 44, "Click check: a Settings row is " + (it ? Math.round(it.height) : 0) + " px tall")
+                    look.theme = m.theme; Turbine.pointerHide(); settingsBack(); zone = "main"; tab = 0 },
+            // 3. The removed row never sends a move or an A to the wrong mod.
+            () => { if (mods.length < 2) return false; modIndex = 0; m.goneId = mods[0].id; uninstall(mods[0]) },
+            () => { if (!ghost) return false; modIndex = 1; m.want = focusedItem && focusedItem.m ? focusedItem.m.id : ""; startMove()
+                    const now = moving && mods[modIndex] ? mods[modIndex] : null
+                    m.ok(!!now && now.id === m.want && !ghost, "Ghost check: Move with the removed row showing moves " + (now ? now.name : "nothing") + (now && now.id === m.want ? ", the focused mod" : ", not the focused mod"))
+                    cancelMove(); putBack(m.goneId) },
+            () => { if (!mods.some(x => x.id === m.goneId)) return false; modIndex = mods.findIndex(x => x.id === m.goneId); uninstall(mods[modIndex]) },
+            () => { if (!ghost) return false; modIndex = ghost.index; ghostTimer.stop(); ghostExpired()
+                    m.next = focusedItem && focusedItem.kind === "mod" ? focusedItem.m.id : ""; m.nextOn = m.next ? mods.find(x => x.id === m.next).enabled : false
+                    pad("a") },
+            () => { if (!mods.some(x => x.id === m.goneId)) return false
+                    const nx = mods.find(x => x.id === m.next)
+                    m.ok(!nx || nx.enabled === m.nextOn, "Ghost check: A just as the removed row went: put back, the mod that slid up " + (nx && nx.enabled !== m.nextOn ? "changed too" : "untouched")) },
+            // 10. A sheet that comes up during the tutorial waits for it.
+            () => { openTutorial(0); oldHelperOnce("0.1")
+                    m.ok(sheet === "tutorial" && pendingOldHelper, "Tutorial check: the out of date helper sheet " + (sheet === "tutorial" ? "waits for the tutorial" : "replaced it"))
+                    tutorialAct("b")
+                    m.ok(sheet === "oldhelper", "Tutorial check: after the tutorial: sheet \"" + sheet + "\""); sheet = "" },
+            // 11. Every game hidden: the rail offers them back.
+            () => { hiddenTest = allGames.map(g => g.id); orderGames(); zone = "rail"; railIndex = 0
+                    const o = binds()
+                    m.ok(games.length === 0 && railExtra === 1 && !!o.a && o.a.label === "Show hidden games", "Hidden check: every game hidden, the rail shows " + (railExtra === 1 ? "Show hidden games" : "nothing to bring them back"))
+                    pad("a") },
+            () => { m.ok(games.length > 0, "Hidden check: Show hidden games put back " + plural(games.length, "game", "games"))
+                    hiddenTest = null; orderGames()
+                    check("Input check: " + m.bad + " problems") }
+        ]
         else if (name === "nexusguard" || name === "inlinebrowser") script = [
             () => { if (getItems.length === 0) return false; openDetails(getItems[0]) },
             () => { if (!detailsData || detailsData.loading || mainLabel !== "Get it on Nexus") return false; m.before = launchCount
                     pad("a"); if (name === "nexusguard") { pad("a"); pad("a") } },
             () => { if (name === "nexusguard") { check("Nexus guard: 3 presses of A, " + (launchCount - m.before) + " browser launch" + (launchCount - m.before === 1 ? "" : "es") + ", button \"" + mainLabel + "\""); return }
-                    openHelpNow(); pad("down") },
+                    openHelpNow() },
             () => { if (name === "inlinebrowser") check("Inline browser buttons: " + pageHelpLabels.join("; ") + ", focus on " + pageALabel + ", sheet \"" + sheet + "\"") }
         ]
         else if (name === "presscount") script = [
@@ -2399,6 +2682,8 @@ Window {
     property int tutCard: 0
     function openTutorial(n) {
         tutCard = n || 0
+        // Remembered as soon as it shows, so a sheet or a quit part way doesn't bring it back at the next start.
+        if (!shot.on) seen.tutorialDone = true
         note("action", "Beginner tutorial, card " + (tutCard + 1))
         sheet = "tutorial"
     }
@@ -2408,7 +2693,9 @@ Window {
             else tutorialDone("finished")
         }
         else if (b === "left") tutCard = Math.max(0, tutCard - 1)
-        else if (b === "b" || b === "start") tutorialDone("skipped")
+        else if (b === "b") tutorialDone("skipped")
+        // Start finishes it (card 4 says Start plays): straight to picking a game.
+        else if (b === "start") tutorialDone("finished with Start")
     }
     function tutorialDone(how) {
         if (!shot.on) seen.tutorialDone = true
@@ -2429,7 +2716,7 @@ Window {
     property string getCategory: ""
     property int getSortIndex: 0
     readonly property var sortKeys: srcNow === "nexus" ? ["trending", "endorsements", "downloads", "updated", "newest"] : ["downloads", "rating", "updated", "newest"]
-    readonly property var sortNames: srcNow === "nexus" ? ["Trending", "Most endorsed", "Most downloaded", "Recently updated", "Newest"]
+    readonly property var sortNames: srcNow === "nexus" ? ["Trending", "Most liked", "Most downloaded", "Recently updated", "Newest"]
                                                         : ["Most downloaded", "Top rated", "Recently updated", "Newest"]
     property var browseData: null
     property bool browseLoading: false
@@ -2648,10 +2935,10 @@ Window {
         }
         Turbine.updateMod(m.id); edited()
     }
-    // X on a card: Get it, Other files, Open on Nexus.
+    // X on a card: the mod page's own words (Get it on Nexus for a free account, else Install), Other files, Open on Nexus.
     readonly property var cardItem: getArea === "grid" ? getItems[getIndex] : null
     readonly property var cardMenuItems: !cardItem ? [] : [
-        { icon: "update", title: "Get it", detail: getWords(), act: "get" },
+        { icon: "update", title: srcNow === "nexus" && account.premium !== true ? "Get it on Nexus" : "Install", detail: getWords(), act: "get" },
         { icon: "info", title: "Other files", detail: "Older versions and extra files, on its page", act: "files" }
     ].concat(srcNow === "nexus" ? [{ icon: "play", title: "Open on Nexus", detail: "In your browser", act: "nexus" }] : [])
     property bool pendingFiles: false
@@ -2668,7 +2955,7 @@ Window {
         if (srcNow === "thunderstore") return "Installs it with what it needs"
         return account.premium === true ? "Installs it in one press" : "Opens its file page on Nexus"
     }
-    // Y on a card (and the card menu's Get it): the same as the mod page's main button.
+    // Y on a card (and the card menu's Get it on Nexus or Install): the same as the mod page's main button.
     function quickGet(c) {
         if (c.installed) { toast.info("Already in your mods.") ; return }
         if (srcNow === "nexus" && account.premium !== true) {
@@ -2728,7 +3015,7 @@ Window {
     readonly property string mainLine: !detailsData || detailsData.loading || detailsData.error ? ""
         : detailsData.partial ? (detailsData.page ? "Some details didn't load. A opens it on Nexus." : "Some details didn't load.")
         : pageInstalled ? (pageModOff ? "In your mods, turned off. A turns it on." : "In your mods and on.")
-        : detailsData.source === "nexus" && detailsData.premium === false ? "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself."
+        : detailsData.source === "nexus" && detailsData.premium === false ? "Opens Nexus. Sign in if asked (free). Press Slow download, wait 5 seconds, then Steam button, Turbine. It's added by itself."
         : ""
     property bool busyHere: false
     readonly property var pageNeeds: {
@@ -2749,8 +3036,10 @@ Window {
     onPageHelpChanged: if (!pageHelp) pageInline = -1
     readonly property string pageALabel: pageInline >= 0 ? (pageHelpLabels[pageInline] || "") : pageIndex === 0 ? mainLabel : pageIndex === 1 ? "Other files" : "Open its page"
     // X on the mod page: Other files, Get what it needs, Open on Nexus.
+    // The Other files row on the page itself (off: it is in X Options, with the main file's line).
+    readonly property bool pageOtherRow: false
     readonly property var pageMenuItems: !detailsData || detailsData.loading ? [] : (otherVersions.length > 0 ? [
-        { icon: "update", title: "Other files", detail: plural(otherVersions.length, "other file", "other files"), run: () => openVersions() }
+        { icon: "update", title: "Other files", detail: (detailsData.mainLine ? detailsData.mainLine + " · " : "") + plural(otherVersions.length, "other file", "other files"), run: () => openVersions() }
     ] : []).concat(pageMissing >= 0 ? [
         { icon: "update", title: "Get what it needs", detail: pageNeeds[pageMissing] ? pageNeeds[pageMissing].name : "", run: () => { pageIndex = pageMissing + 2; openNeed(pageMissing) } }
     ] : []).concat((detailsData.source || srcNow) === "nexus" && detailsData.page ? [
@@ -2768,15 +3057,15 @@ Window {
         else if (b === "up") {
             if (pageInline === 1) pageInline = 0
             else if (pageInline === 0) pageInline = -1
-            else if (pageHelp && pageIndex > 0 && (pageIndex === 1 || (pageIndex === 2 && otherVersions.length === 0))) { pageIndex = 0; pageInline = 1 }
-            else if (pageIndex > 0) pageIndex = pageIndex === 2 && otherVersions.length === 0 ? 0 : pageIndex - 1
+            else if (pageHelp && pageIndex > 0 && (pageIndex === 1 || (pageIndex === 2 && !pageOtherRow))) { pageIndex = 0; pageInline = 1 }
+            else if (pageIndex > 0) pageIndex = pageIndex === 2 && !pageOtherRow ? 0 : pageIndex - 1
             else modView.scroll(-1)
         }
         else if (b === "down") {
             if (pageInline < 0 && pageIndex === 0 && pageHelp) { pageInline = 0; return }
             if (pageInline === 0) { pageInline = 1; return }
             // The Other files row (1) is hidden when there are none: skip it, and scroll when no row is left.
-            const next = pageIndex === 0 && otherVersions.length === 0 ? 2 : pageIndex + 1
+            const next = pageIndex === 0 && !pageOtherRow ? 2 : pageIndex + 1
             if (next <= pageRows - 1) { pageIndex = next; pageInline = -1 } else modView.scroll(1)
         }
         else if (b === "left") { zone = "rail"; railIndex = current }
@@ -2813,7 +3102,11 @@ Window {
             const url = detailsData.filePage || detailsData.page
             note("action", "Get it on Nexus: " + detailsData.name + " (" + url + ")")
             const miss = (detailsData.needs && detailsData.needs.missing ? detailsData.needs.missing : []).filter(r => r.modId > 0 && r.url)
-            chainQueue = miss.map(r => ({ name: r.name, url: r.url + (r.url.indexOf("?") < 0 ? "?tab=files" : "") }))
+            // What it needs comes next, one at a time (the chain sheet after it arrives). Opened from the chain, the
+            // rest of the earlier queue stays after this mod's own needs.
+            const fresh = miss.map(r => ({ name: r.name, modId: r.modId, url: r.url + (r.url.indexOf("?") < 0 ? "?tab=files" : "") }))
+            chainQueue = chainKeep ? fresh.concat(chainQueue.filter(x => !fresh.some(y => y.modId === x.modId))) : fresh
+            chainKeep = false
             openNexus(url)
             return
         }
@@ -2921,12 +3214,15 @@ Window {
     }
     // The helper in the browser is older than Turbine's and can't reload itself: said once per helper version.
     function oldHelperOnce(v) {
-        if (shot.on || browserSet.oldHelperShown === (v || "?")) return
-        browserSet.oldHelperShown = v || "?"
+        if ((shot.on && shot.page !== "inputcheck") || browserSet.oldHelperShown === (v || "?")) return
+        if (!shot.on) browserSet.oldHelperShown = v || "?"
         note("browser", "Showing: the browser helper " + (v || "") + " is out of date (once)")
+        // Never over another sheet (the tutorial above all): it waits for that one to close.
+        if (sheet !== "") { pendingOldHelper = true; return }
         infoIndex = 0
         sheet = "oldhelper"
     }
+    property bool pendingOldHelper: false
     function showAddBrowser(mode) {
         addMode = mode
         note("browser", mode === "noshortcut" ? "Showing Add Chrome to Steam (once)" : "Showing Set up the browser helper too (once)")
@@ -2966,6 +3262,9 @@ Window {
     function openHelpNow() {
         openTimer.stop()
         openHelp = true
+        // The focus goes to Open in Steam's browser (the main button's guard ends now: A there would reopen the
+        // browser that just failed to show).
+        if (modPage && pageIndex === 0 && pageInline < 0) pageInline = 0
         note("browser", "Still in front 8 seconds after Open: Open in Steam's browser and Always use Steam's browser are under the button" + (modPage ? "" : " (mod page)"))
         if (!modPage) toast.showPlain("Nexus didn't show? Settings, Getting mods: Always use Steam's browser.")
     }
@@ -3073,7 +3372,18 @@ Window {
         if (sheet === "chain") {
             const next = chainQueue[0]
             sheet = ""
-            if (label === "Open its page" && next) { chainQueue = chainQueue.slice(1); note("action", "Next requirement: " + next.name); openNexus(next.url) }
+            if (label === "Open its page" && next) {
+                chainQueue = chainQueue.slice(1)
+                note("action", "Next requirement: " + next.name)
+                if (next.modId > 0 && rules && rules.domain) {
+                    // Its mod page first, so the main file is known: then its file page opens straight away, the same
+                    // as the first mod (no files tab to pick from).
+                    page = "game"; tab = 1; zone = "main"
+                    chainKeep = true
+                    openDetails({ id: String(next.modId), name: next.name, source: "nexus", icon: "" }, modPage)
+                    pendingGet = true
+                } else openNexus(next.url)
+            }
             else { chainQueue = []; note("action", "Requirements: later") }
             return
         }
@@ -3186,6 +3496,12 @@ Window {
     property bool orderLand: false
     property var orderSaved: []
     property int orderFrom: -1
+    function orderLandOn(i, d) {
+        if (i < 0) return -1
+        for (let j = i; j >= 0 && j < order.length; j += d) if (!order[j].fixed) return j
+        for (let j = i; j >= 0 && j < order.length; j -= d) if (!order[j].fixed) return j
+        return d < 0 ? -1 : orderIndex
+    }
     function orderAct(b) {
         const p = order[orderIndex]
         if (orderMoving) {
@@ -3330,11 +3646,12 @@ Window {
     function openSettings() {
         // B comes back here.
         if (page !== "settings" && !settingsFrom) settingsFrom = { zone: zone, tab: tab, modPage: modPage, railIndex: railIndex }
-        page = "settings"; zone = "settings"; setRow = 0
+        page = "settings"; zone = "settings"
         if (selfUpd.state === "available" && settingsSections.indexOf("Updates") >= 0) setSection = settingsSections.indexOf("Updates")
+        setRow = firstSettingsRow()
         if (sec === "Look") checkDisplays()
     }
-    function openSection(name) { openSettings(); setSection = Math.max(0, settingsSections.indexOf(name)); setRow = 0 }
+    function openSection(name) { openSettings(); setSection = Math.max(0, settingsSections.indexOf(name)); setRow = firstSettingsRow() }
     onLabsOnChanged: if (!labsOn && setSection >= settingsSections.length) { setSection = settingsSections.indexOf("About"); setRow = 0 }
     // Accounts, Updates and Labs: rows of one kind each. action (A does it), toggle and choice (Left, Right or A
     // change it), item (a Labs checklist item), info (words only).
@@ -3349,6 +3666,9 @@ Window {
     ].concat(hiddenIds.length > 0 ? [
         { kind: "action", key: "unhide", title: "Games hidden from the rail: " + hiddenIds.length, how: "Puts them back on the rail", action: "Show them" }
     ] : [])
+    // The Nexus key's rows show folded until asked for (or while a key is set, or the key is being checked).
+    property bool keyRowsOpen: false
+    readonly property bool keyRowsShown: keyRowsOpen || account.hasKey === true || account.state === "checking" || account.state === "error" || shot.page === "accounts"
     readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
         : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: installs in one press with no browser" : " · Free account: Get it on Nexus opens the file's page")
         : account.state === "error" ? account.message
@@ -3366,12 +3686,16 @@ Window {
     readonly property var accountRows: [
         { kind: "info", key: "verdict", title: nexusPublic === "failed" ? "You're ready. Get mods opens Nexus in your browser, nothing to set up." : "You're ready. Browse and get mods now, nothing to set up.",
           how: "Get mods on each game's page. Thunderstore mods install in one press; Nexus mods open their file page, and Turbine adds the download by itself." },
-        { kind: "action", key: "pasteKey", head: "Optional, makes it faster", title: "Nexus Mods key", how: accountWords, action: account.hasKey ? "Paste a new key" : "Paste" },
+    ].concat(keyRowsShown ? [
+        { kind: "action", key: "pasteKey", head: "Optional: Nexus account key", title: "Nexus Mods key", how: accountWords, action: account.hasKey ? "Paste a new key" : "Paste" },
         { kind: "action", key: "keyPage", title: "Open the API Keys page", how: "Opens " + keyPageUrl.replace("https://", "") + " in the browser. Sign in first if Nexus asks.", action: "Open" },
         { kind: "action", key: "nexusKey", title: "Type the key instead", how: "With Steam's keyboard, if pasting isn't possible", action: "Type" },
         { kind: "info", key: "keyWhat", title: "What a key does",
           how: "Free key: mod details, file lists and update checks. Premium key: also one-press downloads straight from Turbine. Without Premium, Get it on Nexus opens the file's page and Turbine adds the download." }
-    ].concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
+    ] : [
+        // Folded: one row, so the words a beginner doesn't need (API key, Premium) stay out of the way.
+        { kind: "action", key: "keyFold", title: "Optional: Nexus account key", how: "Not needed to get mods. A key can make Get mods faster.", action: "Show" }
+    ]).concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
         { kind: "action", key: "helper", title: "Browser helper", action: "Set up",
           how: "Saves Nexus downloads with no Save box, sorted into Game Mods folders. Tip: in Chrome's settings, turn off Ask where to save each file." }
     ]).concat(bridge.outdated ? [
@@ -3428,6 +3752,7 @@ Window {
         else if (r.key === "steamBrowser" || r.key === "keyless" || r.key === "gmBrowser") labsRun(r)
         else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
         else if (r.key === "pasteKey") pasteKey()
+        else if (r.key === "keyFold") { keyRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "pasteKey") }
         else if (r.key === "keyPage") { if (openNexus(keyPageUrl)) toast.showPlain("Opened API Keys. Copy the Personal API Key at the bottom, come back and press Paste.") }
         else if (r.key === "signOut") Turbine.nexusSignOut()
         else if (r.key === "tutorial") openTutorial(0)
@@ -3465,7 +3790,7 @@ Window {
         { id: "nexus-keyless", title: "Get mods without a key", how: "Labs, Nexus without a key: Check. Then open Get mods in Skyrim, The Witcher 3 or Cyberpunk 2077.",
           expect: "The check says Nexus answered, and Get mods shows the game's mods as pictures with no key." },
         { id: "nexus-gamemode", title: "Nexus opens in Game Mode", how: "Game Mode: a mod page, A Get it on Nexus.",
-          expect: "The browser opens over Turbine on that file's page. If not, after 8 seconds two buttons under Get it offer Steam's browser." },
+          expect: "The browser opens over Turbine on that file's page. If not, after 8 seconds two buttons under Get it on Nexus offer Steam's browser." },
         { id: "game-mods-folder", title: "Slow download with no Save box", how: "Browser helper set up in Chrome. Press Slow download on a mod's file page.",
           expect: "No Save box; the file lands in Downloads, Game Mods, the game's folder, and Turbine adds it to that game." },
         { id: "desktop-pad", title: "Controller in Desktop Mode", how: "Desktop Mode with Steam running: use Turbine with the controller.",
@@ -3551,13 +3876,13 @@ Window {
         { id: "focus-memory", title: "Focus comes back", how: "Highlight the third mod, open another game from the rail, come back. Open X on a mod and close it. Open Settings from the wheel and press B.",
           expect: "Each time the highlight is where you left it, on the same tab." },
         { id: "inline-browser", title: "Didn't see Nexus open?", how: "Game Mode: a mod page, A Get it on Nexus, and stay in Turbine for 8 seconds. Press A again quickly the first time.",
-          expect: "Only one browser starts. After 8 seconds two buttons show under Get it: Open in Steam's browser and Always use Steam's browser. No box pops up." },
+          expect: "Only one browser starts. After 8 seconds two buttons show under Get it on Nexus: Open in Steam's browser (highlighted) and Always use Steam's browser. No box pops up." },
         { id: "rail-menu", title: "Pin and hide on the rail", how: "On the rail press X on a game: Pin to the top; on a tool like Lossless Scaling: Hide from the rail. Settings, Help shows it again.",
           expect: "The pinned game stays at the top; the hidden one is gone from the rail until shown again." },
         { id: "touch-hold", title: "Touch: hold for options", how: "Touch a mod row, a Get mods card and a plugin and hold half a second; swipe sideways on the tabs.",
           expect: "Holding opens that item's options; the swipe changes the tab; the legend hides until the next button press." },
         { id: "fewer-steps", title: "Fewer presses to a mod", how: "A game with no mods, free Nexus account, Game Mode: A on the game in the rail, A on a mod, A Get it on Nexus, Slow download, then Play.",
-          expect: "The game opens on Get mods with the first mod highlighted, Get it is highlighted on its page, and Play is highlighted when the mod arrives." },
+          expect: "The game opens on Get mods with the first mod highlighted, Get it on Nexus is highlighted on its page, and Play is highlighted when the mod arrives." },
         { id: "scroll-stick", title: "Left stick in Steam's keyboard", how: "Open Find (Y) so Steam's keyboard shows, move both sticks and press the triggers.",
           expect: "While Steam's keyboard is up, the sticks and triggers do nothing in Turbine." },
         { id: "md5-identify", title: "Files named from Nexus", how: "With a Nexus key, add a mod you downloaded from Nexus by hand (Add from Downloads).",
@@ -3793,7 +4118,9 @@ Window {
     readonly property var lookRows: [
         { label: "Interface size", key: "size", slider: true, min: 80, max: sizeCap, unit: "%", now: sizeNow,
           words: sizeNow === sizeCap && sizeCap < 150 ? "Largest that fits" : "",
-          step: (d) => sizePreview(sizeStep(d)) },
+          step: (d) => sizePreview(sizeStep(d)),
+          // A: one size bigger, and from the largest back down to the normal size (so A alone can always change it).
+          a: () => sizePreview(sizeNow >= sizeCap ? Math.min(sizeCap, sizeDefault) : sizeStep(1)) },
         { label: "Layout", options: layoutOptions, names: layoutOptions.map(o => o === "tv" ? "TV" : o.charAt(0).toUpperCase() + o.substring(1)), key: "layout", now: layoutNow,
           step: (d) => layoutPreview(layoutOptions[(layoutOptions.indexOf(layoutNow) + d + layoutOptions.length) % layoutOptions.length]) },
         { label: "Theme", options: ["brass", "black", "light"], names: ["Brass", "Black", "Light"], key: "theme",
@@ -3810,9 +4137,9 @@ Window {
           now: seasonPick, step: (d) => { look.season = seasonPick; cycle("season", ["off", "date", "autumn", "snow"], d) } }
     ].concat(seasonKind !== "" ? [
         { label: "Amount", key: "fallAmount", slider: true, min: 10, max: 100, unit: "",
-          step: (d) => slide("fallAmount", 10, 100, 10, d) },
+          step: (d) => slide("fallAmount", 10, 100, 10, d), a: () => { if (look.fallAmount >= 100) look.fallAmount = 10; else slide("fallAmount", 10, 100, 10, 1) } },
         { label: "Size", key: "fallSize", slider: true, min: 50, max: 200, unit: "%",
-          step: (d) => slide("fallSize", 50, 200, 25, d) }
+          step: (d) => slide("fallSize", 50, 200, 25, d), a: () => { if (look.fallSize >= 200) look.fallSize = 50; else slide("fallSize", 50, 200, 25, 1) } }
     ] : [])
     function slide(key, lo, hi, by, d) {
         look[key] = Math.max(lo, Math.min(hi, look[key] + d * by))
@@ -4026,8 +4353,9 @@ Window {
                         anchors.horizontalCenter: parent.horizontalCenter
                         radius: app.px(6)
                         color: c.raised
-                        border.width: tileItem.here || tileItem.focused ? app.px(2) : 0
-                        border.color: tileItem.focused ? c.text : c.accent
+                        // Only the focus ring outlines a tile; the game on screen has the brass bar on its left.
+                        border.width: tileItem.focused ? app.px(2) : 0
+                        border.color: c.text
                         clip: true
                         Image {
                             id: art
@@ -4038,6 +4366,28 @@ Window {
                             fillMode: Image.PreserveAspectCrop
                             sourceSize.height: app.px(132)
                             asynchronous: true
+                        }
+                        // The game's name on its art, so the rail reads without the label beside it.
+                        Rectangle {
+                            visible: art.visible
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                            anchors.margins: tile.border.width
+                            height: artName.implicitHeight + app.px(4)
+                            color: "#C8000000"
+                            Text {
+                                id: artName
+                                anchors.centerIn: parent
+                                width: parent.width - app.px(4)
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                text: tileItem.g ? tileItem.g.name : ""
+                                color: "#FFFFFF"
+                                font.family: app.bodyFont
+                                font.pixelSize: Math.max(7, app.px(8))
+                                font.bold: true
+                            }
                         }
                         // No art: the whole name (shrunk to fit, never cut, so "Deliverance II" keeps its II) and
                         // the store under it, so two copies or two games with long names still look different.
@@ -4087,7 +4437,36 @@ Window {
                     }
                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                     TapHandler { onTapped: { app.railIndex = tileItem.index; app.railSelect(tileItem.index) } }
+                    // Right-click (LT with the pointer): the game's options, like X.
+                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (app.sheet === "") { app.zone = "rail"; app.railIndex = tileItem.index; app.openRailMenu() } }
                 }
+            }
+            // Every game hidden from the rail: one way back, right here.
+            Rectangle {
+                id: hiddenTile
+                visible: app.railExtra > 0
+                anchors.top: railTop.bottom
+                anchors.topMargin: app.px(10)
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: app.px(60); height: app.px(66); radius: app.px(6)
+                readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length
+                color: c.raised
+                border.width: focused ? app.px(2) : Math.max(1, app.px(1))
+                border.color: focused ? c.text : c.line
+                Text {
+                    anchors.fill: parent
+                    anchors.margins: app.px(4)
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
+                    text: "Show hidden games"
+                    color: c.text
+                    font.family: app.bodyFont
+                    font.pixelSize: app.px(11)
+                    font.bold: true
+                }
+                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { onTapped: app.showHiddenGames() }
             }
             Rectangle {
                 id: gear
@@ -4095,7 +4474,7 @@ Window {
                 anchors.bottomMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: app.px(44); height: app.px(44); radius: app.px(8)
-                readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length
+                readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length + app.railExtra
                 color: app.page === "settings" || app.page === "perf" ? c.raised : "transparent"
                 border.width: focused ? app.px(2) : 0
                 border.color: c.text
@@ -4159,7 +4538,8 @@ Window {
                     }
                     Rectangle {
                         id: backBtn
-                        visible: app.page !== "game"
+                        // For touch and the mouse; with a pad or keys the legend already says B Back.
+                        visible: app.page !== "game" && app.lastInput !== "pad" && app.lastInput !== "keys"
                         x: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
                         width: backRow.implicitWidth + app.px(20); height: app.px(32); radius: app.px(6)
@@ -4215,7 +4595,7 @@ Window {
                                 border.color: c.accentLo
                                 Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(13); font.bold: true }
                                 // Updates ready: the list of them (a free account picks each one's page there).
-                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active && !(Turbine.pending > 0 && Turbine.pendingGame === app.game.id)) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
+                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
                             }
                         }
                     }
@@ -4251,7 +4631,8 @@ Window {
                             anchors.centerIn: parent
                             spacing: app.px(8)
                             Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: "Play"; color: c.onAccent; font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                            // Play waits for changes being saved: it says so.
+                            Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: c.onAccent; font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                         TapHandler { onTapped: app.startPlay() }
@@ -4312,11 +4693,12 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         visible: app.page === "game" && (none || loading)
-                        title: none ? "No games yet" : "Reading mods..."
-                        body: none ? "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here." : ""
+                        title: none ? (app.railExtra > 0 ? "Every game is hidden" : "No games yet") : "Reading mods..."
+                        body: none ? (app.railExtra > 0 ? "They were hidden from the rail. Show hidden games puts them back."
+                                      : "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here.") : ""
                         buttonKey: none ? "a" : ""
-                        buttonLabel: none ? "Look again" : ""
-                        onActivated: app.load()
+                        buttonLabel: none ? (app.railExtra > 0 ? "Show hidden games" : "Look again") : ""
+                        onActivated: app.railExtra > 0 ? app.showHiddenGames() : app.load()
                     }
 
                     // My mods: "+ Get mods for <game>", the mods, then the collapsed Removed row.
@@ -4407,8 +4789,8 @@ Window {
                                 badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) || (entry.kind === "mod" && entry.m.enabled && (!!app.modWarns[entry.m.id] || app.missingNeeds(entry.m).length > 0)) ? "warn" : "info"
                                 // The legend says what A and X do: nothing printed twice.
                                 showHints: false
-                                onClicked: app.modIndex = entry.index
-                                onToggleClicked: { app.modIndex = entry.index; app.toggle(entry.m) }
+                                // A click or tap anywhere on the row is A on it (turns it on or off; ticks it in Select several).
+                                onClicked: app.rowA(() => { if (!app.moving) app.modIndex = entry.index })
                                 // A right-click (LT with the pointer) opens the mod's menu, like X.
                                 onMenuClicked: if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" }
                             }
@@ -4429,13 +4811,13 @@ Window {
                                     width: parent.width - app.px(28)
                                     elide: Text.ElideRight
                                     text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
-                                          : "Removed (" + app.removedMods.length + "), kept 7 days"
+                                          : "Removed mods (" + app.removedMods.length + "): A to put back"
                                     color: entry.kind === "ghost" ? c.soft : c.muted
                                     font.pixelSize: app.px(15)
                                     font.italic: entry.kind === "ghost"
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { app.modIndex = entry.index; app.act("a") } }
+                                TapHandler { onTapped: app.rowA(() => { app.modIndex = entry.index }) }
                             }
                         }
                     }
@@ -4478,6 +4860,13 @@ Window {
                         onItemClicked: (i) => { app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
                         onItemMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.getArea = "grid"; app.getIndex = i; app.menuIndex = 0; app.sheet = "cardmenu" } }
                         onFallbackClicked: (k) => { app.getArea = "fallback"; app.getAct(k) }
+                        // After the left stick's wheel (or a swipe): the focus comes into view with the cards.
+                        onScrolled: (first, last) => {
+                            if (app.getArea !== "grid" || first < 0) return
+                            const cols = app.gridColumns, col = app.getIndex % cols
+                            if (app.getIndex < first) { let i = first - first % cols + col; if (i < first) i += cols; app.getIndex = Math.min(app.getItems.length - 1, i) }
+                            else if (last >= 0 && app.getIndex > last) { let i = last - last % cols + col; if (i > last) i -= cols; app.getIndex = Math.max(0, i) }
+                        }
                     }
                     ModDetails {
                         id: modView
@@ -4498,9 +4887,12 @@ Window {
                         onInstallClicked: { app.pageIndex = 0; app.pageInline = -1; app.installFromDetails() }
                         onVersionsClicked: { app.pageIndex = 1; app.openVersions() }
                         onNeedClicked: (i) => { app.pageIndex = i + 2; app.openNeed(i) }
+                        // Right-click (LT with the pointer): the page's options, like X.
+                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (app.sheet === "" && app.pageMenuItems.length > 0) { app.zone = "main"; app.act("x") } }
                     }
                     // Load order tab (Skyrim)
                     LoadOrderList {
+                        id: loadOrderView
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
@@ -4514,9 +4906,13 @@ Window {
                         moving: app.orderMoving
                         active: app.zone === "main" && app.sheet === ""
                         onSortClicked: { app.orderIndex = -1; Turbine.orderSort() }
-                        onRowClicked: (i) => app.orderIndex = i
-                        onRowMenu: (i) => { if (app.sheet === "") { app.orderIndex = i; app.openPluginMenu() } }
-                        onToggleClicked: (i) => { app.orderIndex = i; app.orderAct("a") }
+                        onRowClicked: (i) => app.rowA(() => { if (!app.orderMoving) app.orderIndex = i })
+                        onRowMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.orderIndex = i; app.openPluginMenu() } }
+                        onScrolled: (first, last) => {
+                            if (app.orderMoving || first < 0) return
+                            if (app.orderIndex < first) app.orderIndex = app.orderLandOn(first, 1)
+                            else if (last >= 0 && app.orderIndex > last) app.orderIndex = app.orderLandOn(last, -1)
+                        }
                     }
 
                     // Settings
@@ -4562,7 +4958,7 @@ Window {
                                 required property var modelData
                                 readonly property bool foc: app.zone === "settings" && app.setRow === index
                                 readonly property var now: srow.modelData.now !== undefined ? srow.modelData.now : look[srow.modelData.key]
-                                width: lookList.width; height: app.px(50); radius: app.px(6)
+                                width: lookList.width; height: app.px(srow.modelData.slider ? 62 : 50); radius: app.px(6)
                                 color: foc ? c.focusFill : c.card
                                 border.color: c.accent
                                 border.width: foc ? app.px(2) : 0
@@ -4590,6 +4986,7 @@ Window {
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                                 TapHandler {
                                                     onTapped: {
+                                                        if (!app.tapOnce()) return
                                                         app.setRow = srow.index
                                                         const v = srow.modelData.options[parent.index]
                                                         if (srow.modelData.key === "layout") app.layoutPreview(v)
@@ -4615,21 +5012,25 @@ Window {
                                                 border.color: c.text
                                                 border.width: look.accent === modelData ? app.px(2) : 0
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                                TapHandler { onTapped: { look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } }
+                                                TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } }
                                             }
                                         }
                                         Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
                                     }
-                                    // Sliders: Text size, Seasonal amount and size
+                                    // Sliders: Interface size, Seasonal amount and size. Minus and plus at the ends, and a line
+                                    // under it saying Left and Right change it (A steps up, then wraps back down).
                                     Row {
+                                        id: sliderRow
                                         visible: srow.modelData.slider === true
                                         anchors.verticalCenter: parent.verticalCenter
+                                        anchors.verticalCenterOffset: -app.px(8)
                                         width: parent.width
-                                        spacing: app.px(12)
+                                        spacing: app.px(8)
+                                        Label { text: "\u2212"; color: c.soft; font.pixelSize: app.px(20); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                         Rectangle {
                                             id: track
                                             readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
-                                            width: parent.width - app.px(srow.modelData.words ? 200 : 70); height: app.px(6); radius: height / 2
+                                            width: parent.width - app.px(srow.modelData.words ? 240 : 110); height: app.px(6); radius: height / 2
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: c.line
                                             Rectangle { width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent }
@@ -4639,11 +5040,20 @@ Window {
                                                 width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                                             }
                                         }
+                                        Label { text: "+"; color: c.soft; font.pixelSize: app.px(20); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                         Label { text: srow.now + (srow.modelData.unit || "") + (srow.modelData.words ? " · " + srow.modelData.words : ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                    }
+                                    Label {
+                                        visible: srow.modelData.slider === true
+                                        anchors.top: sliderRow.bottom
+                                        anchors.topMargin: app.px(2)
+                                        text: "Left smaller · Right bigger"
+                                        color: c.muted
+                                        font.pixelSize: app.px(13)
                                     }
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: app.setRow = srow.index }
+                                TapHandler { onTapped: app.rowA(() => { app.setRow = srow.index; app.zone = "settings" }, true) }
                             }
                         }
                         // About: the app icon (ten presses turn Labs mode on or off), version, the scrolling test.
@@ -4703,6 +5113,12 @@ Window {
                             currentIndex: visible ? app.setRow : 0
                             highlightFollowsCurrentItem: false
                             onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                            // After the left stick's wheel: the focus comes into view (a row with only words is passed).
+                            onMovementEnded: {
+                                const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
+                                if (top >= 0 && app.setRow < top) app.setRow = app.settingsLand(top, 1, app.rowsNow.length)
+                                else if (bottom >= 0 && app.setRow > bottom) app.setRow = app.settingsLand(bottom, -1, app.rowsNow.length)
+                            }
                             onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); positionViewAtIndex(currentIndex, ListView.Contain) })
                             delegate: Item {
                                 id: lrow
@@ -4782,6 +5198,7 @@ Window {
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                                 TapHandler {
                                                     onTapped: {
+                                                        if (!app.tapOnce()) return
                                                         app.setRow = lrow.index
                                                         if (lrow.isItem) { app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) }
                                                         else if (!parent.on) app.rowStep(lrow.modelData, 1)
@@ -4791,7 +5208,7 @@ Window {
                                         }
                                     }
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { app.setRow = lrow.index; if (lrow.modelData.kind === "action") app.rowRun(lrow.modelData) } }
+                                    TapHandler { onTapped: { if (app.settingsFocusable(lrow.index)) app.rowA(() => { app.setRow = lrow.index; app.zone = "settings" }, true) } }
                                 }
                             }
                         }
@@ -4926,6 +5343,7 @@ Window {
         onClosed: app.act("b")
     }
     GameMenu {
+        id: gameMenuView
         ui: kit
         visible: app.sheet === "gamemenu"
         gameName: app.gameTitle
@@ -4933,7 +5351,16 @@ Window {
         restoreEmptyText: "Nothing saved yet. A setup is saved each time you play with mods."
         extraItems: app.gameMenuItems.slice(2).map(m => ({ key: m.act, label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
         focusIndex: app.menuIndex
-        onActivated: (index, key) => { app.menuIndex = index; app.gameMenuRun(index) }
+        // Reset runs only while a finger or the pointer stays down on it (a tap says to hold).
+        onActivated: (index, key) => { app.menuIndex = index; if (key !== "reset" || !resetHold.running) app.gameMenuRun(index) }
+        onHeld: (index, down) => {
+            const it = app.gameMenuItems[index]
+            if (!it || it.act !== "reset") return
+            app.menuIndex = index
+            app.clickHeld = down
+            if (down && !resetHold.running) { app.resetHeld = 0; resetHold.start() }
+            else if (!down) app.stopReset()
+        }
         onClosed: app.act("b")
     }
     AddMods {
@@ -5068,7 +5495,8 @@ Window {
                : app.sheet === "oldhelper" ? "Your browser helper is out of date"
                : "Added " + app.notesName
         text: app.sheet === "quick" ? app.quickText
-              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". A opens its files on Nexus: pick the file for your " + app.gameTitle + " version and press Slow download. Turbine adds it too."
+              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file on Nexus, the same way: sign in if asked (free), press Slow download, then Steam button, Turbine. It's added too."
+                                    : "A opens its files on Nexus. Pick the top file under Main files, press Manual download, then Slow download. It's added too.")
               : app.sheet === "nobrowser" ? (app.browser.text || "")
               : app.sheet === "addbrowser" && app.addMode === "helper" ? "Turbine started " + app.openName + " through Steam. Without the browser helper it opens on its start page, not on the mod. The helper opens the mod's page for you and saves the download in the right game's folder."
               : app.sheet === "addbrowser" ? "Game Mode only shows apps Steam starts. Add your browser to Steam once, and Turbine opens Nexus in it right over Turbine. Once:"
@@ -5113,6 +5541,7 @@ Window {
         onClosed: app.act("b")
     }
     InfoSheet {
+        id: confirmSheet
         ui: kit
         visible: app.sheet === "confirm"
         title: "Delete for good?"
@@ -5120,7 +5549,14 @@ Window {
         buttons: [{ key: "", label: confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to delete" },
                   { key: "", label: "Keep" }]
         focusIndex: app.confirmIndex
-        onActivated: (i) => { app.confirmIndex = i; if (i === 0) app.startConfirm(); else app.act("b") }
+        // A tap on Delete only moves the highlight; holding a finger or the pointer on it counts like holding A.
+        onActivated: (i) => { app.confirmIndex = i; if (i !== 0) app.act("b"); else if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to delete for good") }
+        onHeld: (i, down) => {
+            if (i !== 0) return
+            app.confirmIndex = 0
+            app.clickHeld = down
+            if (down) app.startConfirm(); else app.stopConfirm()
+        }
         onClosed: app.act("b")
     }
     // X on a Get mods card.
@@ -5145,21 +5581,28 @@ Window {
         onActivated: (index) => { app.menuIndex = index; app.pickRun(index) }
         onClosed: app.act("b")
     }
-    // The focused game's name beside the rail.
+    // The focused game's name beside the rail, up in the header (never over the tabs), and until a game has been
+    // opened from the rail once, how to pick one.
     Rectangle {
         id: railLabel
         readonly property bool on: app.zone === "rail" && app.railIndex < app.games.length
+        readonly property bool hint: !seen.railHintDone || shot.page === "rail"
         visible: on && app.sheet === ""
         z: 20
         x: rail.width + app.px(4)
-        y: railList.y + app.railIndex * (app.px(66) + railList.spacing) - railList.contentY + (app.px(66) - height) / 2
-        width: railLabelText.implicitWidth + app.px(24)
-        height: app.px(32)
+        y: app.px(6)
+        width: Math.max(railLabelText.implicitWidth, railHintText.visible ? railHintText.implicitWidth : 0) + app.px(24)
+        height: railLabelText.implicitHeight + (railHintText.visible ? railHintText.implicitHeight + app.px(2) : 0) + app.px(12)
         radius: app.px(6)
         color: c.raised
         border.color: c.accent
         border.width: Math.max(1, app.px(1))
-        Text { id: railLabelText; anchors.centerIn: parent; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(15); font.weight: Font.DemiBold }
+        Column {
+            anchors.centerIn: parent
+            spacing: app.px(2)
+            Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(15); font.weight: Font.DemiBold }
+            Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(13) }
+        }
     }
     // The status card over other apps (see showOverlay).
     StatusOverlay {
@@ -5254,7 +5697,8 @@ Window {
         height: app.px(36)
         radius: app.px(6)
         color: c.panel
-        z: 40
+        // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
+        z: app.wheelOpen ? 80 : 40
         visible: app.lastInput !== "touch" && app.sheet !== "tutorial"
         Row {
             id: legendRow
@@ -5331,10 +5775,8 @@ Window {
 
     // ---------------------------------------------------------------- toast
     // Something that just happened, in one of three looks: info, done, problem (real failures only). Never words
-    // already on screen; the same words aren't shown twice in a row. After Uninstall: "Removed: name · Kept 7 days ·
-    // Y Undo".
-    property string undoId: ""
-    readonly property bool undoShown: toast.shown && undoId !== "" && sheet === ""
+    // already on screen; the same words aren't shown twice in a row. (Uninstall says nothing here: its row stays,
+    // dimmed, and A puts it back.)
     property string lastToast: ""
     property real lastToastAt: 0
     Toast {
@@ -5343,20 +5785,18 @@ Window {
         function put(kind, m) {
             if (m === app.lastToast && Date.now() - app.lastToastAt < 6000 && shown) return
             app.lastToast = m; app.lastToastAt = Date.now()
-            app.undoId = ""
             toast.kind = kind
             show(m)
         }
         function info(m) { put("info", m) }
         function done(m) { put("done", m) }
         function problem(m) { put("problem", m) }
-        function showUndo(id, name) { app.undoId = id; toast.kind = "info"; show("Removed:", name, "Kept 7 days", "y", "Undo") }
         function showPlain(m) { put("info", m) }
         // The new-mod picture keeps its toast up (it arrives a few seconds before the picture).
-        timeout: shot.page === "newmod" ? 0 : app.undoId !== "" ? 7000 : 4000
-        onActionClicked: if (app.undoId !== "") app.putBack(app.undoId)
-        onHidden: app.undoId = ""
+        timeout: shot.page === "newmod" ? 0 : 4000
     }
+    // The build's input check: a plain mouse area over everything, to see the left button go down and up.
+    MouseArea { id: inputProbe; anchors.fill: parent; z: 100000; visible: app.probeOn; enabled: app.probeOn; acceptedButtons: Qt.LeftButton }
     // Labs: the brass ring that fills around the rail icon while View (or the icon) is held for a report.
     Shape {
         id: holdRing

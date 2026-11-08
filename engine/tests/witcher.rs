@@ -94,9 +94,11 @@ fn notes_for_settings_files_turbine_never_edits() {
         "bin/config/r4game/user_config_matrix/pc/modX.xml",
     ]));
     assert_eq!(notes.len(), 3, "{notes:?}");
-    assert!(notes[0].contains("input.settings") && notes[0].contains("never changes"));
-    assert!(notes[1].contains("dx12user.settings"));
-    assert!(notes[2].contains("dx12filelist.txt") && notes[2].contains("modX.xml;"));
+    assert!(notes[0].contains("extra keys") && notes[0].contains("works without them"), "{notes:?}");
+    // Plain words: no file names or folders a player in Game Mode can't act on.
+    assert!(notes.iter().all(|n| !n.contains("input.settings") && !n.contains("Proton")), "{notes:?}");
+    assert!(notes[1].contains("extra settings") && notes[1].contains("works without them"));
+    assert!(notes[2].contains("modX.xml") && notes[2].contains("works without it"));
     assert!(r.install_notes(&list(&["mods/modX/content/a.ws"])).is_empty());
 }
 
@@ -166,7 +168,7 @@ fn script_conflicts_warn_before_play() {
     assert_eq!(checks.len(), 1);
     assert_eq!((checks[0].level.as_str(), checks[0].title.as_str()), ("warn", witcher::CONFLICT_TITLE));
     // Plain words: no file path and no outside tool in the check (the paths are in Game details).
-    assert_eq!(checks[0].detail, "Auto Oils and Fast Travel change the same game script, so only one works.");
+    assert_eq!(checks[0].detail, "Auto Oils and Fast Travel: These two mods change the same part of the game. Only one can work.");
     let groups = witcher::conflict_groups(&[("Auto Oils", a.files.as_slice()), ("Fast Travel", b.files.as_slice())]);
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].0, vec!["Auto Oils".to_string(), "Fast Travel".to_string()]);
@@ -194,7 +196,7 @@ fn installing_through_the_store_then_writing_mods_settings() {
     fs::create_dir_all(a.parent().unwrap()).unwrap();
     write_zip(&a, &[("modFastTravel/content/scripts/game/a.ws", b"ws"), ("input.settings.txt", b"[Exploration]\nIK_NumPad0=(Action=Teleport)\n")]);
     let Import::Added(ft) = s.import_archive(&a, src()).unwrap() else { panic!() };
-    assert!(ft.notes.iter().any(|n| n.contains("input.settings")), "{:?}", ft.notes);
+    assert!(ft.notes.iter().any(|n| n.contains("extra keys")), "{:?}", ft.notes);
     let b = t.path("dl/Icons.zip");
     write_zip(&b, &[("Icons/content/blob0.bundle", b"bundle")]);
     let Import::Added(icons) = s.import_archive(&b, src()).unwrap() else { panic!() };

@@ -30,7 +30,8 @@ Item {
     signal sortClicked()
     signal rowClicked(int index)
     signal rowMenu(int index)             // right-click or a long press: the plugin's options (like X)
-    signal toggleClicked(int index)
+    signal scrolled(int first, int last)  // after a wheel scroll or a swipe: the rows in view
+    function rowItem(i) { return list.itemAtIndex(i) }
 
     onFocusIndexChanged: if (focusIndex >= 0) list.positionViewAtIndex(focusIndex, ListView.Contain)
 
@@ -83,6 +84,7 @@ Item {
             clip: true
             spacing: lo.ui.px(4)
             model: lo.plugins
+            onMovementEnded: lo.scrolled(indexAt(10, contentY + lo.ui.px(10)), indexAt(10, contentY + height - lo.ui.px(10)))
             delegate: Rectangle {
                 id: row
                 required property int index
@@ -120,8 +122,6 @@ Item {
                         color: row.p.active ? lo.ui.c.raised : lo.ui.c.ground
                         border.color: row.p.active ? "transparent" : lo.ui.c.line
                         Text { anchors.centerIn: parent; text: row.p.active ? "ON" : "OFF"; color: row.p.active ? lo.ui.c.accentText : lo.ui.c.muted; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(13); font.bold: true }
-                        HoverHandler { enabled: row.p.fixed !== true; onHoveredChanged: lo.ui.hover(parent, hovered) }
-                        TapHandler { enabled: row.p.fixed !== true; onTapped: lo.toggleClicked(row.index) }
                     }
                     Text {
                         text: row.p.name
@@ -158,7 +158,9 @@ Item {
                     }
                 }
                 HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
+                // A tap or click anywhere on the row is A on it (the pill included); right-click or a long press: X.
                 TapHandler { longPressThreshold: 0.5; onTapped: lo.rowClicked(row.index); onLongPressed: lo.rowMenu(row.index) }
+                TapHandler { acceptedButtons: Qt.RightButton; onTapped: lo.rowMenu(row.index) }
             }
         }
     }

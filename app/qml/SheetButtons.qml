@@ -11,9 +11,13 @@ Flow {
     property int focusIndex: 0            // the highlighted one (-1: none, the focus is elsewhere on the sheet)
     property int mainIndex: -1            // Start's button: drawn a little stronger
     signal activated(int index)
+    // Pressed down (true) and let go or slid off (false): the hold buttons (Delete for good).
+    signal held(int index, bool down)
 
     spacing: ui.px(10)
+    function itemAt(i) { return rep.itemAt(i) }
     Repeater {
+        id: rep
         model: sb.labels
         Rectangle {
             id: btn
@@ -56,7 +60,7 @@ Flow {
                 font.weight: Font.DemiBold
             }
             HoverHandler { onHoveredChanged: sb.ui.hover(btn, hovered) }
-            TapHandler { onTapped: sb.activated(btn.index) }
+            TapHandler { onTapped: sb.activated(btn.index); onPressedChanged: sb.held(btn.index, pressed) }
         }
     }
 }

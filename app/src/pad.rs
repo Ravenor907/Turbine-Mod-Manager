@@ -33,6 +33,8 @@ pub struct Pads {
     timer: Option<TimerSubsystem>,
     /// How long the last presses waited in SDL's queue before Turbine read them (ms), for Labs > Performance check.
     waits: VecDeque<u32>,
+    /// A controller went away since the last `take_dropped_out` (holds in the interface stop).
+    dropped_out: bool,
 }
 
 impl Pads {
@@ -66,6 +68,7 @@ impl Pads {
             quiet_until: None,
             timer,
             waits: VecDeque::new(),
+            dropped_out: false,
         };
         if let Some(sub) = pads.subsystem.as_ref() {
             let count = sub.num_joysticks().unwrap_or(0);
@@ -137,8 +140,9 @@ impl Pads {
 
     /// Turbine's window just came back to the front: presses made while a game had it (still waiting in SDL's
     /// queue) are read and thrown away, and new ones are ignored for `quiet`, so a button pressed in the game as it
-    /// closes never acts in Turbine.
-    pub fn wake(&mut self, quiet: Duration) {
+    /// closes never acts in Turbine. The releases among them are returned: a button held in Turbine and let go
+    /// while it was in the background must still be let go here (a hold to delete stops).
+    pub fn wake(&mut self, quiet: Duration) -> Vec<(&'static str, bool)> {
         let kept = self.waits.len();
         let dropped = self.read();
         // Presses made in a game waited there on purpose; they don't count as Turbine being slow.
@@ -147,6 +151,17 @@ impl Pads {
             crate::log::line("pad", &format!("Dropped {} button events made while Turbine was in the background", dropped.len()));
         }
         self.quiet_until = Some(Instant::now() + quiet);
+        dropped.into_iter().filter(|(_, down)| !*down).collect()
+    }
+
+    /// Whether a controller went away since the last call.
+    pub fn take_dropped_out(&mut self) -> bool {
+        std::mem::take(&mut self.dropped_out)
+    }
+
+    /// True during the quiet time after Turbine comes back to the front (presses are dropped).
+    pub fn quiet(&self) -> bool {
+        self.quiet_until.is_some_and(|until| Instant::now() < until)
     }
 
     /// Everything that happened since the last call, as (button, pressed) pairs.
@@ -222,17 +237,28 @@ impl Pads {
                 }
             }
         }
+        let now = Instant::now();
+        let mut out: Vec<(&'static str, bool)> =
+            raw.into_iter().filter_map(|(pad, b, down)| self.dedupe(pad, b, down, now).then_some((b, down))).collect();
         for id in removed {
             if let Some(c) = self.open.iter().find(|c| c.instance_id() == id) {
                 crate::log::line("pad", &format!("Controller disconnected: {}", c.name()));
             }
+            // Everything it held down is let go (it will never send those releases itself), so no hold keeps
+            // running after the controller drops out.
+            let mut gone: Vec<&'static str> = self.held.iter().filter(|(_, pad)| **pad == id).map(|(b, _)| *b).collect();
+            gone.sort_unstable();
+            for b in gone {
+                crate::log::line("pad", &format!("Released {b} (its controller went away)"));
+                self.held.remove(b);
+                out.push((b, false));
+            }
+            self.dropped_out = true;
             self.open.retain(|c| c.instance_id() != id);
-            self.held.retain(|_, pad| *pad != id);
             self.axis_down.retain(|(pad, _), _| *pad != id);
             self.sticks.remove(&id);
         }
-        let now = Instant::now();
-        raw.into_iter().filter_map(|(pad, b, down)| self.dedupe(pad, b, down, now).then_some((b, down))).collect()
+        out
     }
 
     /// One tap seen on two pads counts once.

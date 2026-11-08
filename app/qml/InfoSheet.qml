@@ -19,7 +19,10 @@ Item {
     property int focusIndex: 0
 
     signal activated(int index)
+    signal held(int index, bool down)
     signal closed()
+    // A button's item (the build's checks click it through the pointer).
+    function buttonItem(i) { return btnFlow.itemAt(i) }
 
     readonly property bool scrolls: flick.contentHeight > flick.height + 1
     // Scrolls the words by a step (d = 1 down, -1 up). False when they are already at that end.
@@ -145,6 +148,7 @@ Item {
                 focusIndex: sh.focusIndex
                 mainIndex: 0
                 onActivated: (i) => sh.activated(i)
+                onHeld: (i, down) => sh.held(i, down)
             }
     }
 }

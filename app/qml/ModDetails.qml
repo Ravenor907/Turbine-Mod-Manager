@@ -1,9 +1,9 @@
 import QtQuick
 
 // A mod's page, pushed over Get mods. Left (60%): the largest picture the source gives, name, author, version,
-// size, updated date, endorsements and downloads, then the summary. Right (40%): the main button with one line
+// size, updated date, likes (Nexus endorsements) and downloads, then the summary. Right (40%): the main button with one line
 // under it ("Get it on Nexus", "Install", "Installed · On"), "Other files", then "Also needs" (each requirement with
-// Installed, Will be added or Get it; A on one opens its page). On a narrow window the right column goes under the
+// Installed, Will be added or Not yet; A on one opens its page). On a narrow window the right column goes under the
 // picture. Main.qml moves the focus (focusIndex: 0 main button, 1 Other files, 2 and on the requirements) and scrolls
 // with the D-pad (scroll()). After 8 seconds with Turbine still in front, two buttons show under the main one
 // ("Open in Steam's browser", "Always use Steam's browser": helpLabels, helpFocus, helpClicked). No key caps on the
@@ -16,6 +16,7 @@ Item {
     property bool focused: true
     property string mainLabel: ""
     property string mainLine: ""
+    property bool fileRows: false         // the main file's line and the Other files row (else under X Options)
     property bool mainBusy: false
     property real mainProgress: -1
     property int focusIndex: 0
@@ -37,7 +38,7 @@ Item {
         (needs.installed || []).map(r => ({ tag: "Installed", lvl: "ok", r: r }))
         .concat((needs.missing || []).map(r => {
             const st = stepFor(r.name)
-            return { tag: st && st.action === "download" ? "Will be added" : "Get it", lvl: "", r: r }
+            return { tag: st && st.action === "download" ? "Will be added" : "Not yet", lvl: "", r: r }
         }))
         .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", r: r })))
     // Thunderstore: what Install brings along.
@@ -145,7 +146,7 @@ Item {
                 color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
             }
             Text {
-                text: !md.info || md.loading ? "" : md.count(md.info.rating) + (md.info.source === "nexus" ? " endorsements" : " ratings") + " · " + md.count(md.info.downloads) + " downloads"
+                text: !md.info || md.loading ? "" : md.count(md.info.rating) + (md.info.source === "nexus" ? " likes" : " ratings") + " · " + md.count(md.info.downloads) + " downloads"
                 color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
             }
             Text {
@@ -166,15 +167,25 @@ Item {
             spacing: md.ui.px(10)
             Rectangle {
                 id: mainBtn
+                readonly property bool foc: md.focused && md.focusIndex === 0
                 width: parent.width
                 height: md.ui.px(48)
                 radius: md.ui.px(8)
-                gradient: Gradient {
-                    GradientStop { position: 0; color: md.ui.c.accentHi }
-                    GradientStop { position: 1; color: md.ui.c.accent }
+                // Filled brass only with the focus; otherwise a brass outline, so two things never both look focused
+                // (the browser buttons under it can have the focus).
+                color: md.ui.c.card
+                border.color: foc ? md.ui.c.text : md.ui.c.accent
+                border.width: md.ui.px(2)
+                Rectangle {
+                    visible: mainBtn.foc
+                    anchors.fill: parent
+                    anchors.margins: mainBtn.border.width
+                    radius: mainBtn.radius - mainBtn.border.width
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: md.ui.c.accentHi }
+                        GradientStop { position: 1; color: md.ui.c.accent }
+                    }
                 }
-                border.color: md.ui.c.text
-                border.width: md.focused && md.focusIndex === 0 ? md.ui.px(2) : 0
                 Rectangle {
                     visible: md.mainProgress >= 0
                     anchors.left: parent.left; anchors.bottom: parent.bottom
@@ -184,7 +195,7 @@ Item {
                     color: md.ui.c.onAccent
                     opacity: 0.5
                 }
-                Text { anchors.centerIn: parent; text: md.mainLabel; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true }
+                Text { anchors.centerIn: parent; text: md.mainLabel; color: mainBtn.foc ? md.ui.c.onAccent : md.ui.c.accentText; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.installClicked() }
             }
@@ -223,8 +234,9 @@ Item {
                     TapHandler { onTapped: md.helpClicked(parent.index) }
                 }
             }
+            // Which file and its size, and Other files: under X Options (a first look shouldn't ask for a choice).
             Text {
-                visible: !!md.info && !!md.info.mainLine
+                visible: md.fileRows && !!md.info && !!md.info.mainLine
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: md.info && md.info.mainLine ? md.keepTogether(md.info.mainLine) : ""
@@ -243,7 +255,7 @@ Item {
             }
             Rectangle {
                 id: otherRow
-                visible: md.otherCount > 0
+                visible: md.fileRows && md.otherCount > 0
                 width: parent.width; height: md.ui.px(40); radius: md.ui.px(6)
                 color: md.focused && md.focusIndex === 1 ? md.ui.c.focusFill : md.ui.c.card
                 border.color: md.ui.c.accent

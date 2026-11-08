@@ -1,6 +1,6 @@
 import QtQuick
 
-// A short message at the bottom, e.g. "Recently removed: Epic Loot · Kept 7 days · Y Undo". It sizes and places
+// A short message at the bottom, e.g. "Epic Loot deleted for good." It sizes and places
 // itself at the bottom center of its parent and hides itself after timeout milliseconds (0 keeps it up).
 // Call show(...) to put up a message; it stays hidden until then.
 //
@@ -18,24 +18,19 @@ Rectangle {
     property string text: ""              // e.g. "Recently removed:"
     property string strong: ""            // bold part after text, e.g. "Epic Loot"
     property string detail: ""            // muted, e.g. "Kept 7 days"
-    property string actionKey: ""         // e.g. "y"; empty hides the action
-    property string actionLabel: ""       // e.g. "Undo"
     property int timeout: 5000            // milliseconds; 0 keeps it up until hide()
     property real bottomMargin: ui.px(58) // distance from the parent's bottom (clears the legend)
     property bool shown: false
     // Three looks, never mixed: "info" (accent i mark), "done" (ok check), "problem" (warn mark, real failures only).
     property string kind: "info"
 
-    signal actionClicked()
     signal hidden()
 
-    // show(text, strong, detail, actionKey, actionLabel); the last four are optional.
-    function show(t, s, d, k, l) {
+    // show(text, strong, detail); the last two are optional.
+    function show(t, s, d) {
         text = t || ""
         strong = s || ""
         detail = d || ""
-        actionKey = k || ""
-        actionLabel = l || ""
         shown = true
         if (timeout > 0) hideTimer.restart()
         else hideTimer.stop()
@@ -104,7 +99,7 @@ Rectangle {
         Text {
             id: mainText
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0) - (action.visible ? action.width + parent.spacing : 0))
+            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0))
             text: root.escaped(root.text || "") + (root.strong !== "" ? (root.text !== "" ? " " : "") + "<b>" + root.escaped(root.strong) + "</b>" : "")
             textFormat: Text.StyledText
             elide: Text.ElideRight
@@ -120,50 +115,6 @@ Rectangle {
             color: root.ui.c.muted
             font.family: root.ui.bodyFont
             font.pixelSize: root.ui.px(14)
-        }
-        Rectangle {
-            id: action
-            visible: root.actionKey !== "" || root.actionLabel !== ""
-            anchors.verticalCenter: parent.verticalCenter
-            width: actionRow.implicitWidth + root.ui.px(18)
-            height: root.ui.px(32)
-            radius: root.ui.px(6)
-            color: Qt.tint(root.ui.c.raised, Qt.rgba(root.ui.c.accent.r, root.ui.c.accent.g, root.ui.c.accent.b, 0.22))
-            Row {
-                id: actionRow
-                readonly property color bg: parent.color
-                anchors.centerIn: parent
-                spacing: root.ui.px(6)
-                Rectangle {
-                    visible: root.actionKey !== ""
-                    width: Math.max(root.ui.px(24), actionKeyText.implicitWidth + root.ui.px(12))
-                    height: root.ui.px(24)
-                    radius: root.actionKey.length > 1 ? root.ui.px(6) : height / 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: root.ui.c.raised
-                    border.color: root.ui.c.accentLo
-                    border.width: Math.max(1, root.ui.px(1))
-                    Text {
-                        id: actionKeyText
-                        anchors.centerIn: parent
-                        text: root.actionKey.toUpperCase()
-                        color: root.ui.c.text
-                        font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.px(14)
-                        font.bold: true
-                    }
-                }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.actionLabel || ""
-                    color: root.readable(root.ui.c.accentHi, actionRow.bg)
-                    font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(15)
-                    font.weight: Font.DemiBold
-                }
-            }
-            HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
-            TapHandler { onTapped: root.actionClicked() }
         }
     }
 

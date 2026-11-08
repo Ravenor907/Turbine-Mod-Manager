@@ -97,20 +97,14 @@ pub fn open_through_steam(url: &str) -> String {
 /// How long the same page isn't opened again: the browser can take this long to come up in Game Mode.
 pub const RELAUNCH_GUARD: std::time::Duration = std::time::Duration::from_secs(8);
 
-static LAST_OPEN: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+static LAST_OPEN: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
 
 /// Some(milliseconds since) when `url` was opened less than `RELAUNCH_GUARD` ago; otherwise remembers it as opened
-/// now and answers None. Steam's browser (the player's own choice after a press) is never held back by this.
+/// now and answers None. Each page is remembered on its own (A, B, then A again within 8 seconds opens A once).
+/// Steam's browser (the player's own choice after a press) is never held back by this.
 fn recently_opened(url: &str, now: std::time::Instant) -> Option<u128> {
     let mut last = LAST_OPEN.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((u, at)) = last.as_ref() {
-        let ago = now.saturating_duration_since(*at);
-        if u == url && ago < RELAUNCH_GUARD {
-            return Some(ago.as_millis());
-        }
-    }
-    *last = Some((url.to_string(), now));
-    None
+    crate::bridge::page_guard(&mut last, url, now, RELAUNCH_GUARD)
 }
 
 /// Labs and Recheck: is there a browser among Steam's non-Steam games? {"found":false} or the shortcut's JSON.

@@ -52,6 +52,7 @@ pub mod qobject {
         #[qproperty(f64, pointer_y, cxx_name = "pointerY")]
         #[qproperty(bool, pointer_shown, cxx_name = "pointerShown")]
         #[qproperty(bool, pointer_paused, cxx_name = "pointerPaused")]
+        #[qproperty(bool, stick_dpad, cxx_name = "stickDpad")]
         #[qproperty(QString, labs_json, cxx_name = "labsJson")]
         type Turbine = super::TurbineRust;
 
@@ -89,6 +90,17 @@ pub mod qobject {
         #[qinvokable]
         fn wake(self: Pin<&mut Self>);
 
+        /// The left stick's wheel while the pointer is hidden: `steps` notches (positive down) at (x, y), the
+        /// focused item's middle. The pointer stays hidden.
+        #[qinvokable]
+        #[cxx_name = "wheelAt"]
+        fn wheel_at(self: Pin<&mut Self>, x: f64, y: f64, steps: i32);
+
+        /// Turbine went to the background: a direction held on the left stick is let go (and stays let go until
+        /// the stick is back in the middle), so nothing repeats while a game or the overlay has the screen.
+        #[qinvokable]
+        fn sleep(self: Pin<&mut Self>);
+
         /// Shows this game's mods and rules (opens its store the first time).
         #[qinvokable]
         fn select(self: Pin<&mut Self>, game_id: &QString);
@@ -119,6 +131,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "undoRemove"]
         fn undo_remove(self: Pin<&mut Self>, id: &QString);
+
+        /// The folder a mod's files are kept in (the mod menu's Open folder), or "" when there is none.
+        #[qinvokable]
+        #[cxx_name = "modFolder"]
+        fn mod_folder(self: &Self, id: &QString) -> QString;
 
         /// Applies waiting changes to the game now (does nothing when there are none).
         #[qinvokable]
@@ -622,6 +639,11 @@ pub struct TurbineRust {
     pub(crate) pointer_y: f64,
     pub(crate) pointer_shown: bool,
     pub(crate) pointer_paused: bool,
+    /// The left stick is only a D-pad (no scroll wheel) while the quick wheel is open.
+    pub(crate) stick_dpad: bool,
+    /// Which sources hold each mouse button down: [left, right], a bit per source (RT 1, R3 2 on the left; LT 1
+    /// on the right). The button is let go only when the last source lets go.
+    pub(crate) mouse_src: [u8; 2],
     /// The controller pointer: where it is, the left stick's wheel, and the last look's time.
     pub(crate) pointer: crate::pointer::Pointer,
     pub(crate) pointer_at: Option<std::time::Instant>,
@@ -690,6 +712,8 @@ impl Default for TurbineRust {
             pointer_y: -1.0,
             pointer_shown: false,
             pointer_paused: false,
+            stick_dpad: false,
+            mouse_src: [0, 0],
             pointer: crate::pointer::Pointer::default(),
             pointer_at: None,
             mouse_down: [false, false],
@@ -1171,8 +1195,26 @@ impl qobject::Turbine {
 
     pub fn wake(mut self: Pin<&mut Self>) {
         crate::log::line("window", "Back in front; controller quiet for 250 ms");
-        if let Some(r) = self.as_mut().rust_mut().reader.as_mut() {
-            r.wake(Duration::from_millis(250));
+        let ups = match self.as_mut().rust_mut().reader.as_mut() {
+            Some(r) => r.wake(Duration::from_millis(250)),
+            None => Vec::new(),
+        };
+        // A stick still pushed from the game presses nothing until it has been back in the middle.
+        let stick = self.as_mut().rust_mut().pointer.let_go();
+        // Buttons let go while Turbine was in the background are let go here too.
+        for (button, _) in ups.into_iter().chain(stick.map(|d| (d, false))) {
+            self.as_mut().handle_pad(button, false);
+        }
+    }
+
+    pub fn wheel_at(self: Pin<&mut Self>, x: f64, y: f64, steps: i32) {
+        crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, self.mouse_mask(), steps);
+    }
+
+    pub fn sleep(mut self: Pin<&mut Self>) {
+        if let Some(d) = self.as_mut().rust_mut().pointer.let_go() {
+            crate::log::line("pad", &format!("Left stick {d} let go (Turbine in the background)"));
+            self.as_mut().handle_pad(d, false);
         }
     }
 
@@ -1181,35 +1223,60 @@ impl qobject::Turbine {
             let r = Pads::open();
             self.as_mut().rust_mut().reader = Some(r);
         }
-        let (events, connected, sticks) = match self.as_mut().rust_mut().reader.as_mut() {
-            Some(r) => (r.poll(), r.connected(), r.sticks()),
-            None => (Vec::new(), false, crate::pointer::Sticks::default()),
+        let (events, connected, sticks, quiet, lost) = match self.as_mut().rust_mut().reader.as_mut() {
+            Some(r) => (r.poll(), r.connected(), r.sticks(), r.quiet(), r.take_dropped_out()),
+            None => (Vec::new(), false, crate::pointer::Sticks::default(), false, false),
         };
         if *self.pads() != connected {
             self.as_mut().set_pads(connected);
             let name = self.rust().reader.as_ref().and_then(|r| r.names().into_iter().next()).unwrap_or_default();
             self.as_mut().set_pad_name(QString::from(name.as_str()));
         }
-        // The left stick pushed and held one way is a D-pad press, in with the buttons.
+        // The left stick pushed and held one way is a D-pad press, in with the buttons, and quiet with them just
+        // after Turbine comes back to the front (releases still go through).
         let mut events = events;
-        events.extend(self.as_mut().pointer_tick(&sticks));
+        let dpad = *self.stick_dpad();
+        self.as_mut().rust_mut().pointer.dpad_only = dpad;
+        events.extend(self.as_mut().pointer_tick(&sticks).into_iter().filter(|(_, down)| !(quiet && *down)));
         for (button, pressed) in events {
             self.as_mut().handle_pad(button, pressed);
+        }
+        if lost {
+            // A controller went away: its buttons were let go above; the interface stops every hold too.
+            self.as_mut().pad(QString::from("lost"), false);
         }
     }
 
     /// One press or release, from a pad or the build's checks (selftestPad).
     fn handle_pad(mut self: Pin<&mut Self>, button: &'static str, pressed: bool) {
         // While the pointer shows, RT and R3 are the left mouse button and LT the right one (held for dragging).
+        // Each source is tracked on its own: R3 let go while RT still drags doesn't drop the drag, and a source
+        // whose press went to the mouse never sends its release on to the interface (or the other way round).
         let mouse = match button {
-            "rt" | "r3" => Some(0),
-            "lt" => Some(1),
+            "rt" => Some((0, 1u8)),
+            "r3" => Some((0, 2u8)),
+            "lt" => Some((1, 1u8)),
             _ => None,
         };
-        if let Some(i) = mouse {
-            let held = self.rust().mouse_down[i];
-            if held || (pressed && self.rust().pointer.shown && !*self.pointer_paused()) {
-                self.as_mut().mouse_button(i, pressed, button);
+        if let Some((i, bit)) = mouse {
+            let src = self.rust().mouse_src[i];
+            if pressed {
+                if src & bit != 0 {
+                    return;
+                }
+                if src != 0 || (self.rust().pointer.shown && !*self.pointer_paused()) {
+                    self.as_mut().rust_mut().mouse_src[i] = src | bit;
+                    if src == 0 {
+                        self.as_mut().mouse_button(i, true, button);
+                    }
+                    return;
+                }
+            } else if src & bit != 0 {
+                let left = src & !bit;
+                self.as_mut().rust_mut().mouse_src[i] = left;
+                if left == 0 {
+                    self.as_mut().mouse_button(i, false, button);
+                }
                 return;
             }
         }
@@ -1225,7 +1292,8 @@ impl qobject::Turbine {
     }
 
     pub fn selftest_pad(mut self: Pin<&mut Self>, button: &QString, pressed: bool) {
-        const ALL: [&str; 20] = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view", "r3", "l3", "up", "down", "left", "right", "l4", "r4", "l5", "r5"];
+        // "lost": what a controller going away sends after letting go of its buttons.
+        const ALL: [&str; 21] = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view", "r3", "l3", "up", "down", "left", "right", "l4", "r4", "l5", "r5", "lost"];
         let b = button.to_string();
         if let Some(k) = ALL.iter().find(|k| **k == b) {
             self.as_mut().handle_pad(*k, pressed);
@@ -1260,7 +1328,8 @@ impl qobject::Turbine {
                 self.as_mut().rust_mut().pointer.shown = false;
                 self.as_mut().pointer_publish();
             }
-            return Vec::new();
+            // The keyboard is up: a held direction is let go now, so it doesn't repeat until the keyboard closes.
+            return self.as_mut().rust_mut().pointer.let_go().map(|d| vec![(d, false)]).unwrap_or_default();
         }
         let Some((w, h)) = crate::pad::window_size() else { return Vec::new() };
         let t = {
@@ -1296,7 +1365,15 @@ impl qobject::Turbine {
             crate::pad::send(crate::pad::Kind::Move, -100.0, -100.0, 0, 0, 0);
         }
         if t.wheel != 0 {
-            crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, self.mouse_mask(), t.wheel);
+            if self.rust().pointer.shown {
+                crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, self.mouse_mask(), t.wheel);
+            } else {
+                // No pointer on screen: the wheel goes to whatever has the focus (Main.qml works out where that is
+                // and calls wheelAt), not to the hidden pointer's last place.
+                for _ in 0..t.wheel.unsigned_abs() {
+                    self.as_mut().pad(QString::from("wheel"), t.wheel > 0);
+                }
+            }
         }
         if t.moved || t.hid {
             if t.moved && !*self.pointer_shown() {
@@ -1560,6 +1637,20 @@ impl qobject::Turbine {
         self.change(move |s| s.remove(&id).map_err(|e| format!("Couldn't uninstall that mod: {e}")));
     }
 
+    pub fn mod_folder(&self, id: &QString) -> QString {
+        let id = id.to_string();
+        if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
+            return QString::default();
+        }
+        let Some(game) = self.current_game() else { return QString::default() };
+        let dir = Store::root_for(&game, &data_home()).join("mods").join(&id);
+        if dir.is_dir() {
+            QString::from(dir.to_string_lossy().as_ref())
+        } else {
+            QString::default()
+        }
+    }
+
     pub fn undo_remove(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {e}")));
@@ -1608,7 +1699,8 @@ impl qobject::Turbine {
 
     pub fn apply_now(mut self: Pin<&mut Self>) {
         let (Some(game), n) = self.as_mut().take_pending() else { return };
-        self.as_mut().say(&format!("Applying {} to the game...", changes(n)), "work");
+        // "Saving..." in the status line while it runs (the header shows nothing about changes otherwise).
+        self.as_mut().say(&format!("Saving {} to the game...", changes(n)), "work");
         let name = format!("Apply {} to {}", changes(n), game.name);
         self.send(Some(game.id()), &name, true, apply_job(game, n));
     }

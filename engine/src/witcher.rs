@@ -247,11 +247,11 @@ pub fn conflict_checks(mods: &[(&str, &[String])]) -> Vec<Check> {
                 2 => format!("{} and {}", names[0], names[1]),
                 _ => format!("{} and {}", names[..names.len() - 1].join(", "), names[names.len() - 1]),
             };
-            let one = if names.len() == 2 { "one" } else { "one of them" };
+            let these = if names.len() == 2 { "These two mods" } else { "These mods" };
             Check {
                 level: "warn".into(),
                 title: CONFLICT_TITLE.into(),
-                detail: format!("{who} change the same game script, so only {one} works."),
+                detail: format!("{who}: {these} change the same part of the game. Only one can work."),
             }
         })
         .collect()
@@ -263,21 +263,16 @@ pub fn install_notes(archive_files: &[String]) -> Vec<String> {
     let mut notes = Vec::new();
     let names: Vec<String> = archive_files.iter().map(|f| f.replace('\\', "/")).collect();
     let file = |f: &String| f.rsplit('/').next().unwrap_or(f).to_lowercase();
-    let docs = "Documents/The Witcher 3 (in the game's Proton folder)";
+    // Plain words for someone in Game Mode: the files themselves (input.settings, dx12user.settings in the game's
+    // Proton folder, under Documents/The Witcher 3) can't be edited there, and the mods work without the lines.
     if names.iter().any(|f| {
         let n = file(f);
         n == "input.settings" || (n.contains("input") && (n.ends_with(".settings") || n.ends_with(".txt")))
     }) {
-        notes.push(format!(
-            "This mod comes with key bindings to add to input.settings in {docs}. Turbine never changes that file; \
-             add the lines yourself if you want the mod's keys."
-        ));
+        notes.push("This mod has extra keys you can set up later on a PC. It works without them.".to_string());
     }
     if names.iter().any(|f| matches!(file(f).as_str(), "user.settings" | "dx11user.settings" | "dx12user.settings")) {
-        notes.push(format!(
-            "This mod comes with settings lines for dx12user.settings (or dx11user.settings) in {docs}. Turbine never \
-             changes those files; add the lines yourself if the mod's page asks for them."
-        ));
+        notes.push("This mod has extra settings you can add later on a PC, if its page asks for them. It works without them.".to_string());
     }
     let menus: Vec<String> = names
         .iter()
@@ -285,12 +280,12 @@ pub fn install_notes(archive_files: &[String]) -> Vec<String> {
         .map(|f| f.rsplit('/').next().unwrap_or(f).to_string())
         .collect();
     if !menus.is_empty() {
+        // The menu's file needs a line ("name.xml;") in the game's dx12filelist.txt and dx11filelist.txt, which
+        // belong to the game: Turbine doesn't change them.
         notes.push(format!(
-            "This mod has an in-game settings menu ({}). If it doesn't show in the game's Mods menu, its name needs a \
-             line in dx12filelist.txt and dx11filelist.txt in bin/config/r4game/user_config_matrix/pc, written as \
-             \"{};\". Those lists belong to the game, so Turbine doesn't change them.",
-            menus.join(", "),
-            menus[0]
+            "This mod has its own settings menu ({}). If it doesn't show in the game's Mods menu, it can be added later \
+             on a PC (the mod's page says how). The mod works without it.",
+            menus.join(", ")
         ));
     }
     notes
