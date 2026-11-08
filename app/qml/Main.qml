@@ -952,6 +952,7 @@ Window {
         if (tab === 1) Qt.callLater(browseNow)
     }
     Component.onCompleted: {
+        introSeen = parse(seen.basicIntroDone, [])
         // Recorded samples instead of the internet (the build's screenshot checks); first, before anything asks.
         if (shot.arg("selftest-data") !== "") Turbine.setSampleData(shot.arg("selftest-data"))
         else if (!shot.on) {
@@ -1954,7 +1955,6 @@ Window {
         if (basicIntro && !shot.on) { let d = parse(seen.basicIntroDone, []); if (d.indexOf(game.id) < 0) { d.push(game.id); seen.basicIntroDone = JSON.stringify(d) } }
         if (basicIntro) note("page", "First visit card: Mods for " + gameTitle)
     }
-    Component.onCompleted: introSeen = parse(seen.basicIntroDone, [])
     function placementWords(m) {
         const p = placements[m.id]
         if (!p) return []
