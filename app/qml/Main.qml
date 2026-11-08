@@ -917,7 +917,7 @@ Window {
         }
         load()
         note("app", "Qt platform " + Qt.platform.pluginName + (Turbine.gamemode ? ", Game Mode" : ""))
-        if (shot.page === "settings") { page = "settings"; zone = "settings" }
+        if (shot.page === "settings") { page = "settings"; zone = "settings"; setRow = firstSettingsRow() }
         else if (shot.page === "details") sheet = "details"
         else if (shot.page === "perf") { page = "perf"; zone = "perf" }
         else if (shot.page === "notice") sheet = "notice"
