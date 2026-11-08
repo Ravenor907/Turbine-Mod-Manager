@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.54" date="2026-11-08" type="development">
+      <description>
+        <p>New controls and an easier start:</p>
+        <ul>
+          <li>One selection and one meaning per button; the quick wheel on View; the right stick pointer with RT and R3 as the left click</li>
+          <li>A short beginner tutorial on first run, replayable from Settings, Help</li>
+          <li>Fewer steps from a game to a mod in it; clicking any row does what A does</li>
+          <li>Game Mode opens Chrome through Steam, with Steam's browser one press away</li>
+          <li>The browser helper updates itself; a clear prompt to press Slow download on Nexus</li>
+          <li>Holds such as Delete for good only count while a button is really held</li>
+          <li>Settings, Labs, Activity log with Copy to clipboard</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.53" date="2026-11-07" type="development">
       <description>
         <p>Round four:</p>
