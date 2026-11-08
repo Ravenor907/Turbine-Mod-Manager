@@ -508,7 +508,10 @@ if command -v Xvfb > /dev/null; then
     need $n "7: an exe is refused ($size)" "Download refused \(127.0.0.1\): Turbine only takes zip, 7z or rar mods"
     need $n "7: a second file of a name gets (2) ($size)" "Download: Dupe Test 1.0 \(2\).zip into Game Mods/$sky"
     need $n "1: the initiator is checked in C++ ($size)" "Mod Manager Download link from http://127.0.0.1:47800: initiator checked"
-    need $n "4: Mod Manager Download comes to Turbine ($size)" "Mod Manager Download link from the browser \(scheme handler, from http://127.0.0.1:47800\): nxm://skyrimspecialedition/mods/1/files/2"
+    need $n "4: Mod Manager Download comes to Turbine, which asks ($size)" "Mod Manager Download link from the browser \(scheme handler, from http://127.0.0.1:47800\): Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/2"
+    need $n "M6: the question names mod and file, opens on Not now, page input off ($size)" "Browser check: Mod Manager Download asks: Get .* \(.*\) for .*\?, focus Not now, A Not now, B Not now, page input off"
+    need $n "M6: A at once on the question is ignored ($size)" "Browser check: A at once on the question: ignored"
+    need $n "M6: Right then A after a second gets it ($size)" "Browser check: Right then A after a second gets it: yes"
     need $n "4: and its file goes into Game Mods ($size)" "Test run: pretending to download nxm://skyrimspecialedition/mods/1/files/2.* into Game Mods/$sky"
     need $n "4: the page stays on the file page ($size)" "after Mod Manager Download the page is still the file page: yes"
     need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
@@ -598,13 +601,13 @@ PY
   pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
   pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
   pneed "1c (M5): another mod's link asks first" "Browser check: another mod's link asks: Get .* for .*, A Get it, B Not now"
-  pneed "1c (M5): ... logged as asking" "not for the pressed page's own mod: Turbine asks first: nxm://skyrimspecialedition/mods/2/files/57"
+  pneed "1c (M5): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/2/files/57"
   pneed "1c (H1c): a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* for .*, A Get it, B Not now"
-  pneed "1c (H1c): ... logged as asking" "not for the pressed page's own mod: Turbine asks first: nxm://skyrimspecialedition/mods/1/files/56"
+  pneed "1c (H1c): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/56"
   pneed "1c: Not now downloads nothing" "Browser check: after Not now, nothing downloaded: yes"
   asked=$(printf '%s\n' "$after" | grep -E "pretending to download nxm://skyrimspecialedition/mods/(1/files/56|2/files/57)" || true)
   if [ -n "$asked" ]; then echo "::error title=1c: a link that asked downloaded anyway::"; fail=1; fi
-  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler, from [^)]*\): nxm://.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
+  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler, from [^)]*\): Turbine asks before it downloads: nxm://.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
   if [ -n "$got" ]; then
     echo "::error title=1: a link with no press got through::"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)

@@ -492,7 +492,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserNxm"]
         fn browser_nxm(self: Pin<&mut Self>, url: &QString, main_frame: bool, page_url: &QString) -> bool;
-        /// A mouse click or a touch on the page (the controller's presses are counted in Rust).
+        /// A mouse button or a finger went down on the page.
+        #[qinvokable]
+        #[cxx_name = "browserPointerDown"]
+        fn browser_pointer_down(self: &Self);
+        /// ... and was let go as a tap or click (the controller's presses are counted in Rust).
         #[qinvokable]
         #[cxx_name = "browserPressed"]
         fn browser_pressed(self: Pin<&mut Self>);
@@ -500,11 +504,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserMainFrame"]
         fn browser_main_frame(self: &Self, url: &QString);
-        /// Must Turbine ask before this link downloads (not for the pressed Nexus page's own mod)?
+        /// Must Turbine ask before this link downloads (every link from Turbine's page)?
         #[qinvokable]
         #[cxx_name = "nxmMustAsk"]
         fn nxm_must_ask(self: &Self, link: &QString) -> bool;
-        /// Looks up the link's mod name (lands in nxmNameJson).
+        /// Looks up the link's mod and file names (land in nxmNameJson).
         #[qinvokable]
         #[cxx_name = "nxmAskName"]
         fn nxm_ask_name(self: Pin<&mut Self>, link: &QString);

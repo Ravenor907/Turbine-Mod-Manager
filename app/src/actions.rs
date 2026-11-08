@@ -1433,8 +1433,8 @@ impl qobject::Turbine {
         );
     }
 
-    /// The name of a Mod Manager Download link's mod, for "Get <mod> for <game>?": lands in nxmNameJson
-    /// {"link","name"} ("" when Nexus can't say).
+    /// The names of a Mod Manager Download link's mod and file, for "Get <mod> (<file>) for <game>?": land in
+    /// nxmNameJson {"link","name","file"} ("" when Nexus can't say).
     pub fn nxm_ask_name(self: Pin<&mut Self>, link: &QString) {
         let text = link.to_string();
         let Ok(l) = turbine_engine::nxm::parse(&text) else { return };
@@ -1442,7 +1442,8 @@ impl qobject::Turbine {
             "The name of a Mod Manager Download link's mod",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let name = net.mod_name(&l.domain, l.mod_id).unwrap_or_default();
-                let j = format!("{{\"link\":{},\"name\":{}}}", quote(&text), quote(&name));
+                let file = net.file_name(&l.domain, l.mod_id, l.file_id).unwrap_or_default();
+                let j = format!("{{\"link\":{},\"name\":{},\"file\":{}}}", quote(&text), quote(&name), quote(&file));
                 set(qt, move |t| t.set_nxm_name_json(QString::from(j.as_str())));
             }),
         );

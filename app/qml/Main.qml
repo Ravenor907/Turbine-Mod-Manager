@@ -1970,9 +1970,14 @@ Window {
                 if (sheet === "notice") seen.notSteamOS = true
                 sheet = ""
             }
-        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game)) && b === "start") {
+        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game && !nxmAsking)) && b === "start") {
             // Start plays from any menu (the legend shows it while a menu covers the Play button).
             stopReset(); sheet = ""; startPlay()
+        } else if (sheet === "pick" && nxmAskQuiet()) {
+            note("nxm", "Press " + b + " ignored: the question opened " + (Date.now() - nxmAskAt) + " ms ago")
+        } else if (sheet === "pick" && nxmAsking && (b === "left" || b === "right" || b === "up" || b === "down")) {
+            // Right (or Up) to Get it, Left (or Down) back to Not now.
+            menuIndex = b === "right" || b === "up" ? 0 : 1
         } else if (sheet === "pick") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
             else if (b === "down") menuIndex = Math.min(pickItems.length - 1, menuIndex + 1)
@@ -2895,7 +2900,12 @@ Window {
               act: () => { check("Browser check: pill " + browserPill.text); btShot("added") } },
             { name: "mod manager download", after: 500, act: () => { bt.nxmAt = Date.now(); btClick(460, 188)
                 check("Browser check: the Added note cleared at the next click: " + (!browserNoteNow || browserNoteNow.text.indexOf("Added") < 0 ? "yes" : "no")) } },
-            { name: "nxm", after: 7500, act: () => {
+            // Every Mod Manager Download link from the page asks: on Not now, deaf for a second, then Right and A.
+            { name: "mmd asks", max: 15000, wait: () => nxmAsking,
+              act: () => { const o = binds(); check("Browser check: Mod Manager Download asks: " + pickTitle + ", focus " + pickItems[menuIndex].title + ", A " + o.a.label + ", B " + o.b.label + ", page input " + (nexusView.view.enabled ? "on" : "off"))
+                           pad("a"); check("Browser check: A at once on the question: " + (nxmAsking ? "ignored" : "taken")) } },
+            { name: "mmd get", after: 1200, act: () => { pad("right"); pad("a"); check("Browser check: Right then A after a second gets it: " + (!nxmAsking ? "yes" : "no")) } },
+            { name: "nxm", after: 2500, act: () => {
                 check("Browser check: after Mod Manager Download the page is still the file page: " + (pageIs(/tab=files/) ? "yes" : "no, " + (nexusView ? nexusView.url : "")))
                 browserNoKey("", "nxm://skyrimspecialedition/mods/1/files/2?key=abc&expires=4102444800&user_id=1") } },
             { name: "no key", after: 600, act: () => { btShot("nokey"); btLegend("no key message")
@@ -2937,12 +2947,12 @@ Window {
               act: () => { check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no"))
                            // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
                            btClick(700, 452) } },
-            { name: "another mod asks", max: 15000, wait: () => sheet === "pick" && pickTitle.indexOf("Get ") === 0,
+            { name: "another mod asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
               act: () => { const o = binds(); check("Browser check: another mod's link asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
             // H1c: an outside page read for a while; a tap on it sends the view to mod 1's page that does the same.
             { name: "outside page", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load("http://127.0.0.1:47801/tapme") } },
             { name: "tap outside", max: 15000, wait: () => pageIs(/tapme/), after: 800, act: () => btClick(190, 80) },
-            { name: "tap off nexus asks", max: 15000, wait: () => sheet === "pick" && pickTitle.indexOf("Get ") === 0,
+            { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
               act: () => { const o = binds(); check("Browser check: a tap off Nexus asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
             { name: "slow", max: 15000, wait: () => sheet === "" && pageIs(/file_id=56/), after: 600,
               act: () => { check("Browser check: after Not now, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")); bt.pressAt = Date.now(); btClick(160, 188) } },
@@ -3856,6 +3866,7 @@ Window {
         function onGooglePassword() { app.googleSetPassword() }
         function onGoogleChrome() { app.googleUseChrome() }
         function onPagePressed() { Turbine.browserPressed() }
+        function onPageDown() { Turbine.browserPointerDown() }
         function onCloseClicked() { app.closeBrowser("back") }
         function onTabClicked(i) { app.browserTab = i }
         function onDownloadClicked(i) { app.browserDlIndex = i; app.browserRowAct(i) }
@@ -4269,8 +4280,7 @@ Window {
             return
         }
         if (r.error) { note("nxm", "Link refused: " + r.error); say(r.error, "error"); if (browserOpen) browserSay(r.error, "warn"); return }
-        // Not for the mod of the Nexus page the player pressed on (another mod, another game, a press made off
-        // Nexus): nothing downloads until he says so.
+        // Every Mod Manager Download link from Turbine's page: nothing downloads until the player says Get it.
         if (Turbine.nxmMustAsk(link)) { nxmAsk(link, r); return }
         // From Turbine's own Nexus page: it stays on screen, and the pill shows the download.
         if (browserOpen && page === "browser") {
@@ -4288,22 +4298,35 @@ Window {
         edited()
     }
 
-    // "Get <mod> for <game>?": A Get it, B Not now. The mod's name comes from Nexus a moment later.
+    // "Get <mod> (<file>) for <game>?", asked for every Mod Manager Download link from Turbine's page. It opens on
+    // Not now and takes no input at all for its first second (a page saying "press A again" can't have the next
+    // press answer it); Right (or a tap on Get it) then A gets it. One question at a time: a second link while it
+    // is open is dropped. The names come from Nexus a moment later.
     property string nxmAskLink: ""
     property var nxmAskInfo: null
-    function nxmAskTitle(name) {
-        const m = /^nxm:\/\/[a-z0-9_-]+\/mods\/([0-9]+)/i.exec(nxmAskLink)
-        return "Get " + (name !== "" ? name : "mod " + (m ? m[1] : "")) + " for " + (nxmAskInfo && nxmAskInfo.name ? nxmAskInfo.name : "this game") + "?"
+    property real nxmAskAt: 0
+    property string nxmAskMod: ""
+    property string nxmAskFile: ""
+    readonly property bool nxmAsking: sheet === "pick" && nxmAskLink !== "" && pickBLabel === "Not now"
+    function nxmAskQuiet() { return nxmAsking && Date.now() - nxmAskAt < 1000 }
+    function nxmAskTitle() {
+        const m = /^nxm:\/\/[a-z0-9_-]+\/mods\/([0-9]+)\/files\/([0-9]+)/i.exec(nxmAskLink)
+        return "Get " + (nxmAskMod !== "" ? nxmAskMod : "mod " + (m ? m[1] : "")) + " (" + (nxmAskFile !== "" ? nxmAskFile : "file " + (m ? m[2] : "")) + ") for "
+            + (nxmAskInfo && nxmAskInfo.name ? nxmAskInfo.name : "this game") + "?"
     }
     function nxmAsk(link, r) {
-        note("nxm", "Asking first: the link isn't for the mod of the Nexus page you pressed on")
-        nxmAskLink = link; nxmAskInfo = r
+        if (nxmAsking) { note("nxm", "Another Mod Manager Download link while asking about one: dropped"); return }
+        note("nxm", "Asking before it downloads: a Mod Manager Download link from Turbine's page")
+        nxmAskLink = link; nxmAskInfo = r; nxmAskMod = ""; nxmAskFile = ""
         Turbine.nxmAskName(link)
-        openPick(nxmAskTitle(""), "You didn't press this mod's own download button, so Turbine asks first.", [
+        openPick(nxmAskTitle(), "Turbine asks before every Mod Manager Download from a page. Right, then A, gets it.", [
             { icon: "play", title: "Get it", detail: "Downloads it and adds it to " + (r.name || "the game"), aLabel: "Get it", run: () => nxmAskGet() },
             { icon: "remove", title: "Not now", detail: "Nothing is downloaded", aLabel: "Not now", run: () => nxmAskNo() }
         ], "")
         pickBLabel = "Not now"
+        menuIndex = 1
+        nxmAskAt = Date.now()
+        keyRoot.forceActiveFocus()
     }
     function nxmAskGet() {
         const link = nxmAskLink, r = nxmAskInfo
@@ -4324,7 +4347,9 @@ Window {
         target: Turbine
         function onNxmNameJsonChanged() {
             const j = app.parse(Turbine.nxmNameJson, {})
-            if (j.link === app.nxmAskLink && app.sheet === "pick" && app.pickTitle.indexOf("Get ") === 0) app.pickTitle = app.nxmAskTitle(j.name || "")
+            if (j.link !== app.nxmAskLink || !app.nxmAsking) return
+            app.nxmAskMod = j.name || ""; app.nxmAskFile = j.file || ""
+            app.pickTitle = app.nxmAskTitle()
         }
     }
 
@@ -6209,6 +6234,7 @@ Window {
                 glyph: app.glyph
                 padLegend: app.lastInput !== "touch"
                 signinShown: app.browserSigninShown
+                inputBlocked: app.sheet !== "" || app.wheelOpen
                 noteFresh: app.browserNoteFresh
                 googleShown: app.browserOnGoogle
                 googlePasswordWords: "Nexus emails you a link. Open it (on your phone is fine), set a password, then sign in here with your email and that password. Nothing else to set up."
@@ -6537,8 +6563,17 @@ Window {
         subtitle: app.pickSub
         items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
         focusIndex: app.menuIndex
-        onActivated: (index) => { app.menuIndex = index; app.pickRun(index) }
-        onClosed: app.act("b")
+        onActivated: (index) => {
+            // The Mod Manager Download question: nothing for its first second, and a tap on Get it only picks it
+            // (A then gets it).
+            if (app.nxmAsking && (app.nxmAskQuiet() || (index === 0 && app.menuIndex !== 0))) {
+                if (!app.nxmAskQuiet()) app.menuIndex = 0
+                app.note("nxm", "Tap on the question: " + (app.nxmAskQuiet() ? "ignored (it just opened)" : "Get it picked; A gets it"))
+                return
+            }
+            app.menuIndex = index; app.pickRun(index)
+        }
+        onClosed: { if (app.nxmAskQuiet()) return; app.act("b") }
     }
     // The focused game's name beside the rail, up in the header (never over the tabs), and until a game has been
     // opened from the rail once, how to pick one.

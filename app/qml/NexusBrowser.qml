@@ -35,6 +35,8 @@ Item {
     property bool padLegend: true
     // A message cut short in the pill shows whole under the bar for its first 6 seconds only.
     property bool noteFresh: true
+    // A sheet of Turbine's is over the page: the page takes no input and can't take the focus.
+    property bool inputBlocked: false
     // Google's sign-in page: Turbine's card with the two ways that work (Main.qml has the words and the buttons).
     property bool googleShown: false
     property string googlePasswordWords: ""
@@ -52,6 +54,7 @@ Item {
     signal signinClicked()
     signal googlePassword()
     signal pagePressed()
+    signal pageDown()
     signal googleChrome()
     signal closeClicked()
     signal menuWanted()
@@ -323,6 +326,7 @@ Item {
             anchors.fill: parent
             active: nb.live
             sourceComponent: pageComponent
+            enabled: !nb.inputBlocked
         }
         // The build's pictures without a stand-in page: the frame only.
         Text {
@@ -400,14 +404,16 @@ Item {
             anchors.fill: parent
             z: 3
             // A PointHandler only watches (a TapHandler here kept the page from getting its clicks): a press let go
-            // within a second, moved less than a finger's width, is a tap or a click.
+            // within a second, moved less than a finger's width, is a tap or a click. It counts from where it went
+            // down (Rust drops it if the page changed while it was held).
             PointHandler {
                 acceptedButtons: Qt.LeftButton
+                enabled: !nb.inputBlocked
                 property real downAt: 0
                 property real moved: 0
                 onTranslationChanged: moved = Math.max(moved, Math.sqrt(translation.x * translation.x + translation.y * translation.y))
                 onActiveChanged: {
-                    if (active) { downAt = Date.now(); moved = 0 }
+                    if (active) { downAt = Date.now(); moved = 0; nb.pageDown() }
                     else if (moved < nb.ui.px(12) && Date.now() - downAt < 1000) nb.pagePressed()
                 }
             }

@@ -710,6 +710,16 @@ impl Net {
         Ok(d.info.name)
     }
 
+    /// A Nexus file's name and version (with the key; the build's test runs read the recorded file details).
+    pub fn file_name(&mut self, domain: &str, mod_id: u64, file_id: u64) -> Result<String, String> {
+        let file = if self.sample.is_some() {
+            nexus::parse_file(&self.sample_text("nexus_file.json").ok_or("The sample file details are missing.")??)?
+        } else {
+            self.nexus().ok_or("no key")?.file_info(domain, mod_id, file_id).map_err(err)?
+        };
+        Ok(format!("{} {}", file.name, file.version).trim().to_string())
+    }
+
     pub fn details_nexus(&mut self, game: &GameInfo, mod_id: u64) -> Result<String, String> {
         let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
         // The page's facts through GraphQL (no key needed); the v1 sample for the older screenshot checks.

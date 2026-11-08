@@ -59,10 +59,9 @@ pub struct WebDownload {
 /// nexusmods.com: checked again here (browse::nxm_from_page), then queued like a link from anywhere else.
 pub fn nxm_link_from_page(url: &str, initiator: &str) {
     match browse::nxm_from_page_now(url, initiator, Instant::now(), &mut |l| crate::single::push(l)) {
-        browse::NxmFromPage::Queued(r) => crate::log::line("web", &format!("Mod Manager Download link from the browser (scheme handler, from {}): {r}", browse::log_url(initiator))),
         browse::NxmFromPage::Ask(r) => crate::log::line(
             "web",
-            &format!("Mod Manager Download link from the browser (scheme handler, from {}), not for the pressed page's own mod: Turbine asks first: {r}", browse::log_url(initiator)),
+            &format!("Mod Manager Download link from the browser (scheme handler, from {}): Turbine asks before it downloads: {r}", browse::log_url(initiator)),
         ),
         browse::NxmFromPage::Refused(e) => crate::log::line("web", &format!("Mod Manager Download link refused: {e}")),
     }
@@ -171,9 +170,20 @@ impl qobject::Turbine {
         self.as_mut().set_browser_press_count(n);
     }
 
-    /// A mouse click or a touch on the page (QML's handler over the page sees it on its way in).
-    pub fn browser_pressed(self: Pin<&mut Self>) {
-        self.browser_press_seen();
+    /// A mouse button or a finger went down on the page (QML's handler over the page sees it on its way in).
+    pub fn browser_pointer_down(&self) {
+        browse::note_pointer_down();
+    }
+
+    /// ... and was let go as a tap or a click: a press, made where it went down, unless the main frame changed in
+    /// between (then it counts as nothing).
+    pub fn browser_pressed(mut self: Pin<&mut Self>) {
+        if browse::note_pointer_up(Instant::now()) {
+            let n = self.browser_press_count().wrapping_add(1);
+            self.as_mut().set_browser_press_count(n);
+        } else {
+            crate::log::line("web", "A tap or click didn't count: the page changed while it was held down");
+        }
     }
 
     /// A pressed or let go in the browser. One press is one click (held, it holds the button down).
