@@ -29,8 +29,16 @@ Item {
     property real pillProgress: -1
     property var legend: []               // [[key, label, pre, key2, label2]]
     property var glyph: function (k) { return k.toUpperCase() }
-    property bool signinShown: true
+    // "Google sign-in" (through the player's own browser and the helper): only with a paired helper and while the
+    // page isn't signed in (Main.qml decides).
+    property bool signinShown: false
     property bool padLegend: true
+    // A message cut short in the pill shows whole under the bar for its first 6 seconds only.
+    property bool noteFresh: true
+    // Google's sign-in page: Turbine's card with the two ways that work (Main.qml has the words and the buttons).
+    property bool googleShown: false
+    property string googlePasswordWords: ""
+    property string googleChromeWords: ""
     // What the page is doing, for Main.qml.
     readonly property var view: loader.item
     readonly property string url: view ? view.url.toString() : startUrl
@@ -39,9 +47,12 @@ Item {
     readonly property bool canGoBack: view ? view.canGoBack : false
     readonly property bool canGoForward: view ? view.canGoForward : false
     property int focusKind: 0             // 0 nothing, 1 a link or button, 2 a text field
-    readonly property bool signInPage: /^https:\/\/users\.nexusmods\.com\/(auth|login|sign)/i.test(url)
+    readonly property bool signInPage: /^https:\/\/users\.nexusmods\.com\/(auth|login|sign)/i.test(url) && !/password/i.test(url)
 
     signal signinClicked()
+    signal googlePassword()
+    signal pagePressed()
+    signal googleChrome()
     signal closeClicked()
     signal menuWanted()
     signal tabClicked(int index)
@@ -52,8 +63,27 @@ Item {
     function forward() { if (view && view.canGoForward) view.goForward() }
     function reload() { if (view) view.reload() }
     function load(u) { if (view) view.url = u; else startUrl = u }
+    // A fresh view at this address (the profile, and with it the sign-in, stays): no history, so B closes on it.
+    function restart(u) {
+        startUrl = u
+        if (!nb.live) return
+        loader.active = false
+        loader.active = Qt.binding(() => nb.live)
+    }
     function focusPage() { if (view) view.forceActiveFocus() }
     // Where a point in the page (CSS pixels) is in the window: for the build's scripted presses only.
+    // The bar's touch targets and their sizes in design pixels ([name, "WxH"]), for the build's check (44 at least).
+    function tapSizes() {
+        const out = []
+        const walk = (it) => {
+            if (!it || !it.visible) return
+            if (typeof it.objectName === "string" && it.objectName.indexOf("tap:") === 0)
+                out.push([it.objectName.substring(4), Math.round(it.width / nb.ui.px(1)) + "x" + Math.round(it.height / nb.ui.px(1))])
+            for (let i = 0; i < it.children.length; i++) walk(it.children[i])
+        }
+        walk(bar)
+        return out
+    }
     function pagePoint(cx, cy) { return view ? view.mapToItem(null, cx * view.zoomFactor, cy * view.zoomFactor) : Qt.point(-1, -1) }
 
     Rectangle { anchors.fill: parent; color: nb.ui.c.ground }
@@ -68,12 +98,10 @@ Item {
         color: nb.ui.c.panel
         z: 2
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: Math.max(1, nb.ui.px(1)); color: nb.ui.c.accentLo }
-        // Room for Sign in with my browser: 4 the whole words and the game's name, 3 the whole words (the game's
-        // icon only), 2 "My browser sign-in", 1 "Sign in", 0 none (the X menu, Settings and Nexus's own sign-in page
-        // still have it). Worked out from sizes that never depend on it (the pill and the legend sit at the right).
-        TextMetrics { id: signinFull; font: signinText.font; text: "Sign in with my browser" }
-        TextMetrics { id: signinMid; font: signinText.font; text: "My browser sign-in" }
-        TextMetrics { id: signinShort; font: signinText.font; text: "Sign in" }
+        // Room for "Google sign-in": 2 with the game's name, 1 the button alone (the game's icon only), 0 none. The
+        // pill gives way first (pillRoom keeps the button's room), so it hides only on the narrowest bars.
+        TextMetrics { id: signinShort; font: signinText.font; text: "Google sign-in" }
+        readonly property real signinNeed: nb.signinShown ? signinShort.advanceWidth + nb.ui.px(16) + nb.ui.px(8) : 0
         // On another site than Nexus its host always shows (a warning chip): the room after the tabs keeps it.
         readonly property real tabsEnd: nb.ui.px(10) + nb.ui.px(26) + nb.ui.px(8) + nb.ui.px(12) + tabs.width + nb.ui.px(12)
                                         + (hostChip.host !== "" && !hostChip.nexus ? hostChip.width + nb.ui.px(10) : 0)
@@ -81,14 +109,12 @@ Item {
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
         // under the bar when they don't fit (pillFull).
         readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
-        readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd
+        readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd - signinNeed
         readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)
         readonly property int signinFit: {
             if (!nb.signinShown) return 0
             const pad = nb.ui.px(16)
-            if (signinFull.advanceWidth + pad + nameW <= signinRoom) return 4
-            if (signinFull.advanceWidth + pad <= signinRoom) return 3
-            if (signinMid.advanceWidth + pad <= signinRoom) return 2
+            if (signinShort.advanceWidth + pad + nameW <= signinRoom) return 2
             if (signinShort.advanceWidth + pad <= signinRoom) return 1
             return 0
         }
@@ -107,7 +133,7 @@ Item {
             }
             Text {
                 id: nameText
-                visible: bar.signinFit === 4 || (bar.signinFit === 0 && bar.tabsEnd + bar.nameW <= pill.x - nb.ui.px(10))
+                visible: bar.signinFit === 2 || (bar.signinFit === 0 && bar.tabsEnd + bar.nameW <= (signin.visible ? signin.x : pill.x) - nb.ui.px(10))
                 text: nb.gameName !== "" ? nb.gameName : "Nexus Mods"
                 color: nb.ui.c.accentText
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(15); font.weight: Font.DemiBold
@@ -121,7 +147,7 @@ Item {
             anchors.left: gameBox.right; anchors.leftMargin: nb.ui.px(12)
             anchors.verticalCenter: parent.verticalCenter
             spacing: nb.ui.px(4)
-            Cap { k: "lb"; visible: nb.padLegend }
+            Cap { k: "lb"; visible: nb.padLegend; anchors.verticalCenter: parent.verticalCenter }
             Repeater {
                 model: ["Page", "Downloads" + (nb.downloads.length > 0 ? " (" + nb.downloads.length + ")" : "")]
                 Rectangle {
@@ -133,11 +159,13 @@ Item {
                     border.color: nb.tab === index ? nb.ui.c.accent : "transparent"
                     border.width: Math.max(1, nb.ui.px(1))
                     Text { id: tbText; anchors.centerIn: parent; text: tb.modelData; color: nb.tab === tb.index ? nb.ui.c.accentText : nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(14) }
+                    anchors.verticalCenter: parent.verticalCenter
                     HoverHandler { onHoveredChanged: nb.ui.hover(tb, hovered) }
-                    TapHandler { onTapped: nb.tabClicked(tb.index) }
+                    // A touch target of at least 44 design pixels around the 28 drawn.
+                    Item { objectName: "tap:" + tb.modelData; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.tabClicked(tb.index) } }
                 }
             }
-            Cap { k: "rb"; visible: nb.padLegend }
+            Cap { k: "rb"; visible: nb.padLegend; anchors.verticalCenter: parent.verticalCenter }
         }
         // Middle: the page's title, and its site (another site than Nexus: in a warning chip).
         Row {
@@ -147,13 +175,15 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: nb.ui.px(8)
             clip: true
-            // Never a chip cut in half: with no room for the site's chip the title row stays empty.
-            visible: width >= hostChip.width
+            // Off Nexus the site's warning chip must show whole (else the row stays empty); on Nexus the chip goes
+            // first and the page's title shows, cut short as needed.
+            visible: hostChip.nexus ? width > nb.ui.px(40) : width >= hostChip.width
             Rectangle {
                 id: hostChip
                 readonly property bool nexus: Turbine.browserIsNexus(nb.url)
                 readonly property string host: { const m = /^[a-z]+:\/\/([^\/:?#]+)/i.exec(nb.url); return m ? m[1].toLowerCase() : "" }
-                visible: host !== ""
+                readonly property bool fits: !nexus || titleRow.width >= width + nb.ui.px(8) + nb.ui.px(120)
+                visible: host !== "" && fits
                 width: hostText.implicitWidth + nb.ui.px(14); height: nb.ui.px(24); radius: nb.ui.px(12)
                 color: nexus ? nb.ui.c.raised : nb.ui.c.focusFill
                 border.color: nexus ? nb.ui.c.line : nb.ui.c.warn
@@ -165,7 +195,7 @@ Item {
                 text: nb.loading ? "Loading..." : nb.title
                 color: nb.ui.c.text
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(14)
-                width: Math.max(0, titleRow.width - hostChip.width - nb.ui.px(8)); elide: Text.ElideRight
+                width: Math.max(0, titleRow.width - (hostChip.visible ? hostChip.width + nb.ui.px(8) : 0)); elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -178,9 +208,9 @@ Item {
             width: signinText.implicitWidth + nb.ui.px(16); height: nb.ui.px(28); radius: nb.ui.px(5)
             color: nb.ui.c.raised
             border.color: nb.ui.c.accentLo; border.width: Math.max(1, nb.ui.px(1))
-            Text { id: signinText; anchors.centerIn: parent; text: bar.signinFit >= 3 ? "Sign in with my browser" : bar.signinFit === 2 ? "My browser sign-in" : "Sign in"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+            Text { id: signinText; anchors.centerIn: parent; text: "Google sign-in"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
             HoverHandler { onHoveredChanged: nb.ui.hover(signin, hovered) }
-            TapHandler { onTapped: nb.signinClicked() }
+            Item { objectName: "tap:Google sign-in"; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.signinClicked() } }
         }
         // The download pill.
         Rectangle {
@@ -241,14 +271,14 @@ Item {
             color: nb.ui.c.raised
             Text { anchors.centerIn: parent; text: "×"; color: nb.ui.c.text; font.pixelSize: nb.ui.px(18); font.family: nb.ui.bodyFont }
             HoverHandler { onHoveredChanged: nb.ui.hover(closeBtn, hovered) }
-            TapHandler { onTapped: nb.closeClicked() }
+            Item { objectName: "tap:Close"; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.closeClicked() } }
         }
     }
 
     // The pill's whole words under the bar when they are cut short there (a message to read: done or a warning).
     Rectangle {
         id: pillFull
-        visible: pill.visible && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok")
+        visible: pill.visible && nb.noteFresh && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok")
         anchors.top: bar.bottom; anchors.topMargin: nb.ui.px(4)
         anchors.right: parent.right; anchors.rightMargin: nb.ui.px(10)
         width: Math.min(bar.pillWant, nb.width - nb.ui.px(20)); height: fullText.implicitHeight + nb.ui.px(12)
@@ -302,7 +332,7 @@ Item {
         // On Nexus's sign-in page: Turbine's own button (drawn by Turbine over its corner, not put into the page).
         Rectangle {
             id: signinBig
-            visible: nb.signInPage && nb.signinShown
+            visible: nb.signInPage
             anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: nb.ui.px(16)
             width: bigCol.implicitWidth + nb.ui.px(28); height: bigCol.implicitHeight + nb.ui.px(20)
             radius: nb.ui.px(8)
@@ -312,11 +342,61 @@ Item {
                 id: bigCol
                 anchors.centerIn: parent
                 spacing: nb.ui.px(4)
-                Text { text: "Sign in with my browser (Google and others)"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold }
-                Text { text: "Email and password work right here too."; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+                Text { visible: nb.signinShown; text: "Google sign-in (in Chrome)"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold }
+                Text { text: nb.signinShown ? "Email and password work right here too." : "Email and password work here."; color: nb.signinShown ? nb.ui.c.soft : nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(nb.signinShown ? 13 : 15) }
             }
-            HoverHandler { onHoveredChanged: nb.ui.hover(signinBig, hovered) }
-            TapHandler { onTapped: nb.signinClicked() }
+            HoverHandler { enabled: nb.signinShown; onHoveredChanged: nb.ui.hover(signinBig, hovered) }
+            TapHandler { enabled: nb.signinShown; onTapped: nb.signinClicked() }
+        }
+        // Google's own sign-in page: Google refuses to sign in inside apps, so Turbine says so and offers the two
+        // ways that work, each with what it needs (drawn by Turbine over the page, never put into it).
+        Rectangle {
+            id: googleCard
+            visible: nb.googleShown
+            anchors.centerIn: parent
+            width: Math.min(parent.width - nb.ui.px(40), nb.ui.px(620))
+            height: googleCol.implicitHeight + nb.ui.px(32)
+            radius: nb.ui.px(10)
+            color: nb.ui.c.panel
+            border.color: nb.ui.c.accent; border.width: Math.max(2, nb.ui.px(2))
+            z: 4
+            Column {
+                id: googleCol
+                x: nb.ui.px(18); y: nb.ui.px(16); width: parent.width - nb.ui.px(36)
+                spacing: nb.ui.px(10)
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Google won't sign in inside apps"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(19); font.weight: Font.DemiBold }
+                Repeater {
+                    model: [["a", "Set a Nexus password (stays here)", nb.googlePasswordWords, 0], ["y", "Use Chrome instead", nb.googleChromeWords, 1]]
+                    Rectangle {
+                        id: gRow
+                        required property var modelData
+                        width: googleCol.width; height: Math.max(nb.ui.px(56), gText.implicitHeight + nb.ui.px(16)); radius: nb.ui.px(8)
+                        color: nb.ui.c.card; border.color: nb.ui.c.line; border.width: Math.max(1, nb.ui.px(1))
+                        Cap { id: gCap; k: gRow.modelData[0]; visible: nb.padLegend; x: nb.ui.px(12); anchors.verticalCenter: parent.verticalCenter }
+                        Column {
+                            id: gText
+                            anchors.left: gCap.visible ? gCap.right : parent.left; anchors.leftMargin: nb.ui.px(12)
+                            anchors.right: parent.right; anchors.rightMargin: nb.ui.px(12)
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: nb.ui.px(2)
+                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[1]; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold }
+                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[2]; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+                        }
+                        HoverHandler { onHoveredChanged: nb.ui.hover(gRow, hovered) }
+                        TapHandler { onTapped: gRow.modelData[3] === 0 ? nb.googlePassword() : nb.googleChrome() }
+                    }
+                }
+            }
+        }
+        // Every mouse click or touch on the page counts as the player's press (a download or a Mod Manager Download
+        // link in the next moments is his). Only watched: the page still gets it.
+        Item {
+            anchors.fill: parent
+            z: 3
+            PointHandler {
+                acceptedButtons: Qt.AllButtons
+                onActiveChanged: if (active) nb.pagePressed()
+            }
         }
     }
 
@@ -339,15 +419,24 @@ Item {
             onLoadingChanged: (info) => nb.pageEvent(info.status === WebEngineView.LoadSucceededStatus ? "loaded" : info.status === WebEngineView.LoadFailedStatus ? "failed" : "loading", info.url.toString() + (info.errorString ? " (" + info.errorString + ")" : ""))
             // Chromium's own right-click menu never shows: LT (a right click) opens Turbine's quick menu instead.
             onContextMenuRequested: (request) => { request.accepted = true; nb.menuWanted() }
-            // Pop-ups open here, in the same view.
-            onNewWindowRequested: (request) => { nb.pageEvent("newwindow", request.requestedUrl.toString()); request.openIn(web) }
-            // Only web pages. A Mod Manager Download link goes to Turbine (the scheme handler sees it too: one
-            // counts); every other kind of link is refused.
+            // Pop-ups open here, in the same view, and only when the player's own press asked for one.
+            onNewWindowRequested: (request) => {
+                if (!request.userInitiated) { nb.pageEvent("popupblocked", request.requestedUrl.toString()); return }
+                nb.pageEvent("newwindow", request.requestedUrl.toString())
+                request.openIn(web)
+            }
+            // Only web pages. A Mod Manager Download link goes on (to webglue.cpp's scheme handler, which checks who
+            // started it) only when the page itself goes there while it is on Nexus: never from a frame inside it.
+            // Every other kind of link is refused.
             onNavigationRequested: (request) => {
                 const u = request.url.toString()
                 if (/^(https?|about|data|blob):/i.test(u)) return
+                if (/^nxm:/i.test(u)) {
+                    if (Turbine.browserNxm(u, request.isMainFrame, web.url.toString())) return
+                    request.reject()
+                    return
+                }
                 request.reject()
-                if (/^nxm:/i.test(u)) { Turbine.browserNxm(u); return }
                 nb.pageEvent("blocked", u.split(":")[0])
             }
             onCertificateError: (error) => { error.rejectCertificate(); nb.pageEvent("certificate", error.url.toString()) }

@@ -34,7 +34,7 @@ pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
 pub const HELPER_FOLDER: &str = "Turbine browser helper";
 /// What the status says while a Nexus file page is open for a free account.
 pub const SLOW_DOWNLOAD: &str =
-    "Sign in to Nexus if it asks (free). Press Slow download on this page. Then Steam button, Turbine to come back: the mod is added by itself.";
+    "Sign in to Nexus if it asks (free), then press Slow download on this page. Turbine adds the mod by itself when the file lands.";
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 /// How long a browser's report of a download holds the Downloads watcher back once the file is ready: past this,
@@ -958,7 +958,7 @@ impl qobject::Turbine {
                     true,
                     Box::new(move |w: &mut Worker| {
                         let out = crate::actions::add_archive(w, &game, &path, source, replaces, &label);
-                        report(w, &game, out);
+                        report(w, &game, &path, out);
                     }),
                 )
             });
@@ -1169,6 +1169,22 @@ impl qobject::Turbine {
         }
     }
 
+    /// A finished download from Turbine's browser that isn't a sure match (not from Nexus's own file host, or no
+    /// press): never added by itself; Turbine asks which game it is for (the game on screen is the first guess).
+    pub(crate) fn catch_ask(mut self: Pin<&mut Self>, a: Arrival, why: &str) {
+        let name = label_of(&a.path);
+        if self.rust().found.is_empty() {
+            crate::log::line("catch", &format!("{name}: no games found here, so there is nowhere to add it"));
+            return;
+        }
+        crate::log::line("catch", &format!("{name}: asking, because {why}"));
+        let game = self.current_game();
+        let ask = Ask { path: a.path, size: a.size, game, hint: None, source: None, why: why.to_string() };
+        self.as_mut().rust_mut().catching.asks.push(ask);
+        self.as_mut().catch_save(true);
+        self.show_ask();
+    }
+
     /// A caught mod went in (or its installer finished): the status and the helper hear about it.
     pub(crate) fn caught_added(mut self: Pin<&mut Self>, game: &str, name: &str, notes: Vec<String>, only_if_busy: bool) {
         if only_if_busy && !self.rust().catching.busy {
@@ -1181,15 +1197,23 @@ impl qobject::Turbine {
     }
 }
 
-/// What add_archive did with a caught download, for the status.
-fn report(w: &Worker, game: &Game, out: crate::actions::Outcome) {
+/// What add_archive did with a caught download, for the status (and for its row in Turbine's browser, by its path).
+fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::Outcome) {
     let g = game.name.clone();
+    let p = path.to_path_buf();
     match out {
-        crate::actions::Outcome::Added { name, notes } => w.post(move |t| t.caught_added(&g, &name, notes, false)),
-        crate::actions::Outcome::Choices { name } => w.post(move |t| {
+        crate::actions::Outcome::Added { name, notes } => w.post(move |mut t| {
+            t.as_mut().add_result(&p, true, false, &name, &g, &format!("Added to {g}: {name}. It's on."));
+            t.caught_added(&g, &name, notes, false)
+        }),
+        crate::actions::Outcome::Choices { name } => w.post(move |mut t| {
+            t.as_mut().add_result(&p, true, false, &name, &g, &format!("{name} has installer choices. Pick them in Turbine."));
             t.set_status(&format!("{name} has installer choices. Pick them on the page or in Turbine."), "busy", None, &g, "", false, "")
         }),
-        crate::actions::Outcome::Failed(e) => w.post(move |t| t.set_status(&e, "stop", None, &g, "", true, "")),
+        crate::actions::Outcome::Failed(e) => w.post(move |mut t| {
+            t.as_mut().add_result(&p, false, false, "", &g, &e);
+            t.set_status(&e, "stop", None, &g, "", true, "")
+        }),
     }
 }
 

@@ -311,6 +311,29 @@ impl Pointer {
     }
 }
 
+/// A in Turbine's browser: a click at the pointer, or Enter on the page's focused link or button. Enter only after
+/// the player moved the page's focus with the D-pad (`key`), and only until he moves the pointer (right stick) or
+/// clicks: a button clicked a moment ago keeps the page's focus, and A must never press it again by itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct KeyNav {
+    pub on: bool,
+}
+
+impl KeyNav {
+    /// The D-pad moved the page's focus.
+    pub fn key(&mut self) {
+        self.on = true;
+    }
+    /// The right stick moved the pointer, or a mouse button went down (RT, R3, LT, or A's own click).
+    pub fn pointer(&mut self) {
+        self.on = false;
+    }
+    /// What A does now: true for Enter on the focused element (`focused`: the page has one), false for a click.
+    pub fn enter(&self, focused: bool) -> bool {
+        self.on && focused
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -593,5 +616,21 @@ mod tests {
         p.sticky = false;
         let t = run(&mut p, Sticks::default(), 100.0);
         assert!(!p.shown && t.hid);
+    }
+
+    #[test]
+    fn a_presses_enter_only_after_the_d_pad() {
+        let mut k = KeyNav::default();
+        // A button clicked a moment ago keeps the page's focus: A is still a click at the pointer.
+        assert!(!k.enter(true));
+        k.key();
+        assert!(k.enter(true));
+        assert!(!k.enter(false));
+        // The right stick, or any click, and A clicks at the pointer again (no matter how long it stays still).
+        k.pointer();
+        assert!(!k.enter(true));
+        k.key();
+        k.pointer();
+        assert!(!k.enter(true));
     }
 }

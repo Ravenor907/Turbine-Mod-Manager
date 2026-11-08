@@ -44,6 +44,14 @@ jobs:
           hits=$(git grep -n -I -i -E "$pattern" -- . | head -n 20 || true)
           if [ -n "$hits" ]; then echo "::error title=House rule broken::Another mod manager is named"; echo "$hits"; fail=1; fi
           exit $fail
+      - name: No stale words (Nexus opens inside Turbine, so there is nothing to come back from)
+        shell: bash
+        run: |
+          # The tutorial, the next-requirement sheet and the free-account words once taught "Steam button, then
+          # Turbine"; the page is Turbine's own now. (The outside-browser ways in Labs and Desktop Mode still say it.)
+          hits=$( { grep -n -E "Steam button" app/qml/Tutorial.qml app/src/online.rs app/src/catch.rs || true; grep -n 'sheet === "chain"' app/qml/Main.qml | grep "Steam button" || true; } )
+          if [ -n "$hits" ]; then echo "::error title=Stale words::Steam button, then Turbine is still taught"; echo "$hits"; exit 1; fi
+          echo "No stale Steam button words"
       - name: QML syntax (seconds here instead of minutes into the Flatpak build)
         shell: bash
         run: node tools/qml-check.js app/qml/*.qml

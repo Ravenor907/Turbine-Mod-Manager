@@ -134,7 +134,7 @@ pub const NEXUS_MOD: &str = "nexus-mod:";
 
 /// Said instead of Install for free accounts.
 pub const FREE_WORDS: &str =
-    "Opens Nexus. Sign in if asked (free). Press Slow download, wait 5 seconds, then Steam button, Turbine. It's added by itself.";
+    "Opens Nexus right here in Turbine. Sign in if it asks (free), then press Slow download. Turbine adds it and closes the page.";
 
 /// "2026-11-06" from seconds since 1970 (UTC).
 pub fn date_of(secs: u64) -> String {
@@ -869,6 +869,14 @@ impl Net {
     pub fn fetch_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, into: Option<&std::path::Path>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
         if self.sample.is_some() {
             return self.pretend_nxm(link, into, progress);
+        }
+        if self.nexus().is_none() {
+            return Err("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.".into());
+        }
+        // The link is for one account (its user_id): another account's link is refused before anything downloads.
+        if link.user_id.is_some() {
+            let me = self.account().map(|a| a.user_id).unwrap_or(0);
+            crate::browse::user_matches(link.user_id, me)?;
         }
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.")?;
         let file = nx.file_info(&link.domain, link.mod_id, link.file_id).map_err(err)?;

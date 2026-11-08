@@ -43,7 +43,7 @@ shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
   shift 4
   out="$PWD/shots/$name.png"
   # Each picture gets its own mod store, so imports never pile up between pictures.
-  timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
+  timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software $SHOOT_ENV \
     --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$PWD/data/$name" \
     --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
     io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" --selftest-data="$PWD/samples" "$@" > "shots/$name.log" 2>&1 \
@@ -108,6 +108,11 @@ for size in $SIZES; do
     "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
   # The browser: Settings > Accounts > Browser, the no-browser warning, the helper's steps, the status card.
   for page in browser nobrowser helper overlay overlaygm addbrowser; do shoot "$page-$size" "$size" $page "$PWD/home"; done
+  # 0.55: Settings, Getting mods in Game Mode (Steam's Game Mode is what SteamGamepadUI=1 says).
+  SHOOT_ENV="--env=SteamGamepadUI=1" shoot "accountsgm-$size" "$size" accountsgm "$PWD/home"
+  need "accountsgm-$size" "10: Open Nexus in shows in Game Mode, own-browser rows folded ($size)" "Getting mods rows \(Game Mode true\): verdict, openInGm, .*ownFold"
+  if grep -Eq "Getting mods rows \(Game Mode true\):.*(, helper|, nxmHandler|, overlay|, browser(,|$))" "$PWD/data/accountsgm-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
+    echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::"; fail=1; fi
   # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
   cp2077=steam:1091500
   w3=steam:292030
@@ -481,12 +486,29 @@ if command -v Xvfb > /dev/null; then
     fi
     need $n "2: WebEngine set up before the app ($size)" "WebEngine ready"
     need $n "Nexus page loaded in Turbine ($size)" "Browser check: the file page loaded in Turbine"
-    need $n "9: legend, no field ($size)" "Browser legend \(no field\): A Click .*, 0 problems"
-    need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Type.*, 0 problems"
+    need $n "9: legend, no field: Y Keyboard and R stick Pointer, no LT ($size)" "Browser legend \(no field\): A Click · B [^·]* · X Menu · Y Keyboard · RS Pointer, 0 problems"
+    need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Keyboard.*, 0 problems"
+    if grep -Eq "Browser legend .*LT " "$log"; then echo "::error title=9: LT Menu is still in the legend ($size)::"; fail=1; fi
+    need $n "7: A after a click is a click ($size)" "Browser check: A after a click is a click: yes"
+    need $n "7: A presses Enter only after the D-pad ($size)" "Browser check: A after the D-pad presses Enter: yes"
+    need $n "7: A after the pointer clicked is a click again ($size)" "Browser check: A after the pointer clicked is a click again: yes"
+    need $n "9: the quick menu has at most 6 rows ($size)" "Browser check: the quick menu has [1-6] rows"
+    tt=$(grep -h "Browser check: touch targets" "$log" | head -n1)
+    small=$(echo "$tt" | grep -oE "[0-9]+x[0-9]+" | awk -Fx '$1 < 44 || $2 < 44' | head -n1)
+    if [ -n "$tt" ] && [ -z "$small" ]; then echo "::notice title=9: touch targets 44 px or more ($size)::${tt#*touch targets }"
+    else echo "::error title=9: a touch target under 44 px ($size)::$tt"; fail=1; fi
+    need $n "9: the Added note clears ($size)" "Browser check: the Added note cleared at the next click: yes"
+    need $n "9: the no-key note on its own page leaves A and B alone ($size)" "Browser check: the no-key note on its own file page leaves A Click and B (Close|Back)"
+    need $n "10: no-key on another page: B Not now ($size)" "Browser check: the no-key note for another file's page: A Slow download page, B Not now"
+    need $n "9: the pointer hides when the page closes ($size)" "Browser check: the pointer is hidden after the close: yes"
+    need $n "9: A just after the auto close is ignored ($size)" "Press a ignored: the Nexus page closed by itself"
+    need $n "9: ... and starts nothing ($size)" "Browser check: A just after the auto close started nothing: yes"
+    need $n "2: a Nexus-hosted download after a press is a sure match ($size)" "Download: Dupe Test 1.0 \(2\).zip into Game Mods/$sky \(from 127.0.0.1, after your press: a sure match\)"
     need $n "8: B goes back a page ($size)" "Browser check: B from a second page went back one page"
     need $n "7: an exe is refused ($size)" "Download refused \(127.0.0.1\): Turbine only takes zip, 7z or rar mods"
     need $n "7: a second file of a name gets (2) ($size)" "Download: Dupe Test 1.0 \(2\).zip into Game Mods/$sky"
-    need $n "4: Mod Manager Download comes to Turbine ($size)" "Mod Manager Download link from the browser \(.*\): nxm://skyrimspecialedition/mods/1/files/2"
+    need $n "1: the initiator is checked in C++ ($size)" "Mod Manager Download link from http://127.0.0.1:47800: initiator checked"
+    need $n "4: Mod Manager Download comes to Turbine ($size)" "Mod Manager Download link from the browser \(scheme handler, from http://127.0.0.1:47800\): nxm://skyrimspecialedition/mods/1/files/2"
     need $n "4: and its file goes into Game Mods ($size)" "Test run: pretending to download nxm://skyrimspecialedition/mods/1/files/2.* into Game Mods/$sky"
     need $n "4: the page stays on the file page ($size)" "after Mod Manager Download the page is still the file page: yes"
     need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
@@ -509,6 +531,14 @@ if command -v Xvfb > /dev/null; then
     if [ -n "$kept" ]; then echo "::notice title=Sign-in: the cookie is in the profile on disk ($size)::${kept#$PWD/}"
     else echo "::error title=Sign-in: the cookie isn't in the profile on disk ($size)::"; find "$PWD/data/$n" -maxdepth 4 | head -n 40; fail=1; fi
     if grep -rlaE "other_site_check|look_alike_check" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: another site's cookie got in ($size)::"; fail=1; fi
+    # 6: signed links and the account number never go into the log whole.
+    leak=$(grep -Eh "user_id=|[?&]key=|[?&]md5=|expires=[0-9]" "$log" 2>/dev/null || true)
+    if [ -n "$leak" ]; then echo "::error title=6: a signed link or user_id is in the log ($size)::"; echo "$leak" | head -n 5 | cut -c1-200; fail=1
+    else echo "::notice title=6: no signed links or user_id in the log ($size)::"; fi
+    # 6: the profile folder (it holds the sign-in) is the player's alone.
+    bdir=$(find "$PWD/data/$n" -maxdepth 3 -type d -name browser | head -n1)
+    perm=$( [ -n "$bdir" ] && stat -c %a "$bdir" || echo none)
+    if [ "$perm" = 700 ]; then echo "::notice title=6: the profile folder is 0700 ($size)::${bdir#$PWD/}"; else echo "::error title=6: the profile folder is $perm, not 700 ($size)::$bdir"; fail=1; fi
     for tag in page downloads added nokey; do
       if [ -s "$PWD/shots/$n-$tag.png" ]; then echo "::notice title=11: picture $tag ($size)::$n-$tag.png"; else echo "::error title=11: no picture $tag ($size)::"; fail=1; fi
     done
@@ -549,6 +579,29 @@ PY
   bshoot browserpersist-1280x800 1280x800 browserpersist "$h" "$PWD/data/browsertest-1280x800" --game=$skyrim
   first=$(sed -n '/name=persist-run/,$p' "$sl" | grep "/skyrimspecialedition/mods/" | head -n1)
   case "$first" in *standin_session*) echo "::notice title=6: signed in stays signed in::$first" ;; *) echo "::error title=6: the second run didn't send the cookie back::$first"; fail=1 ;; esac
+  # 1: a page that tries everything by itself, with no press: nothing is downloaded or turned on.
+  n=browserpersist-1280x800
+  plog="$PWD/data/browsertest-1280x800/turbine-mod-manager/activity.log"
+  after=$(sed -n '/Browser check: second run loaded/,$p' "$plog" 2>/dev/null || true)
+  pneed() { hit=$(printf '%s\n' "$after" | grep -Eh "$2" | head -n1 | cut -c1-200 || true)
+            if [ -n "$hit" ]; then echo "::notice title=$1::$hit"
+            else echo "::error title=$1::not found: $2"; printf '%s\n' "$after" | grep -h " web \| browser \| check " | tail -n 40 || true; fail=1; fi; }
+  pneed "1: a script's nxm link with no press is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/88 came with no press of yours"
+  pneed "1: a frame's nxm link is refused (main frame only)" "Mod Manager Download link refused \(nxm://skyrimspecialedition/mods/1/files/77\): it came from a frame"
+  before=$(printf '%s\n' "$after" | sed -n '1,/Browser check: no press, nothing downloaded/p')
+  if printf '%s\n' "$before" | grep -q "Page newwindow"; then echo "::error title=1: a pop-up opened with no press::"; fail=1
+  elif printf '%s\n' "$before" | grep -q "Page popupblocked"; then echo "::notice title=1: a pop-up with no press is refused::Page popupblocked"
+  else echo "::notice title=1: a pop-up with no press didn't open::Chromium stopped it before Turbine saw it"; fi
+  pneed "1: a download with no press is refused" "Download refused \(127.0.0.1\): Turbine only takes a download you start yourself"
+  pneed "1: nothing downloaded or turned on with no press" "Browser check: no press, nothing downloaded: yes"
+  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler.*files/(66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(66|77|88)" || true)
+  if [ -n "$got" ]; then
+    echo "::error title=1: a link with no press got through::"; fail=1; fi
+  img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
+  echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
+  pneed "10: closing midway says the download goes on" "Still downloading 1 mod. It's added by itself. To watch it: View, Full menu, Nexus downloads."
+  pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
+  pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
   echo "Stand-in log:"; cat "$sl" | cut -c1-200
   kill $standin $xvfb 2>/dev/null || true
 else

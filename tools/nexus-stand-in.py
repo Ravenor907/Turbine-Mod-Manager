@@ -10,6 +10,10 @@ Serves on 127.0.0.1 only:
       (/files/TurbineTest-Bigger_Pockets-1.0.3.zip, sent as an attachment over about 3 seconds) or to an nxm:// link;
       a link to a setup program (refused by Turbine), a link to "Dupe Test 1.0.zip" (a name already in the game's
       folder), a link to the description page and a text field. Everything sits at a fixed place on the page.
+  ...&auto=1  the same file page, which also tries everything by itself with no press (as an ad or a hostile page
+      would): it goes to an nxm:// link from a script, a frame inside it goes to one and loads one as an image, it
+      opens a pop-up and it starts a download. Turbine must take none of them.
+  /frame  that frame.
   /<domain>/mods/<id>?tab=description  a second page with a link back.
   /files/<name>  the files above.
   /log?event=<what>  the page's own report of a press; /mark?name=<what>  a mark from the check.
@@ -29,7 +33,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOCK = threading.Lock()
 
 
-def page(domain, mod_id, file_id):
+AUTO = """
+  <iframe class="at" style="left:640px; top:300px; width:200px; height:120px; border:0;" src="/frame"></iframe>
+<script>
+  const soon = () => String(Math.floor(Date.now() / 1000) + 3600);
+  setTimeout(() => location.assign("nxm://skyrimspecialedition/mods/1/files/88?key=abc&expires=" + soon() + "&user_id=1"), 1500);
+  setTimeout(() => window.open("/skyrimspecialedition/mods/1?tab=description"), 2500);
+  setTimeout(() => location.assign("/files/TurbineTest-Bigger_Pockets-1.0.3.zip"), 3500);
+</script>"""
+
+FRAME = """<!doctype html><html><body style="margin:0">
+<img src="nxm://skyrimspecialedition/mods/1/files/66?key=abc&expires=4102444800&user_id=1" alt="">
+<script>
+  setTimeout(() => location.assign("nxm://skyrimspecialedition/mods/1/files/77?key=abc&expires=" + String(Math.floor(Date.now() / 1000) + 3600) + "&user_id=1"), 2000);
+</script></body></html>"""
+
+
+def page(domain, mod_id, file_id, auto=False):
     """The file page. Places are fixed (CSS pixels from the page's top left) so the check can put the pointer there."""
     nxm = f"nxm://{domain}/mods/{mod_id}/files/{file_id}?key=abc&expires=EXPIRES&user_id=1"
     return f"""<!doctype html>
@@ -66,7 +86,7 @@ def page(domain, mod_id, file_id):
   }}
   document.getElementById("slow").onclick = () => wait("slow", () => location.assign("/files/TurbineTest-Bigger_Pockets-1.0.3.zip"));
   document.getElementById("mmd").onclick = () => wait("mmd", () => location.assign("{nxm}".replace("EXPIRES", String(Math.floor(Date.now() / 1000) + 3600))));
-</script>
+</script>{AUTO if auto else ""}
 </body></html>"""
 
 
@@ -114,13 +134,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/log", "/mark"):
             self.wfile.write(self.send_body(204, b""))
             return
+        if url.path == "/frame":
+            self.wfile.write(self.send_body(200, FRAME))
+            return
         if len(parts) >= 3 and parts[1] == "mods" and parts[2].isdigit():
             domain, mod_id = parts[0], int(parts[2])
             if q.get("tab", [""])[0] == "description":
                 self.wfile.write(self.send_body(200, description(domain, mod_id)))
             else:
                 file_id = int(q.get("file_id", ["2"])[0] or 2) if q.get("file_id", ["2"])[0].isdigit() else 2
-                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id)))
+                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id, q.get("auto", [""])[0] == "1")))
             return
         if len(parts) == 2 and parts[0] == "files":
             name = urllib.parse.unquote(parts[1])

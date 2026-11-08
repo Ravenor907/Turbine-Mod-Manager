@@ -57,8 +57,15 @@ pub mod qobject {
         /// Turbine's browser has the controller (its page is on screen, no sheet or wheel over it): A clicks at the
         /// pointer (QML sets this).
         #[qproperty(bool, browser_input, cxx_name = "browserInput")]
-        /// The page has a focused link or button (the read-only probe, QML sets this): A held still is Enter on it.
+        /// The page has a focused link or button (the read-only probe, QML sets this): A is Enter on it after the
+        /// D-pad moved the page's focus (browserKeyNav).
         #[qproperty(bool, browser_enter, cxx_name = "browserEnter")]
+        /// The D-pad moved the page's focus since the last pointer move or click: A presses Enter ("A Press").
+        #[qproperty(bool, browser_key_nav, cxx_name = "browserKeyNav")]
+        /// Counts the player's presses in the page (A, RT, R3, a click or tap): QML restarts its timers on each.
+        #[qproperty(i32, browser_press_count, cxx_name = "browserPressCount")]
+        /// A file Turbine's browser downloaded was added or not: {"n","path","ok","ask","name","game","text"}.
+        #[qproperty(QString, add_result_json, cxx_name = "addResultJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -458,6 +465,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserKey"]
         fn browser_key(self: Pin<&mut Self>, dir: &QString);
+        /// A page up or down into the page ("pageup", "pagedown"): the D-pad held for a while.
+        #[qinvokable]
+        #[cxx_name = "browserPageKey"]
+        fn browser_page_key(self: Pin<&mut Self>, dir: &QString);
         /// A press and release of A on the page (the build's scripted presses).
         #[qinvokable]
         #[cxx_name = "browserClick"]
@@ -474,14 +485,40 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserZoomDefault"]
         fn browser_zoom_default(self: &Self, height: f64, size: f64) -> f64;
-        /// A Mod Manager Download link the navigation guard caught.
+        /// A Mod Manager Download link the navigation guard caught: true lets the navigation go on to the scheme
+        /// handler (the main frame, on Nexus), false stops it there.
         #[qinvokable]
         #[cxx_name = "browserNxm"]
-        fn browser_nxm(self: Pin<&mut Self>, url: &QString);
-        /// Where a download goes: {"ok","dir","name","path","game","folder","error"} (the file is marked as Turbine's).
+        fn browser_nxm(self: Pin<&mut Self>, url: &QString, main_frame: bool, page_url: &QString) -> bool;
+        /// A mouse click or a touch on the page (the controller's presses are counted in Rust).
+        #[qinvokable]
+        #[cxx_name = "browserPressed"]
+        fn browser_pressed(self: Pin<&mut Self>);
+        /// An address for the activity log: host and path only.
+        #[qinvokable]
+        #[cxx_name = "browserLogUrl"]
+        fn browser_log_url(self: &Self, url: &QString) -> QString;
+        /// The same page, the query's parts in any order?
+        #[qinvokable]
+        #[cxx_name = "browserSamePage"]
+        fn browser_same_page(self: &Self, a: &QString, b: &QString) -> bool;
+        /// The Nexus mod id of a page (0 when it isn't a mod's page).
+        #[qinvokable]
+        #[cxx_name = "browserPageMod"]
+        fn browser_page_mod(self: &Self, url: &QString) -> f64;
+        /// Signed in to Nexus in Turbine's browser (its sign-in cookie is there)?
+        #[qinvokable]
+        #[cxx_name = "browserSignedIn"]
+        fn browser_signed_in(self: &Self) -> bool;
+        /// A running download, twice a second: "" to go on, or why it must stop (past 64 GB, the disk nearly full).
+        #[qinvokable]
+        #[cxx_name = "browserDlCheck"]
+        fn browser_dl_check(self: &Self, path: &QString, got: f64) -> QString;
+        /// Where a download goes: {"ok","dir","name","path","game","folder","sure","mod","error"} (the file is marked
+        /// as Turbine's). `pending`: bytes running downloads still have to come.
         #[qinvokable]
         #[cxx_name = "browserPlan"]
-        fn browser_plan(self: Pin<&mut Self>, url: &QString, suggested: &QString, page_url: &QString, total: f64) -> QString;
+        fn browser_plan(self: Pin<&mut Self>, url: &QString, suggested: &QString, page_url: &QString, total: f64, pending: f64) -> QString;
         /// A download finished: added to its game.
         #[qinvokable]
         #[cxx_name = "browserDone"]
@@ -731,6 +768,12 @@ pub struct TurbineRust {
     pub(crate) labs_json: QString,
     pub(crate) browser_input: bool,
     pub(crate) browser_enter: bool,
+    pub(crate) browser_key_nav: bool,
+    pub(crate) browser_press_count: i32,
+    pub(crate) add_result_json: QString,
+    /// A is Enter only after the D-pad (pointer.rs).
+    pub(crate) key_nav: crate::pointer::KeyNav,
+    pub(crate) add_results: i32,
     /// Presses of A, RT and R3 in the browser, and the clicks they made (the build checks the two match).
     pub(crate) browser_presses: u32,
     pub(crate) browser_clicks: u32,
@@ -805,6 +848,11 @@ impl Default for TurbineRust {
             resend_ms: 0.0,
             browser_input: false,
             browser_enter: false,
+            browser_key_nav: false,
+            browser_press_count: 0,
+            add_result_json: QString::from("{}"),
+            key_nav: crate::pointer::KeyNav::default(),
+            add_results: 0,
             browser_presses: 0,
             browser_clicks: 0,
             a_enter: false,
@@ -1397,6 +1445,7 @@ impl qobject::Turbine {
             let n = self.rust().browser_presses + 1;
             self.as_mut().rust_mut().browser_presses = n;
             crate::log::line("pad", &format!("Browser press {n} ({})", button.to_uppercase()));
+            self.as_mut().browser_press_seen();
         }
         // While the pointer shows, RT and R3 are the left mouse button and LT the right one (held for dragging).
         // Each source is tracked on its own: R3 let go while RT still drags doesn't drop the drag, and a source
@@ -1524,6 +1573,11 @@ impl qobject::Turbine {
                 }
             }
         }
+        if t.moved && self.rust().key_nav.on {
+            // The right stick moved the pointer: A clicks at it again (not Enter on the page's focus).
+            self.as_mut().rust_mut().key_nav.pointer();
+            self.as_mut().set_browser_key_nav(false);
+        }
         if t.moved || t.hid {
             if t.moved && !*self.pointer_shown() {
                 crate::log::line("pad", "Pointer shown (right stick)");
@@ -1574,6 +1628,10 @@ impl qobject::Turbine {
         let (x, y) = (self.rust().pointer.x, self.rust().pointer.y);
         let button = if i == 0 { 1 } else { 2 };
         if pressed {
+            if self.rust().key_nav.on {
+                self.as_mut().rust_mut().key_nav.pointer();
+                self.as_mut().set_browser_key_nav(false);
+            }
             let what = if i == 0 { "Left click" } else { "Right click" };
             crate::log::line("pad", &format!("{what} ({}) at {x:.0}, {y:.0}", from.to_uppercase()));
             // In the browser every click is counted against the presses that made it (the build checks they match).

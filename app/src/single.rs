@@ -3,7 +3,8 @@
 //! The first Turbine listens on a Unix socket in its runtime folder (only the player can open it). A second launch
 //! with an nxm:// link (the browser opens one when "Mod Manager Download" is pressed) sends the link to the running
 //! Turbine and exits; with no Turbine running, it starts normally and handles the link itself. Only nxm:// lines that
-//! read as a Nexus download link are accepted from the socket; anything else is dropped.
+//! read as a Nexus download link are accepted from the socket (and "turbine:show", from a second launch with no link:
+//! the running Turbine comes to the front); anything else is dropped.
 //!
 //! In the Flatpak the folder is $XDG_RUNTIME_DIR/app/<app id>/, which Flatpak shares between every copy of the same
 //! app (the rest of the runtime folder is private to each copy); outside it, $XDG_RUNTIME_DIR/<app id>/.
@@ -18,6 +19,8 @@ use std::time::Duration;
 pub const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
 /// Longest line accepted from the socket (a Nexus link is well under 1 KB).
 const MAX_LINE: u64 = 4096;
+/// What a second launch with no link sends: the running Turbine comes to the front.
+pub const SHOW: &str = "turbine:show";
 
 /// Where the socket lives. None when there is no runtime folder.
 pub fn socket_path() -> Option<PathBuf> {
@@ -91,7 +94,12 @@ pub fn start(link: Option<&str>) -> Start {
                 Ok(()) => Start::Forwarded,
                 Err(e) => Start::Alone(format!("the running Turbine didn't take the link ({e})")),
             },
-            None => Start::Alone("another Turbine is already running".into()),
+            // No link: the running one comes to the front, and this one ends (it never shares the running one's
+            // partial downloads or browser profile).
+            None => match send(&path, SHOW) {
+                Ok(()) => Start::Forwarded,
+                Err(e) => Start::Alone(format!("another Turbine is running but didn't answer ({e})")),
+            },
         };
     }
     if let Err(e) = fs::create_dir_all(dir) {
@@ -122,7 +130,7 @@ fn read_link(stream: UnixStream) -> Option<String> {
         let _ = w.write_all(b"ok");
     }
     let line = line.trim().to_string();
-    if plausible_link(&line) {
+    if line == SHOW || plausible_link(&line) {
         Some(line)
     } else {
         crate::log::line("nxm", &format!("Dropped a line from the socket that isn't a Nexus download link ({} bytes)", line.len()));

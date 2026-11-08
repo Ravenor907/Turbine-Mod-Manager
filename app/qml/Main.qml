@@ -106,7 +106,7 @@ Window {
         readonly property bool slow: ["pointer", "pointerscroll", "checkend", "caught", "nexusnokey", "mods",
                                       "getmods", "getmodsfallback", "modpagefree", "modpagepremium", "getmodsback", "emptygame", "emptygamemods",
                                       "removed", "newmod", "opening", "opening8s", "desktop", "desktopgrid", "tv", "rail", "menu", "gamemenu", "check", "add", "loader", "report", "browse", "moddetails", "fomod",
-                                      "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
+                                      "loadorder", "profiles", "accounts", "accountsgm", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
@@ -140,7 +140,7 @@ Window {
                 app.tab = 1; app.zone = "main"
             }
             else if (page === "loadorder" || page === "lootsort" || page === "lootnotes") { app.tab = 2; app.zone = "main" }
-            else if (page === "accounts") app.openSection("Getting mods")
+            else if (page === "accounts" || page === "accountsgm") app.openSection("Getting mods")
             // The browser: Settings > Accounts with a browser found and the helper connected; the no-browser
             // warning; the helper's setup steps; the status card in both its windows.
             else if (page === "browser" || page === "helper" || page === "nobrowser") {
@@ -235,6 +235,8 @@ Window {
             else if (shot.page === "code") { app.openProfiles(); Turbine.profileCode("Default"); app.sheet = "code" }
             else if (shot.page === "profiles") app.openProfiles()
             else if (shot.page === "browser") app.setRow = app.accountRows.findIndex(r => r.key === "overlay")
+            // 0.55: Settings, Getting mods in Game Mode: "Open Nexus in" shows as a fact, the own-browser rows fold.
+            else if (shot.page === "accountsgm") app.note("shot", "Getting mods rows (Game Mode " + Turbine.gamemode + "): " + app.accountRows.map(r => r.key).join(", "))
             else if (shot.page === "lootsort" || shot.page === "lootnotes") { app.orderIndex = -1; Turbine.orderSort() }
             // The controller pointer: over the second mod's ON pill, clicked through the same mouse events the right
             // stick and RT make (the mod turns off), then the 2,000 row list scrolled by wheel steps.
@@ -293,7 +295,7 @@ Window {
     }
     Timer {
         running: shot.on
-        interval: shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 40000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 75000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -1393,6 +1395,8 @@ Window {
         { icon: "info", title: "Overlaps: " + plural(overlapCount, "mod shares", "mods share") + " files", detail: "Which mod's copy the game gets", ok: true, act: "overlaps" }
     ] : []).concat(updateCount > 0 ? [
         { icon: "update", title: "Update all", detail: plural(updateCount, "mod has", "mods have") + " a newer version", ok: true, act: "updateall" }
+    ] : []).concat(webDls.length > 0 && !browserOpen ? [
+        { icon: "update", title: "Nexus downloads", detail: webDlsRunning > 0 ? plural(webDlsRunning, "download", "downloads") + " running · added by themselves" : "What Turbine's Nexus page downloaded", ok: true, act: "nexusdl" }
     ] : []).concat([
         { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" },
         { icon: "info", title: "Activity log", detail: "What Turbine did, to read, copy or save", ok: true, act: "activity" },
@@ -1422,6 +1426,7 @@ Window {
         else if (item.act === "setups") openSetups()
         else if (item.act === "overlaps") openOverlaps()
         else if (item.act === "activity") openActivity()
+        else if (item.act === "nexusdl") openNexusDownloads()
         else if (item.act === "help") { sheet = ""; openSection("Help") }
         else if (item.act === "updateall") { sheet = ""; if (account.premium === true || updateList.every(x => x.u.kind !== "nexus")) Turbine.updateAll(); else openUpdates() }
         else sheet = "details"
@@ -1705,7 +1710,14 @@ Window {
         repeat: true
         onTriggered: {
             interval = 85
-            const n = Date.now() - app.repeatSince > 1500 && (app.repeatButton === "up" || app.repeatButton === "down") ? 5 : 1
+            const fast = Date.now() - app.repeatSince > 1500 && (app.repeatButton === "up" || app.repeatButton === "down")
+            // On the Nexus page the sped-up repeat is a page up or down at a time (not five link hops).
+            if (fast && app.page === "browser" && app.browserTab === 0 && app.sheet === "" && !app.wheelOpen) {
+                if (interval !== 260) interval = 260
+                Turbine.browserPageKey(app.repeatButton === "up" ? "pageup" : "pagedown")
+                return
+            }
+            const n = fast ? 5 : 1
             for (let i = 0; i < n; i++) app.act(app.repeatButton)
         }
     }
@@ -1736,6 +1748,13 @@ Window {
         if (lastInput === "touch") lastInput = "pad"
         const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
         if (grip[b]) b = grip[b]
+        // The Nexus page closed by itself a moment ago: A, Start and RT were meant for the page (never Play).
+        if ((b === "a" || b === "start" || b === "rt") && Date.now() - closedAddedAt < 600) {
+            note("pad", "Press " + b + " ignored: the Nexus page closed by itself " + (Date.now() - closedAddedAt) + " ms ago")
+            ignoredRelease = b
+            return
+        }
+        if (page === "browser") browserPressed()
         if (b === "a") aHeld = true
         if (b === "b") bHeld = true
         // R3 here means the pointer was hidden: the same as A on the focused item (never the start of a hold).
@@ -1752,9 +1771,11 @@ Window {
         if (b === "a" && sheet === "confirm" && confirmIndex === 0) { startConfirm(); return }
         act(b)
     }
+    property string ignoredRelease: ""
     function release(b) {
         const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
         if (grip[b]) b = grip[b]
+        if (b === ignoredRelease) { ignoredRelease = ""; return }
         // A controller went away (pad.rs let go of its buttons first).
         if (b === "lost") { stopHolds("a controller went away"); return }
         if (b === "a") aHeld = false
@@ -1945,6 +1966,12 @@ Window {
         } else if (sheet === "pick") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
             else if (b === "down") menuIndex = Math.min(pickItems.length - 1, menuIndex + 1)
+            else if ((b === "left" || b === "right") && pickItems[menuIndex] && pickItems[menuIndex].step) {
+                // A row with a value (the Nexus menu's Zoom): Left and Right change it, the menu stays.
+                const i = menuIndex
+                pickItems[i].step(b === "left" ? -1 : 1)
+                if (pickTitle === "Nexus") openBrowserMenu(i)
+            }
             else if (b === "a") pickRun(menuIndex)
             else if (b === "b" || b === "x") sheet = pickBack
         } else if (sheet === "modmenu") {
@@ -2054,22 +2081,37 @@ Window {
         if (page === "game" && game) o.start = bind("", startPlay)
         // Nexus inside Turbine: A clicks at the pointer (or works the Downloads row), B back a page or close.
         if (page === "browser") {
-            o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back" : "Close", browserBack)
-            o.x = bind("Menu", () => { if (browserTab === 1) browserRowMenu(browserDlIndex); else openBrowserMenu() })
+            // B: back a page (held: close), or close on the first page.
+            o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back, hold: Close" : "Close", browserBack)
             o.lb = bind("", () => { browserTab = 0 })
             o.rb = bind("", () => { browserTab = 1 })
             o.start = bind(browserAddedGame !== "" ? "Play" : "", browserPlay)
             if (browserTab === 1) {
                 o.a = bind(browserRowLabel(browserDlIndex), () => browserRowAct(browserDlIndex))
+                // X only on a row (the menu has nothing to offer with no downloads).
+                if (webDls[browserDlIndex]) o.x = bind("Menu", () => browserRowMenu(browserDlIndex))
                 return o
             }
+            o.x = bind("Menu", openBrowserMenu)
+            // Google's sign-in page: Turbine's card answers A and Y.
+            if (browserOnGoogle) {
+                o.a = bind("Set a password", googleSetPassword)
+                o.y = bind("Use Chrome", googleUseChrome)
+                return o
+            }
+            // Steam's keyboard is up for a field in the page: B only ends the typing (it never goes back a page).
+            if (browserTyping) {
+                o.b = bind("Done typing", browserTypingDone)
+                return o
+            }
+            // Mod Manager Download without a key, when the file's page is somewhere else: A goes there, B not now.
             if (browserNoKeyPage !== "") {
                 o.a = bind("Slow download page", browserNoKeyGo)
-                o.b = bind("OK", () => { browserNoKeyPage = ""; browserNoteNow = null })
+                o.b = bind("Not now", () => { browserNoKeyPage = ""; browserNoteNow = null })
                 return o
             }
-            o.a = bind("Click", () => Turbine.browserClick())
-            o.y = bind(nexusView && nexusView.focusKind === 2 ? "Type" : "", browserKeyboard)
+            o.a = bind(Turbine.browserKeyNav && browserEnterNow ? "Press" : "Click", () => Turbine.browserClick())
+            o.y = bind("Keyboard", browserKeyboard)
             o.lt = bind("", openBrowserMenu)
             o.rt = bind("", () => Turbine.browserClick())
             return o
@@ -2197,10 +2239,11 @@ Window {
     function legendFor(o) {
         let h = []
         for (const k of ["a", "b", "x", "y"]) if (o[k] && o[k].label) h.push([k, o[k].label, o[k].pre || ""])
-        // The Nexus page: A already says Click, so the one more is Start Play after an add, otherwise LT Menu.
+        // The Nexus page: A already says Click, so the one more is Start Play after an add, otherwise how to move the
+        // pointer (the right stick). X Menu covers what LT opens too.
         if (page === "browser" && sheet === "" && !wheelOpen) {
             if (o.start && o.start.label) h.push(["start", o.start.label, ""])
-            else if (browserTab === 0) h.push(["lt", "Menu", ""])
+            else if (browserTab === 0 && !browserTyping && !keysLegend) h.push(["rs", "Pointer", ""])
             return h.slice(0, 5)
         }
         // LT is the right button (options) only where X has options: elsewhere the legend says RT Click alone.
@@ -2399,11 +2442,12 @@ Window {
     readonly property var wheelSlots: {
         const g = !!game
         const k = wheelKind
-        // The Nexus page: Up Search Nexus, Up-right Zoom in, Right Forward, Down-right Reload, Down Full menu,
-        // Down-left Settings, Left Downloads, Up-left Zoom out.
+        // The Nexus page: Up Search Nexus, Up-right Zoom in, Right Forward, Down-right Reload, Down Full menu (the
+        // game menu, as everywhere: Activity log and Help included), Down-left Settings, Left Downloads, Up-left
+        // Zoom out.
         if (k === "browser") return [slot("Search Nexus", true, browserSearch), slot("Zoom in", true, () => browserZoomBy(0.1)),
                                      slot("Forward", !!nexusView && nexusView.canGoForward, () => nexusView.forward()), slot("Reload", !!nexusView, () => nexusView.reload()),
-                                     slot("Full menu", true, openBrowserMenu), slot("Settings", true, openSettings),
+                                     slot("Full menu", g, () => { menuIndex = 0; sheet = "gamemenu" }), slot("Settings", true, openSettings),
                                      slot("Downloads", true, () => { browserTab = 1 }), slot("Zoom out", true, () => browserZoomBy(-0.1))]
         const common = [slot("Play options", g, openPlayOptions), slot("Full menu", g, () => { menuIndex = 0; sheet = "gamemenu" }),
                         slot("Settings", true, openSettings), slot("Games", games.length > 0, openGamesPick)]
@@ -2819,9 +2863,12 @@ Window {
               act: () => { if (!big) btMark("idle-end"); btLegend("no field") } },
             { name: "field", act: () => btClick(190, 500) },
             { name: "field focus", max: 6000, wait: () => nexusView.focusKind === 2,
-              act: () => { btLegend("a field"); check("Browser check: Steam's keyboard opens for a field: " + (browserFieldSeen > 0 ? "yes" : "no")) } },
-            { name: "second page", act: () => btClick(110, 432) },
-            { name: "on the second page", max: 15000, wait: () => pageIs(/tab=description/), act: () => pad("b") },
+              act: () => { btLegend("a field"); check("Browser check: Steam's keyboard opens for a field: " + (browserFieldSeen > 0 ? "yes" : "no"))
+                           // A clicked a moment ago: still a click at the pointer, never Enter on what has the focus.
+                           check("Browser check: A after a click is a click: " + (Turbine.browserKeyNav ? "no" : "yes")); pad("down") } },
+            { name: "d-pad", after: 300, act: () => { check("Browser check: A after the D-pad presses Enter: " + (Turbine.browserKeyNav ? "yes" : "no")); btClick(110, 432) } },
+            { name: "on the second page", max: 15000, wait: () => pageIs(/tab=description/),
+              act: () => { check("Browser check: A after the pointer clicked is a click again: " + (Turbine.browserKeyNav ? "no" : "yes")); pad("b") } },
             { name: "back", max: 15000, wait: () => pageIs(/tab=files/),
               act: () => { check("Browser check: B from a second page went back one page (" + nexusView.url + ")"); btClick(150, 312) } },
             { name: "refused", max: 10000, wait: () => !!browserNoteNow && browserNoteNow.text.indexOf("zip, 7z or rar") >= 0,
@@ -2831,14 +2878,20 @@ Window {
             // A picture is taken at the next frame: what changes the screen waits for the step after it.
             { name: "downloads tab", after: 400, act: () => btShot("downloads") },
             { name: "page tab", after: 500, act: () => pad("lb") },
+            { name: "quick menu", after: 400, act: () => { openBrowserMenu(); check("Browser check: the quick menu has " + pickItems.length + " rows (at most 6): " + pickItems.map(x => x.title).join(", "))
+                                                         check("Browser check: touch targets " + nexusView.tapSizes().map(x => x[0] + " " + x[1]).join(", ")) } },
+            { name: "quick menu closed", after: 400, act: () => pad("b") },
             { name: "added", max: 25000, wait: () => webDls.some(x => x.name.indexOf("Dupe Test") === 0 && x.state === "added"),
               act: () => { check("Browser check: pill " + browserPill.text); btShot("added") } },
-            { name: "mod manager download", after: 500, act: () => { bt.nxmAt = Date.now(); btClick(460, 188) } },
+            { name: "mod manager download", after: 500, act: () => { bt.nxmAt = Date.now(); btClick(460, 188)
+                check("Browser check: the Added note cleared at the next click: " + (!browserNoteNow || browserNoteNow.text.indexOf("Added") < 0 ? "yes" : "no")) } },
             { name: "nxm", after: 7500, act: () => {
                 check("Browser check: after Mod Manager Download the page is still the file page: " + (pageIs(/tab=files/) ? "yes" : "no, " + (nexusView ? nexusView.url : "")))
                 browserNoKey("", "nxm://skyrimspecialedition/mods/1/files/2?key=abc&expires=4102444800&user_id=1") } },
-            { name: "no key", after: 600, act: () => { btShot("nokey"); btLegend("no key message") } },
-            { name: "no key ok", after: 500, act: () => pad("b") },
+            { name: "no key", after: 600, act: () => { btShot("nokey"); btLegend("no key message")
+                const o = binds(); check("Browser check: the no-key note on its own file page leaves A " + o.a.label + " and B " + o.b.label)
+                browserNoteNow = null; browserNoKey("", "nxm://skyrimspecialedition/mods/1/files/9?key=abc&expires=4102444800&user_id=1") } },
+            { name: "no key elsewhere", after: 400, act: () => { const o = binds(); check("Browser check: the no-key note for another file's page: A " + o.a.label + ", B " + o.b.label); pad("b") } },
             { name: "close", after: 400, act: () => { check("Browser check: B on " + (nexusView && nexusView.canGoBack ? "a later page" : "the first page")); pad("b") } },
             { name: "closed", max: 5000, wait: () => page !== "browser",
               act: () => { check("Browser check: B on the first page closed it; focus " + (modPage && zone === "main" && pageIndex === 0 ? "on Get it" : "on " + zone + (modPage ? " (mod page row " + pageIndex + ")" : ""))) } },
@@ -2851,14 +2904,27 @@ Window {
               act: () => { check("Browser check: Slow download started " + Math.round((Date.now() - bt.pressAt) / 100) / 10 + " s after the press") } },
             { name: "auto close", max: 30000, wait: () => page !== "browser",
               act: () => { check("Browser check: after the add the page closed by itself; focus " + (zone === "play" ? "on Play" : "on " + zone)
-                                 + "; My mods " + (mods.some(m => /bigger.pockets|turbinetest/i.test(m.name + " " + (m.sourceId || ""))) ? "lists it" : "doesn't list it (" + mods.map(m => m.name).join(", ") + ")")) } }
+                                 + "; My mods " + (mods.some(m => /bigger.pockets|turbinetest/i.test(m.name + " " + (m.sourceId || ""))) ? "lists it" : "doesn't list it (" + mods.map(m => m.name).join(", ") + ")"))
+                           check("Browser check: the pointer is hidden after the close: " + (Turbine.pointerShown ? "no" : "yes"))
+                           bt.launches = launchCount; pad("a") } },
+            { name: "after the close", after: 300, act: () => check("Browser check: A just after the auto close started nothing: " + (launchCount === bt.launches && sheet === "" ? "yes" : "no")) }
         ])
     }
+    // The second run: the profile kept the sign-in; then a page that tries everything by itself with no press (a Mod
+    // Manager Download link from a script and from a frame, a pop-up, a download): nothing happens. Then a Slow
+    // download, and the page closed while it runs: Turbine says it goes on and where to watch it.
     function browserPersistScript() {
         btRun([
-            { name: "open", act: () => openNexus(btFiles) },
+            { name: "open", act: () => openNexus(btFiles + "&auto=1") },
             { name: "loaded", max: 45000, wait: () => !!nexusView && !!nexusView.view && !nexusView.loading && /tab=files/.test(nexusView.url),
-              act: () => check("Browser check: second run loaded " + nexusView.url) }
+              act: () => check("Browser check: second run loaded " + nexusView.url) },
+            { name: "tries", after: 9000, act: () => check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")")) },
+            { name: "slow", act: () => { bt.pressAt = Date.now(); btClick(160, 188) } },
+            { name: "running", max: 20000, wait: () => webDlsRunning > 0, act: () => pad("b") },
+            { name: "closed", max: 5000, wait: () => page !== "browser",
+              act: () => check("Browser check: closed while downloading; at the top: " + (webDlsRunning > 0 ? "Getting " + plural(webDlsRunning, "mod", "mods") : "nothing") + "; game menu has Nexus downloads: " + (gameMenuItems.some(x => x.act === "nexusdl") ? "yes" : "no")) },
+            { name: "landed", max: 20000, wait: () => webDls.some(x => x.state === "added" || x.state === "failed" || x.state === "asked"),
+              act: () => check("Browser check: the download went on after the close: " + webDls.map(x => x.name + " " + x.state).join(", ")) }
         ])
     }
     // The 0.54 fix: a helper report with no finish, a refused finish, and the Slow download hint replaced.
@@ -3363,7 +3429,7 @@ Window {
     property real zoomTrial: 0              // the build's pictures change the size without saving it
     readonly property real browserZoom: zoomTrial > 0 ? zoomTrial : !shot.on && browserSet.zoom > 0 ? browserSet.zoom : Turbine.browserZoomDefault(height, sizeNow)
     // The controller works the page (A clicks at the pointer) only while nothing of Turbine's is over it.
-    readonly property bool browserHasPad: page === "browser" && sheet === "" && !wheelOpen && browserTab === 0 && !keyboardUp && browserNoKeyPage === ""
+    readonly property bool browserHasPad: page === "browser" && sheet === "" && !wheelOpen && browserTab === 0 && !keyboardUp && browserNoKeyPage === "" && !browserOnGoogle
     onBrowserHasPadChanged: Turbine.browserInput = browserHasPad
     readonly property bool browserEnterNow: page === "browser" && !!nexusView && nexusView.focusKind === 1
     onBrowserEnterNowChanged: Turbine.browserEnter = browserEnterNow
@@ -3390,15 +3456,19 @@ Window {
         launchCount++
         outsideOpen = false
         const addr = browserAddress(url)
-        note("browser", "Nexus in Turbine: " + addr + " (" + opener + ")")
+        note("browser", "Nexus in Turbine: " + Turbine.browserLogUrl(addr) + " (" + opener + ")")
         if (page !== "browser") browserFrom = { page: page, zone: zone, tab: tab, modPage: modPage, pageIndex: pageIndex }
         browserOpener = opener
         browserGame = game ? game.id : ""
+        browserStartMod = Turbine.browserPageMod(addr)
         browserAddedGame = ""
         browserArrival = null
         browserNoteNow = null
+        browserNoKeyPage = ""
         browserTab = 0
-        if (browserOpen && nexusView) nexusView.load(addr)
+        // Already open: a fresh page with no history, so B closes on the first page Turbine opened (not after
+        // stepping back through the pages before it).
+        if (browserOpen && nexusView) nexusView.restart(addr)
         browserStart = addr
         browserOpen = true
         page = "browser"
@@ -3411,10 +3481,17 @@ Window {
     function closeBrowser(why) {
         if (!browserOpen) return
         note("browser", "Nexus page closed (" + why + ")" + (webDlsRunning > 0 ? ": " + plural(webDlsRunning, "download goes", "downloads go") + " on" : ""))
+        browserLastUrl = nexusView && nexusView.url ? nexusView.url : browserStart
         browserOpen = false
         launching = false
+        browserAutoClose.stop()
+        browserNoKeyPage = ""
+        if (browserTyping) browserTypingDone()
         Turbine.browserMode(false)
         Turbine.browserInput = false
+        // The page closed by itself after an add: A, Start and RT pressed a moment later were meant for the page,
+        // not for the Play button that now has the focus.
+        if (why === "added") closedAddedAt = Date.now()
         const f = browserFrom
         browserFrom = null
         if (page === "browser") page = f && f.page !== "browser" ? f.page : "game"
@@ -3422,10 +3499,32 @@ Window {
         keyRoot.forceActiveFocus()
         const a = browserArrival
         browserArrival = null
-        if (a) { landing = true; modArrived(a.game, a.id, a.name, a.on); landing = false }
-        else note("focus", "Back from Nexus: " + zone + (modPage ? ", the mod page's " + (pageIndex === 0 ? "main button" : "row " + pageIndex) : ""))
+        // The page's own mod went in and the page closed by itself: the focus goes to it (Play). Closed by hand: the
+        // focus stays where Nexus was opened from, and a toast says what was added.
+        if (a && why === "added") { landing = true; modArrived(a.game, a.id, a.name, a.on); landing = false }
+        else {
+            note("focus", "Back from Nexus: " + zone + (modPage ? ", the mod page's " + (pageIndex === 0 ? "main button" : "row " + pageIndex) : ""))
+            if (a && why !== "play" && why !== "home") toast.done("Added " + a.name + "." + (game && a.game === game.id ? " " + glyph("start") + " plays." : ""))
+        }
+        // Still downloading: it goes on, and the player is told so and where to see it.
+        if (webDlsRunning > 0 && why !== "play") {
+            const t = "Still downloading " + plural(webDlsRunning, "mod", "mods") + ". It's added by itself. To watch it: View, Full menu, Nexus downloads."
+            note("browser", t)
+            toast.showPlain(t)
+        }
         // Install notes that came while the page was open.
         if (pendingNotes && sheet === "") { pendingNotes = false; infoIndex = 0; sheet = "notes" }
+    }
+    property string browserLastUrl: ""
+    property real browserStartMod: 0        // the Nexus mod of the page Turbine opened (0: not a mod's page)
+    property real closedAddedAt: 0
+    // View, Full menu, Nexus downloads (and a tap on "Getting 1 mod" at the top): the page again, on its Downloads tab.
+    function openNexusDownloads() {
+        sheet = ""
+        const u = browserLastUrl !== "" ? browserLastUrl : browserStart
+        if (u === "") return
+        openBrowser(u, "page")
+        browserTab = 1
     }
     property bool landing: false
     // B: back one page, or close on the first page Turbine opened.
@@ -3439,11 +3538,24 @@ Window {
     function browserArrived(gameId, id, name, on) {
         browserAddedGame = gameId
         browserArrival = { game: gameId, id: id, name: name, on: on }
-        const auto = browserOpener === "getit" && webDlsRunning === 0 && gameId === browserGame
-        note("browser", "Added while Nexus is open: " + name + (auto ? "; closing in 2.5 seconds" : ""))
+        // Closes by itself only for the page's own mod (the newest file that landed came from the mod Get it opened).
+        const last = webDls.filter(x => x.state === "done" || x.state === "added").pop()
+        const own = !!last && browserStartMod > 0 && last.mod === browserStartMod
+        const auto = browserOpener === "getit" && webDlsRunning === 0 && gameId === browserGame && own
+        note("browser", "Added while Nexus is open: " + name + (auto ? "; closing after 2.5 seconds with no press" : own ? "" : " (not the page's own mod: the page stays)"))
         if (auto) browserAutoClose.restart()
     }
+    // 2.5 seconds with no press after the add (each press starts it again).
     Timer { id: browserAutoClose; interval: 2500; onTriggered: if (app.browserOpen && app.webDlsRunning === 0) app.closeBrowser("added") }
+    Connections {
+        target: Turbine
+        function onBrowserPressCountChanged() { app.browserPressed() }
+    }
+    // A press in the page (A, RT, R3, a click or tap, the D-pad): the auto close waits again, and a note goes.
+    function browserPressed() {
+        if (browserAutoClose.running) browserAutoClose.restart()
+        if (browserNoteNow && browserNoteNow.level !== "busy" && browserNoKeyPage === "" && Date.now() - browserNoteNow.at > 400) browserNoteNow = null
+    }
     readonly property var nexusView: browserLoader.item
     // The Desktop Mode setting, and the Labs ones for Game Mode.
     property bool outsideOpen: false
@@ -3455,7 +3567,10 @@ Window {
     }
     function webDownload(d) {
         const pageUrl = nexusView ? nexusView.url : browserStart
-        const r = parse(Turbine.browserPlan(d.url.toString(), d.suggestedFileName || "", pageUrl, d.totalBytes), { ok: false, error: "Turbine couldn't take that download." })
+        // What running downloads still have to come counts against the free space too.
+        let pending = 0
+        for (const x of webDls) if ((x.state === "requested" || x.state === "progress" || x.state === "paused") && x.total > 0) pending += Math.max(0, x.total - x.got)
+        const r = parse(Turbine.browserPlan(d.url.toString(), d.suggestedFileName || "", pageUrl, d.totalBytes, pending), { ok: false, error: "Turbine couldn't take that download." })
         if (!r.ok) {
             d.cancel()
             browserSay(r.error, "warn")
@@ -3464,12 +3579,27 @@ Window {
         d.downloadDirectory = r.dir
         d.downloadFileName = r.name
         d.accept()
-        webDls = webDls.concat([{ obj: d, path: r.path, name: r.name, game: r.game, state: "requested", got: 0, total: d.totalBytes, speed: 0,
-                                  words: "Starting", at: Date.now(), lastGot: 0, lastAt: Date.now(), reported: false }])
+        webDls = webDls.concat([{ obj: d, path: r.path, name: r.name, game: r.game, sure: r.sure === true, mod: r.mod || 0, state: "requested", got: 0, total: d.totalBytes, speed: 0,
+                                  words: r.sure ? "Starting" : "Starting. Not from Nexus's own file host: Turbine asks which game it is for", at: Date.now(), lastGot: 0, lastAt: Date.now(), reported: false }])
         browserDlIndex = webDls.length - 1
+    }
+    // "about 2 min left" from the speed so far.
+    function timeLeft(x) {
+        if (!(x.total > 0) || !(x.speed > 0) || x.got >= x.total) return ""
+        const sec = (x.total - x.got) / x.speed
+        return sec < 60 ? "under a minute left" : sec < 3600 ? "about " + Math.round(sec / 60) + " min left" : "about " + Math.round(sec / 360) / 10 + " h left"
     }
     // Twice a second: each download's state, bytes and speed (Qt keeps no history, so rows stay until Turbine closes).
     readonly property int webDlsRunning: { webDlTick; return webDls.filter(x => x.state === "requested" || x.state === "progress" || x.state === "paused").length }
+    // All running downloads' share done (-1 when a size isn't known), for "Getting 1 mod · 40%" at the top.
+    readonly property real webDlPart: {
+        webDlTick
+        const run = webDls.filter(x => x.state === "requested" || x.state === "progress" || x.state === "paused")
+        if (run.length === 0 || run.some(x => !(x.total > 0))) return -1
+        let got = 0, total = 0
+        for (const x of run) { got += x.got; total += x.total }
+        return total > 0 ? Math.min(1, got / total) : -1
+    }
     Timer {
         interval: 500
         repeat: true
@@ -3490,7 +3620,19 @@ Window {
                 const s = o.isPaused ? "paused" : "progress"
                 if (got !== x.got || total !== x.total || s !== x.state) changed = true
                 x.got = got; x.total = total; x.state = s
-                x.words = (s === "paused" ? "Paused · " : "") + sizeWords(got) + (total > 0 ? " of " + sizeWords(total) : "") + (s === "progress" && x.speed > 0 ? " · " + sizeWords(Math.round(x.speed)) + "/s" : "")
+                // Past 64 GB, or the disk nearly full: stopped now, and its partial file goes at once.
+                const stop = Turbine.browserDlCheck(x.path, got)
+                if (stop !== "") {
+                    x.stopWhy = stop
+                    note("browser", "Stopping " + x.name + ": " + stop)
+                    o.cancel()
+                    x.state = "cancelled"; x.words = "Stopped: " + stop; x.goneAt = now; changed = true
+                    Turbine.browserFailed(x.path, "stopped: " + stop)
+                    browserSay(x.name + " stopped: " + stop + ". Its partial file was removed.", "warn")
+                    continue
+                }
+                const left = s === "progress" ? timeLeft(x) : ""
+                x.words = (s === "paused" ? "Paused · " : "") + sizeWords(got) + (total > 0 ? " of " + sizeWords(total) : "") + (s === "progress" && x.speed > 0 ? " · " + sizeWords(Math.round(x.speed)) + "/s" : "") + (left ? " · " + left : "")
             } else if (st === 2 && x.state !== "done" && x.state !== "added") {
                 x.state = "done"; x.got = o.receivedBytes; x.total = Math.max(o.totalBytes, o.receivedBytes); x.words = "Adding..."
                 changed = true
@@ -3498,8 +3640,18 @@ Window {
             } else if (st === 3 && x.state !== "cancelled") {
                 x.state = "cancelled"; x.words = "Cancelled"; x.goneAt = now; changed = true
                 Turbine.browserFailed(x.path, "cancelled")
-            } else if (st === 4 && x.state !== "interrupted") {
-                x.state = "interrupted"; x.why = o.interruptReasonString || ""; changed = true
+            } else if (st === 4 && x.state !== "interrupted" && x.state !== "cancelled") {
+                x.why = o.interruptReasonString || ""; changed = true
+                // The disk filled up: stopped for good, and its partial file goes at once (not at the next start).
+                // WebEngineDownloadRequest's interruptReason 3 is FileNoSpace.
+                if (o.interruptReason === 3 || /no space|disk.*full|not enough space/i.test(x.why)) {
+                    o.cancel()
+                    x.state = "cancelled"; x.words = "Stopped: the disk is full"; x.goneAt = now
+                    Turbine.browserFailed(x.path, "nospace: " + x.why)
+                    browserSay(x.name + " stopped: the disk is full. Its partial file was removed.", "warn")
+                    continue
+                }
+                x.state = "interrupted"
                 // Nexus's file address has expired (the server refuses it): a new press of Slow download is needed.
                 x.server = /server|forbidden|unauthori|bad request|not found/i.test(x.why)
                 x.words = x.server ? "The address expired: press Slow download on the page again" : "Stopped" + (x.why ? " (" + x.why + ")" : "") + ". A: Try again"
@@ -3511,23 +3663,22 @@ Window {
         if (keep.length !== webDls.length) { webDls = keep; browserDlIndex = Math.min(browserDlIndex, Math.max(0, webDls.length - 1)); changed = true }
         if (changed) webDlTick++
     }
-    // A finished download went in: its row says so.
+    // A finished download went in (or Turbine asks about it, or it failed): its own row says so, matched by its
+    // path (two finishing together, or another status, never label the wrong row).
     Connections {
         target: Turbine
-        function onStatusJsonChanged() {
-            const s = app.parse(Turbine.statusJson, { active: false })
-            if (!app.browserOpen && app.webDls.length === 0) return
-            if (s.active && s.done && s.level === "ok" && s.added) {
-                for (const x of app.webDls) if (x.state === "done") { x.state = "added"; x.words = "Added to " + (s.game || x.game || "the game") + ": " + s.added }
-                app.browserSay(s.text, "ok")
-                app.webDlTick++
-            } else if (s.active && (s.level === "stop" || s.level === "warn") && s.done) {
-                for (const x of app.webDls) if (x.state === "done") { x.state = "failed"; x.words = s.text }
-                app.browserSay(s.text, "warn")
-                app.webDlTick++
-            }
+        function onAddResultJsonChanged() {
+            const r = app.parse(Turbine.addResultJson, {})
+            const x = app.webDls.find(d => d.path === r.path)
+            if (!x) return
+            if (r.ask) { x.state = "asked"; x.words = r.text }
+            else if (r.ok) { x.state = "added"; x.words = r.text }
+            else { x.state = "failed"; x.words = r.text }
+            if (app.browserOpen) app.browserSay(r.text, r.ok ? "ok" : "warn")
+            app.webDlTick++
         }
     }
+    function logUrl(u) { return Turbine.browserLogUrl(u) }
     function browserSay(text, level) {
         browserNoteNow = { text: text, level: level, at: Date.now() }
         note("browser", "Pill: " + text)
@@ -3550,9 +3701,25 @@ Window {
         if (n) return { text: n.text, level: n.level, progress: -1 }
         const stopped = webDls.filter(x => x.state === "interrupted")
         if (stopped.length > 0) return { text: stopped[stopped.length - 1].server ? "Press Slow download on the page again" : stopped[stopped.length - 1].name + " stopped. Downloads: Try again", level: "warn", progress: -1 }
-        if (browserIsFilePage && account.premium !== true) return { text: "Waiting for you: press Slow download", level: "hint", progress: -1 }
+        if (browserIsFilePage && account.premium !== true)
+            return { text: browserSignedIn ? "Press Slow download (free. Mod Manager Download needs Premium)" : "Sign in first (free), then press Slow download", level: "hint", progress: -1 }
         return { text: "", level: "ok", progress: -1 }
     }
+    // Signed in to Nexus in Turbine's browser (its sign-in cookie), looked at while the page is open.
+    property bool browserSignedIn: false
+    Timer { interval: 1000; repeat: true; running: app.browserOpen; triggeredOnStart: true; onTriggered: { const v = Turbine.browserSignedIn(); if (v !== app.browserSignedIn) app.browserSignedIn = v } }
+    // "Google sign-in" (the player's own browser through the helper) shows only with a paired helper and while the
+    // page isn't signed in.
+    readonly property bool browserSigninShown: bridge.paired === true && !browserSignedIn
+    // A message under the bar (cut short in the pill) shows for 6 seconds, then only the pill keeps it; a done or
+    // info message goes after 15 seconds.
+    property real noteClock: 0
+    Timer { interval: 500; repeat: true; running: app.browserOpen && !!app.browserNoteNow; onTriggered: {
+        app.noteClock = Date.now()
+        const n = app.browserNoteNow
+        if (n && n.level !== "warn" && app.browserNoKeyPage === "" && Date.now() - n.at > 15000) app.browserNoteNow = null
+    } }
+    readonly property bool browserNoteFresh: !!browserNoteNow && (noteClock === 0 || noteClock - browserNoteNow.at < 6000)
     readonly property bool browserIsFilePage: !!nexusView && /[?&]tab=files/.test(nexusView.url) && Turbine.browserIsNexus(nexusView.url)
     // The Downloads tab's rows.
     readonly property var browserRows: { webDlTick; return webDls.map(x => ({ name: x.name, game: x.game, state: x.state, got: x.got, total: x.total, words: x.words })) }
@@ -3575,46 +3742,74 @@ Window {
             { icon: "remove", title: "Cancel", detail: "Stops this download", danger: true, run: () => { if (x.obj) x.obj.cancel() } }
         ] : []).concat(x.state === "added" ? [
             { icon: "info", title: "Show in Turbine", detail: "Its game's My mods", run: () => closeBrowser("menu") }
-        ] : []).concat([
+        ] : []).concat(Turbine.gamemode ? [] : [
+            // A file manager means nothing in Game Mode: Desktop Mode only.
             { icon: "info", title: "Open folder", detail: dir.replace(/^.*\/Downloads\//, "Downloads/"), run: () => { if (!shot.on && !Qt.openUrlExternally("file://" + encodeURI(dir))) toast.showPlain("It's in " + dir) } }
         ]), "")
     }
-    // X, LT (a right click on the page) and the wheel's Full menu: Turbine's quick menu for the page.
-    function openBrowserMenu() {
+    // X and LT (a right click on the page): Turbine's quick menu for the page, at most 6 rows. Back is B, so it isn't
+    // here; Forward only when there is a page to go forward to.
+    function openBrowserMenu(keep) {
         if (!browserOpen) return
-        openPick("Nexus", nexusView ? nexusView.title : "", [
-            { icon: "info", title: "Back", detail: "The page before this one", run: () => { if (nexusView) nexusView.back() } },
-            { icon: "info", title: "Forward", detail: "", run: () => { if (nexusView) nexusView.forward() } },
+        const zoomWords = Math.round(browserZoom * 100) + "% · Left, Right change it" + (Math.abs(browserZoom - browserZoomSaved) > 0.001 ? " · A keeps it" : "")
+        openPick("Nexus", nexusView ? nexusView.title : "", (nexusView && nexusView.canGoForward ? [
+            { icon: "info", title: "Forward", detail: "The page you went back from", run: () => { if (nexusView) nexusView.forward() } }
+        ] : []).concat([
             { icon: "update", title: "Reload", detail: "", run: () => { if (nexusView) nexusView.reload() } },
-            { icon: "info", title: "Zoom in", detail: Math.round(browserZoom * 100) + "% now", run: () => browserZoomBy(0.1) },
-            { icon: "info", title: "Zoom out", detail: Math.round(browserZoom * 100) + "% now", run: () => browserZoomBy(-0.1) },
-            { icon: "info", title: "Copy page address", detail: nexusView ? nexusView.url : "", run: () => { Turbine.copyText(nexusView ? nexusView.url : browserStart); toast.done("Address copied.") } },
-            { icon: "play", title: "Sign in with my browser (Google and others)", detail: "Signs Turbine in from your own browser", run: () => signinStart() },
-            { icon: "remove", title: "Close", detail: "Downloads go on", run: () => closeBrowser("menu") }
-        ], "")
+            { icon: "info", title: "Zoom", detail: zoomWords, keep: true, step: (d) => browserZoomBy(d * 0.1), run: () => browserZoomKeep() },
+            { icon: "info", title: "Copy page address", detail: nexusView ? Turbine.browserLogUrl(nexusView.url) : "", run: () => { Turbine.copyText(nexusView ? nexusView.url : browserStart); toast.done("Address copied.") } }
+        ]).concat(browserSigninShown ? [
+            { icon: "play", title: "Google sign-in", detail: "Signs in on Nexus in Chrome, then Turbine takes the sign-in", run: () => signinStart() }
+        ] : []).concat([
+            { icon: "remove", title: "Close", detail: webDlsRunning > 0 ? "Downloads go on and are added by themselves" : "Back to where you opened it", run: () => closeBrowser("menu") }
+        ]), "")
+        if (keep !== undefined) menuIndex = Math.min(keep, pickItems.length - 1)
     }
+    // The page size: this time only (Left and Right), or kept for next time (A on Zoom, or Settings).
+    readonly property real browserZoomSaved: !shot.on && browserSet.zoom > 0 ? browserSet.zoom : Turbine.browserZoomDefault(height, sizeNow)
     function browserZoomBy(d) {
         const z = Math.max(0.5, Math.min(3, Math.round((browserZoom + d) * 10) / 10))
-        if (!shot.on) browserSet.zoom = z
-        else zoomTrial = z
+        zoomTrial = z
         note("action", "Nexus zoom " + Math.round(z * 100) + "%")
+    }
+    function browserZoomKeep() {
+        if (!shot.on) browserSet.zoom = browserZoom
+        note("action", "Nexus zoom kept: " + Math.round(browserZoom * 100) + "%")
+        toast.done("Nexus pages now start at " + Math.round(browserZoom * 100) + "%.")
     }
     // Y, and by itself once each time a text field gets the focus: Steam's keyboard.
     property int browserFieldSeen: 0
     function browserKeyboard() {
         note("action", "Nexus: keyboard")
-        if (Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard")
+        if (Turbine.gamemode && !shot.on) {
+            Qt.openUrlExternally("steam://open/keyboard")
+            // Until the field loses the focus (or B, Done typing), the pad's presses don't work the page: a B meant
+            // for Steam's keyboard never goes back a page.
+            browserTyping = true
+            keyboardUp = true
+        }
+    }
+    property bool browserTyping: false
+    function browserTypingDone() {
+        if (!browserTyping) return
+        browserTyping = false
+        keyboardUp = false
+        note("browser", "Done typing on the page")
+        if (Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://close/keyboard")
     }
     Connections {
         target: app.nexusView
         function onFocusKindChanged() {
             if (!app.nexusView) return
             if (app.nexusView.focusKind === 2) { app.browserFieldSeen++; app.note("browser", "A text field has the focus: Steam's keyboard opens"); app.browserKeyboard() }
+            else if (app.browserTyping) app.browserTypingDone()
         }
         function onPageEvent(what, detail) {
             if (what === "url") return
-            if (what === "loaded" || what === "failed" || what === "blocked" || what === "certificate" || what === "upload" || what === "crashed" || what === "newwindow")
-                app.note("browser", "Page " + what + (detail ? ": " + detail : ""))
+            // Addresses go into the log as host and path only (signed file links and sign-in codes stay out).
+            if (what === "loaded" || what === "failed" || what === "blocked" || what === "certificate" || what === "upload" || what === "crashed" || what === "newwindow" || what === "popupblocked" || what === "nxmrefused")
+                app.note("browser", "Page " + what + (detail ? ": " + (/^[a-z]+:/i.test(detail) ? app.logUrl(detail) : detail) : ""))
+            if (what === "popupblocked") app.browserSay("The page tried to open a window by itself. Turbine only opens one when you press.", "warn")
             if (what === "blocked") app.browserSay("Turbine doesn't open " + detail + " links.", "warn")
             if (what === "certificate") app.browserSay("That site's security certificate isn't valid, so Turbine won't open it.", "warn")
             if (what === "upload") app.browserSay("Uploading files isn't possible here.", "warn")
@@ -3624,6 +3819,9 @@ Window {
         function onDialogWanted(request) { app.browserDialog(request) }
         function onMenuWanted() { app.openBrowserMenu() }
         function onSigninClicked() { app.signinStart() }
+        function onGooglePassword() { app.googleSetPassword() }
+        function onGoogleChrome() { app.googleUseChrome() }
+        function onPagePressed() { Turbine.browserPressed() }
         function onCloseClicked() { app.closeBrowser("back") }
         function onTabClicked(i) { app.browserTab = i }
         function onDownloadClicked(i) { app.browserDlIndex = i; app.browserRowAct(i) }
@@ -3657,9 +3855,20 @@ Window {
     function browserNoKey(page, link) {
         const m = /^nxm:\/\/([a-z0-9_-]+)\/mods\/([0-9]+)\/files\/([0-9]+)/i.exec(link || "")
         const exact = m ? Turbine.browserStartUrl(m[1].toLowerCase(), parseInt(m[2]), parseInt(m[3])) : ""
-        browserNoKeyPage = exact !== "" ? exact : page
-        browserSay("Mod Manager Download needs your Nexus key. Use Slow download, or add your key in Settings", "warn")
+        const target = exact !== "" ? exact : page
+        const here = nexusView ? nexusView.url : ""
+        // Already on that file's page: only a note (A still clicks, B still goes back); it goes after 8 seconds or
+        // at the next click. Only a file page somewhere else takes A over (A goes there, B not now).
+        if (target === "" || (here !== "" && Turbine.browserSamePage(browserAddress(target), here))) {
+            browserNoKeyPage = ""
+            browserSay("Mod Manager Download needs a Nexus key (Premium). Press Slow download here instead: it's free", "warn")
+            noKeyNoteClear.restart()
+            return
+        }
+        browserNoKeyPage = target
+        browserSay("Mod Manager Download needs a Nexus key (Premium). A opens this file's page, where Slow download is free", "warn")
     }
+    Timer { id: noKeyNoteClear; interval: 8000; onTriggered: if (app.browserNoteNow && app.browserNoKeyPage === "" && /needs a Nexus key/.test(app.browserNoteNow.text)) app.browserNoteNow = null }
     // A on that message: the file's own page, where Slow download is.
     function browserNoKeyGo() {
         const u = browserNoKeyPage
@@ -3669,6 +3878,23 @@ Window {
     }
 
     // ---- Sign in with my browser (Google and others)
+    // Google won't sign in inside an app's browser. On its sign-in page Turbine's card offers the two ways that work:
+    // a Nexus password (Nexus emails a link; then email and password work right here), or Chrome with the helper.
+    readonly property bool browserOnGoogle: page === "browser" && browserTab === 0 && !!nexusView && /^https:\/\/accounts\.google\.com\//i.test(nexusView.url)
+    readonly property string googlePasswordUrl: "https://users.nexusmods.com/auth/password/new"
+    function googleSetPassword() {
+        note("action", "Google page: set a Nexus password (stays here)")
+        if (nexusView) nexusView.load(googlePasswordUrl)
+    }
+    function googleUseChrome() {
+        note("action", "Google page: use Chrome instead")
+        if (bridge.paired === true) { signinStart(); return }
+        const t = Turbine.gamemode
+            ? "Chrome needs Desktop Mode once: add Chrome to Steam and set up the browser helper (Settings, Labs). Then Google sign-in shows here."
+            : "Chrome needs the browser helper once (Settings, Getting mods, Using your own browser). Then Google sign-in shows here."
+        browserSay(t, "warn")
+        toast.showPlain(t)
+    }
     function signinStart() {
         const r = parse(Turbine.signinStart(), { how: "error", text: "Turbine couldn't start the sign-in." })
         note("browser", "Sign in with my browser: " + r.how)
@@ -3990,6 +4216,8 @@ Window {
     property var handler: ({ state: "unknown" })
     Timer { interval: 300; running: true; repeat: true; onTriggered: { const l = Turbine.takeLink(); if (l !== "") app.linkArrived(l) } }
     function linkArrived(link) {
+        // Turbine launched again with no link: this one comes to the front (the second one has closed).
+        if (link === "turbine:show") { if (!shot.on) { app.raise(); app.requestActivate() } return }
         const r = parse(Turbine.openLink(link), { error: "That Nexus link can't be read." })
         if (!shot.on) { app.raise(); app.requestActivate() }
         if (r.needsKey && browserOpen) {
@@ -4242,6 +4470,11 @@ Window {
     ] : [])
     // The Nexus key's rows show folded until asked for (or while a key is set, or the key is being checked).
     property bool keyRowsOpen: false
+    // Settings, Getting mods: the rows for the player's own browser are folded until asked for (open in Desktop Mode
+    // when he chose his own browser, and in the build's pictures of them).
+    property bool ownRowsOpen: false
+    readonly property bool ownRowsShown: ownRowsOpen || (!Turbine.gamemode && browserSet.openIn === "mine") || bridge.outdated === true
+                                         || ["browser", "helper", "accounts", "nobrowser"].indexOf(shot.page) >= 0
     readonly property bool keyRowsShown: keyRowsOpen || account.hasKey === true || account.state === "checking" || account.state === "error" || shot.page === "accounts"
     readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
         : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: installs in one press with no browser" : " · Free account: Get it on Nexus opens the file's page")
@@ -4264,10 +4497,15 @@ Window {
         { kind: "choice", key: "openIn", title: "Open Nexus in",
           how: browserSet.openIn === "mine" ? "Your own browser. Turbine watches Downloads and adds the file when it lands." : "Turbine itself: sign in once, press Slow download, and the mod is added. (Desktop Mode only; Game Mode always uses Turbine.)",
           value: browserSet.openIn, options: ["turbine", "mine"], names: ["Turbine", "My browser"] }
+    ] : [
+        // Game Mode: the same row, as a plain fact (there is nothing to choose there).
+        { kind: "info", key: "openInGm", title: "Open Nexus in: Turbine",
+          how: "Always, in Game Mode. Desktop Mode can use your own browser instead." }
+    ]).concat(bridge.paired === true ? [
+        { kind: "action", key: "signinMine", title: "Google sign-in",
+          how: "Signs in on Nexus in Chrome, then Turbine takes the sign-in from there. Email and password also work right in Turbine's page.",
+          action: "Sign in" }
     ] : []).concat([
-        { kind: "action", key: "signinMine", title: "Sign in with my browser (Google and others)",
-          how: bridge.paired ? "Signs in on Nexus in Chrome, then Turbine takes the sign-in from there. Email and password also work right in Turbine's page." : "Needs the browser helper below. Email and password sign-in works right in Turbine's page without it.",
-          action: "Sign in" },
         { kind: "action", key: "webSignOut", title: "Sign out of Nexus in Turbine", how: "Forgets the sign-in in Turbine's own Nexus page (your key stays)", action: "Sign out" },
         { kind: "choice", key: "zoom", title: "Nexus page size", how: "How large Nexus pages show in Turbine (also X, Zoom in or Zoom out on the page)",
           value: "", options: ["-", "+"], names: ["Smaller", "Larger (" + Math.round(browserZoom * 100) + "% now)"] }
@@ -4280,20 +4518,24 @@ Window {
     ] : [
         // Folded: one row, so the words a beginner doesn't need (API key, Premium) stay out of the way.
         { kind: "action", key: "keyFold", title: "Optional: Nexus account key", how: "Not needed to get mods. A key can make Get mods faster.", action: "Show" }
-    ]).concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat([
+    ]).concat(account.hasKey ? [{ kind: "action", key: "signOut", title: "Sign out of Nexus Mods", how: "Deletes the key from this device", action: "Sign out" }] : []).concat(ownRowsShown ? [] : [
+        // Folded: the rows for the player's own browser (Desktop Mode) stay out of the way.
+        { kind: "action", key: "ownFold", title: "Using your own browser (Desktop Mode)",
+          how: "Not needed in Game Mode: Nexus opens right in Turbine. These are for Chrome or Firefox in Desktop Mode.", action: "Show" }
+    ]).concat(!ownRowsShown ? [] : [
         { kind: "action", key: "helper", title: "Browser helper", action: "Set up",
           how: "For Chrome: brings a Google (or other) sign-in back to Turbine, and saves Nexus downloads from Chrome into Game Mods folders." }
-    ]).concat(bridge.outdated ? [
+    ]).concat(ownRowsShown && bridge.outdated ? [
         { kind: "info", key: "helperOld", title: "Your browser helper is out of date" + (bridge.helper ? " (" + bridge.helper + ", Turbine has " + bridge.bundled + ")" : ""),
           how: bridge.manual ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. After that it updates by itself."
                              : "Turbine put the new version in its folder and asks it to reload when it connects." }
-    ] : []).concat([
+    ] : []).concat(!ownRowsShown ? [] : [
         { kind: "toggle", key: "overlay", title: "Show status over other apps",
           how: "A small Turbine card shows download progress and Added while you're in the browser.",
           value: browserSet.overlay, options: [false, true], names: ["Off", "On"] }
-    ]).concat(bridge.paired || bridge.connected > 0 || shot.page === "browser" ? [
+    ]).concat(ownRowsShown && (bridge.paired || bridge.connected > 0 || shot.page === "browser") ? [
         { kind: "action", key: "pair", title: bridgeTitle, how: bridgeWords, action: bridge.paired ? "Pair again" : "Pair" }
-    ] : []).concat([
+    ] : []).concat(!ownRowsShown ? [] : [
         { kind: "action", key: "browser", title: "Web browser", how: browserWords, action: browserFound ? "Check again" : "How to get one" },
         { kind: "action", key: "nxmHandler", title: "Use Turbine for Mod Manager Download",
           how: handler.state === "yes" ? "Turbine gets Mod Manager Download links from the browser (they need a Nexus key)."
@@ -4325,7 +4567,7 @@ Window {
         else if (r.key === "alwaysSteam") { if (!shot.on) browserSet.alwaysSteam = !browserSet.alwaysSteam }
         else if (r.key === "labsChrome") { if (!shot.on) browserSet.labsChrome = !browserSet.labsChrome }
         else if (r.key === "openIn") { if (!shot.on) browserSet.openIn = browserSet.openIn === "mine" ? "turbine" : "mine" }
-        else if (r.key === "zoom") browserZoomBy(d * 0.1)
+        else if (r.key === "zoom") { browserZoomBy(d * 0.1); if (!shot.on) browserSet.zoom = browserZoom }
         else if (r.key === "noGpu") { webNoGpu = !webNoGpu; Turbine.setWebNoGpu(webNoGpu); toast.showPlain("Takes effect the next time Turbine starts.") }
         else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
         note("action", "Setting " + r.key + " changed")
@@ -4338,6 +4580,7 @@ Window {
         else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
         else if (r.key === "pasteKey") pasteKey()
         else if (r.key === "keyFold") { keyRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "pasteKey") }
+        else if (r.key === "ownFold") { ownRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "helper") }
         else if (r.key === "keyPage") { if (openNexus(keyPageUrl)) toast.showPlain("Opened API Keys. Copy the Personal API Key at the bottom, come back and press Paste.") }
         else if (r.key === "signOut") Turbine.nexusSignOut()
         else if (r.key === "webSignOut") Turbine.browserSignOut()
@@ -4804,6 +5047,7 @@ Window {
     readonly property bool keysLegend: !Turbine.gamemode && !shot.on && (lastInput === "mouse" || (lastInput === "keys" && Turbine.pads))
     readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "PgUp", rt: "PgDn", view: "V", start: "P", r3: "F" })
     function glyph(k) {
+        if (k === "rs") return "R stick"
         if (keysLegend && keyNames[k]) return keyNames[k]
         if (k === "view" && padKind === "360") return "BACK"
         if (k === "start" && padKind === "menu") return "MENU"
@@ -5188,6 +5432,7 @@ Window {
                             Rectangle {
                                 id: pill
                                 readonly property string words: app.dl.active ? "Getting " + app.plural(Math.max(1, Turbine.netBusy), "mod", "mods") + (app.dlPart >= 0 ? " · " + Math.round(app.dlPart * 100) + "%" : "")
+                                                                 : !app.browserOpen && app.webDlsRunning > 0 ? "Getting " + app.plural(app.webDlsRunning, "mod", "mods") + (app.webDlPart >= 0 ? " · " + Math.round(app.webDlPart * 100) + "%" : "")
                                                                  : app.statusNow.pill || ""
                                 visible: words !== ""
                                 anchors.verticalCenter: parent.verticalCenter
@@ -5196,7 +5441,7 @@ Window {
                                 border.color: c.accentLo
                                 Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(13); font.bold: true }
                                 // Updates ready: the list of them (a free account picks each one's page there).
-                                TapHandler { onTapped: if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
+                                TapHandler { onTapped: if (!app.dl.active && !app.browserOpen && app.webDlsRunning > 0) app.openNexusDownloads(); else if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
                             }
                         }
                     }
@@ -5886,6 +6131,13 @@ Window {
                 legend: app.sheet === "" && !app.wheelOpen && app.lastInput !== "touch" ? app.legendHints : []
                 glyph: app.glyph
                 padLegend: app.lastInput !== "touch"
+                signinShown: app.browserSigninShown
+                noteFresh: app.browserNoteFresh
+                googleShown: app.browserOnGoogle
+                googlePasswordWords: "Nexus emails you a link. Open it (on your phone is fine), set a password, then sign in here with your email and that password. Nothing else to set up."
+                googleChromeWords: app.bridge.paired === true ? "Opens Nexus's sign-in in Chrome. Sign in with Google there; Turbine takes the sign-in and comes back."
+                                   : Turbine.gamemode ? "Needs Desktop Mode once: Chrome added to Steam, and the browser helper set up in Chrome (Settings, Labs)."
+                                   : "Needs the browser helper set up in Chrome once (Settings, Getting mods, Using your own browser)."
             }
         }
     }
@@ -6125,7 +6377,7 @@ Window {
                : app.sheet === "oldhelper" ? "Your browser helper is out of date"
                : "Added " + app.notesName
         text: app.sheet === "quick" ? app.quickText
-              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file on Nexus, the same way: sign in if asked (free), press Slow download, then Steam button, Turbine. It's added too."
+              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file in Turbine. Press Slow download; it's added too."
                                     : "A opens its files on Nexus. Pick the top file under Main files, press Manual download, then Slow download. It's added too.")
               : app.sheet === "nobrowser" ? (app.browser.text || "")
               : app.sheet === "addbrowser" && app.addMode === "helper" ? "Turbine started " + app.openName + " through Steam. Without the browser helper it opens on its start page, not on the mod. The helper opens the mod's page for you and saves the download in the right game's folder."

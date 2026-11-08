@@ -4,7 +4,8 @@
 //!
 //! Downloads: browserPlan decides where a download goes before QML accepts it (it can't move afterwards) and marks
 //! the file as handled at once, so the Downloads watcher never adds it a second time; browserDone adds it as a sure
-//! match for its game when it lands. A file Turbine's browser downloads is never removed by Turbine.
+//! match for its game when it lands (Nexus's own file host after a press), or asks which game it is for. A finished
+//! file is never removed by Turbine; only the partial file of a download stopped for good (a full disk, too big).
 
 use crate::backend::qobject;
 use crate::browse;
@@ -12,6 +13,7 @@ use core::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use turbine_engine::json::{quote, Json};
 use turbine_engine::watch::Arrival;
@@ -41,6 +43,8 @@ const KEY_UP: i32 = 0x0100_0013;
 const KEY_RIGHT: i32 = 0x0100_0014;
 const KEY_DOWN: i32 = 0x0100_0015;
 const KEY_RETURN: i32 = 0x0100_0004;
+const KEY_PAGE_UP: i32 = 0x0100_0016;
+const KEY_PAGE_DOWN: i32 = 0x0100_0017;
 
 /// One download Turbine's browser accepted.
 #[derive(Clone, Debug)]
@@ -51,12 +55,22 @@ pub struct WebDownload {
     pub page: Option<(String, u64, Option<u64>)>,
 }
 
-/// A Mod Manager Download link the page navigated to: checked, then queued like a link from anywhere else.
-pub fn nxm_link_from_page(url: &str, route: &str) {
-    match browse::nxm_from_page(url, Instant::now(), &mut |l| crate::single::push(l)) {
-        browse::NxmFromPage::Queued(r) => crate::log::line("web", &format!("Mod Manager Download link from the browser ({route}): {r}")),
-        browse::NxmFromPage::Again => {}
-        browse::NxmFromPage::Refused(e) => crate::log::line("web", &format!("The page tried to open a link Turbine can't use ({route}): {e}")),
+/// A Mod Manager Download link webglue.cpp's scheme handler took, after it checked the request's initiator is
+/// nexusmods.com: checked again here (browse::nxm_from_page), then queued like a link from anywhere else.
+pub fn nxm_link_from_page(url: &str, initiator: &str) {
+    match browse::nxm_from_page(url, initiator, browse::last_press(), Instant::now(), &mut |l| crate::single::push(l)) {
+        browse::NxmFromPage::Queued(r) => crate::log::line("web", &format!("Mod Manager Download link from the browser (scheme handler, from {}): {r}", browse::log_url(initiator))),
+        browse::NxmFromPage::Refused(e) => crate::log::line("web", &format!("Mod Manager Download link refused: {e}")),
+    }
+}
+
+/// Signed in to Nexus in Turbine's browser: its sign-in cookie is in the profile (webglue.cpp watches the cookie
+/// store), or the browser helper brought the sign-in in.
+static SIGNED_IN: AtomicBool = AtomicBool::new(false);
+
+pub fn set_signed_in(on: bool) {
+    if SIGNED_IN.swap(on, Ordering::SeqCst) != on {
+        crate::log::line("web", if on { "Turbine's browser is signed in to Nexus" } else { "Turbine's browser is signed out of Nexus" });
     }
 }
 
@@ -74,17 +88,34 @@ fn c(s: &str) -> std::ffi::CString {
     std::ffi::CString::new(s.replace('\0', "")).unwrap_or_default()
 }
 
+/// A key pressed then let go into the page.
+fn send_key(key: i32) {
+    let none = c("");
+    // SAFETY: plain calls into qtglue.cpp on the GUI thread; the text lives for the calls.
+    unsafe {
+        turbine_key_event(key, 1, none.as_ptr());
+        turbine_key_event(key, 0, none.as_ptr());
+    }
+}
+
 impl qobject::Turbine {
     // ------------------------------------------------------------------------------------------------ controller
 
-    /// The browser is on screen (true) or closed: the pointer stays on screen the whole time it is open.
+    /// The browser is on screen (true) or closed: the pointer stays on screen the whole time it is open, and hides
+    /// as soon as it closes (so RT pages the list again at once instead of clicking Turbine).
     pub fn browser_mode(mut self: Pin<&mut Self>, on: bool) {
         if self.rust().pointer.sticky == on {
             return;
         }
         self.as_mut().rust_mut().pointer.sticky = on;
-        crate::log::line("pad", if on { "Browser open: the pointer stays on screen" } else { "Browser closed: the pointer hides as usual" });
-        if on && !self.rust().pointer.shown {
+        self.as_mut().rust_mut().key_nav.pointer();
+        self.as_mut().set_browser_key_nav(false);
+        crate::log::line("pad", if on { "Browser open: the pointer stays on screen" } else { "Browser closed: the pointer hides" });
+        if !on {
+            self.as_mut().pointer_hide();
+            return;
+        }
+        if !self.rust().pointer.shown {
             if let Some((w, h)) = crate::pad::window_size() {
                 let (x, y) = if self.rust().pointer.x >= 0.0 { (self.rust().pointer.x, self.rust().pointer.y) } else { (w / 2.0, h / 2.0) };
                 self.as_mut().rust_mut().pointer.place(x, y);
@@ -95,8 +126,9 @@ impl qobject::Turbine {
     }
 
     /// The D-pad (or the left stick pushed) in the page: an arrow key, pressed then let go. With spatial navigation
-    /// the page's own focus moves between links and buttons, and it scrolls where there are none.
-    pub fn browser_key(self: Pin<&mut Self>, dir: &QString) {
+    /// the page's own focus moves between links and buttons, and it scrolls where there are none. From now on A
+    /// presses Enter on that focus, until the pointer moves or clicks.
+    pub fn browser_key(mut self: Pin<&mut Self>, dir: &QString) {
         let key = match dir.to_string().as_str() {
             "up" => KEY_UP,
             "down" => KEY_DOWN,
@@ -104,20 +136,40 @@ impl qobject::Turbine {
             "right" => KEY_RIGHT,
             _ => return,
         };
-        let none = c("");
-        // SAFETY: plain calls into qtglue.cpp on the GUI thread; the text lives for the calls.
-        unsafe {
-            turbine_key_event(key, 1, none.as_ptr());
-            turbine_key_event(key, 0, none.as_ptr());
+        self.as_mut().rust_mut().key_nav.key();
+        if !*self.browser_key_nav() {
+            self.as_mut().set_browser_key_nav(true);
+        }
+        send_key(key);
+    }
+
+    /// The D-pad held for a while in the page: a page up or down per repeat instead of five arrows.
+    pub fn browser_page_key(self: Pin<&mut Self>, dir: &QString) {
+        match dir.to_string().as_str() {
+            "pageup" => send_key(KEY_PAGE_UP),
+            "pagedown" => send_key(KEY_PAGE_DOWN),
+            _ => {}
         }
     }
 
-    /// A on the page: the same left click RT makes at the pointer (or Enter on the page's focused element, when the
-    /// pointer has been still for 3 seconds and the page has a focused element). For the build's scripted presses;
-    /// a controller's A comes through handle_pad.
+    /// A on the page: the same left click RT makes at the pointer (or Enter on the page's focused element, only
+    /// after the D-pad moved that focus). For the build's scripted presses; a controller's A comes through handle_pad.
     pub fn browser_click(mut self: Pin<&mut Self>) {
         self.as_mut().browser_a(true);
         self.as_mut().browser_a(false);
+    }
+
+    /// A press of the player's in the page (A, RT, R3, a click or a tap): a download or a Mod Manager Download link
+    /// in the next moments is his; QML's timers start again.
+    pub(crate) fn browser_press_seen(mut self: Pin<&mut Self>) {
+        browse::note_press(Instant::now());
+        let n = self.browser_press_count().wrapping_add(1);
+        self.as_mut().set_browser_press_count(n);
+    }
+
+    /// A mouse click or a touch on the page (QML's handler over the page sees it on its way in).
+    pub fn browser_pressed(self: Pin<&mut Self>) {
+        self.browser_press_seen();
     }
 
     /// A pressed or let go in the browser. One press is one click (held, it holds the button down).
@@ -126,14 +178,15 @@ impl qobject::Turbine {
             let n = self.rust().browser_presses + 1;
             self.as_mut().rust_mut().browser_presses = n;
             crate::log::line("pad", &format!("Browser press {n} (A)"));
-            let enter = *self.browser_enter() && self.rust().pointer.still_ms() >= crate::pointer::HIDE_MS;
+            self.as_mut().browser_press_seen();
+            let enter = self.rust().key_nav.enter(*self.browser_enter());
             if enter {
                 self.as_mut().rust_mut().a_enter = true;
                 let n = self.rust().browser_clicks + 1;
                 self.as_mut().rust_mut().browser_clicks = n;
-                crate::log::line("pad", &format!("Browser click {n} (A): Enter on the page's focused element"));
+                crate::log::line("pad", &format!("Browser click {n} (A): Enter on the link or button the D-pad picked"));
                 let t = c("\r");
-                // SAFETY: as in browser_key.
+                // SAFETY: as in send_key.
                 unsafe { turbine_key_event(KEY_RETURN, 1, t.as_ptr()) };
                 return;
             }
@@ -146,7 +199,7 @@ impl qobject::Turbine {
             if self.rust().a_enter {
                 self.as_mut().rust_mut().a_enter = false;
                 let t = c("\r");
-                // SAFETY: as in browser_key.
+                // SAFETY: as in send_key.
                 unsafe { turbine_key_event(KEY_RETURN, 0, t.as_ptr()) };
                 return;
             }
@@ -182,25 +235,63 @@ impl qobject::Turbine {
         browse::zoom_default(height, size)
     }
 
-    /// A Mod Manager Download link QML's navigation guard caught (the scheme handler may see it too: one counts).
-    pub fn browser_nxm(self: Pin<&mut Self>, url: &QString) {
-        nxm_link_from_page(&url.to_string(), "navigation guard");
+    /// A Mod Manager Download link QML's navigation guard caught: a permit (the navigation goes on to webglue.cpp's
+    /// scheme handler, which checks the initiator) only for the main frame while the page is on Nexus. False: QML
+    /// stops the navigation there.
+    pub fn browser_nxm(self: Pin<&mut Self>, url: &QString, main_frame: bool, page_url: &QString) -> bool {
+        let u = url.to_string();
+        let r = turbine_engine::nxm::parse(&u).map(|l| l.redacted()).unwrap_or_else(|_| "a link Turbine can't read".into());
+        match browse::nxm_permit(&u, main_frame, &page_url.to_string(), Instant::now()) {
+            Ok(()) => true,
+            Err(e) => {
+                crate::log::line("web", &format!("Mod Manager Download link refused ({r}): {e}"));
+                false
+            }
+        }
+    }
+
+    pub fn browser_log_url(&self, url: &QString) -> QString {
+        QString::from(browse::log_url(&url.to_string()).as_str())
+    }
+
+    pub fn browser_same_page(&self, a: &QString, b: &QString) -> bool {
+        browse::same_page(&a.to_string(), &b.to_string())
+    }
+
+    pub fn browser_page_mod(&self, url: &QString) -> f64 {
+        browse::page_ids(&url.to_string()).map(|(_, m, _)| m as f64).unwrap_or(0.0)
+    }
+
+    pub fn browser_signed_in(&self) -> bool {
+        SIGNED_IN.load(Ordering::SeqCst)
+    }
+
+    /// A running download, twice a second: "" to go on, or why it stops now (QML cancels it, then browserFailed
+    /// removes what it left).
+    pub fn browser_dl_check(&self, path: &QString, got: f64) -> QString {
+        let p = PathBuf::from(path.to_string());
+        let free = p.parent().and_then(crate::system::free_bytes);
+        match browse::keep_going(if got.is_finite() { got as i64 } else { 0 }, free) {
+            Ok(()) => QString::default(),
+            Err(e) => QString::from(e.as_str()),
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ downloads
 
     /// Where a download the page started goes, or why it is refused. Answers {"ok", "dir", "name", "path", "game",
-    /// "folder", "error"}. On ok the file is marked as handled now, so the watcher never adds it too.
-    pub fn browser_plan(mut self: Pin<&mut Self>, url: &QString, suggested: &QString, page_url: &QString, total: f64) -> QString {
+    /// "folder", "sure", "mod", "error"}. On ok the file is marked as handled now, so the watcher never adds it too.
+    pub fn browser_plan(mut self: Pin<&mut Self>, url: &QString, suggested: &QString, page_url: &QString, total: f64, pending: f64) -> QString {
         let (url, suggested, page) = (url.to_string(), suggested.to_string(), page_url.to_string());
-        let ids = browse::page_ids(&page).or_else(|| browse::page_ids(&url));
+        let ids = browse::page_ids(&page);
         let game = ids.as_ref().and_then(|(d, _, _)| self.game_for_domain(d));
         let req = browse::Request { url: url.clone(), suggested, total: if total.is_finite() { total as i64 } else { -1 } };
         let dl = downloads_dir();
         let taken: Vec<PathBuf> = self.rust().web_downloads.iter().map(|d| d.path.clone()).collect();
         let free = crate::system::free_bytes(&dl);
         let host = browse::host_of(&url).map(|(h, _)| h).unwrap_or_else(|| "an unknown address".into());
-        let plan = browse::plan(&req, &dl, game.as_ref().map(|g| g.name.as_str()), free, &taken);
+        let pending = if pending.is_finite() && pending > 0.0 { pending as u64 } else { 0 };
+        let plan = browse::plan(&req, &dl, game.as_ref().map(|g| g.name.as_str()), free, pending, &taken, browse::last_press(), Instant::now());
         let p = match plan {
             Ok(p) => p,
             Err(e) => {
@@ -216,10 +307,17 @@ impl qobject::Turbine {
         let dir = p.dir.canonicalize().unwrap_or_else(|_| p.dir.clone());
         let path = dir.join(&p.name);
         self.as_mut().mark_handled(&path);
-        crate::log::line("web", &format!("Download: {} into Game Mods/{} (from {host})", p.name, p.folder));
+        if p.sure {
+            crate::log::line("web", &format!("Download: {} into Game Mods/{} (from {host}, after your press: a sure match)", p.name, p.folder));
+        } else {
+            crate::log::line("web", &format!("Download: {} into Game Mods/{} (from {host}, not Nexus's own file host: Turbine asks which game)", p.name, p.folder));
+        }
+        let (game, ids) = if p.sure { (game, ids) } else { (None, None) };
         let gname = game.as_ref().map(|g| g.name.clone()).unwrap_or_default();
+        let mod_id = ids.as_ref().map(|(_, m, _)| *m).unwrap_or(0);
         {
             let mut rm = self.as_mut().rust_mut();
+            // Interrupted downloads stay in the list until they are cancelled or finish; the oldest rows go past 50.
             rm.web_downloads.push(WebDownload { path: path.clone(), game, page: ids });
             if rm.web_downloads.len() > 50 {
                 rm.web_downloads.remove(0);
@@ -227,51 +325,76 @@ impl qobject::Turbine {
         }
         QString::from(
             format!(
-                "{{\"ok\":true,\"dir\":{},\"name\":{},\"path\":{},\"game\":{},\"folder\":{},\"error\":\"\"}}",
+                "{{\"ok\":true,\"dir\":{},\"name\":{},\"path\":{},\"game\":{},\"folder\":{},\"sure\":{},\"mod\":{},\"error\":\"\"}}",
                 quote(&dir.to_string_lossy()),
                 quote(&p.name),
                 quote(&path.to_string_lossy()),
                 quote(&gname),
-                quote(&p.folder)
+                quote(&p.folder),
+                p.sure,
+                mod_id
             )
             .as_str(),
         )
     }
 
-    /// A download finished: added to its game as a sure match (it came from that game's page), or decided the usual
-    /// way when no installed game fits (Game Mods/Other).
+    /// What became of a downloaded file, for its row in the Downloads tab (matched by its path).
+    pub(crate) fn add_result(mut self: Pin<&mut Self>, path: &Path, ok: bool, ask: bool, name: &str, game: &str, text: &str) {
+        let n = self.rust().add_results + 1;
+        self.as_mut().rust_mut().add_results = n;
+        let j = format!(
+            "{{\"n\":{n},\"path\":{},\"ok\":{ok},\"ask\":{ask},\"name\":{},\"game\":{},\"text\":{}}}",
+            quote(&path.to_string_lossy()),
+            quote(name),
+            quote(game),
+            quote(text)
+        );
+        self.as_mut().set_add_result_json(QString::from(j.as_str()));
+    }
+
+    /// A download finished: added to its game as a sure match (Nexus's own file host after a press), or Turbine asks
+    /// which game it is for. A file Turbine didn't plan (dropped from the list) is never left marked as handled: it
+    /// is decided the usual way.
     pub fn browser_done(mut self: Pin<&mut Self>, path: &QString) {
         let p = PathBuf::from(path.to_string());
-        let Some(d) = self.rust().web_downloads.iter().find(|d| d.path == p).cloned() else {
-            crate::log::line("web", &format!("A finished download Turbine didn't plan: {}", p.display()));
-            return;
-        };
-        self.as_mut().rust_mut().web_downloads.retain(|x| x.path != p);
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-        crate::log::line("web", &format!("Downloaded {name} ({})", browse::size_words(size)));
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
         self.as_mut().unmark_handled(&p);
+        let Some(d) = self.rust().web_downloads.iter().find(|d| d.path == p).cloned() else {
+            crate::log::line("web", &format!("A finished download Turbine didn't plan: {name}; deciding it the usual way"));
+            return self.catch_arrival(Arrival { path: p, size, arrived: now, catch_up: false });
+        };
+        self.as_mut().rust_mut().web_downloads.retain(|x| x.path != p);
+        crate::log::line("web", &format!("Downloaded {name} ({})", browse::size_words(size)));
         match d.game {
             Some(g) => {
                 let hint = d.page.map(|(domain, m, f)| (crate::bridge::NexusRef { domain, mod_id: m, file_id: f }, None));
                 self.catch_add(g, p, hint, None);
             }
             None => {
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
-                self.catch_arrival(Arrival { path: p, size, arrived: now, catch_up: false });
+                self.as_mut().add_result(&p, false, true, &name, "", "Which game is it for? Turbine asks before adding it.");
+                self.catch_ask(Arrival { path: p, size, arrived: now, catch_up: false }, "it didn't come from Nexus's own file host");
             }
         }
     }
 
-    /// A download stopped (interrupted or cancelled): said in the log; the page's Try again resumes it.
+    /// A download stopped (interrupted or cancelled): said in the log; the page's Try again resumes it. Stopped for
+    /// good (cancelled, a full disk, too big): its partial file goes at once.
     pub fn browser_failed(mut self: Pin<&mut Self>, path: &QString, why: &QString) {
         let p = PathBuf::from(path.to_string());
+        let why = why.to_string();
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        crate::log::line("web", &format!("Download of {name} stopped: {}", why.to_string()));
-        // Cancelled for good: the name is free again, and the watcher may look at that path again.
-        if why.to_string() == "cancelled" {
+        crate::log::line("web", &format!("Download of {name} stopped: {why}"));
+        let gone_for_good = why == "cancelled" || why.starts_with("stopped:") || why.starts_with("nospace");
+        if gone_for_good {
             self.as_mut().rust_mut().web_downloads.retain(|x| x.path != p);
             self.as_mut().unmark_handled(&p);
+        }
+        if why.starts_with("stopped:") || why.starts_with("nospace") {
+            for f in browse::remove_partial(&p) {
+                crate::log::line("web", &format!("Removed {} (the download stopped for good)", f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+            }
         }
     }
 
@@ -316,6 +439,7 @@ impl qobject::Turbine {
         // SAFETY: a plain call into webglue.cpp on the GUI thread.
         let r = unsafe { turbine_web_sign_out() };
         if r == 1 {
+            set_signed_in(false);
             self.as_mut().say("Signed out of Nexus in Turbine.", "ok");
         } else {
             self.as_mut().say("Turbine's browser couldn't sign out.", "warn");
@@ -421,6 +545,7 @@ impl qobject::Turbine {
             return;
         }
         crate::bridge::signin_end();
+        set_signed_in(true);
         let who = crate::bridge::signin_name(&cookies);
         let text = match &who {
             Some(n) => format!("Signed in to Nexus as {n}"),
@@ -538,7 +663,7 @@ impl qobject::Turbine {
 }
 
 /// What the sign-in button says when the browser helper isn't set up (one line).
-pub const NO_HELPER: &str = "Set up the browser helper first (Settings, Getting mods). Email and password sign-in works right here without it.";
+pub const NO_HELPER: &str = "Google sign-in needs the browser helper and Chrome, set up in Desktop Mode (Settings, Labs). Email and password sign-in works right here without it.";
 /// Game Mode with no Chrome-family browser in Steam: Steam's browser opens, but only Chrome with the helper can hand
 /// the sign-in back.
 pub const STEAM_ONLY: &str = "Steam's browser opened, but it can't hand the sign-in back to Turbine. Add Chrome to Steam (Settings, Getting mods), or sign in with email and password right here.";

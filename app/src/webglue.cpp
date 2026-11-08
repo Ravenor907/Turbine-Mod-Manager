@@ -4,16 +4,23 @@
 // - turbine_web_profile: remembers where the browser keeps its files and registers the one profile Turbine uses as the
 //   QML singleton TurbineWeb.NexusProfile. The profile itself is made the first time something uses it (opening the
 //   browser, signing out), so Chromium never starts in a run that doesn't open Nexus.
-// - NxmHandler: a Mod Manager Download link the page navigates to stops here (the page stays where it is) and its text
-//   goes to Rust (browse.rs), which checks it before anything else happens.
+// - NxmHandler: a Mod Manager Download link the page navigates to stops here (the page stays where it is). Only a
+//   request whose initiator is nexusmods.com over https (or the build's stand-in) goes on to Rust (browse.rs), which
+//   checks it again: QML's guard must have let the main frame go there while it was on Nexus, the link must carry its
+//   key, expiry and account number, the player must have pressed something in the last 30 seconds, and the link must
+//   be new. Anything else is refused here and only its origin is logged.
 // - turbine_web_sign_out, turbine_web_set_cookie: Settings' sign out, and the sign-in the browser helper brings back
 //   from the player's own browser (nexusmods.com cookies only, checked in Rust first and again here).
+// - The cookie store is watched for Nexus's sign-in cookie (names only), so Turbine knows whether the page is signed in.
+// - The profile's folders are the player's alone (0700): they hold the sign-in.
 // Cookie values never go to the log: only names and counts do.
 // No class here has Q_OBJECT, so nothing in this file needs moc.
 
 #include <QtCore/QByteArray>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QSet>
 #include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtCore/QUrl>
@@ -30,12 +37,16 @@
 
 namespace {
 using LogSink = void (*)(const char *text);
-using NxmSink = void (*)(const char *url);
+using NxmSink = void (*)(const char *url, const char *initiator);
+using SignedSink = void (*)(int on);
 
 LogSink s_log = nullptr;
 NxmSink s_nxm = nullptr;
+SignedSink s_signed = nullptr;
 QString s_data;
 QString s_cache;
+QString s_testOrigin; // "http://127.0.0.1:<port>" in the build's test runs only, else empty
+QSet<QString> s_signinCookies;
 QPointer<QQuickWebEngineProfile> s_profile;
 
 void say(const QString &text)
@@ -46,8 +57,18 @@ void say(const QString &text)
     }
 }
 
+// Is this origin ("https://www.nexusmods.com", "null", "http://127.0.0.1:47800") Nexus's own site over https, or the
+// build's stand-in? browse.rs's initiator_ok says the same.
+bool initiatorOk(const QUrl &origin)
+{
+    if (!s_testOrigin.isEmpty() && origin.toString(QUrl::RemovePath | QUrl::StripTrailingSlash).toLower() == s_testOrigin)
+        return true;
+    const QString host = origin.host().toLower();
+    return origin.scheme() == QLatin1String("https") && (host == QLatin1String("nexusmods.com") || host.endsWith(QLatin1String(".nexusmods.com")));
+}
+
 // A Mod Manager Download link (nxm://...) the page navigated to. The request fails on purpose, so the page stays on
-// the file page; the link's text goes to Rust, which checks it (nxm::parse) before using it.
+// the file page; the link's text goes to Rust only when Nexus itself started the request.
 class NxmHandler : public QWebEngineUrlSchemeHandler
 {
 public:
@@ -55,11 +76,44 @@ public:
     void requestStarted(QWebEngineUrlRequestJob *job) override
     {
         const QByteArray url = job->requestUrl().toString(QUrl::FullyEncoded).toUtf8();
+        const QUrl origin = job->initiator();
         job->fail(QWebEngineUrlRequestJob::RequestAborted);
+        const QString from = origin.isEmpty() ? QStringLiteral("nowhere") : origin.toString(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::RemoveUserInfo);
+        if (!initiatorOk(origin)) {
+            say(QStringLiteral("Mod Manager Download link refused: it came from %1, not nexusmods.com").arg(from));
+            return;
+        }
+        say(QStringLiteral("Mod Manager Download link from %1: initiator checked").arg(from));
+        const QByteArray o = from.toUtf8();
         if (s_nxm && url.size() <= 4096)
-            s_nxm(url.constData());
+            s_nxm(url.constData(), o.constData());
     }
 };
+
+// Nexus's sign-in cookies (by name; values are never read): any one of them on nexusmods.com means signed in.
+bool signinCookie(const QNetworkCookie &c)
+{
+    static const QSet<QString> names = { QStringLiteral("nexusmods_session"), QStringLiteral("nexusmods_session_refresh"), QStringLiteral("sid_develop"),
+                                         QStringLiteral("member_id") };
+    QString d = c.domain().toLower();
+    if (d.startsWith(QLatin1Char('.')))
+        d = d.mid(1);
+    const bool nexus = d == QLatin1String("nexusmods.com") || d.endsWith(QLatin1String(".nexusmods.com"));
+    return nexus && names.contains(QString::fromUtf8(c.name()));
+}
+
+void signinChanged()
+{
+    if (s_signed)
+        s_signed(s_signinCookies.isEmpty() ? 0 : 1);
+}
+
+// A folder only the player can open (the profile holds the sign-in).
+void ownerOnly(const QString &dir)
+{
+    QDir().mkpath(dir);
+    QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+}
 
 QQuickWebEngineProfile *profile()
 {
@@ -71,16 +125,30 @@ QQuickWebEngineProfile *profile()
     p->setStorageName(QStringLiteral("nexus"));
     p->setOffTheRecord(false);
     if (!s_data.isEmpty()) {
-        QDir().mkpath(s_data);
+        ownerOnly(s_data);
         p->setPersistentStoragePath(s_data);
     }
     if (!s_cache.isEmpty()) {
-        QDir().mkpath(s_cache);
+        ownerOnly(s_cache);
         p->setCachePath(s_cache);
     }
     p->setHttpCacheType(QQuickWebEngineProfile::DiskHttpCache);
     p->setPersistentCookiesPolicy(QQuickWebEngineProfile::ForcePersistentCookies);
     p->installUrlSchemeHandler(QByteArrayLiteral("nxm"), new NxmHandler(p));
+    QWebEngineCookieStore *store = p->cookieStore();
+    QObject::connect(store, &QWebEngineCookieStore::cookieAdded, p, [](const QNetworkCookie &c) {
+        if (signinCookie(c)) {
+            s_signinCookies.insert(QString::fromUtf8(c.name()) + QLatin1Char('@') + c.domain());
+            signinChanged();
+        }
+    });
+    QObject::connect(store, &QWebEngineCookieStore::cookieRemoved, p, [](const QNetworkCookie &c) {
+        if (signinCookie(c)) {
+            s_signinCookies.remove(QString::fromUtf8(c.name()) + QLatin1Char('@') + c.domain());
+            signinChanged();
+        }
+    });
+    store->loadAllCookies();
     s_profile = p;
     say(QStringLiteral("Nexus browser profile ready (kept in %1; signed in stays signed in)").arg(p->persistentStoragePath()));
     return p;
@@ -102,11 +170,13 @@ extern "C" int turbine_web_prepare(LogSink log)
 }
 
 // After QGuiApplication, before Main.qml: where the profile keeps its files, and TurbineWeb.NexusProfile for QML.
-extern "C" void turbine_web_profile(const char *data_dir, const char *cache_dir, NxmSink nxm)
+extern "C" void turbine_web_profile(const char *data_dir, const char *cache_dir, const char *test_origin, NxmSink nxm, SignedSink sign)
 {
     s_data = QString::fromUtf8(data_dir);
     s_cache = QString::fromUtf8(cache_dir);
+    s_testOrigin = QString::fromUtf8(test_origin).toLower();
     s_nxm = nxm;
+    s_signed = sign;
     qmlRegisterSingletonType<QQuickWebEngineProfile>("TurbineWeb", 1, 0, "NexusProfile", [](QQmlEngine *, QJSEngine *) -> QObject * {
         QQuickWebEngineProfile *p = profile();
         QJSEngine::setObjectOwnership(p, QJSEngine::CppOwnership);
@@ -122,6 +192,8 @@ extern "C" int turbine_web_sign_out()
         return 0;
     p->cookieStore()->deleteAllCookies();
     p->clearHttpCache();
+    s_signinCookies.clear();
+    signinChanged();
     say(QStringLiteral("Signed out of Nexus in Turbine (cookies and cache cleared)"));
     return 1;
 }

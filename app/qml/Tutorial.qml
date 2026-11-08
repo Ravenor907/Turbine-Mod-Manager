@@ -1,8 +1,8 @@
 import QtQuick
 
 // The beginner tutorial: four cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
-// X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus,
-// the Steam button and Turbine to come back, Turbine adds it). 4: Press START to play, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
+// X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus
+// right in Turbine, Added, START plays). 4: Press START to play, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
 // Left back, B skips, Start finishes) and remembers it was seen; Settings, Help shows it again.
 Item {
     id: tut
@@ -93,7 +93,7 @@ Item {
             wrapMode: Text.WordWrap
             text: ["A picks and B goes back. X shows options for what's highlighted, and Y searches this list. LB and RB switch tabs. The right stick moves a pointer, and RT clicks.",
                    "Press View for the quick wheel: Find, Sort, Settings, your games and more, from anywhere. Games: Left to the rail, or View then Left.",
-                   "Open Get mods and press A on a mod, then A on Get it on Nexus. Sign in to Nexus if it asks (free), press Slow download, then the Steam button and Turbine to come back. Turbine adds the mod by itself.",
+                   "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
                    "Press START to play the game with your mods on. That's all you need."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(18)
@@ -134,16 +134,16 @@ Item {
                 }
             }
         }
-        // 3: the five steps of getting a mod, coming back to Turbine included.
+        // 3: the five steps of getting a mod, all inside Turbine.
         Row {
             visible: tut.card === 2
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(8)
             Step { n: 1; tile: "Get mods"; words: "Open Get mods (RB)" }
             Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it on Nexus" }
-            Step { n: 3; tile: "Slow download"; words: "Sign in to Nexus (free), press Slow download" }
-            Step { n: 4; tile: "STEAM"; words: "Steam button, then Turbine, to come back" }
-            Step { n: 5; tile: "Added"; words: "Turbine adds it to your game" }
+            Step { n: 3; tile: "Slow download"; words: "Sign in if it asks (free), press Slow download" }
+            Step { n: 4; tile: "Added"; words: "Turbine adds it and closes the page" }
+            Step { n: 5; tile: tut.startGlyph; words: tut.startGlyph + " plays" }
         }
         // 4: Start.
         Column {
