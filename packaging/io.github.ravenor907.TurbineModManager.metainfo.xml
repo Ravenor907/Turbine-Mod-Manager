@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.55" date="2026-11-08" type="development">
+      <description>
+        <p>Nexus Mods inside Turbine:</p>
+        <ul>
+          <li>Nexus opens full screen inside Turbine, driven by the controller and pointer; sign-in is remembered</li>
+          <li>Press Slow download and the mod lands in Game Mods and is added, with Play ready</li>
+          <li>Mod Manager Download always asks first, so nothing downloads without your say</li>
+          <li>Sign in with Google through your own browser when the browser helper is paired</li>
+          <li>More game art, from your own Steam art and Steam's newer covers</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.54" date="2026-11-08" type="development">
       <description>
         <p>New controls and an easier start:</p>
