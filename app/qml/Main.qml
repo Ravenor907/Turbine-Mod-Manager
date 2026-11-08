@@ -2809,7 +2809,7 @@ Window {
             { name: "Get mods", max: 20000, wait: () => !!game && modsLoaded && getItems.length > 0,
               act: () => { Turbine.selftestCatch("watch")
                            // The sign-in pass-through: a helper's answer goes into the profile (checked on disk later).
-                           Turbine.selftestCatch("signin"); browserNoteNow = null
+                           Turbine.selftestCatch("signin"); browserNoteNow = null; toast.hide()
                            openDetails(getItems[0]) } },
             { name: "mod page", max: 15000, wait: () => !!detailsData && !detailsData.loading && mainLabel === "Get it on Nexus",
               act: () => { check("Browser check: mod page " + detailsData.name + ", button " + mainLabel); openNexus(btFiles) } },

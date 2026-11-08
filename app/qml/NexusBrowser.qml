@@ -68,6 +68,24 @@ Item {
         color: nb.ui.c.panel
         z: 2
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: Math.max(1, nb.ui.px(1)); color: nb.ui.c.accentLo }
+        // Room for Sign in with my browser: 4 the whole words and the game's name, 3 the whole words (the game's
+        // icon only), 2 "My browser sign-in", 1 "Sign in", 0 none (the X menu, Settings and Nexus's own sign-in page
+        // still have it). Worked out from sizes that never depend on it (the pill and the legend sit at the right).
+        TextMetrics { id: signinFull; font: signinText.font; text: "Sign in with my browser" }
+        TextMetrics { id: signinMid; font: signinText.font; text: "My browser sign-in" }
+        TextMetrics { id: signinShort; font: signinText.font; text: "Sign in" }
+        readonly property real tabsEnd: nb.ui.px(10) + nb.ui.px(26) + nb.ui.px(8) + nb.ui.px(12) + tabs.width + nb.ui.px(12)
+        readonly property real signinRoom: pill.x - nb.ui.px(8) - tabsEnd
+        readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)
+        readonly property int signinFit: {
+            if (!nb.signinShown) return 0
+            const pad = nb.ui.px(16)
+            if (signinFull.advanceWidth + pad + nameW <= signinRoom) return 4
+            if (signinFull.advanceWidth + pad <= signinRoom) return 3
+            if (signinMid.advanceWidth + pad <= signinRoom) return 2
+            if (signinShort.advanceWidth + pad <= signinRoom) return 1
+            return 0
+        }
         // Left: the game.
         Row {
             id: gameBox
@@ -82,6 +100,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
+                id: nameText
+                visible: bar.signinFit === 4 || bar.signinFit === 0
                 text: nb.gameName !== "" ? nb.gameName : "Nexus Mods"
                 color: nb.ui.c.accentText
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(15); font.weight: Font.DemiBold
@@ -141,16 +161,16 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
-        // Sign in with my browser (Google and others): always in the bar.
+        // Sign in with my browser (Google and others): in the bar when there is room (signinFit).
         Rectangle {
             id: signin
-            visible: nb.signinShown && nb.width > nb.ui.px(700)
+            visible: bar.signinFit > 0
             anchors.right: pill.left; anchors.rightMargin: nb.ui.px(8)
             anchors.verticalCenter: parent.verticalCenter
             width: signinText.implicitWidth + nb.ui.px(16); height: nb.ui.px(28); radius: nb.ui.px(5)
             color: nb.ui.c.raised
             border.color: nb.ui.c.accentLo; border.width: Math.max(1, nb.ui.px(1))
-            Text { id: signinText; anchors.centerIn: parent; text: "Sign in with my browser"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+            Text { id: signinText; anchors.centerIn: parent; text: bar.signinFit >= 3 ? "Sign in with my browser" : bar.signinFit === 2 ? "My browser sign-in" : "Sign in"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
             HoverHandler { onHoveredChanged: nb.ui.hover(signin, hovered) }
             TapHandler { onTapped: nb.signinClicked() }
         }
