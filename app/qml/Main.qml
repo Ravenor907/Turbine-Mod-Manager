@@ -2828,13 +2828,17 @@ Window {
               act: () => { check("Browser check: refused: " + browserNoteNow.text); browserNoteNow = null; btClick(150, 372) } },
             { name: "downloading", max: 15000, wait: () => webDls.some(x => x.name.indexOf("Dupe Test") === 0 && x.state === "progress"),
               act: () => { const x = webDls.find(d => d.name.indexOf("Dupe Test") === 0); check("Browser check: second download of a name there already is " + x.name); pad("rb") } },
-            { name: "downloads tab", after: 400, act: () => { btShot("downloads"); pad("lb") } },
+            // A picture is taken at the next frame: what changes the screen waits for the step after it.
+            { name: "downloads tab", after: 400, act: () => btShot("downloads") },
+            { name: "page tab", after: 500, act: () => pad("lb") },
             { name: "added", max: 25000, wait: () => webDls.some(x => x.name.indexOf("Dupe Test") === 0 && x.state === "added"),
-              act: () => { check("Browser check: pill " + browserPill.text); btShot("added"); bt.nxmAt = Date.now(); btClick(460, 188) } },
+              act: () => { check("Browser check: pill " + browserPill.text); btShot("added") } },
+            { name: "mod manager download", after: 500, act: () => { bt.nxmAt = Date.now(); btClick(460, 188) } },
             { name: "nxm", after: 7500, act: () => {
                 check("Browser check: after Mod Manager Download the page is still the file page: " + (pageIs(/tab=files/) ? "yes" : "no, " + (nexusView ? nexusView.url : "")))
                 browserNoKey("", "nxm://skyrimspecialedition/mods/1/files/2?key=abc&expires=4102444800&user_id=1") } },
-            { name: "no key", after: 600, act: () => { btShot("nokey"); btLegend("no key message"); pad("b") } },
+            { name: "no key", after: 600, act: () => { btShot("nokey"); btLegend("no key message") } },
+            { name: "no key ok", after: 500, act: () => pad("b") },
             { name: "close", after: 400, act: () => { check("Browser check: B on " + (nexusView && nexusView.canGoBack ? "a later page" : "the first page")); pad("b") } },
             { name: "closed", max: 5000, wait: () => page !== "browser",
               act: () => { check("Browser check: B on the first page closed it; focus " + (modPage && zone === "main" && pageIndex === 0 ? "on Get it" : "on " + zone + (modPage ? " (mod page row " + pageIndex + ")" : ""))) } },
