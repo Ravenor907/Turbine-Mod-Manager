@@ -849,7 +849,8 @@ Window {
     property var lastFocusId: ({})
     property bool landFocus: true
     // Not while a game's mods are still on their way in (the list on screen is the last game's until then).
-    onModIndexChanged: if (game && !moving && !landFocus && focusedItem && focusedItem.kind === "mod") {
+    // Whatever puts a different mod under the highlight (a move of the focus, or the list changing under it).
+    onFocusedItemChanged: if (game && !moving && !landFocus && modsLoaded && page === "game" && tab === 0 && focusedItem && focusedItem.kind === "mod") {
         if (shot.scripted && lastFocusId[game.id] !== focusedItem.m.id) note("focus", game.name + ": remember " + focusedItem.m.name + " (row " + (modIndex + 1) + ", zone " + zone + ", tab " + tab + ", " + mods.length + " mods)")
         lastFocusId[game.id] = focusedItem.m.id
     }
