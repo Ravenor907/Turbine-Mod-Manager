@@ -1,6 +1,7 @@
 // Service worker: keeps the link to Turbine, reports Nexus downloads and nxm links, feeds the panel and popup,
 // opens the Nexus page Turbine asks for in a new tab (Game Mode starts the browser through Steam, then sends it),
-// and reloads itself when Turbine has put a newer helper in its folder.
+// reloads itself when Turbine has put a newer helper in its folder, and (0.55) hands the player's Nexus sign-in to
+// Turbine's own browser when he asked for that in Turbine: only after a "signin.request", only nexusmods.com cookies.
 /* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads */
 "use strict";
 
@@ -11,7 +12,11 @@ const EXT_VERSION = chrome.runtime.getManifest().version;
 const ADDED_KEEP_MS = 10 * 60 * 1000;
 
 // What the panel and popup show. Kept in session storage so a restarted worker still knows it.
-let view = { status: null, added: null, choices: null, lastError: null };
+let view = { status: null, added: null, choices: null, lastError: null, signin: null };
+// The sign-in Turbine asked for: {id, at, sawAuth, changed, done}. Cookie values are never kept or stored here.
+const SIGNIN_KEEP_MS = 15 * 60 * 1000;
+let signin = null;
+let signinSent = "";
 const ports = new Set();
 
 const bridge = TurbineBridge.createBridge({
@@ -60,6 +65,18 @@ function handleTurbine(msg) {
       // panels start again with the new version and reconnect by themselves.
       if (chrome.runtime.reload) setTimeout(() => chrome.runtime.reload(), 100);
       return;
+    case "signin.request":
+      signin = { id: msg.id, at: Date.now(), sawAuth: false, changed: false, done: false };
+      signinSent = "";
+      view.signin = { pending: true, ok: false, text: "Sign in to Nexus here (Google works too). Turbine takes the sign-in when you're done." };
+      chrome.storage.session.set({ signin });
+      break;
+    case "signin.done":
+      if (!signin || msg.id !== signin.id) return;
+      if (msg.ok) signin.done = true;
+      view.signin = { pending: !msg.ok, ok: msg.ok, text: msg.text };
+      chrome.storage.session.set({ signin });
+      break;
     default:
       break;
   }
@@ -83,6 +100,58 @@ function openTab(url) {
     });
 }
 
+// ---------- Sign-in pass-through ----------
+
+function signinLive() {
+  return !!signin && !signin.done && Date.now() - signin.at < SIGNIN_KEEP_MS;
+}
+
+// Nexus's cookies (nexusmods.com and its hosts only) to Turbine, for the request it made. Sent again only when they
+// changed (a first copy may come from before the sign-in finished).
+async function sendSignin(why) {
+  if (!signinLive() || !chrome.cookies) return false;
+  let all = [];
+  try {
+    all = await chrome.cookies.getAll({ domain: "nexusmods.com" });
+  } catch (e) {
+    return false;
+  }
+  const m = P.build.signinCookies(signin.id, all);
+  if (!m || m.cookies.length === 0) return false;
+  const key = m.cookies.map((c) => c.domain + "|" + c.name + "|" + c.value.length + "|" + c.expirationDate).join(";");
+  if (key === signinSent && why !== "button") return false;
+  if (!bridge.send(m)) return false;
+  signinSent = key;
+  view.signin = { pending: true, ok: false, text: "Sent your Nexus sign-in to Turbine..." };
+  broadcast();
+  return true;
+}
+
+// Where a Nexus tab is now (the panel's report, URL only): back on Nexus after its sign-in page means signed in.
+function onWhere(url) {
+  if (!signinLive()) return;
+  let u = null;
+  try {
+    u = new URL(url);
+  } catch (e) {
+    return;
+  }
+  if (!P.isNexusHost(u.hostname)) return;
+  if (u.hostname.toLowerCase() === "users.nexusmods.com") {
+    signin.sawAuth = true;
+    chrome.storage.session.set({ signin });
+    return;
+  }
+  if (signin.sawAuth || signin.changed) sendSignin("page");
+}
+
+if (chrome.cookies && chrome.cookies.onChanged) {
+  chrome.cookies.onChanged.addListener((info) => {
+    if (!signinLive() || !info || info.removed || !info.cookie || !P.isNexusCookieDomain(info.cookie.domain)) return;
+    signin.changed = true;
+  });
+}
+
 function snapshot() {
   const st = bridge.getState();
   if (view.added && Date.now() - view.added.at > ADDED_KEEP_MS) view.added = null;
@@ -95,6 +164,7 @@ function snapshot() {
     added: view.added,
     choices: st.conn === "connected" ? view.choices : null,
     lastError: view.lastError,
+    signin: signinLive() || (view.signin && !view.signin.pending) ? view.signin : null,
   };
 }
 
@@ -161,6 +231,12 @@ function handlePanel(msg, port) {
     }
     case "nxm":
       if (P.isNxmUrl(msg.url)) bridge.send(P.build.nxm(msg.url));
+      break;
+    case "where":
+      if (typeof msg.url === "string") onWhere(msg.url);
+      break;
+    case "signin.send":
+      sendSignin("button");
       break;
     case "choice":
       if (view.choices && msg.sessionId === view.choices.sessionId && Array.isArray(msg.selected)) {
@@ -256,8 +332,9 @@ chrome.downloads.onErased.addListener((id) => tracker.onErased(id));
 chrome.runtime.onStartup.addListener(() => bridge.nudge());
 chrome.runtime.onInstalled.addListener(() => bridge.nudge());
 
-chrome.storage.session.get(["view", "trackedDownloads"]).then((s) => {
+chrome.storage.session.get(["view", "trackedDownloads", "signin"]).then((s) => {
   if (s.view) view = Object.assign(view, s.view, { choices: null });
+  if (s.signin && P.isSigninId(s.signin.id)) signin = s.signin;
   tracker.restore(s.trackedDownloads);
   updateBadge();
   broadcast();

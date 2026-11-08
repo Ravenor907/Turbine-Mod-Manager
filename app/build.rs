@@ -33,9 +33,14 @@ fn main() {
         .files(["src/backend.rs"])
         .cpp_file("src/qtglue.cpp")
         .cpp_file("src/webglue.cpp");
-    for dir in &web.includes {
-        b = b.include_dir(dir);
-    }
+    // SAFETY: only adds include folders to the C++ compiler cxx-qt-build runs (the documented use of cc_builder).
+    b = unsafe {
+        b.cc_builder(|cc| {
+            for dir in &web.includes {
+                cc.include(dir);
+            }
+        })
+    };
     b.build();
     // qtglue.cpp marks the Game Mode overlay window through Xlib.
     println!("cargo:rustc-link-lib=X11");

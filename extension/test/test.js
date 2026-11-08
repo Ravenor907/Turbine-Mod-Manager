@@ -476,6 +476,45 @@ test("Reconnects after Turbine goes away and comes back", async (t) => {
 
 // ---------- The real service worker file, with a fake chrome API ----------
 
+// ---------- Sign-in pass-through ----------
+
+const SID = "0123456789abcdef0123456789abcdef";
+
+test("Only Nexus's own cookies pass the domain filter", () => {
+  for (const ok of [".nexusmods.com", "nexusmods.com", "users.nexusmods.com", ".WWW.NexusMods.com"]) assert.ok(P.isNexusCookieDomain(ok), ok);
+  for (const bad of ["evilnexusmods.com", "nexusmods.com.evil.example", ".google.com", "accounts.google.com", "nexusmods.co", "", ".", "a..nexusmods.com", "nexus mods.com", null, 5])
+    assert.ok(!P.isNexusCookieDomain(bad), String(bad));
+  const list = [
+    { name: "nexusmods_session", value: "v1", domain: ".nexusmods.com", path: "/", secure: true, httpOnly: true, hostOnly: false, sameSite: "lax", expirationDate: 1893456000.5, storeId: "0", session: false },
+    { name: "SID", value: "google", domain: ".google.com", path: "/", secure: true },
+    { name: "x", value: "y", domain: "nexusmods.com.evil.example" },
+    { name: "u", value: "w", domain: "users.nexusmods.com", hostOnly: true, sameSite: "weird" },
+    { name: 7, value: "bad", domain: ".nexusmods.com" },
+  ];
+  const got = P.nexusCookies(list);
+  assert.deepEqual(got.map((c) => c.name), ["nexusmods_session", "u"]);
+  assert.deepEqual(Object.keys(got[0]).sort(), ["domain", "expirationDate", "hostOnly", "httpOnly", "name", "path", "sameSite", "secure", "value"]);
+  assert.equal(got[1].sameSite, "unspecified");
+  assert.equal(got[1].expirationDate, null);
+  assert.equal(P.nexusCookies(Array(200).fill(list[0])).length, 80);
+  assert.deepEqual(P.nexusCookies("nope"), []);
+});
+
+test("Sign-in messages are checked both ways", () => {
+  assert.deepEqual(P.validateIncoming({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" }), { type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" });
+  // A page that isn't Nexus's: the sign-in page instead.
+  assert.equal(P.validateIncoming({ type: "signin.request", id: SID, url: "https://evil.example/" }).url, P.SIGNIN_URL);
+  assert.equal(P.validateIncoming({ type: "signin.request", id: "short" }), null);
+  assert.equal(P.validateIncoming({ type: "signin.request", id: SID.toUpperCase() }), null);
+  assert.deepEqual(P.validateIncoming({ type: "signin.done", id: SID, ok: true, text: "Done" }), { type: "signin.done", id: SID, ok: true, text: "Done" });
+  assert.equal(P.validateIncoming({ type: "signin.done", id: "x", ok: true }), null);
+  assert.equal(P.build.signinCookies("x", []), null, "no request, nothing to send");
+  const m = P.build.signinCookies(SID, [{ name: "a", value: "b", domain: ".nexusmods.com" }, { name: "c", value: "d", domain: ".google.com" }]);
+  assert.equal(m.type, "signin.cookies");
+  assert.deepEqual(m.cookies.map((c) => c.name), ["a"]);
+  assert.equal(P.validateIncoming({ type: "status", text: "x", level: "hint" }).level, "hint");
+});
+
 test("background.js wires downloads, the panel and pairing to the bridge", async (t) => {
   const fake = await fakeOnFreePort({ token: TOKEN });
   t.after(() => fake.close());
@@ -492,6 +531,12 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   const tabsMade = [];
   const windowsFocused = [];
   let reloads = 0;
+  const cookieQueries = [];
+  // What chrome.cookies.getAll would find for each domain (the fake filters like Chrome does).
+  const jar = [
+    { name: "nexusmods_session", value: "s3cr3t", domain: ".nexusmods.com", path: "/", secure: true, httpOnly: true, hostOnly: false, sameSite: "lax", expirationDate: 1893456000 },
+    { name: "SID", value: "google", domain: ".google.com", path: "/", secure: true },
+  ];
   const pick = (store, keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((k) => k in store).map((k) => [k, store[k]]));
   const chrome = {
     runtime: {
@@ -529,6 +574,13 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
     windows: {
       update: async (id, o) => windowsFocused.push([id, o]),
       create: async () => {},
+    },
+    cookies: {
+      onChanged: on("cookieChanged"),
+      getAll: async (q) => {
+        cookieQueries.push(q);
+        return jar.filter((c) => c.domain === q.domain || c.domain.endsWith("." + q.domain) || c.domain === "." + q.domain);
+      },
     },
     action: {
       setBadgeText: (o) => badge.push(o.text),
@@ -620,6 +672,35 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
   await Promise.all(fire("dlChanged", { id: 11, state: { current: "complete" } }));
   assert.deepEqual(await fake.waitFor((m) => m.type === "download.finished"), { type: "download.finished", id: 11, path: "/home/deck/Downloads/a.zip", size: 5 });
 
+  // Sign-in pass-through: nothing is sent before Turbine asks.
+  fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/" });
+  fire("panelMsg", { kind: "signin.send" });
+  await sleep(100);
+  assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 0, "no cookies without a request");
+  assert.equal(cookieQueries.length, 0, "cookies aren't even read without a request");
+  // Turbine asks; the player is on the sign-in page, then back on Nexus: the cookies go, Nexus's only.
+  fake.send({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" });
+  await until(() => panelMsgs.some((m) => m.signin && m.signin.pending), 2000, "sign-in shown on the panel");
+  fire("panelMsg", { kind: "where", url: "https://users.nexusmods.com/auth/sign_in" });
+  fire("cookieChanged", { removed: false, cookie: { name: "nexusmods_session", domain: ".nexusmods.com" } });
+  fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/" });
+  const sent = await fake.waitFor((m) => m.type === "signin.cookies");
+  assert.equal(sent.id, SID);
+  assert.deepEqual(sent.cookies.map((c) => c.domain), [".nexusmods.com"]);
+  assert.equal(cookieQueries[0].domain, "nexusmods.com");
+  // The same cookies aren't sent again by themselves; the panel's button sends them again on purpose.
+  fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/skyrimspecialedition" });
+  await sleep(100);
+  assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 1);
+  fire("panelMsg", { kind: "signin.send" });
+  await until(() => fake.received.filter((m) => m.type === "signin.cookies").length === 2, 2000, "button sends again");
+  // Turbine took it: the request is over and nothing more goes.
+  fake.send({ type: "signin.done", id: SID, ok: true, text: "Turbine has your Nexus sign-in. Go back to Turbine." });
+  await until(() => panelMsgs.some((m) => m.signin && m.signin.ok), 2000, "signed in shown");
+  fire("panelMsg", { kind: "signin.send" });
+  await sleep(100);
+  assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 2, "nothing after the request ended");
+
   // Pairing: only accepted from the pairing page itself, then stored.
   const NEW = "c".repeat(64);
   const replies = [];
@@ -638,7 +719,8 @@ test("Every file loads, the manifest is minimal and the house rules hold", () =>
   const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
   assert.equal(m.manifest_version, 3);
   assert.equal(m.name, "Turbine browser helper");
-  assert.deepEqual(m.permissions, ["downloads", "storage"]);
+  // cookies: only for the sign-in Turbine asks for, and only nexusmods.com's (host permissions limit it too).
+  assert.deepEqual(m.permissions, ["cookies", "downloads", "storage"]);
   assert.deepEqual(m.host_permissions, ["https://*.nexusmods.com/*", "http://127.0.0.1/*"]);
   assert.match(m.version, /^\d+\.\d+$/, "one dot in the version");
   const files = [m.background.service_worker, m.action.default_popup, ...Object.values(m.icons), ...m.content_scripts.flatMap((c) => c.js)];

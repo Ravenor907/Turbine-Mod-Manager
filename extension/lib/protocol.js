@@ -6,7 +6,10 @@
   const PROTOCOL_VERSION = 1;
   const PORT_MIN = 47701;
   const PORT_MAX = 47710;
-  const LEVELS = ["ok", "busy", "wait", "warn", "stop"];
+  const LEVELS = ["ok", "busy", "wait", "hint", "warn", "stop"];
+  // Sign-in pass-through: Nexus's own cookies only, at most this many, at most this long.
+  const SIGNIN_URL = "https://users.nexusmods.com/auth/sign_in";
+  const MAX_COOKIES = 80;
   const KINDS = ["one", "any", "atleastone", "atmostone", "all"];
   const STATES = ["selected", "available", "required", "disabled"];
 
@@ -79,6 +82,38 @@
   function isNxmUrl(text) {
     if (typeof text !== "string" || text.length > 2048) return false;
     return /^nxm:\/\/[a-z0-9_-]+\/[^\s"'<>\\]+$/i.test(text);
+  }
+
+  // A sign-in request id from Turbine: 32 hex digits.
+  function isSigninId(text) {
+    return typeof text === "string" && /^[0-9a-f]{32}$/.test(text);
+  }
+
+  // A cookie's domain is Nexus's own: nexusmods.com or a host under it (never a look-alike).
+  function isNexusCookieDomain(domain) {
+    if (typeof domain !== "string") return false;
+    const d = domain.replace(/^\./, "").toLowerCase();
+    if (!/^[a-z0-9.-]{1,253}$/.test(d) || d.split(".").some((p) => p === "")) return false;
+    return d === "nexusmods.com" || d.endsWith(".nexusmods.com");
+  }
+
+  // The cookies chrome.cookies.getAll gave, reduced to Nexus's own, with only the fields Turbine needs.
+  function nexusCookies(list) {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((c) => c && typeof c.name === "string" && typeof c.value === "string" && isNexusCookieDomain(c.domain))
+      .slice(0, MAX_COOKIES)
+      .map((c) => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        hostOnly: c.hostOnly === true,
+        path: typeof c.path === "string" && c.path ? c.path : "/",
+        secure: c.secure === true,
+        httpOnly: c.httpOnly === true,
+        sameSite: ["no_restriction", "lax", "strict", "unspecified"].includes(c.sameSite) ? c.sameSite : "unspecified",
+        expirationDate: typeof c.expirationDate === "number" && isFinite(c.expirationDate) ? c.expirationDate : null,
+      }));
   }
 
   function isToken(text) {
@@ -195,6 +230,13 @@
       // Turbine put a newer helper in the folder this one was loaded from: reload from it.
       case "reload":
         return { type: "reload" };
+      // The player pressed "Sign in with my browser" in Turbine: send Nexus's sign-in once he has signed in here.
+      case "signin.request":
+        if (!isSigninId(msg.id)) return null;
+        return { type: "signin.request", id: msg.id, url: isNexusTabUrl(msg.url) || SIGNIN_URL };
+      case "signin.done":
+        if (!isSigninId(msg.id)) return null;
+        return { type: "signin.done", id: msg.id, ok: msg.ok === true, text: str(msg.text, 300) || "" };
       default:
         return null;
     }
@@ -232,6 +274,8 @@
     choice: (sessionId, step, selected) => ({ type: "choice", sessionId, step, selected: selected.slice() }),
     choiceBack: (sessionId) => ({ type: "choice.back", sessionId }),
     choiceCancel: (sessionId) => ({ type: "choice.cancel", sessionId }),
+    // Only for a request Turbine made, and only Nexus's own cookies.
+    signinCookies: (id, cookies) => (isSigninId(id) ? { type: "signin.cookies", id, cookies: nexusCookies(cookies) } : null),
   };
 
   const api = {
@@ -243,6 +287,10 @@
     parseNexusUrl,
     isNxmUrl,
     isNexusTabUrl,
+    isSigninId,
+    isNexusCookieDomain,
+    nexusCookies,
+    SIGNIN_URL,
     isToken,
     isPort,
     parsePairingUrl,

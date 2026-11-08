@@ -1,5 +1,6 @@
 // Content script for nexusmods.com: Turbine's own small panel (in a closed shadow root), the page report and nxm links.
 // It never clicks, changes or reads anything on the Nexus page except the URL and the nxm links the player clicks.
+// The URL also tells the helper when the player is back on Nexus after its sign-in page (sign-in pass-through).
 /* global chrome, TurbineProtocol, TurbineChoices */
 (function () {
   "use strict";
@@ -20,6 +21,7 @@
   let seenAdded = 0;
   let seenChoices = "";
   let seenWait = "";
+  let seenSignin = "";
 
   // ---------- Link to the service worker ----------
   function connectPort() {
@@ -64,6 +66,7 @@
   function reportPage() {
     if (location.href === lastHref) return;
     lastHref = location.href;
+    post({ kind: "where", url: location.href });
     if (P.parseNexusUrl(location.href)) post({ kind: "page", url: location.href });
   }
   setInterval(reportPage, 1000);
@@ -173,7 +176,8 @@
   const secStatus = el("div");
   const secAdded = el("div");
   const secChoices = el("div");
-  body.append(secConn, secStatus, secAdded, secChoices);
+  const secSignin = el("div");
+  body.append(secConn, secSignin, secStatus, secAdded, secChoices);
   card.append(head, body);
 
   function el(tag, cls, text) {
@@ -301,7 +305,7 @@
   }
 
   // ---------- Rendering ----------
-  const sigs = { conn: "", status: "", added: "", choices: "" };
+  const sigs = { conn: "", signin: "", status: "", added: "", choices: "" };
 
   function level() {
     if (state.conn === "refused") return "warn";
@@ -340,6 +344,12 @@
       seenWait = wk;
       if (wk) wantOpen = true;
     }
+    // Turbine asked for the Nexus sign-in: the panel opens to say what happens.
+    const sk = state.signin ? state.signin.text : "";
+    if (sk !== seenSignin) {
+      seenSignin = sk;
+      if (sk) wantOpen = true;
+    }
     if (state.conn === "connected" && lastHref === "") reportPage();
     if (wantOpen && !open) {
       open = true;
@@ -361,6 +371,7 @@
     if (!open) return;
     const top = body.scrollTop;
     renderConn();
+    renderSignin();
     renderStatus();
     renderAdded();
     renderChoices();
@@ -386,6 +397,21 @@
       box.append(el("div", "warnline", state.lastError), rowOf(button("OK", "ghost", () => post({ kind: "dismiss" }))));
       secConn.append(box);
     }
+  }
+
+  // Sign in with my browser: what is happening, and a button to send the sign-in now (the player's own press).
+  function renderSignin() {
+    const g = state.conn === "connected" ? state.signin : null;
+    const sig = g ? JSON.stringify(g) : "";
+    if (sig === sigs.signin) return;
+    sigs.signin = sig;
+    secSignin.replaceChildren();
+    if (!g) return;
+    const box = el("div", "box");
+    box.append(el("h2", "", g.ok ? "Signed in" : "Sign in for Turbine"));
+    box.append(el("div", "", g.text));
+    if (g.pending) box.append(rowOf(button("Send my sign-in to Turbine", "main", () => post({ kind: "signin.send" }))));
+    secSignin.append(box);
   }
 
   function renderStatus() {

@@ -736,6 +736,8 @@ pub struct TurbineRust {
     pub(crate) browser_clicks: u32,
     /// A is holding Enter down (not the mouse button).
     pub(crate) a_enter: bool,
+    /// The last A press went to the page (its release goes there too).
+    pub(crate) a_browser: bool,
     /// Downloads Turbine's browser accepted and hasn't finished adding.
     pub(crate) web_downloads: Vec<crate::web::WebDownload>,
 }
@@ -806,6 +808,7 @@ impl Default for TurbineRust {
             browser_presses: 0,
             browser_clicks: 0,
             a_enter: false,
+            a_browser: false,
             web_downloads: Vec::new(),
         }
     }
@@ -1338,8 +1341,16 @@ impl qobject::Turbine {
     /// One press or release, from a pad or the build's checks (selftestPad).
     fn handle_pad(mut self: Pin<&mut Self>, button: &'static str, pressed: bool) {
         // Turbine's browser: A is a click at the pointer (one press, one click; held, it holds the button down).
-        if button == "a" && (*self.browser_input() || self.rust().mouse_src[0] & 4 != 0 || self.rust().a_enter) {
-            return self.browser_a(pressed);
+        // A press that went to the page lets go there too, and one that went to Turbine's interface lets go there.
+        if button == "a" {
+            if pressed && *self.browser_input() && !self.rust().a_browser {
+                self.as_mut().rust_mut().a_browser = true;
+                return self.browser_a(true);
+            }
+            if !pressed && self.rust().a_browser {
+                self.as_mut().rust_mut().a_browser = false;
+                return self.browser_a(false);
+            }
         }
         if pressed && *self.browser_input() && (button == "rt" || button == "r3") {
             let n = self.rust().browser_presses + 1;

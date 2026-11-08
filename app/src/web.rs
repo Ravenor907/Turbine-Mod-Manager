@@ -469,6 +469,10 @@ impl qobject::Turbine {
         let step = step.to_string();
         let dl = downloads_dir();
         let said = if step == "watch" {
+            // No catch-up on the test home's old downloads: only what the check drops in counts.
+            let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
+            let _ = turbine_engine::watch::CatchState { last_seen: now, ..Default::default() }.save(&path);
             self.as_mut().start_downloads_watch();
             "watching".to_string()
         } else if let Some(j) = step.strip_prefix("bridge:") {

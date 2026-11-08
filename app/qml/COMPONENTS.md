@@ -449,7 +449,8 @@ Labs > Performance check: Run check (about 13 seconds: still, scrolling, idle), 
 - `ModDetails`: a mod's page, its own full screen (header "Get mods > Name", no Back button, LB/RB the previous or
   next result). `info` is the engine's details answer; the main button has the focus. `helpLabels` and `helpFocus`:
   the two buttons that show under the main one 8 seconds after Open ("Open in Steam's browser", "Always use Steam's
-  browser"), `helpClicked(index)`.
+  browser"), `helpClicked(index)`. Since 0.55 they only show for Labs' Game Mode ways of opening Nexus (Chrome
+  through Steam, Steam's browser): Nexus normally opens inside Turbine.
 - `FomodSheet`: installer choices, one question per page with a picture preview. Main.qml passes buttons to
   `handleButton(b)`; it emits `choose(group, option)`, `next()`, `back()` and `stop()`.
 - `LoadOrderList`: the Load order tab (Skyrim). `plugins` is the engine's load order, `focusIndex` -1 is Sort
@@ -458,3 +459,38 @@ Labs > Performance check: Run check (about 13 seconds: still, scrolling, idle), 
 - `AskText`: one line of text typed with Steam's keyboard: `open(title, note, start, placeholder, max, secret,
   done)`, then `accepted(text)` or `cancelled()`. `focusIndex` -1 is the field (A opens Steam's keyboard again), then
   Clear, Cancel and Done (SheetButtons); Start is Done.
+
+## NexusBrowser (0.55)
+
+Nexus inside Turbine: one web page (Qt WebEngine, the profile `TurbineWeb.NexusProfile` from webglue.cpp) full
+screen under a 40 design pixel brass bar: the game's icon and name, the Page | Downloads tabs with LB and RB caps on
+their ends, the page's title with its site (another site than Nexus in a warning chip), Sign in with my browser, the
+download pill, the legend and a close button. On Nexus's sign-in page Turbine's own "Sign in with my browser (Google
+and others)" button sits over the page's corner (drawn by Turbine, never put into the page).
+
+Main.qml holds it in a Loader (`browserOpen`), made when Nexus opens and destroyed when it closes; the profile, and
+with it the sign-in, stays. Main.qml passes `startUrl`, `gameName`, `gameIcon`, `zoom`, `tab`, `downloads` (rows:
+name, game, state, got, total, words), `dlIndex`, `pillText`, `pillLevel`, `pillProgress`, `legend` (the legend from
+`binds()`), `glyph` and `live` (false in the build's pictures without the stand-in page: the frame only). It reads
+`url`, `title`, `loading`, `canGoBack`, `canGoForward` and `focusKind` (0 nothing, 1 a link or button, 2 a text field:
+a read-only script in its own world reads it every 300 ms), and calls `back()`, `forward()`, `reload()`, `load(url)`,
+`focusPage()`. Signals: `signinClicked()`, `closeClicked()`, `menuWanted()` (LT, a right click: Chromium's own menu
+never shows), `tabClicked(i)`, `downloadClicked(i)`, `dialogWanted(request)` (the page's alerts, in Turbine's menu)
+and `pageEvent(what, detail)` (loaded, failed, blocked, certificate, upload, crashed, newwindow).
+
+Guards: only http(s) pages; an nxm link goes to Turbine (the C++ scheme handler sees it too, one counts); certificate
+errors are refused; file uploads, permissions and full screen are refused; pop-ups open in the same view.
+
+Controls (`binds()` with `page === "browser"`): right stick the pointer (never hides, dims after 3 s still); RT, R3
+and A click at it (A on a focused element after the pointer was still 3 s: Enter); LT and X Turbine's quick menu
+(Back, Forward, Reload, Zoom in, Zoom out, Copy page address, Sign in with my browser, Close); Y Steam's keyboard (it
+also opens by itself once each time a text field gets the focus); B back a page, on the first page close (focus back
+on the button that opened it; hold 1 s home); LB/RB Page and Downloads; D-pad and the left stick pushed arrow keys
+into the page (spatial navigation); the left stick swept the wheel at the pointer; Start Play after a mod was added;
+View the quick wheel (Search Nexus, Zoom in, Forward, Reload, Full menu, Settings, Downloads, Zoom out). Legend: A
+Click, B Back or Close, X Menu, Y Type (only with a field focused), then Start Play after an add, otherwise LT Menu.
+
+Downloads: `downloadRequested` on the profile asks `Turbine.browserPlan()` where it goes (Downloads/Game Mods/<Game>/,
+refused unless https, zip/7z/rar, under 64 GB, room for twice its size; " (2)" for a name already there), then
+accepts it; `Turbine.browserDone()` adds it as a sure match. A single file opened from a mod's Get it closes the page
+2.5 seconds after Added, with the focus on Play. Downloads go on when the page closes.

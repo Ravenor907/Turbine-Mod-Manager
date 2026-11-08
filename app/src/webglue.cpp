@@ -139,7 +139,7 @@ extern "C" int turbine_web_set_cookie(const char *name, const char *value, const
     QQuickWebEngineProfile *p = profile();
     if (!p)
         return 0;
-    QNetworkCookie c(QByteArray(name), QByteArray(value));
+    QNetworkCookie c{QByteArray(name), QByteArray(value)};
     c.setDomain(host_only ? QString() : QStringLiteral(".") + h);
     c.setPath(path && *path ? QString::fromUtf8(path) : QStringLiteral("/"));
     c.setSecure(secure != 0);

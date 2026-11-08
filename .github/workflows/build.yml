@@ -347,6 +347,9 @@ jobs:
               shoot "$p-$size" "$size" $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
             done
             shoot "railmenu-$size" "$size" railmenu "$PWD/home" --game=$skyrim
+            # 0.55: the Nexus page's frame over a mod page (the page itself is drawn in the X11 run below).
+            fresh "browserframe-$size"; h="$PWD/fh/browserframe-$size"
+            shoot "browserframe-$size" "$size" browserframe "$h" --game=$skyrim
             fresh "inlinebrowser-$size"; h="$PWD/fh/inlinebrowser-$size"
             shoot "inlinebrowser-$size" "$size" inlinebrowser "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
           done
@@ -410,9 +413,24 @@ jobs:
           need $i "Show hidden games" "Hidden check: every game hidden, the rail shows Show hidden games"
           need $i "Input checks" "Input check: 0 problems"
           for size in 1280x800 1920x1080; do
-            need inlinebrowser-$size "Inline browser buttons ($size)" "Inline browser buttons: Open in Steam's browser; Always use Steam's browser, focus on Open in Steam's browser, sheet \"\""
+            need inlinebrowser-$size "No inline browser buttons: Nexus opens in Turbine ($size)" "Inline browser buttons: none \(Nexus open in Turbine\), sheet \"\""
           done
           need presscount-1280x800 "Presses to a mod and Play" "Presses from the rail to a mod added and Play: "
+          # 10. The 0.54 regression: a helper report with no finish, a refused finish, and the Slow download hint.
+          fresh "regress"; h="$PWD/fh/regress"
+          timeout 90 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
+            --env=TURBINE_HOME="$h" --env=TURBINE_DATA="$PWD/data/regress" \
+            --filesystem="$PWD/shots" --filesystem="$h" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
+            io.github.ravenor907.TurbineModManager --screenshot="$PWD/shots/regress-1280x800.png" --size=1280x800 --page=regress --selftest-data="$PWD/samples" \
+            --game=$skyrim "--regress-downloads=$h/Downloads" > shots/regress.log 2>&1 || echo "::warning title=The regression run stopped with code $?::"
+          r=regress
+          need $r "10: the Slow download hint is shown" "Status \(hint\): Sign in to Nexus if it asks"
+          need $r "10: a download status replaces the hint" "Status \(busy\): Downloading in the browser: Regress Three 1.0.zip"
+          need $r "10: a report with no finish holds the watcher back" "Regress One 1.0.zip: the browser helper is reporting this download"
+          need $r "10: ... for at most 20 seconds" "The browser didn't report Regress One 1.0.zip finished; adding it from Downloads"
+          need $r "10: a refused finish falls back to the watcher" "Finished download not taken: .*the Downloads watcher takes Regress Two 1.0.zip instead"
+          added=$(grep -c "Added to .*Skyrim Special Edition: " "$PWD/data/$r/turbine-mod-manager/activity.log" || true)
+          if [ "$added" -ge 2 ]; then echo "::notice title=10: both files added::$added added"; else echo "::error title=10: the files weren't both added::$added added"; (grep -h "catch\|bridge" "$PWD/data/$r/turbine-mod-manager/activity.log" | tail -n 40 || true); fail=1; fi
           # 0.51: Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
           # the next requirement for a free account, and the bar over My mods.
           shoot "getmods-cyberpunk-1280x800" 1280x800 getmods "$PWD/home" --game=steam:1091500
@@ -585,6 +603,108 @@ jobs:
             kill $xvfb 2>/dev/null || true
           else
             echo "::warning title=No Xvfb::The X11 check didn't run"
+          fi
+          # 0.55: Nexus inside Turbine, against the stand-in page (tools/nexus-stand-in.py) under X11, WebEngine drawing
+          # without the GPU. The full run at both sizes, then a second run with the same profile (signed in stays).
+          if command -v Xvfb > /dev/null; then
+            Xvfb :78 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+            xvfb=$!
+            sl="$PWD/shots/standin.log"
+            python3 tools/nexus-stand-in.py --port 47800 --log "$sl" --zip "$PWD/home/Downloads/Brighter Lanterns 1.2.zip" --dupe-zip "$PWD/home/Downloads/Lantern Glow SKSE 2.0.zip" > shots/standin.out 2>&1 &
+            standin=$!
+            sleep 2
+            sky="The Elder Scrolls V Skyrim Special Edition"
+            bshoot() {   # bshoot <name> <WxH> <page> <home> <data> [more arguments]
+              name=$1 size=$2 page=$3 home=$4 bdata=$5
+              shift 5
+              DISPLAY=:78 timeout 260 dbus-run-session -- flatpak run --socket=x11 --env=QT_QPA_PLATFORM=xcb --env=QT_QUICK_BACKEND=software \
+                --env=QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu $BROWSER_ENV \
+                --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$bdata" \
+                --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
+                io.github.ravenor907.TurbineModManager --screenshot="$PWD/shots/$name.png" --size="$size" --page="$page" --selftest-data="$PWD/samples" \
+                --browser-test=http://127.0.0.1:47800/ "$@" > "shots/$name.log" 2>&1 || echo "::warning title=$name stopped with code $?::"
+              if [ ! -s "$PWD/shots/$name.png" ]; then echo "::error title=No screenshot::$name"; tail -n 60 "shots/$name.log"; fail=1; fi
+              if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
+            }
+            BROWSER_ENV=""
+            for size in 1280x800 1920x1080; do
+              n="browsertest-$size"
+              rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null; h="$PWD/fh/$n"
+              mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
+              bshoot "$n" "$size" browsertest "$h" "$PWD/data/$n" --game=$skyrim
+              log="$PWD/data/$n/turbine-mod-manager/activity.log"
+              # Chromium's own sandbox inside the Flatpak: if the page never loaded, say so and try once without it.
+              if ! grep -q "Browser check: the file page loaded in Turbine" "$log" 2>/dev/null && [ -z "$BROWSER_ENV" ]; then
+                echo "::warning title=The Nexus page didn't load ($size)::trying again with QTWEBENGINE_DISABLE_SANDBOX=1 (only in this check)"
+                grep -h " web \| browser " "$log" | tail -n 20 || true
+                BROWSER_ENV="--env=QTWEBENGINE_DISABLE_SANDBOX=1"
+                rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null
+                mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
+                bshoot "$n" "$size" browsertest "$h" "$PWD/data/$n" --game=$skyrim
+              fi
+              need $n "2: WebEngine set up before the app ($size)" "WebEngine ready"
+              need $n "Nexus page loaded in Turbine ($size)" "Browser check: the file page loaded in Turbine"
+              need $n "9: legend, no field ($size)" "Browser legend \(no field\): A Click .*, 0 problems"
+              need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Type.*, 0 problems"
+              need $n "8: B goes back a page ($size)" "Browser check: B from a second page went back one page"
+              need $n "7: an exe is refused ($size)" "Download refused \(127.0.0.1\): Turbine only takes zip, 7z or rar mods"
+              need $n "7: a second file of a name gets (2) ($size)" "Download: Dupe Test 1.0 \(2\).zip into Game Mods/$sky"
+              need $n "4: Mod Manager Download comes to Turbine ($size)" "Mod Manager Download link from the browser \(.*\): nxm://skyrimspecialedition/mods/1/files/2"
+              need $n "4: and its file goes into Game Mods ($size)" "Test run: pretending to download nxm://skyrimspecialedition/mods/1/files/2.* into Game Mods/$sky"
+              need $n "4: the page stays on the file page ($size)" "after Mod Manager Download the page is still the file page: yes"
+              need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
+              need $n "3: Slow download, added, page closed, focus on Play ($size)" "after the add the page closed by itself; focus on Play; My mods lists it"
+              f="$h/Downloads/Game Mods/$sky/TurbineTest-Bigger_Pockets-1.0.3.zip"
+              if [ -s "$f" ]; then echo "::notice title=3: the file is in Game Mods ($size)::$f"; else echo "::error title=3: the file isn't in Game Mods ($size)::"; ls -laR "$h/Downloads/Game Mods" || true; fail=1; fi
+              adds=$(grep -c "Start: Add TurbineTest-Bigger_Pockets-1.0.3.zip" "$log" || true)
+              if [ "$adds" = "1" ]; then echo "::notice title=3: added once ($size)::no second add from the watcher"; else echo "::error title=3: added $adds times ($size)::"; fail=1; fi
+              presses=$(grep -c "Browser press [0-9]* (" "$log" || true); clicks=$(grep -c "Browser click [0-9]* (" "$log" || true)
+              if [ "$presses" -gt 0 ] && [ "$presses" = "$clicks" ]; then echo "::notice title=5: one click per press ($size)::$presses presses, $clicks clicks"
+              else echo "::error title=5: clicks and presses differ ($size)::$presses presses, $clicks clicks"; grep -h "Browser press\|Browser click" "$log" | head -n 40; fail=1; fi
+              for tag in page downloads added nokey; do
+                if [ -s "$PWD/shots/$n-$tag.png" ]; then echo "::notice title=11: picture $tag ($size)::$n-$tag.png"; else echo "::error title=11: no picture $tag ($size)::"; fail=1; fi
+              done
+            done
+            # 3: Nexus's wait is the page's: at least 5 seconds between the press and the file.
+            python3 - "$sl" <<'PY' || fail=1
+          import sys
+          lines = [l.split() for l in open(sys.argv[1]) if l.strip()]
+          bad = 0
+          press = [float(l[0]) for l in lines if "event=slow-pressed" in l[2]]
+          files = [float(l[0]) for l in lines if l[2].startswith("/files/TurbineTest") and len(l) == 4]
+          for p in press:
+              nxt = [f for f in files if f > p]
+              gap = (nxt[0] - p) if nxt else -1
+              print(f"::notice title=3: Slow download wait::{gap:.1f} s from the press to the file request")
+              if gap < 5:
+                  bad = 1
+                  print("::error title=3: the file came sooner than 5 seconds after the press::")
+          if not press:
+              print("::error title=3: the stand-in never saw a Slow download press::")
+              bad = 1
+          # 4: the stand-in never gets an nxm request. 5: nothing pressed while nobody pressed anything.
+          if any("nxm" in l[2] for l in lines):
+              print("::error title=4: the stand-in got an nxm request::"); bad = 1
+          s = [float(l[0]) for l in lines if "name=idle-start" in l[2]]
+          e = [float(l[0]) for l in lines if "name=idle-end" in l[2]]
+          if s and e:
+              quiet = [l for l in lines if s[0] < float(l[0]) < e[0] and ("-pressed" in l[2] or l[2].startswith("/files/"))]
+              print(f"::notice title=5: 30 seconds with no input::{len(quiet)} button requests, {e[0] - s[0]:.0f} s")
+              if quiet: bad = 1; print("::error title=5: a button request came with no input::")
+          else:
+              print("::error title=5: the idle marks are missing::"); bad = 1
+          sys.exit(bad)
+          PY
+            # 6: a second run with the same profile sends the stand-in's cookie back (signed in stays signed in).
+            curl -s "http://127.0.0.1:47800/mark?name=persist-run" > /dev/null
+            h="$PWD/fh/browsertest-1280x800"
+            bshoot browserpersist-1280x800 1280x800 browserpersist "$h" "$PWD/data/browsertest-1280x800" --game=$skyrim
+            first=$(sed -n '/name=persist-run/,$p' "$sl" | grep "/skyrimspecialedition/mods/" | head -n1)
+            case "$first" in *standin_session*) echo "::notice title=6: signed in stays signed in::$first" ;; *) echo "::error title=6: the second run didn't send the cookie back::$first"; fail=1 ;; esac
+            echo "Stand-in log:"; cat "$sl" | cut -c1-200
+            kill $standin $xvfb 2>/dev/null || true
+          else
+            echo "::error title=No Xvfb::the Nexus page checks didn't run"; fail=1
           fi
           ls -la shots
           # Also into the log, so the pictures can be checked where artifacts can't be downloaded.
