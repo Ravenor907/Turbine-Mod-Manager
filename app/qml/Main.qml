@@ -2267,10 +2267,10 @@ Window {
             () => { modIndex = 1; pad("a"); check("Toggle: focus on row " + (modIndex + 1)); pad("x"); m.sheet = sheet; pad("b"); check("Menu " + m.sheet + " closed: focus on row " + (modIndex + 1)) },
             () => { modIndex = 1; pad("rb"); m.tab = tab; pad("lb"); check("Tabs round trip: tab " + m.tab + " and back to " + tab + ", row " + (modIndex + 1)) },
             () => { m.home = game.id; m.other = games.findIndex(g => g.id !== game.id); if (m.other < 0) { check("Game round trip: only one game"); return }
-                    tab = 0; zone = "main"; modIndex = 1; m.want = mods[1] ? mods[1].name : ""; zone = "rail"; railIndex = m.other; pad("a") },
+                    tab = 0; zone = "main"; modIndex = 1; m.want = focusedItem && focusedItem.m ? focusedItem.m.name : ""; zone = "rail"; railIndex = m.other; pad("a") },
             () => { if (!game || game.id === m.home) return false; zone = "rail"; railIndex = games.findIndex(g => g.id === m.home); pad("a") },
             () => { if (!game || game.id !== m.home || !modsLoaded || mods.length < 2) return false
-                    check("Game round trip: back on " + game.name + ", tab " + tab + ", row " + (modIndex + 1) + " (" + (focusedItem && focusedItem.m ? focusedItem.m.name : "") + ", was " + m.want + "; remembered " + lastFocusId[game.id] + ")") },
+                    check("Game round trip: back on " + game.name + ", tab " + tab + ", row " + (modIndex + 1) + " (" + (focusedItem && focusedItem.m ? focusedItem.m.name : "") + ", was " + m.want + "; remembered " + lastFocusId[game.id] + ")" + (focusedItem && focusedItem.m && focusedItem.m.name === m.want ? ": the same mod" : ": a different mod")) },
             // The quick wheel: tap View, Up then Right is Up-right (Sort); hold View, push Left, let go: Games.
             () => { pad("view"); pad("up"); pad("right"); check("Wheel: slot " + wheelSlot + " " + (wheelSlots[wheelSlot] ? wheelSlots[wheelSlot].label : "")); pad("b") },
             () => { Turbine.selftestPad("view", true); pad("left"); Turbine.selftestPad("view", false); check("Wheel held, Left, let go: sheet " + sheet + " \"" + pickTitle + "\""); pad("b") },

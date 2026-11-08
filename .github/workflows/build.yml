@@ -352,7 +352,7 @@ jobs:
           need $c "8: toggle keeps the row" "Toggle: focus on row 2"
           need $c "8: a menu closes back to its row" "Menu modmenu closed: focus on row 2"
           need $c "8: tabs keep the row" "Tabs round trip: tab 1 and back to 0, row 2"
-          need $c "8: a game round trip keeps tab and row" "Game round trip: back on .*, tab 0, row 2 \((.*), was \1\)"
+          need $c "8: a game round trip keeps tab and row" "Game round trip: back on .*, tab 0, .*: the same mod"
           need $c "Quick wheel: Up then Right" "Wheel: slot 1 Sort"
           need $c "Quick wheel held" 'Wheel held, Left, let go: sheet pick "Games"'
           need $c "Uninstall keeps the row" "Uninstall: row 1 is ghost"
