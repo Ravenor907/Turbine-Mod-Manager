@@ -324,9 +324,10 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: entry.ui.px(12)
             anchors.verticalCenter: parent.verticalCenter
-            width: entry.focused && entry.available ? entryKey.width : entry.more ? entryArrow.implicitWidth : 0
+            width: entry.more && !entry.focused ? entryArrow.implicitWidth : 0
             height: entry.ui.px(24)
-            KeyCap { id: entryKey; visible: entry.focused && entry.available; ui: entry.ui; k: "a"; anchors.verticalCenter: parent.verticalCenter }
+            // No A cap on the highlighted row: the legend says A Choose (never printed twice).
+            KeyCap { id: entryKey; visible: false; ui: entry.ui; k: "a"; anchors.verticalCenter: parent.verticalCenter }
             Text {
                 id: entryArrow
                 visible: !entry.focused && entry.more

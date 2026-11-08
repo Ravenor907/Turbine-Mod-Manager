@@ -2109,7 +2109,7 @@ Window {
             { icon: "play", title: "Play options", detail: "With or without mods, or another loadout", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openPlayOptions) } },
             { icon: "profile", title: "Loadouts", detail: "Save setups by name, switch, share", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openProfiles) } },
             { icon: "move", title: pinned ? "Unpin" : "Pin to the top", detail: pinned ? "Back in last played order" : "Stays at the top of the rail", run: () => setRailList("pinned", g.id, !pinned) },
-            { icon: "remove", title: "Hide from the rail", detail: "For tools that aren't games. Settings, Help shows them again.", run: () => setRailList("hidden", g.id, true) }
+            { icon: "info", title: "Hide from the rail", detail: "For tools that aren't games. Settings, Help shows them again.", run: () => setRailList("hidden", g.id, true) }
         ], "")
     }
     // Load order's quick menu (X): Move, Details, Go to its mod.
