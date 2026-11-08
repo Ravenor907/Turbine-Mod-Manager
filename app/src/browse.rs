@@ -46,16 +46,78 @@ pub const STEM_MAX: usize = 180;
 
 // ------------------------------------------------------------------------------------------------ presses
 
-static LAST_PRESS: Mutex<Option<Instant>> = Mutex::new(None);
+/// How long after the view left Nexus (and came back) a Mod Manager Download link still asks before anything is
+/// turned on.
+pub const CAME_BACK: Duration = Duration::from_secs(120);
 
-/// The player pressed A, RT or R3 in the page, or clicked or tapped it.
-pub fn note_press(now: Instant) {
-    *LAST_PRESS.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
+/// The player's presses in the page, tied to the page they were made on. A press counts for a download (60 seconds)
+/// and for at most one Mod Manager Download link (30 seconds). The moment the main frame goes to a page that isn't on
+/// Nexus (a link, a redirect, a pop-up opened in the view), the press is gone: a page reached that way can't bounce
+/// back to Nexus and spend it. A link that comes soon after such a trip asks before anything is turned on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Presses {
+    at: Option<Instant>,
+    nxm_used: bool,
+    left_nexus: Option<Instant>,
 }
 
-/// When the player last pressed something in the page.
+impl Presses {
+    /// A tap, click or button press in the page.
+    pub fn press(&mut self, now: Instant) {
+        self.at = Some(now);
+        self.nxm_used = false;
+    }
+    /// The main frame went to (or loaded) a page that isn't on Nexus.
+    pub fn left_nexus(&mut self, now: Instant) {
+        self.at = None;
+        self.nxm_used = false;
+        self.left_nexus = Some(now);
+    }
+    /// The press a download may count on.
+    pub fn for_download(&self) -> Option<Instant> {
+        self.at
+    }
+    /// One press, one Mod Manager Download link: Ok uses it up.
+    pub fn take_for_nxm(&mut self, now: Instant) -> Result<(), String> {
+        if !within(self.at, now, NXM_PRESS) {
+            return Err("came with no press of yours in the last 30 seconds".into());
+        }
+        if self.nxm_used {
+            return Err("came after the one link your last press allows".into());
+        }
+        self.nxm_used = true;
+        Ok(())
+    }
+    /// Did the view leave Nexus a short while ago (and come back)?
+    pub fn came_back(&self, now: Instant) -> bool {
+        within(self.left_nexus, now, CAME_BACK)
+    }
+}
+
+static PRESSES: Mutex<Presses> = Mutex::new(Presses { at: None, nxm_used: false, left_nexus: None });
+
+fn presses() -> std::sync::MutexGuard<'static, Presses> {
+    PRESSES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The player pressed A, RT or R3 in the page, or tapped or clicked it (never a scroll or a drag).
+pub fn note_press(now: Instant) {
+    presses().press(now);
+}
+
+/// The main frame is going to (or loaded) this address: off Nexus, the press is gone. True when it left Nexus.
+pub fn note_main_frame(url: &str, now: Instant) -> bool {
+    let u = url.trim();
+    if u.is_empty() || u.to_ascii_lowercase().starts_with("about:") || is_nexus_page(u) {
+        return false;
+    }
+    presses().left_nexus(now);
+    true
+}
+
+/// When the player last pressed something in the page (for a download).
 pub fn last_press() -> Option<Instant> {
-    *LAST_PRESS.lock().unwrap_or_else(|e| e.into_inner())
+    presses().for_download()
 }
 
 /// Was `press` within `within` before `now` (and not after it)?
@@ -129,7 +191,7 @@ pub fn log_url(url: &str) -> String {
         // data:, blob:, about: and the like: the scheme only.
         return url.split(':').next().map(|s| format!("{}:", s.chars().take(16).collect::<String>())).unwrap_or_default();
     };
-    let cut = rest.find(['?', '#']).unwrap_or(rest.len());
+    let cut = rest.find(['?', '#', ';']).unwrap_or(rest.len());
     let rest = &rest[..cut];
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
@@ -520,7 +582,7 @@ pub fn nxm_permit(url: &str, main_frame: bool, page_url: &str, now: Instant) -> 
     }
     let mut p = PERMITS.lock().unwrap_or_else(|e| e.into_inner());
     p.retain(|(_, at)| now.saturating_duration_since(*at) < NXM_PERMIT);
-    p.push((url.trim().to_string(), now));
+    p.push((key_of(url), now));
     if p.len() > 20 {
         p.remove(0);
     }
@@ -534,11 +596,30 @@ pub fn initiator_ok(initiator: &str) -> bool {
     is_test_url(i) || host_of(i).is_some_and(|(h, https)| https && is_nexus_host(&h))
 }
 
+/// One form for a link, whatever the order of its query's parts (the used-link list and the permits compare this).
+pub fn nxm_key(link: &turbine_engine::nxm::NxmLink) -> String {
+    format!(
+        "{}/{}/{}/{}/{}/{}",
+        link.domain,
+        link.mod_id,
+        link.file_id,
+        link.key.as_deref().unwrap_or(""),
+        link.expires.unwrap_or(0),
+        link.user_id.unwrap_or(0)
+    )
+}
+
+fn key_of(url: &str) -> String {
+    turbine_engine::nxm::parse(url.trim()).map(|l| nxm_key(&l)).unwrap_or_else(|_| url.trim().to_string())
+}
+
 /// A Mod Manager Download link from the page, after webglue.cpp's scheme handler checked its initiator. Queued
 /// (`push`, single::push in the app) only with all of: its key, expiry and account number; an initiator on Nexus; the
-/// navigation guard's permit for this very link; a press of the player's within 30 seconds (`press`); and never used
-/// before.
-pub fn nxm_from_page(url: &str, initiator: &str, press: Option<Instant>, now: Instant, push: &mut dyn FnMut(String)) -> NxmFromPage {
+/// navigation guard's permit for this very link; a press of the player's within 30 seconds that no other link used
+/// and that wasn't followed by a trip off Nexus (`presses`); and never used before (in any order of its parts).
+/// Queued links that came soon after the view left Nexus and came back are remembered: they ask before anything is
+/// turned on (`must_ask`).
+pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Instant, push: &mut dyn FnMut(String)) -> NxmFromPage {
     let url = url.trim();
     if url.len() > 2048 {
         return NxmFromPage::Refused("the link is too long".into());
@@ -548,6 +629,7 @@ pub fn nxm_from_page(url: &str, initiator: &str, press: Option<Instant>, now: In
         Err(e) => return NxmFromPage::Refused(e),
     };
     let r = link.redacted();
+    let key = nxm_key(&link);
     if link.key.as_deref().unwrap_or("").is_empty() || link.expires.is_none() || link.user_id.is_none() {
         return NxmFromPage::Refused(format!("{r} has no key, expiry or account number (Nexus's own button always gives them)"));
     }
@@ -557,31 +639,53 @@ pub fn nxm_from_page(url: &str, initiator: &str, press: Option<Instant>, now: In
     let permit = {
         let mut p = PERMITS.lock().unwrap_or_else(|e| e.into_inner());
         p.retain(|(_, at)| now.saturating_duration_since(*at) < NXM_PERMIT);
-        p.iter().position(|(u, _)| u == url).map(|i| p.remove(i))
+        p.iter().position(|(u, _)| *u == key).map(|i| p.remove(i))
     };
     if permit.is_none() {
         return NxmFromPage::Refused(format!("{r} wasn't the page itself going there (a frame, an image or a script's request)"));
     }
-    if !within(press, now, NXM_PRESS) {
-        return NxmFromPage::Refused(format!("{r} came with no press of yours in the last 30 seconds"));
+    if USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == key) {
+        return NxmFromPage::Refused(format!("{r} was used already"));
+    }
+    if let Err(e) = presses.take_for_nxm(now) {
+        return NxmFromPage::Refused(format!("{r} {e}"));
     }
     {
         let mut used = USED.lock().unwrap_or_else(|e| e.into_inner());
-        if used.iter().any(|u| u == url) {
-            return NxmFromPage::Refused(format!("{r} was used already"));
-        }
-        used.push(url.to_string());
+        used.push(key.clone());
         if used.len() > 2000 {
             used.remove(0);
+        }
+    }
+    if presses.came_back(now) {
+        let mut a = ASK.lock().unwrap_or_else(|e| e.into_inner());
+        a.push(key);
+        if a.len() > 200 {
+            a.remove(0);
         }
     }
     push(url.to_string());
     NxmFromPage::Queued(r)
 }
 
+/// The same, with Turbine's own record of the player's presses.
+pub fn nxm_from_page_now(url: &str, initiator: &str, now: Instant, push: &mut dyn FnMut(String)) -> NxmFromPage {
+    let mut p = presses();
+    nxm_from_page(url, initiator, &mut p, now, push)
+}
+
+/// Links that came soon after the view left Nexus and came back: Turbine asks before turning their file on.
+static ASK: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+pub fn must_ask(url: &str) -> bool {
+    let k = key_of(url);
+    ASK.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == k)
+}
+
 /// Did this link come from Turbine's browser? Its file then goes into Game Mods/<Game>.
 pub fn from_page(url: &str) -> bool {
-    USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| u == url.trim())
+    let k = key_of(url);
+    USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == k)
 }
 
 // ------------------------------------------------------------------------------------------------ pages
@@ -792,31 +896,42 @@ mod tests {
     const PAGE: &str = "https://www.nexusmods.com/skyrimspecialedition/mods/1?tab=files&file_id=2";
     const NEXUS: &str = "https://www.nexusmods.com";
 
+    /// A press made `ago` before `now`.
+    fn pressed(now: Instant, ago: u64) -> Presses {
+        let mut p = Presses::default();
+        p.press(now - Duration::from_secs(ago));
+        p
+    }
+
     #[test]
     fn nxm_from_the_page_needs_the_main_frame_on_nexus_a_press_and_a_fresh_link() {
         let mut got = Vec::new();
         let now = Instant::now();
-        let press = Some(now - Duration::from_secs(6));
         let l = "nxm://skyrimspecialedition/mods/1/files/5?key=abc&expires=4102444800&user_id=1";
         // The navigation guard: only the main frame, only while the page is on Nexus.
         assert!(nxm_permit(l, false, PAGE, now).unwrap_err().contains("frame"));
         assert!(nxm_permit(l, true, "https://github.com/someone/mod", now).unwrap_err().contains("isn't on nexusmods.com"));
         assert!(nxm_permit(l, true, "http://www.nexusmods.com/x", now).is_err());
         // No permit: a frame, an image or a request from a script never gets one.
-        assert!(matches!(nxm_from_page(l, NEXUS, press, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("wasn't the page itself")));
+        let mut p = pressed(now, 6);
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("wasn't the page itself")));
         nxm_permit(l, true, PAGE, now).unwrap();
         // The scheme handler's initiator must be Nexus too.
-        assert!(matches!(nxm_from_page(l, "https://ads.example", press, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("not nexusmods.com")));
-        assert!(matches!(nxm_from_page(l, "null", press, now, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
-        let r = nxm_from_page(l, NEXUS, press, now, &mut |u| got.push(u));
+        assert!(matches!(nxm_from_page(l, "https://ads.example", &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("not nexusmods.com")));
+        assert!(matches!(nxm_from_page(l, "null", &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
+        let r = nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u));
         assert!(matches!(r, NxmFromPage::Queued(ref s) if !s.contains("abc") && !s.contains("user_id")), "{r:?}");
         assert_eq!(got.len(), 1);
-        assert!(from_page(l));
-        // The same link again (a page repeating it, or the other route): never a second download.
-        nxm_permit(l, true, PAGE, now + Duration::from_secs(1)).unwrap();
-        assert!(matches!(nxm_from_page(l, NEXUS, press, now + Duration::from_secs(1), &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("used already")));
-        nxm_permit(l, true, PAGE, now + Duration::from_secs(60)).unwrap();
-        assert!(matches!(nxm_from_page(l, NEXUS, Some(now + Duration::from_secs(59)), now + Duration::from_secs(60), &mut |u| got.push(u)), NxmFromPage::Refused(_)));
+        assert!(from_page(l) && !must_ask(l));
+        // The same link again (a page repeating it, or the other route), even with a fresh press: never a second
+        // download, and not with its parts in another order either.
+        let mut p = pressed(now, 1);
+        nxm_permit(l, true, PAGE, now).unwrap();
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("used already")));
+        let reordered = "nxm://skyrimspecialedition/mods/1/files/5?user_id=1&expires=4102444800&key=abc";
+        nxm_permit(reordered, true, PAGE, now).unwrap();
+        assert!(matches!(nxm_from_page(reordered, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("used already")));
+        assert!(from_page(reordered));
         assert_eq!(got.len(), 1);
     }
 
@@ -825,17 +940,21 @@ mod tests {
         let mut got = Vec::new();
         let now = Instant::now();
         let l = "nxm://skyrimspecialedition/mods/1/files/6?key=abc&expires=4102444800&user_id=1";
-        for press in [None, Some(now - Duration::from_secs(31)), Some(now + Duration::from_secs(3))] {
+        let mut future = Presses::default();
+        future.press(now + Duration::from_secs(3));
+        for mut press in [Presses::default(), pressed(now, 31), future] {
             nxm_permit(l, true, PAGE, now).unwrap();
-            assert!(matches!(nxm_from_page(l, NEXUS, press, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("no press")), "{press:?}");
+            assert!(matches!(nxm_from_page(l, NEXUS, &mut press, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("no press")), "{press:?}");
         }
         assert!(got.is_empty() && !from_page(l));
         // The permit is only good for a moment.
         nxm_permit(l, true, PAGE, now).unwrap();
         let later = now + NXM_PERMIT + Duration::from_secs(1);
-        assert!(matches!(nxm_from_page(l, NEXUS, Some(later), later, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
+        let mut p = Presses::default();
+        p.press(later);
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, later, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
         nxm_permit(l, true, PAGE, now).unwrap();
-        assert!(matches!(nxm_from_page(l, NEXUS, Some(now - Duration::from_secs(29)), now, &mut |u| got.push(u)), NxmFromPage::Queued(_)));
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut pressed(now, 29), now, &mut |u| got.push(u)), NxmFromPage::Queued(_)));
     }
 
     #[test]
@@ -850,10 +969,68 @@ mod tests {
             "https://www.nexusmods.com/",
         ] {
             let _ = nxm_permit(l, true, PAGE, now);
-            assert!(matches!(nxm_from_page(l, NEXUS, Some(now), now, &mut |u| got.push(u)), NxmFromPage::Refused(_)), "{l}");
+            assert!(matches!(nxm_from_page(l, NEXUS, &mut pressed(now, 0), now, &mut |u| got.push(u)), NxmFromPage::Refused(_)), "{l}");
         }
         assert!(got.is_empty());
         let _ = L;
+    }
+
+    /// The second break test's H1b: the player presses on an outside link from a mod page; the outside page at once
+    /// sends the view to Nexus's Mod Manager Download address (&nmm=1), and Nexus's page goes to the nxm link.
+    #[test]
+    fn a_bounce_off_nexus_and_back_never_spends_the_press() {
+        let mut got = Vec::new();
+        let t0 = Instant::now();
+        let mut p = Presses::default();
+        p.press(t0); // A on the outside link, on a Nexus page
+        let bounce = "https://www.nexusmods.com/skyrimspecialedition/mods/999?tab=files&file_id=5&nmm=1";
+        let l = "nxm://skyrimspecialedition/mods/999/files/5?key=k&expires=4102444800&user_id=7";
+        // The view goes to the outside page (its navigation, or a redirect through it): the press is gone.
+        p.left_nexus(t0 + Duration::from_millis(300));
+        // Back on Nexus's nmm=1 page, which goes to the nxm link by itself 6 seconds after the press.
+        let now = t0 + Duration::from_secs(6);
+        nxm_permit(l, true, bounce, now).unwrap();
+        let r = nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u));
+        assert!(matches!(r, NxmFromPage::Refused(ref e) if e.contains("no press")), "{r:?}");
+        assert!(got.is_empty());
+        // A press on Nexus after coming back works, but the file asks before anything is turned on.
+        p.press(now + Duration::from_secs(1));
+        nxm_permit(l, true, bounce, now + Duration::from_secs(2)).unwrap();
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now + Duration::from_secs(2), &mut |u| got.push(u)), NxmFromPage::Queued(_)));
+        assert!(must_ask(l));
+        // One press, one link: a second, different link on the same press is refused.
+        let l2 = "nxm://skyrimspecialedition/mods/998/files/6?key=k&expires=4102444800&user_id=7";
+        nxm_permit(l2, true, bounce, now + Duration::from_secs(3)).unwrap();
+        let r2 = nxm_from_page(l2, NEXUS, &mut p, now + Duration::from_secs(3), &mut |u| got.push(u));
+        assert!(matches!(r2, NxmFromPage::Refused(ref e) if e.contains("one link")), "{r2:?}");
+        assert_eq!(got.len(), 1);
+        // Long after the trip, a press and a link no longer ask.
+        let late = t0 + CAME_BACK + Duration::from_secs(10);
+        let l3 = "nxm://skyrimspecialedition/mods/997/files/8?key=k&expires=4102444800&user_id=7";
+        p.press(late);
+        nxm_permit(l3, true, PAGE, late).unwrap();
+        assert!(matches!(nxm_from_page(l3, NEXUS, &mut p, late, &mut |u| got.push(u)), NxmFromPage::Queued(_)));
+        assert!(!must_ask(l3));
+    }
+
+    #[test]
+    fn going_off_nexus_drops_the_press_and_nexus_pages_keep_it() {
+        let now = Instant::now();
+        let mut p = Presses::default();
+        p.press(now);
+        assert!(p.for_download().is_some());
+        p.left_nexus(now);
+        assert!(p.for_download().is_none() && p.came_back(now));
+        // The app's record: Nexus pages and about:blank keep the press, anything else drops it.
+        note_press(now);
+        assert!(!note_main_frame("https://www.nexusmods.com/skyrimspecialedition/mods/1", now));
+        assert!(!note_main_frame("about:blank", now));
+        assert!(last_press().is_some());
+        assert!(note_main_frame("https://evil.example/bounce", now));
+        assert!(last_press().is_none());
+        note_press(now);
+        assert!(note_main_frame("data:text/html,x", now));
+        assert!(last_press().is_none());
     }
 
     #[test]
@@ -888,6 +1065,8 @@ mod tests {
         assert_eq!(log_url("data:text/html;base64,SECRET"), "data:");
         assert_eq!(log_url("HTTPS://WWW.NEXUSMODS.COM"), "https://www.nexusmods.com");
         assert!(!log_url(L).contains("user_id") && !log_url(L).contains("abc"));
+        // Path parameters (";code=") are cut too.
+        assert_eq!(log_url("https://users.nexusmods.com/auth/callback;code=SECRET"), "https://users.nexusmods.com/auth/callback");
     }
 
     #[test]

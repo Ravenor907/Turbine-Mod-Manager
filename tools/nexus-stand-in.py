@@ -13,7 +13,9 @@ Serves on 127.0.0.1 only:
   ...&auto=1  the same file page, which also tries everything by itself with no press (as an ad or a hostile page
       would): it goes to an nxm:// link from a script, a frame inside it goes to one and loads one as an image, it
       opens a pop-up and it starts a download. Turbine must take none of them.
-  /frame  that frame.
+  /frame  that frame. The auto page also links to an outside site (a second stand-in on --outside-port) whose /bounce
+      at once sends the view back to a file page with &go=nxm, which goes to its nxm:// link as soon as it loads (the
+      way Nexus's Mod Manager Download address does for Premium): Turbine must not count the press on the link.
   /<domain>/mods/<id>?tab=description  a second page with a link back.
   /files/<name>  the files above.
   /log?event=<what>  the page's own report of a press; /mark?name=<what>  a mark from the check.
@@ -31,9 +33,11 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOCK = threading.Lock()
+OUTSIDE_PORT = 47801
 
 
 AUTO = """
+  <a id="out" class="at" style="left:640px; top:440px;" href="http://127.0.0.1:OUTSIDE/bounce">Outside site</a>
   <iframe class="at" style="left:640px; top:300px; width:200px; height:120px; border:0;" src="/frame"></iframe>
 <script>
   const soon = () => String(Math.floor(Date.now() / 1000) + 3600);
@@ -49,9 +53,12 @@ FRAME = """<!doctype html><html><body style="margin:0">
 </script></body></html>"""
 
 
-def page(domain, mod_id, file_id, auto=False):
+def page(domain, mod_id, file_id, auto=False, go_nxm=False):
     """The file page. Places are fixed (CSS pixels from the page's top left) so the check can put the pointer there."""
     nxm = f"nxm://{domain}/mods/{mod_id}/files/{file_id}?key=abc&expires=EXPIRES&user_id=1"
+    go = ""
+    if go_nxm:
+        go = "<script>location.assign(\"" + nxm.replace("EXPIRES", "4102444800") + "\");</script>"
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Stand-in file page {mod_id}</title>
 <style>
@@ -86,7 +93,7 @@ def page(domain, mod_id, file_id, auto=False):
   }}
   document.getElementById("slow").onclick = () => wait("slow", () => location.assign("/files/TurbineTest-Bigger_Pockets-1.0.3.zip"));
   document.getElementById("mmd").onclick = () => wait("mmd", () => location.assign("{nxm}".replace("EXPIRES", String(Math.floor(Date.now() / 1000) + 3600))));
-</script>{AUTO if auto else ""}
+</script>{AUTO.replace("OUTSIDE", str(OUTSIDE_PORT)) if auto else ""}{go}
 </body></html>"""
 
 
@@ -134,6 +141,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/log", "/mark"):
             self.wfile.write(self.send_body(204, b""))
             return
+        if url.path == "/bounce":
+            # The outside site: straight back to a Nexus file page that goes to its nxm link by itself.
+            to = f"http://127.0.0.1:{self.server.home_port}/skyrimspecialedition/mods/1?tab=files&file_id=55&go=nxm"
+            self.wfile.write(self.send_body(200, f"<!doctype html><title>Outside</title><script>location.replace({to!r});</script>"))
+            return
         if url.path == "/frame":
             self.wfile.write(self.send_body(200, FRAME))
             return
@@ -143,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(self.send_body(200, description(domain, mod_id)))
             else:
                 file_id = int(q.get("file_id", ["2"])[0] or 2) if q.get("file_id", ["2"])[0].isdigit() else 2
-                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id, q.get("auto", [""])[0] == "1")))
+                self.wfile.write(self.send_body(200, page(domain, mod_id, file_id, q.get("auto", [""])[0] == "1", q.get("go", [""])[0] == "nxm")))
             return
         if len(parts) == 2 and parts[0] == "files":
             name = urllib.parse.unquote(parts[1])
@@ -180,13 +192,24 @@ def main():
     ap.add_argument("--log", required=True)
     ap.add_argument("--zip", required=True)
     ap.add_argument("--dupe-zip", required=True)
+    ap.add_argument("--outside-port", type=int, default=47801)
     a = ap.parse_args()
+    global OUTSIDE_PORT
+    OUTSIDE_PORT = a.outside_port
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     srv.log_path = a.log
+    srv.home_port = a.port
+    # The outside site: the same handler on another port (another origin, so it isn't the stand-in for Nexus).
+    out = ThreadingHTTPServer(("127.0.0.1", a.outside_port), Handler)
+    out.log_path = a.log
+    out.home_port = a.port
     with open(a.zip, "rb") as f:
         srv.zip_bytes = f.read()
     with open(a.dupe_zip, "rb") as f:
         srv.dupe_bytes = f.read()
+    out.zip_bytes = srv.zip_bytes
+    out.dupe_bytes = srv.dupe_bytes
+    threading.Thread(target=out.serve_forever, daemon=True).start()
     open(a.log, "a").close()
     print(f"stand-in on http://127.0.0.1:{a.port}/", flush=True)
     try:

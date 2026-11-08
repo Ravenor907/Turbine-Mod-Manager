@@ -494,6 +494,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserPressed"]
         fn browser_pressed(self: Pin<&mut Self>);
+        /// The main frame is going to (or loaded) this address (a press made before it left Nexus no longer counts).
+        #[qinvokable]
+        #[cxx_name = "browserMainFrame"]
+        fn browser_main_frame(self: &Self, url: &QString);
         /// An address for the activity log: host and path only.
         #[qinvokable]
         #[cxx_name = "browserLogUrl"]

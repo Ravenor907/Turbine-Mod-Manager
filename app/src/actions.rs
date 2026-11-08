@@ -1411,6 +1411,8 @@ impl qobject::Turbine {
         };
         // Pressed in Turbine's browser: the file goes into Game Mods/<Game>, like a Slow download.
         let into = crate::browse::from_page(&link_text).then(|| crate::web::game_mods_dir(&game));
+        // Soon after the view left Nexus and came back: Turbine asks before turning the file on.
+        let ask = crate::browse::must_ask(&link_text);
         if let Some(d) = &into {
             crate::log::line("nxm", &format!("From Turbine's browser: the file goes into {}", d.display()));
         }
@@ -1423,7 +1425,7 @@ impl qobject::Turbine {
                     Ok(f) => match into {
                         Some(dir) => {
                             let g = game.clone();
-                            post(qt, move |t| t.web_place_fetched(g, f, dir));
+                            post(qt, move |t| t.web_place_fetched(g, f, dir, ask));
                         }
                         None => hand_over(qt, &game)(f),
                     },

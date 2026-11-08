@@ -594,7 +594,10 @@ PY
   else echo "::notice title=1: a pop-up with no press didn't open::Chromium stopped it before Turbine saw it"; fi
   pneed "1: a download with no press is refused" "Download refused \(127.0.0.1\): Turbine only takes a download you start yourself"
   pneed "1: nothing downloaded or turned on with no press" "Browser check: no press, nothing downloaded: yes"
-  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler.*files/(66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(66|77|88)" || true)
+  pneed "1b: going to an outside site drops the press" "The page left Nexus \(http://127.0.0.1:47801/bounce\)"
+  pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
+  pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
+  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
   if [ -n "$got" ]; then
     echo "::error title=1: a link with no press got through::"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
@@ -602,6 +605,7 @@ PY
   pneed "10: closing midway says the download goes on" "Still downloading 1 mod. It's added by itself. To watch it: View, Full menu, Nexus downloads."
   pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
   pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
+  pneed "10: ... and the screen doesn't jump to it when it lands" "New mod from a download that went on after Nexus closed: the focus stays where it is"
   echo "Stand-in log:"; cat "$sl" | cut -c1-200
   kill $standin $xvfb 2>/dev/null || true
 else

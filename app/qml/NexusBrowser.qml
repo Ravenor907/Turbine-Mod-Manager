@@ -394,14 +394,16 @@ Item {
                 }
             }
         }
-        // Every mouse click or touch on the page counts as the player's press (a download or a Mod Manager Download
-        // link in the next moments is his). Only watched: the page still gets it.
+        // A tap or a click on the page counts as the player's press (a download or a Mod Manager Download link in the
+        // next moments is his); a scroll or a drag doesn't. Only watched: the page still gets it.
         Item {
             anchors.fill: parent
             z: 3
-            PointHandler {
-                acceptedButtons: Qt.AllButtons
-                onActiveChanged: if (active) nb.pagePressed()
+            TapHandler {
+                acceptedButtons: Qt.LeftButton
+                gesturePolicy: TapHandler.DragThreshold
+                grabPermissions: PointerHandler.ApprovesTakeOverByAnything
+                onTapped: nb.pagePressed()
             }
         }
     }
@@ -421,7 +423,8 @@ Item {
             settings.localContentCanAccessRemoteUrls: false
             settings.localContentCanAccessFileUrls: false
             onZoomFactorChanged: if (Math.abs(zoomFactor - nb.zoom) > 0.001) zoomFactor = nb.zoom
-            onUrlChanged: nb.pageEvent("url", url.toString())
+            // The main frame's address: off Nexus, the player's last press no longer counts (Rust).
+            onUrlChanged: { Turbine.browserMainFrame(url.toString()); nb.pageEvent("url", url.toString()) }
             onLoadingChanged: (info) => nb.pageEvent(info.status === WebEngineView.LoadSucceededStatus ? "loaded" : info.status === WebEngineView.LoadFailedStatus ? "failed" : "loading", info.url.toString() + (info.errorString ? " (" + info.errorString + ")" : ""))
             // Chromium's own right-click menu never shows: LT (a right click) opens Turbine's quick menu instead.
             onContextMenuRequested: (request) => { request.accepted = true; nb.menuWanted() }
@@ -436,7 +439,12 @@ Item {
             // Every other kind of link is refused.
             onNavigationRequested: (request) => {
                 const u = request.url.toString()
-                if (/^(https?|about|data|blob):/i.test(u)) return
+                if (/^(https?|about|data|blob):/i.test(u)) {
+                    // Going off Nexus (a link, a redirect, a pop-up in this view): the press is gone before the
+                    // page there can send the view back to Nexus.
+                    if (request.isMainFrame) Turbine.browserMainFrame(u)
+                    return
+                }
                 if (/^nxm:/i.test(u)) {
                     if (Turbine.browserNxm(u, request.isMainFrame, web.url.toString())) return
                     request.reject()

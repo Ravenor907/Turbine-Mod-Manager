@@ -1448,6 +1448,14 @@ Window {
         if (shot.on && shot.page !== "newmod" && shot.page !== "presscount" && shot.page.indexOf("browser") !== 0) return
         // Nexus is open in Turbine: the landing waits for it to close (by itself 2.5 seconds after a single file).
         if (browserOpen && page === "browser" && !landing) { browserArrived(gameId, id, name, on); return }
+        // A download that went on after Nexus was closed: the screen never jumps there by itself; a toast says so.
+        if (!browserOpen && !landing && browserBackground.length > 0) {
+            browserBackground = browserBackground.slice(1)
+            const g = games[i]
+            toast.done(game && game.id === gameId ? words : "Added to " + (g ? g.name : "its game") + ": " + name + ".")
+            note("focus", "New mod from a download that went on after Nexus closed: the focus stays where it is")
+            return
+        }
         // Installed from the mod page of the game on screen: stay on the page (its button says Installed).
         if (modPage && game && game.id === gameId) {
             busyHere = false; toast.done(words)
@@ -2914,13 +2922,20 @@ Window {
     // Manager Download link from a script and from a frame, a pop-up, a download): nothing happens. Then a Slow
     // download, and the page closed while it runs: Turbine says it goes on and where to watch it.
     function browserPersistScript() {
+        const pageIs = (re) => !!nexusView && !!nexusView.view && !nexusView.loading && re.test(nexusView.url)
         btRun([
             { name: "open", act: () => openNexus(btFiles + "&auto=1") },
             { name: "loaded", max: 45000, wait: () => !!nexusView && !!nexusView.view && !nexusView.loading && /tab=files/.test(nexusView.url),
               act: () => check("Browser check: second run loaded " + nexusView.url) },
-            { name: "tries", after: 9000, act: () => check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")")) },
+            { name: "tries", after: 9000, act: () => { check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")"))
+                                                         // H1b: A on a link to an outside site that sends the view straight back to a Nexus page
+                                                         // that goes to its Mod Manager Download link by itself.
+                                                         btClick(700, 452) } },
+            { name: "bounced", max: 20000, wait: () => pageIs(/file_id=55/), after: 6000,
+              act: () => check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")) },
             { name: "slow", act: () => { bt.pressAt = Date.now(); btClick(160, 188) } },
-            { name: "running", max: 20000, wait: () => webDlsRunning > 0, act: () => pad("b") },
+            // The page closes while the download runs (the bounce left pages to go back to, so it closes outright).
+            { name: "running", max: 20000, wait: () => webDlsRunning > 0, act: () => closeBrowser("back") },
             { name: "closed", max: 5000, wait: () => page !== "browser",
               act: () => check("Browser check: closed while downloading; at the top: " + (webDlsRunning > 0 ? "Getting " + plural(webDlsRunning, "mod", "mods") : "nothing") + "; game menu has Nexus downloads: " + (gameMenuItems.some(x => x.act === "nexusdl") ? "yes" : "no")) },
             { name: "landed", max: 20000, wait: () => webDls.some(x => x.state === "added" || x.state === "failed" || x.state === "asked"),
@@ -3465,6 +3480,7 @@ Window {
         browserArrival = null
         browserNoteNow = null
         browserNoKeyPage = ""
+        browserBackground = []
         browserTab = 0
         // Already open: a fresh page with no history, so B closes on the first page Turbine opened (not after
         // stepping back through the pages before it).
@@ -3506,7 +3522,9 @@ Window {
             note("focus", "Back from Nexus: " + zone + (modPage ? ", the mod page's " + (pageIndex === 0 ? "main button" : "row " + pageIndex) : ""))
             if (a && why !== "play" && why !== "home") toast.done("Added " + a.name + "." + (game && a.game === game.id ? " " + glyph("start") + " plays." : ""))
         }
-        // Still downloading: it goes on, and the player is told so and where to see it.
+        // Still downloading: it goes on, and the player is told so and where to see it (and when it lands, the
+        // screen doesn't jump to it).
+        browserBackground = webDls.filter(x => x.state === "requested" || x.state === "progress" || x.state === "paused").map(x => x.path)
         if (webDlsRunning > 0 && why !== "play") {
             const t = "Still downloading " + plural(webDlsRunning, "mod", "mods") + ". It's added by itself. To watch it: View, Full menu, Nexus downloads."
             note("browser", t)
@@ -3516,6 +3534,7 @@ Window {
         if (pendingNotes && sheet === "") { pendingNotes = false; infoIndex = 0; sheet = "notes" }
     }
     property string browserLastUrl: ""
+    property var browserBackground: []      // downloads still running when the page closed (their paths)
     property real browserStartMod: 0        // the Nexus mod of the page Turbine opened (0: not a mod's page)
     property real closedAddedAt: 0
     // View, Full menu, Nexus downloads (and a tap on "Getting 1 mod" at the top): the page again, on its Downloads tab.
@@ -3639,6 +3658,7 @@ Window {
                 Turbine.browserDone(x.path)
             } else if (st === 3 && x.state !== "cancelled") {
                 x.state = "cancelled"; x.words = "Cancelled"; x.goneAt = now; changed = true
+                browserBackground = browserBackground.filter(p => p !== x.path)
                 Turbine.browserFailed(x.path, "cancelled")
             } else if (st === 4 && x.state !== "interrupted" && x.state !== "cancelled") {
                 x.why = o.interruptReasonString || ""; changed = true
@@ -3674,6 +3694,8 @@ Window {
             if (r.ask) { x.state = "asked"; x.words = r.text }
             else if (r.ok) { x.state = "added"; x.words = r.text }
             else { x.state = "failed"; x.words = r.text }
+            // Nothing lands for a question or a failure: no arrival to wait for.
+            if (!r.ok) app.browserBackground = app.browserBackground.filter(p => p !== x.path)
             if (app.browserOpen) app.browserSay(r.text, r.ok ? "ok" : "warn")
             app.webDlTick++
         }
