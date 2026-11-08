@@ -331,7 +331,7 @@ impl qobject::Turbine {
     pub fn helper_setup(self: Pin<&mut Self>) -> QString {
         crate::log::line("action", "Set up the browser helper");
         let to = helper_folder();
-        let r = copy_helper(&helper_source(), &to);
+        let r = bridge::copy_helper(&helper_source(), &to);
         let (folder, error) = match r {
             Ok(n) => {
                 crate::log::line("bridge", &format!("Copied the browser helper ({n} files) to {}", to.display()));

@@ -1078,6 +1078,10 @@ pub fn copy_helper(from: &Path, to: &Path) -> Result<usize, String> {
     if !from.join("manifest.json").is_file() {
         return Err("this build has no browser helper in it".into());
     }
+    // The first setup makes the folder; after that it must be the plain folder Turbine made, never a link.
+    if !is_link(to) && !to.exists() {
+        std::fs::create_dir_all(to).map_err(|e| format!("helper folder: {e}"))?;
+    }
     if is_link(to) || !to.is_dir() {
         return Err("the helper folder isn't a plain folder".into());
     }
@@ -1522,6 +1526,10 @@ mod tests {
         assert_eq!(std::fs::read_to_string(to.join("lib/bridge.js")).unwrap(), "// lib 0.54");
         assert!(!to.join("test").exists(), "tests are left out");
         assert!(!to.join(".turbine-update").exists(), "the staging folder is gone");
+        // The first setup: the folder is made.
+        let fresh = root.join("Downloads/fresh");
+        assert_eq!(copy_helper(&from, &fresh), Ok(3));
+        assert!(fresh.join("lib/bridge.js").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
