@@ -1,14 +1,42 @@
 {
   "schema": 1,
   "name": "Lethal Company",
-  "ids": { "steam": ["1966720"] },
+  "ids": {
+    "steam": [
+      "1966720"
+    ]
+  },
   "support": "full",
   "kind": "bepinex",
   "modRoot": "BepInEx/plugins",
   "plugins": false,
   "ordered": false,
-  "loader": { "use": "bepinex", "source": "https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/" },
+  "loader": {
+    "use": "bepinex",
+    "source": "https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/"
+  },
   "nexus": "lethalcompany",
   "thunderstore": "lethal-company",
-  "notes": []
+  "starters": [
+    {
+      "source": "thunderstore",
+      "id": "x753-More_Suits",
+      "name": "More Suits",
+      "what": "More suits to wear in the ship"
+    },
+    {
+      "source": "thunderstore",
+      "id": "anormaltwig-LateCompany",
+      "name": "LateCompany",
+      "what": "Friends can join after the game started"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "AppData/LocalLow/ZeekerssRBLX/Lethal Company"
+    ]
+  },
+  "notes": [
+    "Save folders and starter mods added Nov 8 2026 from each game's usual locations and Nexus or Thunderstore pages; recheck each on the device before shipping."
+  ]
 }

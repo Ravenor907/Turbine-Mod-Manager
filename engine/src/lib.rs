@@ -28,6 +28,7 @@ pub mod plugins;
 pub mod profiles;
 pub mod proton;
 pub mod rules;
+pub mod saves;
 pub mod selfupdate;
 pub mod shortcuts;
 pub mod sha256;

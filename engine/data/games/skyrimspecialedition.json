@@ -2,15 +2,56 @@
   "schema": 1,
   "name": "Skyrim Special Edition",
   "shortName": "Skyrim Special Edition",
-  "ids": { "steam": ["489830"], "gog": ["1711230643"] },
+  "ids": {
+    "steam": [
+      "489830"
+    ],
+    "gog": [
+      "1711230643"
+    ]
+  },
   "support": "full",
   "kind": "bethesda",
   "modRoot": "Data",
   "plugins": true,
   "ordered": true,
-  "loader": { "use": "skse" },
+  "loader": {
+    "use": "skse"
+  },
   "nexus": "skyrimspecialedition",
+  "starters": [
+    {
+      "source": "nexus",
+      "id": "266",
+      "name": "Unofficial Skyrim Special Edition Patch",
+      "what": "Fixes thousands of the game's own bugs"
+    },
+    {
+      "source": "nexus",
+      "id": "12604",
+      "name": "SkyUI",
+      "what": "Menus that are easier to read and sort"
+    },
+    {
+      "source": "nexus",
+      "id": "32444",
+      "name": "Address Library for SKSE Plugins",
+      "what": "Many SKSE mods need it"
+    },
+    {
+      "source": "nexus",
+      "id": "17230",
+      "name": "SSE Engine Fixes",
+      "what": "Fixes crashes and slow loading in the engine"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "Documents/My Games/Skyrim Special Edition/Saves"
+    ]
+  },
   "notes": [
-    "GOG sells it as Skyrim Anniversary Edition: product 1711230643 is The Elder Scrolls V: Skyrim Special Edition, type Game, Windows builds (gogdb.org/product/1711230643, checked Nov 6 2026)."
+    "GOG sells it as Skyrim Anniversary Edition: product 1711230643 is The Elder Scrolls V: Skyrim Special Edition, type Game, Windows builds (gogdb.org/product/1711230643, checked Nov 6 2026).",
+    "Save folders and starter mods added Nov 8 2026 from each game's usual locations and Nexus or Thunderstore pages; recheck each on the device before shipping."
   ]
 }

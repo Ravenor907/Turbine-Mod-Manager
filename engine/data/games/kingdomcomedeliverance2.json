@@ -1,7 +1,14 @@
 {
   "schema": 1,
   "name": "Kingdom Come: Deliverance II",
-  "ids": { "steam": ["1771300"], "gog": ["1248083010"] },
+  "ids": {
+    "steam": [
+      "1771300"
+    ],
+    "gog": [
+      "1248083010"
+    ]
+  },
   "support": "full",
   "kind": "generic",
   "handler": "kcd2",
@@ -9,8 +16,14 @@
   "plugins": false,
   "ordered": true,
   "nexus": "kingdomcomedeliverance2",
+  "saves": {
+    "proton": [
+      "Saved Games/kingdomcome2/saves"
+    ]
+  },
   "notes": [
     "Steam 1771300 (store.steampowered.com/app/1771300, Kingdom Come: Deliverance II); GOG 1248083010 (gogdb.org, Kingdom Come: Deliverance II, type Game, Windows builds; 1076704248 is its package and 1141344806 the Expansion Pass package). Checked Nov 7 2026. Mods: Warhorse's own guide (see kcd.rs).",
-    "Nexus: nexusmods.com/kingdomcomedeliverance2 (checked Nov 7 2026)."
+    "Nexus: nexusmods.com/kingdomcomedeliverance2 (checked Nov 7 2026).",
+    "Save folders and starter mods added Nov 8 2026 from each game's usual locations and Nexus or Thunderstore pages; recheck each on the device before shipping."
   ]
 }

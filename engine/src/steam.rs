@@ -349,3 +349,28 @@ pub fn scan(home: &Path, scan: &mut Scan) {
         }
     }
 }
+
+/// The game's Steam Launch Options as the player set them (read only), from each Steam user's localconfig.vdf:
+/// Some("") when the game has none set, None when no localconfig.vdf mentions the game (or it can't be read).
+/// Several users: the first one with the game listed.
+pub fn launch_options(home: &Path, app_id: &str) -> Option<String> {
+    for root in steam_roots(home) {
+        let Ok(rd) = fs::read_dir(root.join("userdata")) else { continue };
+        let mut users: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+        users.sort();
+        for u in users {
+            let Ok(text) = fs::read_to_string(u.join("config").join("localconfig.vdf")) else { continue };
+            if let Some(o) = launch_options_in(&text, app_id) {
+                return Some(o);
+            }
+        }
+    }
+    None
+}
+
+/// `launch_options` for one localconfig.vdf's text.
+pub fn launch_options_in(text: &str, app_id: &str) -> Option<String> {
+    let v = crate::vdf::parse(text).ok()?;
+    let app = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps", app_id])?;
+    Some(app.str_at(&["LaunchOptions"]).unwrap_or("").to_string())
+}

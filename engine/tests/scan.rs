@@ -140,3 +140,11 @@ fn games_json_is_valid() {
     assert_eq!(val.str_at("runtime"), Some("native"));
     assert!(val.str_at("cover").is_some());
 }
+
+#[test]
+fn launch_options_read_from_localconfig() {
+    let text = "\"UserLocalConfigStore\"\n{\n\"Software\"\n{\n\"Valve\"\n{\n\"Steam\"\n{\n\"Apps\"\n{\n\"489830\"\n{\n\"LaunchOptions\" \"WINEDLLOVERRIDES=\\\"x=n,b\\\" %command%\"\n}\n\"413150\"\n{\n\"LastPlayed\" \"1\"\n}\n}\n}\n}\n}\n}\n";
+    assert_eq!(turbine_engine::steam::launch_options_in(text, "489830").as_deref(), Some("WINEDLLOVERRIDES=\"x=n,b\" %command%"));
+    assert_eq!(turbine_engine::steam::launch_options_in(text, "413150").as_deref(), Some(""), "listed, none set");
+    assert_eq!(turbine_engine::steam::launch_options_in(text, "1"), None, "not listed");
+}

@@ -1,13 +1,58 @@
 {
   "schema": 1,
   "name": "Stardew Valley",
-  "ids": { "steam": ["413150"], "gog": ["1453375253"] },
+  "ids": {
+    "steam": [
+      "413150"
+    ],
+    "gog": [
+      "1453375253"
+    ]
+  },
   "support": "full",
   "kind": "smapi",
   "modRoot": "Mods",
   "plugins": false,
   "ordered": false,
-  "loader": { "use": "smapi" },
+  "loader": {
+    "use": "smapi"
+  },
   "nexus": "stardewvalley",
-  "notes": []
+  "starters": [
+    {
+      "source": "nexus",
+      "id": "1915",
+      "name": "Content Patcher",
+      "what": "Many content mods need it"
+    },
+    {
+      "source": "nexus",
+      "id": "5098",
+      "name": "Generic Mod Config Menu",
+      "what": "Change mod settings in the game"
+    },
+    {
+      "source": "nexus",
+      "id": "541",
+      "name": "Lookup Anything",
+      "what": "Shows what anything is, and what it is for"
+    },
+    {
+      "source": "nexus",
+      "id": "239",
+      "name": "NPC Map Locations",
+      "what": "Shows villagers on the map"
+    }
+  ],
+  "saves": {
+    "native": [
+      ".config/StardewValley/Saves"
+    ],
+    "proton": [
+      "AppData/Roaming/StardewValley/Saves"
+    ]
+  },
+  "notes": [
+    "Save folders and starter mods added Nov 8 2026 from each game's usual locations and Nexus or Thunderstore pages; recheck each on the device before shipping."
+  ]
 }

@@ -2,7 +2,15 @@
   "schema": 1,
   "name": "The Witcher 3",
   "shortName": "The Witcher 3",
-  "ids": { "steam": ["292030"], "gog": ["1207664643", "1495134320"] },
+  "ids": {
+    "steam": [
+      "292030"
+    ],
+    "gog": [
+      "1207664643",
+      "1495134320"
+    ]
+  },
   "support": "full",
   "kind": "generic",
   "handler": "witcher3",
@@ -10,7 +18,21 @@
   "plugins": false,
   "ordered": true,
   "nexus": "witcher3",
+  "starters": [
+    {
+      "source": "nexus",
+      "id": "3652",
+      "name": "Community Patch - Base",
+      "what": "Fixes many of the game's bugs"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "Documents/The Witcher 3/gamesaves"
+    ]
+  },
   "notes": [
-    "Steam 292030 (store.steampowered.com/app/292030, The Witcher 3: Wild Hunt). On GOG, 1207664663 is the Complete Edition package (gogdb.org, type Package, no builds); the installable games are 1207664643 (The Witcher 3: Wild Hunt, type Game, the one that package holds) and 1495134320 (the Game of the Year Edition, type Game). Checked Nov 6 2026."
+    "Steam 292030 (store.steampowered.com/app/292030, The Witcher 3: Wild Hunt). On GOG, 1207664663 is the Complete Edition package (gogdb.org, type Package, no builds); the installable games are 1207664643 (The Witcher 3: Wild Hunt, type Game, the one that package holds) and 1495134320 (the Game of the Year Edition, type Game). Checked Nov 6 2026.",
+    "Save folders and starter mods added Nov 8 2026 from each game's usual locations and Nexus or Thunderstore pages; recheck each on the device before shipping."
   ]
 }
