@@ -335,7 +335,8 @@ jobs:
           done
           fresh "nexusguard"; h="$PWD/fh/nexusguard"
           shoot "nexusguard-1280x800" 1280x800 nexusguard "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
-          fresh "presscount"; h="$PWD/fh/presscount"
+          # A new home: by now the shared one has Witcher 3 mods from earlier pictures.
+          rm -rf "$PWD/fh/presscount"; python3 tools/fake-home.py "$PWD/fh/presscount" > /dev/null; h="$PWD/fh/presscount"
           shoot "presscount-1280x800" 1280x800 presscount "$h" --game=$w3 "--presscount-file=$h/Downloads/Better Torches 1.0.zip"
           need() {   # need <shot> <title> <grep -E pattern>
             if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"

@@ -642,6 +642,7 @@ Window {
                 const want = app.lastFocusId[app.game.id]
                 const i = want ? app.listItems.findIndex(x => x.kind === "mod" && x.m.id === want) : -1
                 app.modIndex = i >= 0 ? i : 0
+                app.note("focus", app.game.name + ": landed on row " + (app.modIndex + 1) + (want ? " (last focused " + want + (i < 0 ? ", not in the list" : "") + ")" : ""))
             }
             if (app.removedIndex > app.removedMods.length) app.removedIndex = app.removedMods.length
             if (app.sheet === "removed" && app.removedMods.length === 0) app.sheet = ""
@@ -850,6 +851,7 @@ Window {
         if (!shot.on) seen.lastGame = game.id
         moving = false
         landFocus = true
+        modsLoaded = false
         modIndex = 0
         checks = []
         modPage = false
@@ -2131,6 +2133,13 @@ Window {
         if (i >= 0) { orderIndex = i; note("action", "Find plugin \"" + text + "\": row " + (i + 1)) }
         else toast.info("No plugin has \"" + text + "\" in its name.")
     }
+    // The rail's label: the game's name, and where it comes from when two copies share a name (Steam and Heroic).
+    function railName(i) {
+        const g = games[i]
+        if (!g) return ""
+        const twins = games.filter(x => x.name === g.name).length > 1
+        return g.name + (twins ? " · " + (g.launcher === "Steam" ? "Steam" : (g.storeLabel || g.launcher) + " (Heroic)") : "")
+    }
     function railSelect(i) {
         note("action", "Rail " + (i < games.length ? games[i].name : "Settings"))
         if (i < games.length) { current = i; page = "game"; zone = "main" }
@@ -2226,7 +2235,8 @@ Window {
         let ok = true
         try { ok = script[scriptStep]() !== false } catch (e) { check("Step " + (scriptStep + 1) + " stopped: " + e); ok = true }
         if (ok || ++scriptTries > 12) {
-            if (!ok) check("Step " + (scriptStep + 1) + " gave up waiting")
+            if (!ok) check("Step " + (scriptStep + 1) + " gave up waiting (game " + (game ? game.name : "none") + ", " + mods.length + " mods, tab " + tab + ", zone " + zone
+                           + ", Get mods " + getArea + " " + getIndex + " of " + getItems.length + ", mod page " + modPage + ", sheet \"" + sheet + "\")")
             scriptStep++; scriptTries = 0
         }
     }
@@ -2257,7 +2267,7 @@ Window {
                     tab = 0; zone = "main"; modIndex = 1; m.want = mods[1] ? mods[1].name : ""; zone = "rail"; railIndex = m.other; pad("a") },
             () => { if (!game || game.id === m.home) return false; zone = "rail"; railIndex = games.findIndex(g => g.id === m.home); pad("a") },
             () => { if (!game || game.id !== m.home || !modsLoaded || mods.length < 2) return false
-                    check("Game round trip: back on " + game.name + ", tab " + tab + ", row " + (modIndex + 1) + " (" + (focusedItem && focusedItem.m ? focusedItem.m.name : "") + ", was " + m.want + ")") },
+                    check("Game round trip: back on " + game.name + ", tab " + tab + ", row " + (modIndex + 1) + " (" + (focusedItem && focusedItem.m ? focusedItem.m.name : "") + ", was " + m.want + "; remembered " + lastFocusId[game.id] + ")") },
             // The quick wheel: tap View, Up then Right is Up-right (Sort); hold View, push Left, let go: Games.
             () => { pad("view"); pad("up"); pad("right"); check("Wheel: slot " + wheelSlot + " " + (wheelSlots[wheelSlot] ? wheelSlots[wheelSlot].label : "")); pad("b") },
             () => { Turbine.selftestPad("view", true); pad("left"); Turbine.selftestPad("view", false); check("Wheel held, Left, let go: sheet " + sheet + " \"" + pickTitle + "\""); pad("b") },
