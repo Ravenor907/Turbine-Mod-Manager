@@ -399,11 +399,17 @@ Item {
         Item {
             anchors.fill: parent
             z: 3
-            TapHandler {
+            // A PointHandler only watches (a TapHandler here kept the page from getting its clicks): a press let go
+            // within a second, moved less than a finger's width, is a tap or a click.
+            PointHandler {
                 acceptedButtons: Qt.LeftButton
-                gesturePolicy: TapHandler.DragThreshold
-                grabPermissions: PointerHandler.ApprovesTakeOverByAnything
-                onTapped: nb.pagePressed()
+                property real downAt: 0
+                property real moved: 0
+                onTranslationChanged: moved = Math.max(moved, Math.sqrt(translation.x * translation.x + translation.y * translation.y))
+                onActiveChanged: {
+                    if (active) { downAt = Date.now(); moved = 0 }
+                    else if (moved < nb.ui.px(12) && Date.now() - downAt < 1000) nb.pagePressed()
+                }
             }
         }
     }
