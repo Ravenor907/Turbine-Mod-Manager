@@ -42,6 +42,16 @@ pub struct Sticks {
     pub ry: f64,
 }
 
+/// The quick wheel's wedge angle for the left stick: degrees from Up, clockwise (0..359), or None while the stick
+/// is near the middle (pushed less than half way), so letting go keeps the wedge last pointed at.
+pub fn wedge_angle(lx: f64, ly: f64) -> Option<i32> {
+    if (lx * lx + ly * ly).sqrt() < 0.5 {
+        return None;
+    }
+    let deg = lx.atan2(-ly).to_degrees();
+    Some(((deg.round() as i32) % 360 + 360) % 360)
+}
+
 /// SDL's axis value (-32768..32767) as -1..1.
 pub fn unit(v: i16) -> f64 {
     (f64::from(v) / 32767.0).clamp(-1.0, 1.0)
@@ -340,6 +350,16 @@ mod tests {
 
     const W: f64 = 1280.0;
     const H: f64 = 800.0;
+
+    #[test]
+    fn wedge_angle_by_stick() {
+        assert_eq!(wedge_angle(0.0, -1.0), Some(0), "up");
+        assert_eq!(wedge_angle(1.0, 0.0), Some(90), "right");
+        assert_eq!(wedge_angle(0.0, 1.0), Some(180), "down");
+        assert_eq!(wedge_angle(-1.0, 0.0), Some(270), "left");
+        assert_eq!(wedge_angle(0.7, -0.7), Some(45), "up-right");
+        assert_eq!(wedge_angle(0.2, 0.2), None, "near the middle");
+    }
 
     fn run(p: &mut Pointer, s: Sticks, ms: f64) -> Tick {
         let mut total = Tick::default();

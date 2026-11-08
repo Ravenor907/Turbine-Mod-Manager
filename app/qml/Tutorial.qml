@@ -120,7 +120,7 @@ Item {
                 Rectangle { anchors.fill: parent; radius: width / 2; color: tut.ui.c.card; border.color: tut.ui.c.line; border.width: Math.max(1, tut.ui.px(2)) }
                 Rectangle { anchors.centerIn: parent; width: tut.ui.px(54); height: width; radius: width / 2; color: tut.ui.c.raised }
                 Repeater {
-                    model: ["Find", "Sort", "Show", "Play options", "Full menu", "Settings", "Games", "Updates"]
+                    model: ["Find", "Sort", "Show", "Play options", "Game menu", "Settings", "Games", "Select several"]
                     Text {
                         required property int index
                         required property string modelData

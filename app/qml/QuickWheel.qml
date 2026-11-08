@@ -1,8 +1,10 @@
 import QtQuick
 
-// The quick wheel (View): eight fixed places around a circle, the same on every screen. Slots with nothing to do
-// on this screen are dimmed, never moved. The highlighted one has the brass ring; in Labs the middle says Report.
-// Main.qml owns the slots ({label, ok}) and the keys; a tap on a slot does it, a tap outside closes.
+// The quick wheel (View): a pie of eight wedges in fixed places, the same on every screen. The left stick (or a
+// pointer over it) picks a wedge by its angle; the D-pad still works (Up then Right is Up-right). The picked wedge
+// fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name, dimmed.
+// While it is open nothing behind it takes a press, a tap or a scroll; a tap outside the pie closes it.
+// Main.qml owns the slots ({label, ok, desc}) and the keys; a tap on a wedge does it.
 Item {
     id: qw
     required property var ui
@@ -10,59 +12,127 @@ Item {
     property int focusIndex: -1
     property bool labs: false
     property string viewGlyph: "VIEW"
+    property bool reduceMotion: false
     signal activated(int index)
+    signal pointed(int index)
     signal closed()
 
     anchors.fill: parent
     z: 70
 
-    Rectangle { anchors.fill: parent; color: "#B0000000" }
-    MouseArea { anchors.fill: parent; onClicked: qw.closed() }
+    // The backdrop takes every press, scroll and hover, so the page behind never sees one.
+    Rectangle { anchors.fill: parent; color: "#D0050403" }
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.AllButtons
+        onWheel: (w) => { w.accepted = true }
+        onPressed: (m) => { m.accepted = true }
+        onClicked: (m) => {
+            const i = pie.wedgeAt(m.x - pie.x, m.y - pie.y)
+            if (i === -2) qw.closed()
+            else if (i >= 0) qw.activated(i)
+        }
+        onPositionChanged: (m) => {
+            const i = pie.wedgeAt(m.x - pie.x, m.y - pie.y)
+            if (i >= 0 && i !== qw.focusIndex) qw.pointed(i)
+        }
+    }
 
     Item {
-        id: ring
-        readonly property real r: Math.min(qw.width, qw.height) * 0.30
-        width: r * 2 + qw.ui.px(150); height: r * 2 + qw.ui.px(60)
+        id: pie
+        readonly property real outer: Math.min(qw.width, qw.height) * 0.34
+        readonly property real inner: outer * 0.30
+        width: outer * 2; height: outer * 2
         anchors.centerIn: parent
-        Rectangle {
-            anchors.centerIn: parent
-            width: ring.r * 2 + qw.ui.px(40); height: width; radius: width / 2
-            color: qw.ui.c.panel
-            border.color: qw.ui.c.line; border.width: Math.max(1, qw.ui.px(2))
-            MouseArea { anchors.fill: parent }
+        scale: qw.visible ? 1 : 0.92
+        Behavior on scale { enabled: !qw.reduceMotion; NumberAnimation { duration: 120 } }
+
+        // -1 the middle, -2 outside the pie, else the wedge (0 is Up, then clockwise).
+        function wedgeAt(px, py) {
+            const dx = px - outer, dy = py - outer
+            const d = Math.sqrt(dx * dx + dy * dy)
+            if (d > outer) return -2
+            if (d < inner) return -1
+            let deg = Math.atan2(dx, -dy) * 180 / Math.PI
+            if (deg < 0) deg += 360
+            return Math.round(deg / 45) % 8
         }
-        // The middle: View's name (Labs: the report shot).
-        Rectangle {
-            anchors.centerIn: parent
-            width: qw.ui.px(88); height: width; radius: width / 2
-            color: qw.focusIndex < 0 ? qw.ui.c.raised : qw.ui.c.card
-            border.color: qw.focusIndex < 0 && qw.labs ? qw.ui.c.accentHi : qw.ui.c.accentLo
-            border.width: Math.max(1, qw.ui.px(2))
-            Column {
-                anchors.centerIn: parent
-                Text { anchors.horizontalCenter: parent.horizontalCenter; text: qw.viewGlyph; color: qw.ui.c.text; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(14); font.bold: true }
-                Text { visible: qw.labs; anchors.horizontalCenter: parent.horizontalCenter; text: "Report"; color: qw.ui.c.soft; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(12) }
+
+        Canvas {
+            id: canvas
+            anchors.fill: parent
+            property int sel: qw.focusIndex
+            property var okList: qw.slots.map(s => !!s.ok)
+            onSelChanged: requestPaint()
+            onOkListChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            property color acc: qw.ui.c.accent
+            onAccChanged: requestPaint()
+            onPaint: {
+                const g = getContext("2d")
+                g.reset()
+                const cx = width / 2, cy = height / 2, R = pie.outer, r = pie.inner
+                for (let i = 0; i < 8; i++) {
+                    // Wedge i is centred on i * 45 degrees from Up, clockwise.
+                    const a0 = (i * 45 - 22.5 - 90) * Math.PI / 180, a1 = (i * 45 + 22.5 - 90) * Math.PI / 180
+                    g.beginPath()
+                    g.arc(cx, cy, R, a0, a1, false)
+                    g.arc(cx, cy, r, a1, a0, true)
+                    g.closePath()
+                    g.fillStyle = i === sel ? String(qw.ui.c.accent) : String(qw.ui.c.raised)
+                    g.fill()
+                    g.lineWidth = Math.max(2, qw.ui.px(4))
+                    g.strokeStyle = String(qw.ui.c.ground)
+                    g.stroke()
+                }
             }
         }
+        // The wedges' names (never empty: a wedge with nothing to do here keeps its name, dimmed).
         Repeater {
             model: qw.slots
-            Rectangle {
-                id: sl
+            Text {
                 required property int index
                 required property var modelData
                 readonly property bool foc: index === qw.focusIndex
                 readonly property real a: (index * 45 - 90) * Math.PI / 180
-                width: Math.max(qw.ui.px(110), slText.implicitWidth + qw.ui.px(24)); height: qw.ui.px(46)
-                radius: qw.ui.px(8)
-                x: ring.width / 2 + Math.cos(a) * ring.r - width / 2
-                y: ring.height / 2 + Math.sin(a) * ring.r - height / 2
-                opacity: modelData.ok ? 1 : 0.38
-                color: foc ? qw.ui.c.focusFill : qw.ui.c.card
-                border.color: foc ? qw.ui.c.accentHi : qw.ui.c.line
-                border.width: foc ? Math.max(2, qw.ui.px(3)) : Math.max(1, qw.ui.px(1))
-                Text { id: slText; anchors.centerIn: parent; text: sl.modelData.label; color: sl.foc ? qw.ui.c.accentText : qw.ui.c.text; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(16); font.weight: Font.DemiBold }
-                HoverHandler { onHoveredChanged: qw.ui.hover(sl, hovered) }
-                TapHandler { onTapped: qw.activated(sl.index) }
+                readonly property real mid: (pie.outer + pie.inner) / 2 + pie.outer * 0.04
+                width: pie.outer * 0.55
+                x: pie.outer + Math.cos(a) * mid - width / 2
+                y: pie.outer + Math.sin(a) * mid - height / 2
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                text: modelData.label || ""
+                opacity: modelData.ok ? 1 : 0.45
+                color: foc ? qw.ui.c.onAccent : qw.ui.c.text
+                font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(17); font.weight: Font.DemiBold
+                Accessible.role: Accessible.MenuItem
+                Accessible.name: (modelData.label || "") + (modelData.ok ? "" : ", not available here")
+            }
+        }
+        // The middle: the picked wedge's name and what it does (nothing picked: View's name, and Report in Labs).
+        Rectangle {
+            anchors.centerIn: parent
+            width: pie.inner * 2 - qw.ui.px(8); height: width; radius: width / 2
+            color: qw.ui.c.panel
+            border.color: qw.ui.c.accent; border.width: Math.max(1, qw.ui.px(2))
+            readonly property var s: qw.focusIndex >= 0 ? qw.slots[qw.focusIndex] : null
+            Column {
+                anchors.centerIn: parent
+                width: parent.width - qw.ui.px(16)
+                spacing: qw.ui.px(2)
+                Text {
+                    width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                    text: parent.parent.s ? parent.parent.s.label : qw.viewGlyph
+                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(16); font.bold: true
+                }
+                Text {
+                    width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
+                    text: parent.parent.s ? (parent.parent.s.ok ? (parent.parent.s.desc || "") : "Not available here") : (qw.labs ? "A: Report" : "Point at a wedge")
+                    color: qw.ui.c.soft; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(12)
+                }
             }
         }
     }

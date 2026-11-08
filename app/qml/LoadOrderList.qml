@@ -5,7 +5,7 @@ import QtQuick.Shapes
 // marked, the game's own files fixed at the top, and a warning on plugins whose masters are missing. Sort
 // automatically sits above the list (focus index -1). Main.qml handles the keys: A turns a plugin on or off, X Move moves
 // it, X shows a plugin's details, A on Sort automatically sorts (with LOOT's masterlist when it can be had). Plugins
-// LOOT has notes on carry a badge: "LOOT: problem" (red), "Dirty" or "LOOT: warning" (amber), "LOOT: note".
+// LOOT has notes on carry a badge: "Problem" (red), "Needs cleaning" or "Warning" (amber), "Note".
 Item {
     id: lo
     required property var ui
@@ -18,10 +18,10 @@ Item {
     function lootBadge(name) {
         const n = notesFor(name)
         if (n.length === 0) return null
-        if (n.some(x => x.level === "error")) return ["LOOT: problem", "stop"]
-        if (n.some(x => x.level === "warn" && x.text.indexOf("Dirty") === 0)) return ["Dirty", "warn"]
-        if (n.some(x => x.level === "warn")) return ["LOOT: warning", "warn"]
-        return ["LOOT: note", "info"]
+        if (n.some(x => x.level === "error")) return ["Problem", "stop"]
+        if (n.some(x => x.level === "warn" && x.text.indexOf("Dirty") === 0)) return ["Needs cleaning", "warn"]
+        if (n.some(x => x.level === "warn")) return ["Warning", "warn"]
+        return ["Note", "info"]
     }
     property int focusIndex: 0
     property bool moving: false
@@ -71,7 +71,7 @@ Item {
                 maximumLineCount: 2
                 elide: Text.ElideRight
                 text: lo.error !== "" ? lo.error : lo.note !== "" ? lo.note
-                      : "Sorts with LOOT's masterlist when it can be downloaded, otherwise masters first. Lower in the list wins."
+                      : "Sort automatically puts these in a safe order. Lower in the list wins."
                 color: lo.error !== "" ? lo.ui.c.warn : lo.note.indexOf("Sorted with LOOT") === 0 ? lo.ui.c.ok : lo.ui.c.soft
                 font.family: lo.ui.bodyFont
                 font.pixelSize: lo.ui.px(14)
@@ -123,8 +123,9 @@ Item {
                         border.color: row.p.active ? "transparent" : lo.ui.c.line
                         Text { anchors.centerIn: parent; text: row.p.active ? "ON" : "OFF"; color: row.p.active ? lo.ui.c.accentText : lo.ui.c.muted; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(13); font.bold: true }
                     }
+                    // The mod's name first (the plugin file is the small line after it).
                     Text {
-                        text: row.p.name
+                        text: lo.owners[(row.p.name || "").toLowerCase()] || row.p.name
                         color: row.p.active ? lo.ui.c.text : lo.ui.c.soft
                         font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(16); font.bold: true
                         anchors.verticalCenter: parent.verticalCenter
@@ -135,7 +136,7 @@ Item {
                     Text {
                         readonly property string from: lo.owners[(row.p.name || "").toLowerCase()] || ""
                         visible: from !== ""
-                        text: "From: " + from
+                        text: row.p.name
                         color: lo.ui.c.muted
                         font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.px(14)
                         anchors.verticalCenter: parent.verticalCenter
@@ -143,7 +144,7 @@ Item {
                         elide: Text.ElideRight
                     }
                     Repeater {
-                        model: (row.p.fixed ? [["Game file", ""]] : []).concat(row.p.master ? [["Master", ""]] : []).concat(row.p.light ? [["Light", ""]] : [])
+                        model: row.p.fixed ? [["Base game", ""]] : row.p.master ? [["Master", ""]] : []
                             .concat(row.p.unreadable ? [["Can't be read", "warn"]] : [])
                             .concat((row.p.missing || []).length > 0 ? [["Needs " + row.p.missing.join(", "), "warn"]] : [])
                             .concat(lo.lootBadge(row.p.name) ? [lo.lootBadge(row.p.name)] : [])

@@ -10,7 +10,23 @@ Item {
 
     property var lines: []
     property int focusAt: 0
-    readonly property var buttons: [{ label: "Copy to clipboard" }, { label: "Save to Downloads" }, { label: "Close", key: "b" }]
+    // 0.56: "What happened" (plain sentences with the time) unless the full log is asked for (X, for reports).
+    property bool full: false
+    readonly property var buttons: [{ label: "Copy to clipboard" }, { label: "Save to Downloads" }, { label: full ? "Show what happened" : "Show the full log", key: "x" }, { label: "Close", key: "b" }]
+    readonly property var shown: full ? lines : plain(lines)
+    function plain(raw) {
+        let out = []
+        for (const l of raw) {
+            const m = String(l).match(/^\d{4}-\d{2}-\d{2} (\d{2}):(\d{2}):\d{2}(\.\d+)? +(\S+) +(.*)$/)
+            if (!m) continue
+            const kind = m[4], text = m[5]
+            if (!/^(action|engine|net|catch|play|scan)$/.test(kind)) continue
+            if (!/^(Added|Removed|Uninstall|Play|Placed|Skipped|Refused|Not added|Renamed|Turn|Download|Got|Couldn't|Failed|Updated|Update|Nexus game for|Name reset|Deploy failed|Error)/i.test(text)) continue
+            const h = parseInt(m[1]), mm = m[2]
+            out.push((h % 12 === 0 ? 12 : h % 12) + ":" + mm + (h < 12 ? " AM" : " PM") + "  " + text)
+        }
+        return out.length > 0 ? out : ["Nothing to tell yet. X shows the full log."]
+    }
 
     signal copyClicked()
     signal saveClicked()
@@ -19,7 +35,7 @@ Item {
     // Newest at the bottom: the list starts at its end.
     function toEnd() { list.positionViewAtEnd() }
     onLinesChanged: Qt.callLater(toEnd)
-    onVisibleChanged: if (visible) { focusAt = 0; Qt.callLater(toEnd) }
+    onVisibleChanged: if (visible) { focusAt = 0; full = false; Qt.callLater(toEnd) }
 
     function scrollBy(d) {
         const max = Math.max(0, list.contentHeight - list.height) + list.originY
@@ -30,12 +46,14 @@ Item {
         else if (b === "left") focusAt = Math.max(0, focusAt - 1)
         else if (b === "right") focusAt = Math.min(buttons.length - 1, focusAt + 1)
         else if (b === "a") activate(focusAt)
+        else if (b === "x") activate(2)
         else if (b === "b") closeClicked()
     }
     function activate(i) {
         focusAt = i
         if (i === 0) copyClicked()
         else if (i === 1) saveClicked()
+        else if (i === 2) { full = !full; Qt.callLater(toEnd) }
         else closeClicked()
     }
 
@@ -85,7 +103,7 @@ Item {
                 anchors.fill: parent
                 anchors.margins: al.ui.px(8)
                 clip: true
-                model: al.lines
+                model: al.shown
                 boundsBehavior: Flickable.StopAtBounds
                 // Plenty built ahead, so jumping to the end lands on the real end.
                 cacheBuffer: 4000

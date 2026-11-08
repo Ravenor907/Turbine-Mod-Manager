@@ -108,7 +108,7 @@ Item {
             width: md.stacked ? view.width : view.width * 0.6 - md.ui.px(8)
             spacing: md.ui.px(8)
             Rectangle {
-                width: parent.width; height: Math.min(width * 9 / 16, md.ui.px(300))
+                width: parent.width; height: Math.min(width * 9 / 16, md.ui.px(300), view.height * 0.4)
                 radius: md.ui.px(6)
                 color: md.ui.c.raised
                 clip: true
@@ -321,6 +321,22 @@ Item {
                     TapHandler { onTapped: md.needClicked(nr.index) }
                 }
             }
+        }
+    }
+
+    // More below: a fade at the bottom and how to scroll (0.56).
+    Rectangle {
+        visible: view.visible && view.contentHeight > view.height + 2 && !view.atYEnd
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        height: md.ui.px(46)
+        gradient: Gradient {
+            GradientStop { position: 0; color: "transparent" }
+            GradientStop { position: 1; color: md.ui.c.ground }
+        }
+        Text {
+            anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: md.ui.px(4)
+            text: "Left stick: scroll"
+            color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13)
         }
     }
 }

@@ -15,7 +15,8 @@ Rectangle {
     required property var ui
 
     property string name: ""
-    property string detail: ""            // one line, e.g. "5.2 · Nexus"
+    property string detail: ""            // one line: "by STuRoK · added Oct 21", or a problem ("Needs SKSE")
+    property string detailLevel: ""       // "" plain, or warn / stop / info for a problem in the line
     property bool isOn: true
     property bool ordered: false          // show the order number (only for games where order matters)
     property int order: 0
@@ -24,7 +25,7 @@ Rectangle {
     property bool focused: false
     property bool showHints: focused
     property string aLabel: isOn ? "Turn off" : "Turn on"
-    property string xLabel: "More"
+    property string xLabel: "Options"
 
     // A tap or click anywhere on the row (the pill included) is clicked(): Main.qml runs A on it.
     signal clicked()
@@ -55,6 +56,13 @@ Rectangle {
         return out
     }
 
+    // Screen readers: name, role, then what it is ("Lantern Glow, on, by STuRoK, 2 of 9").
+    property int position: 0
+    property int count: 0
+    Accessible.role: Accessible.ListItem
+    Accessible.name: name + ", " + (isOn ? "on" : "off") + (detail !== "" ? ", " + detail : "") + (badge !== "" ? ", " + badge : "")
+                     + (count > 0 ? ", " + position + " of " + count : "")
+    Accessible.focused: focused
     implicitWidth: ui.px(600)
     property bool compact: false          // Desktop layout: 38 px rows
     property int ticked: -1               // Select several: -1 no box, 0 empty box, 1 ticked
@@ -231,7 +239,9 @@ Rectangle {
             width: parent.width
             text: root.detail || ""
             elide: Text.ElideRight
-            color: root.focused ? root.ui.c.soft : root.ui.c.muted
+            color: root.detailLevel !== "" ? root.readable(root.levelColor(root.detailLevel), root.focused ? root.ui.c.focusFill : root.ui.c.card)
+                   : root.focused ? root.ui.c.soft : root.ui.c.muted
+            font.weight: root.detailLevel !== "" ? Font.DemiBold : Font.Normal
             font.family: root.ui.bodyFont
             font.pixelSize: root.ui.px(14)
         }

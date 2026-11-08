@@ -1,10 +1,10 @@
 import QtQuick
 import QtQuick.Shapes
 
-// Get mods: the bar (search with Steam's keyboard, sort, category, where from, Add a file from Downloads), then a
-// "Recently viewed" strip on the start page and the mods as picture cards: thumbnail, name (two lines at most),
-// author, "12K likes · 3.1M downloads", an "Installed" or "Update ready" ribbon and a "Code mod" chip where known. 3 columns on
-// a handheld, 4 when the design width is 1100 or more. When browsing failed (no key and Nexus refused), one big card
+// Get mods: the bar (search with Steam's keyboard, sort, category, where from, Add from Downloads), then a
+// the mods as picture cards, four to a row: thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
+// an "Installed · On" (or Off) or "Update ready" ribbon and a "Code mod" chip where known. (Recently viewed is on the
+// quick wheel.) When browsing failed (no key and Nexus refused), one big card
 // opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "bar", "recent", "grid" or "fallback"
 // with focusIndex) and passes taps through the signals.
 Item {
@@ -17,7 +17,8 @@ Item {
     property string search: ""
     property string category: ""
     property var bar: []                    // [{key, label}]
-    property var recent: []                 // Recently viewed: [{id, name, icon}]
+    property var recent: []                 // the strip over the cards: [{id, name, icon, what}]
+    property string recentTitle: "Good first mods"
     property string banner: ""              // "No mods for The Witcher 3 yet. Pick one below, or search."
     property bool fallback: false
     property string fallbackTitle: ""
@@ -127,7 +128,7 @@ Item {
             width: parent.width
             height: visible ? implicitHeight : 0
             spacing: gm.ui.px(4)
-            Text { text: "Recently viewed"; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); font.weight: Font.DemiBold }
+            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); font.weight: Font.DemiBold }
             ListView {
                 id: recentList
                 width: parent.width
@@ -143,7 +144,7 @@ Item {
                     required property int index
                     required property var modelData
                     readonly property bool foc: gm.active && gm.focusArea === "recent" && gm.focusIndex === index
-                    width: gm.ui.px(190); height: recentList.height; radius: gm.ui.px(6)
+                    width: gm.ui.px(250); height: recentList.height; radius: gm.ui.px(6)
                     color: foc ? gm.ui.c.focusFill : gm.ui.c.card
                     border.color: gm.ui.c.accent
                     border.width: foc ? gm.ui.px(2) : 0
@@ -152,7 +153,7 @@ Item {
                         x: rthumb.x + rthumb.width + gm.ui.px(8)
                         width: parent.width - x - gm.ui.px(6)
                         anchors.verticalCenter: parent.verticalCenter
-                        text: rc.modelData.name || ""
+                        text: (rc.modelData.name || "") + (rc.modelData.what ? "\n" + rc.modelData.what : "")
                         wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                         color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
                     }
@@ -192,7 +193,7 @@ Item {
                         ActionKey { k: "a"; label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
                         ActionKey { k: "x"; label: "Try again here"; onClicked: gm.fallbackClicked("x") }
                         // A file that landed but wasn't caught can still be added from here.
-                        ActionKey { k: "y"; label: "Add a file from Downloads"; onClicked: gm.fallbackClicked("y") }
+                        ActionKey { k: "y"; label: "Add from Downloads"; onClicked: gm.fallbackClicked("y") }
                     }
                 }
                 HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -214,7 +215,7 @@ Item {
                 anchors.fill: parent
                 clip: true
                 cellWidth: width / gm.columns
-                cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + gm.ui.px(84)
+                cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + gm.ui.px(76)
                 model: gm.items
                 onMovementEnded: gm.scrolled(indexAt(gm.ui.px(10), contentY + gm.ui.px(10)), indexAt(width - gm.ui.px(10), contentY + height - gm.ui.px(10)))
                 footer: Item {
@@ -228,6 +229,10 @@ Item {
                     required property var modelData
                     readonly property bool foc: gm.active && gm.focusArea === "grid" && gm.focusIndex === index
                     width: grid.cellWidth; height: grid.cellHeight
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: (modelData.name || "") + (modelData.installed ? ", installed" + (modelData.on === true ? ", on" : modelData.on === false ? ", off" : "") : "")
+                                     + (modelData.summary ? ", " + modelData.summary : "") + ", " + (index + 1) + " of " + gm.items.length
+                    Accessible.focused: foc
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: gm.ui.px(4)
@@ -252,7 +257,7 @@ Item {
                             width: rib.implicitWidth + gm.ui.px(14); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
                             border.color: cell.modelData.update === true ? gm.ui.c.accent : gm.ui.c.ok
-                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "Update ready" : "Installed"; color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
                         }
                         Rectangle {
                             visible: cell.modelData.code === true
@@ -269,14 +274,12 @@ Item {
                             spacing: gm.ui.px(1)
                             Text {
                                 width: parent.width
-                                height: gm.ui.px(38)
-                                wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                                verticalAlignment: Text.AlignTop
+                                elide: Text.ElideRight
                                 text: cell.modelData.name
                                 color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15); font.weight: Font.DemiBold
-                                lineHeight: 0.95
                             }
-                            Text { width: parent.width; elide: Text.ElideRight; text: cell.modelData.owner || ""; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13) }
+                            // What it does, in one line.
+                            Text { width: parent.width; elide: Text.ElideRight; text: cell.modelData.summary || cell.modelData.owner || ""; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13) }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: (cell.modelData.source === "thunderstore" || gm.result && gm.result.source === "thunderstore"

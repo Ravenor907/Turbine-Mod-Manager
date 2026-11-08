@@ -75,7 +75,7 @@ Item {
                 }
                 Text {
                     topPadding: sheet.ui.px(6)
-                    text: "LOOT'S NOTES"
+                    text: "NOTES"
                     color: sheet.ui.c.muted
                     font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(14); font.bold: true; font.letterSpacing: sheet.ui.px(1)
                 }
@@ -83,7 +83,7 @@ Item {
                     visible: sheet.notes.length === 0
                     width: parent.width
                     wrapMode: Text.WordWrap
-                    text: "LOOT has nothing to say about this plugin."
+                    text: "No notes about this plugin."
                     color: sheet.ui.c.soft
                     font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15)
                 }

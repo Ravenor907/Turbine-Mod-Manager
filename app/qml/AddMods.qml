@@ -15,8 +15,17 @@ Item {
     id: root
 
     required property var ui
+    // 0.56: a download's name as people say it: no .zip, no Nexus numbers, spaces for underscores (the file's own
+    // name is the small line under it).
+    function niceName(f) {
+        let n = String(f).replace(/\.(zip|7z|rar)$/i, "")
+        const m = n.match(/^(.*?)-\d+(-[0-9A-Za-z]+)*-\d{9,}$/)
+        if (m && m[1].length > 1) n = m[1]
+        n = n.replace(/_/g, " ").replace(/\s+/g, " ").trim()
+        return n !== "" ? n : String(f)
+    }
 
-    property string title: "Add mods"
+    property string title: "Add from Downloads"
     property string subtitle: "Zip files in your Downloads folder"
     // Each file: { name, size (text, e.g. "4.1 MB"), age (text, e.g. "2 days ago"), note (optional, e.g. "Already added") }
     property var files: []
@@ -193,8 +202,8 @@ Item {
                     spacing: root.ui.px(1)
                     Text {
                         width: parent.width
-                        text: fileRow.modelData.name || ""
-                        elide: Text.ElideMiddle
+                        text: root.niceName(fileRow.modelData.name || "")
+                        elide: Text.ElideRight
                         color: root.ui.c.text
                         font.family: root.ui.bodyFont
                         font.pixelSize: root.ui.px(16)
@@ -202,7 +211,7 @@ Item {
                     }
                     Text {
                         width: parent.width
-                        text: [fileRow.modelData.size || "", fileRow.modelData.age || "", fileRow.note].filter(t => t !== "").join(" · ")
+                        text: [root.niceName(fileRow.modelData.name || "") !== (fileRow.modelData.name || "") ? fileRow.modelData.name : "", fileRow.modelData.size || "", fileRow.modelData.age || "", fileRow.note].filter(t => t !== "").join(" · ")
                         elide: Text.ElideRight
                         color: fileRow.focused ? root.ui.c.soft : root.ui.c.muted
                         font.family: root.ui.bodyFont
