@@ -160,7 +160,8 @@ Item {
             visible: nb.pillText !== ""
             anchors.right: legendRow.left; anchors.rightMargin: nb.ui.px(10)
             anchors.verticalCenter: parent.verticalCenter
-            width: visible ? Math.min(pillText.implicitWidth + nb.ui.px(24), nb.width * 0.30) : 0
+            width: visible ? Math.min(pillMetrics.advanceWidth + nb.ui.px(24), nb.width * 0.30) : 0
+            TextMetrics { id: pillMetrics; font: pillText.font; text: nb.pillText }
             height: nb.ui.px(28); radius: height / 2
             color: nb.pillLevel === "warn" ? nb.ui.c.focusFill : nb.ui.c.card
             border.color: nb.pillLevel === "ok" ? nb.ui.c.ok : nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.accent

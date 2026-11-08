@@ -218,6 +218,7 @@ Window {
             else if (page === "presscount") Turbine.setSampleFree()
             // 0.55: Nexus inside Turbine (the frame alone; the stand-in page under X11; the second run; the watcher).
             else if (page === "browserframe" || page === "browsertest") { Turbine.setSampleFree(); app.tab = 1; app.zone = "main" }
+            else if (page === "regress") Turbine.setSampleFree()
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
     }
@@ -2834,7 +2835,9 @@ Window {
             { name: "close", after: 400, act: () => { check("Browser check: B on " + (nexusView && nexusView.canGoBack ? "a later page" : "the first page")); pad("b") } },
             { name: "closed", max: 5000, wait: () => page !== "browser",
               act: () => { check("Browser check: B on the first page closed it; focus " + (modPage && zone === "main" && pageIndex === 0 ? "on Get it" : "on " + zone + (modPage ? " (mod page row " + pageIndex + ")" : ""))) } },
-            { name: "get it", after: 500, act: () => { bt.clicks = 0; pad("a") } },
+            // This check's mod needs nothing else (the sample mod asks for SKSE, which keeps the focus on its page
+            // and offers the next requirement: that way is checked by the chain pictures).
+            { name: "get it", after: 500, act: () => { detailsData = Object.assign({}, detailsData, { needs: null }); chainQueue = []; check("Browser check: (the mod for the auto close needs nothing else)"); pad("a") } },
             { name: "file page again", max: 30000, wait: () => browserOpener === "getit" && pageIs(/tab=files/),
               act: () => { bt.pressAt = Date.now(); btClick(160, 188) } },
             { name: "slow download", max: 15000, wait: () => webDls.some(x => x.name === "TurbineTest-Bigger_Pockets-1.0.3.zip"),

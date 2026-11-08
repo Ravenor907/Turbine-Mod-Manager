@@ -249,6 +249,33 @@ pub fn no_gpu_wanted(data_dir: &Path) -> bool {
     data_dir.join(NO_GPU_FILE).is_file()
 }
 
+// ------------------------------------------------------------------------------------------------ leftovers
+
+/// Turbine's browser writes a download as "<name>.download" until it is done. A run that ended mid-download leaves
+/// one behind, and Qt keeps no history to resume it: at the next start each one in Downloads/Game Mods/<folder>/ is
+/// removed (only those: a mod archive's name with ".download" after it). Returns the removed files.
+pub fn remove_partials(downloads: &Path) -> Vec<PathBuf> {
+    let mut gone = Vec::new();
+    let Ok(rd) = std::fs::read_dir(downloads.join(GAME_MODS)) else { return gone };
+    for dir in rd.flatten() {
+        if !dir.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
+        for f in files.flatten() {
+            let name = f.file_name().to_string_lossy().into_owned();
+            let Some(base) = name.strip_suffix(".download") else { continue };
+            if !turbine_engine::archives::is_archive_name(base) || !f.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            if std::fs::remove_file(f.path()).is_ok() {
+                gone.push(f.path());
+            }
+        }
+    }
+    gone
+}
+
 // ------------------------------------------------------------------------------------------------ nxm links
 
 static FROM_PAGE: Mutex<Vec<(String, Instant)>> = Mutex::new(Vec::new());
@@ -444,5 +471,20 @@ mod tests {
         assert_eq!(percent_decode("a%2"), "a%2");
         assert_eq!(percent_decode("%zz"), "%zz");
         assert_eq!(percent_decode("%"), "%");
+    }
+
+    #[test]
+    fn leftovers_of_a_stopped_download_go_and_nothing_else() {
+        let dl = temp("partials");
+        let dir = dl.join("Game Mods/Valheim");
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["Mod.zip.download", "Mod.zip", "notes.txt.download", "Other.7z.crdownload"] {
+            std::fs::write(dir.join(n), b"x").unwrap();
+        }
+        std::fs::write(dl.join("Loose.zip.download"), b"x").unwrap();
+        let gone = remove_partials(&dl);
+        assert_eq!(gone, vec![dir.join("Mod.zip.download")]);
+        assert!(dir.join("Mod.zip").exists() && dir.join("notes.txt.download").exists() && dir.join("Other.7z.crdownload").exists());
+        assert!(dl.join("Loose.zip.download").exists());
     }
 }

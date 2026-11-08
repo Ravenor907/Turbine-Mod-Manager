@@ -149,6 +149,12 @@ fn main() {
     browser_test();
     // SAFETY: called once on the main thread before QGuiApplication; the log function lives for the whole run.
     unsafe { turbine_web_prepare(web_log) };
+    // A download Turbine's browser was writing when it last closed can't be resumed: its partial file goes.
+    if !screenshot {
+        for p in browse::remove_partials(&turbine_engine::home_dir().join("Downloads")) {
+            log::line("web", &format!("Removed {}: a download that stopped when Turbine closed (Qt can't resume it)", p.display()));
+        }
+    }
     let redacted = |l: &str| turbine_engine::nxm::parse(l).map(|x| x.redacted()).unwrap_or_default();
     let mut listening = false;
     match start {

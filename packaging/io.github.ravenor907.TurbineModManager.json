@@ -37,8 +37,7 @@
                 }
             },
             "build-commands": [
-                "cargo --offline build --release --locked -p turbine-mod-manager",
-                "install -Dm755 target/release/turbine-mod-manager /app/bin/turbine-mod-manager",
+                "if [ -d /run/ccache ]; then export CARGO_TARGET_DIR=/run/ccache/cargo-target; fi; cargo --offline build --release --locked -p turbine-mod-manager && install -Dm755 \"${CARGO_TARGET_DIR:-target}/release/turbine-mod-manager\" /app/bin/turbine-mod-manager",
                 "install -Dm644 -t /app/share/turbine-mod-manager/fonts fonts/*.ttf",
                 "install -Dm644 -t /app/share/turbine-mod-manager/licenses fonts/OFL-*.txt LICENSE",
                 "for d in vendor/libloot vendor/libloot-*; do if [ -f \"$d/LICENSE\" ]; then install -Dm644 \"$d/LICENSE\" /app/share/turbine-mod-manager/licenses/libloot-LICENSE.txt; fi; done",
