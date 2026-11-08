@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "name": "The Witcher 3",
+  "shortName": "The Witcher 3",
+  "ids": { "steam": ["292030"], "gog": ["1207664643", "1495134320"] },
+  "support": "full",
+  "kind": "generic",
+  "handler": "witcher3",
+  "modRoot": "",
+  "plugins": false,
+  "ordered": true,
+  "nexus": "witcher3",
+  "notes": [
+    "Steam 292030 (store.steampowered.com/app/292030, The Witcher 3: Wild Hunt). On GOG, 1207664663 is the Complete Edition package (gogdb.org, type Package, no builds); the installable games are 1207664643 (The Witcher 3: Wild Hunt, type Game, the one that package holds) and 1495134320 (the Game of the Year Edition, type Game). Checked Nov 6 2026."
+  ]
+}

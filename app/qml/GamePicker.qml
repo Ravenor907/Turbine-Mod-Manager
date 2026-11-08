@@ -79,7 +79,8 @@ Item {
                     Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: gp.ui.c.text; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(16); font.bold: true }
                     Text {
                         width: parent.width; elide: Text.ElideRight
-                        text: row.modelData.launcher === "Steam" ? "Steam" : "Heroic" + (row.modelData.storeLabel ? " (" + row.modelData.storeLabel + ")" : "")
+                        text: (row.modelData.launcher === "Steam" ? "Steam" : "Heroic" + (row.modelData.storeLabel ? " (" + row.modelData.storeLabel + ")" : ""))
+                              + (row.modelData.support === "basic" ? " · Basic support" : row.modelData.support === "custom" ? " · Added by you" : "")
                         color: gp.ui.c.soft; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(13)
                     }
                 }

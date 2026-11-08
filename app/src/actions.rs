@@ -44,7 +44,7 @@ pub(crate) fn game_info(slot: &Slot) -> GameInfo {
         id: g.id(),
         name: g.name.clone(),
         community: community(g).map(str::to_string),
-        domain: turbine_engine::nexus::domain_for_store_id(&g.store_id).map(str::to_string),
+        domain: turbine_engine::nexus::domain_for(g.store, &g.store_id).map(str::to_string),
         kind: match slot.rules.kind {
             Kind::Bethesda => "bethesda",
             Kind::BepInEx => "bepinex",
@@ -151,7 +151,7 @@ pub(crate) enum Outcome {
 }
 
 /// Install notes the player may want to act on (settings lines to add by hand, menus, REDmod): shown after adding.
-fn show_notes(w: &Worker, name: &str, notes: &[String]) {
+pub(crate) fn show_notes(w: &Worker, name: &str, notes: &[String]) {
     let notes: Vec<String> = notes.iter().filter(|n| !n.trim().is_empty()).cloned().collect();
     if notes.is_empty() {
         return;
@@ -173,7 +173,14 @@ pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: Sour
                 crate::log::line("engine", &format!("{}: {n}", done.item.name));
             }
             let verb = if replaces.is_some() { "Updated" } else { "Added" };
-            w.say(format!("{verb} {}", done.item.name), "ok");
+            match &done.placed {
+                // A Basic game's mod: where it went.
+                Some(p) => {
+                    let words = crate::anygame::note_placed(&done.item.name, p);
+                    w.say(if replaces.is_some() { words.replacen("Added", "Updated", 1) } else { words }, "ok");
+                }
+                None => w.say(format!("{verb} {}", done.item.name), "ok"),
+            }
             show_notes(w, &done.item.name, &done.notes);
             if let Some(id) = replaces {
                 let gid = game.id();
@@ -193,6 +200,12 @@ pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: Sour
             if w.pending.len() == 1 {
                 post_fomod(w);
             }
+            Outcome::Choices { name }
+        }
+        Ok(Import::NeedsPlace(p)) => {
+            let name = p.name.clone();
+            w.say(if p.sure { format!("{} has files {} already has", p.name, game.name) } else { format!("Where do {}'s files go?", p.name) }, "work");
+            crate::anygame::queue_place(w, game, *p);
             Outcome::Choices { name }
         }
         Err(e) => {
@@ -633,7 +646,7 @@ fn plan_share(w: &mut Worker, game: &Game, share: Share) {
     let json = match w.slot(game).and_then(|s| profiles::plan_import(&share, &s.store)) {
         Ok(plan) => {
             // Nexus entries: what Premium fetches, and the pages a free account opens.
-            let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
+            let domain = turbine_engine::nexus::domain_for(game.store, &game.store_id);
             let j = format!(
                 "{{\"game\":{},\"profile\":{},\"plan\":{},\"nexusPremium\":{},\"nexusFree\":{},\"error\":\"\"}}",
                 quote(&game.id()),
@@ -758,7 +771,7 @@ fn install_nexus_version(
 
 impl qobject::Turbine {
     /// Queues a job for the download lane (started the first time).
-    fn net_send(mut self: Pin<&mut Self>, name: &str, task: NetTask) {
+    pub(crate) fn net_send(mut self: Pin<&mut Self>, name: &str, task: NetTask) {
         if self.rust().net.is_none() {
             let (tx, rx) = mpsc::channel::<NetTask>();
             let qt = self.qt_thread();
@@ -1542,7 +1555,7 @@ impl qobject::Turbine {
                     .map(|m| m.version.as_ref().map(|v| format!("{}-{v}", m.id)).unwrap_or_else(|| m.id.clone()))
                     .collect();
                 // Nexus mods Turbine can fetch for a Premium account (free accounts get their pages instead).
-                let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
+                let domain = turbine_engine::nexus::domain_for(game.store, &game.store_id);
                 let fetch: Vec<(String, u64, Option<u64>, String)> = profiles::nexus_steps(&plan, domain, true)
                     .into_iter()
                     .filter_map(|st| match st.action {

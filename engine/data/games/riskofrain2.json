@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "name": "Risk of Rain 2",
+  "ids": { "steam": ["632360"] },
+  "support": "full",
+  "kind": "bepinex",
+  "modRoot": "BepInEx/plugins",
+  "plugins": false,
+  "ordered": false,
+  "loader": { "use": "bepinex", "source": "https://thunderstore.io/c/riskofrain2/p/bbepis/BepInExPack/" },
+  "nexus": "riskofrain2",
+  "thunderstore": "riskofrain2",
+  "notes": []
+}

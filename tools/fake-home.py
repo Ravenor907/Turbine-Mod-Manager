@@ -53,6 +53,9 @@ def main(home):
         # Kingdom Come: Deliverance I and II (Windows builds through Proton; the second game ships a lower-case mods folder).
         (steam, "379430", "Kingdom Come: Deliverance", "KingdomComeDeliverance", "Bin/Win64/KingdomCome.exe", True, (120, 100, 60), (30, 25, 15)),
         (steam, "1771300", "Kingdom Come: Deliverance II", "KingdomComeDeliverance2", "Bin/Win64MasterMasterSteamPGO/KingdomCome.exe", True, (90, 110, 70), (20, 28, 15)),
+        # 0.56, Mods for any game: two made-up games Turbine has no rules for (Basic support).
+        (steam, "3999901", "Lantern Hollow", "Lantern Hollow", "Lantern/Binaries/Win64/Lantern-Win64-Shipping.exe", True, (180, 120, 50), (30, 20, 10)),
+        (steam, "3999902", "Brass Pier", "Brass Pier", "BrassPier.exe", True, (150, 110, 60), (25, 20, 15)),
     ]
     for lib, app_id, name, folder, exe, proton, top, bottom in games:
         apps = os.path.join(lib, "steamapps")
@@ -81,6 +84,16 @@ def main(home):
         {"app_name": "1453375253", "title": "Stardew Valley"},
         {"app_name": "1719198803", "title": "Kingdom Come: Deliverance"},
         {"app_name": "1248083010", "title": "Kingdom Come: Deliverance II"}]}))
+
+    # Lantern Hollow: an Unreal game (one Content/Paks folder) with anti-cheat. Brass Pier: a Data folder, a Mods
+    # folder with a mod already in it, and a file of its own a mod will try to replace.
+    lh = os.path.join(steam, "steamapps/common/Lantern Hollow")
+    write(os.path.join(lh, "Lantern/Content/Paks/Lantern-Windows.pak"), "pak")
+    write(os.path.join(lh, "EasyAntiCheat/EasyAntiCheat_EOS_Setup.exe"))
+    bp = os.path.join(steam, "steamapps/common/Brass Pier")
+    write(os.path.join(bp, "Data/pier.txt"), "the game's own pier\n")
+    write(os.path.join(bp, "Data/textures/water.dds"), "dds")
+    write(os.path.join(bp, "Mods/OldMod/mod.json"), "{}")
 
     skyrim_plugins(os.path.join(steam, "steamapps/common/Skyrim Special Edition/Data"),
                    os.path.join(steam, "steamapps/compatdata/489830/pfx/drive_c/users/steamuser/AppData/Local/Skyrim Special Edition"))
@@ -272,6 +285,18 @@ def downloads(folder):
         "FastTravel/mod.manifest": manifest % "Fast Travel",
         "FastTravel/Data/travel.pak": pak,
     }, now - 6 * 86400)
+    # 0.56, Basic support: an Unreal pak mod (Lantern Hollow); a mod with its own Data folder, one with loose files
+    # Turbine can't place, and one that would replace the game's own files (Brass Pier).
+    zip_file(os.path.join(folder, "Wand Glow 1.0.zip"), {
+        "WandGlow_P.pak": b"pak" * 20, "WandGlow_P.utoc": b"utoc", "WandGlow_P.ucas": b"ucas", "readme.txt": "Glowing wands.\n",
+    }, now - 5 * 86400)
+    zip_file(os.path.join(folder, "Brass Lamps 1.0.zip"), {
+        "Data/textures/lamp.dds": b"DDS " + b"\0" * 60, "readme.txt": "Brass lamps on the pier.\n",
+    }, now - 5 * 86400)
+    zip_file(os.path.join(folder, "Odd Layout 1.0.zip"), {"odd.cfg": b"x=1\n", "odd2.cfg": b"y=2\n"}, now - 5 * 86400)
+    zip_file(os.path.join(folder, "Pier Fix 1.0.zip"), {
+        "Data/pier.txt": b"a mod's pier\n", "Data/pier2.txt": b"new\n", "BrassPier.exe": fake_dll,
+    }, now - 5 * 86400)
     # A profile share file someone sent, for Lethal Company.
     share = {"turbineProfile": 1, "app": "Turbine Mod Manager",
              "game": {"name": "Lethal Company", "store": "steam", "storeId": "1966720"}, "profile": "Friday night",

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "name": "Cyberpunk 2077",
+  "ids": { "steam": ["1091500"], "gog": ["1423049311"] },
+  "support": "full",
+  "kind": "generic",
+  "handler": "cyberpunk",
+  "modRoot": "",
+  "plugins": false,
+  "ordered": true,
+  "nexus": "cyberpunk2077",
+  "notes": [
+    "Steam 1091500 (store.steampowered.com/app/1091500, Cyberpunk 2077); GOG 1423049311 (gogdb.org, Cyberpunk 2077, type Game). Both checked Nov 6 2026.",
+    "Several frameworks instead of one loader: see cyberpunk::FRAMEWORKS and mod_checks."
+  ]
+}

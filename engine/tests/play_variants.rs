@@ -51,12 +51,13 @@ fn without_the_loader_for_one_run() {
 fn a_setup_that_closed_early_is_not_the_one_that_worked() {
     let t = TempDir::new("closed-early");
     let dir = t.path("lib/Game");
-    fs::create_dir_all(&dir).unwrap();
+    // A Basic game: its own text folder makes the placement sure (mirrors the game's top).
+    fs::create_dir_all(dir.join("text")).unwrap();
     let g = game(Launcher::Steam, "99999", "Some Game", &dir, None);
     let mut s = Store::open(&g, &t.path("data")).unwrap();
     let src = || SourceInfo { kind: "zip".into(), ..SourceInfo::default() };
     let a = t.path("dl/A.zip");
-    write_zip(&a, &[("a.txt", b"a")]);
+    write_zip(&a, &[("text/a.txt", b"a")]);
     let Import::Added(ma) = s.import_archive(&a, src()).unwrap() else { panic!() };
     s.set_clock(1_000);
     s.apply().unwrap();
@@ -64,7 +65,7 @@ fn a_setup_that_closed_early_is_not_the_one_that_worked() {
     let worked = s.restore_target().unwrap().id.clone();
     assert_eq!(s.setup_on(&worked), vec![ma.item.id.clone()]);
     let b = t.path("dl/B.zip");
-    write_zip(&b, &[("b.txt", b"b")]);
+    write_zip(&b, &[("text/b.txt", b"b")]);
     s.set_clock(2_000);
     let Import::Added(mb) = s.import_archive(&b, src()).unwrap() else { panic!() };
     s.apply().unwrap();

@@ -1,0 +1,9 @@
+{
+  "key": "bepinex",
+  "name": "BepInEx",
+  "explain": "BepInEx lets Unity games load mods that add new code; most mods for this game need it.",
+  "detect": ["winhttp.dll", "BepInEx/core"],
+  "source": "https://github.com/BepInEx/BepInEx/releases",
+  "hook": "Windows builds: winhttp.dll override in the prefix; native builds: the pack's start script",
+  "launcherSwap": null
+}

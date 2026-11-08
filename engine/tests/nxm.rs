@@ -16,7 +16,8 @@ fn reads_a_mod_manager_download_link() {
             user_id: Some(1234567),
         }
     );
-    assert_eq!(l.store_ids(), vec!["489830"]);
+    // The GOG copy (Anniversary Edition) is the same Nexus game since the rules became data files.
+    assert_eq!(l.store_ids(), vec!["489830", "1711230643"]);
     assert_eq!(l.game_name(), Some("Skyrim Special Edition"));
     assert!(l.supported());
     assert_eq!(

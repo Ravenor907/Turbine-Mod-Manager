@@ -18,16 +18,24 @@ use std::time::{Duration, SystemTime};
 
 pub const SITE: &str = "https://thunderstore.io";
 
-/// Thunderstore communities for the launch games, by Steam app ID. Stardew Valley isn't on Thunderstore.
-pub const COMMUNITIES: &[(&str, &str, &str)] = &[
-    ("1966720", "lethal-company", "Lethal Company"),
-    ("892970", "valheim", "Valheim"),
-    ("632360", "riskofrain2", "Risk of Rain 2"),
-];
+/// Thunderstore communities by Steam app ID: (app ID, community, name), from the games' data files.
+pub fn communities() -> Vec<(&'static str, &'static str, &'static str)> {
+    let mut out = Vec::new();
+    for d in crate::rules::games().iter().chain(crate::rules::player_games()) {
+        if let Some(c) = d.data.thunderstore.as_deref() {
+            for (s, id) in d.ids {
+                if *s == crate::games::Store::Steam {
+                    out.push((*id, c, d.name));
+                }
+            }
+        }
+    }
+    out
+}
 
 /// The community for a Steam app ID, if the game is on Thunderstore.
 pub fn community_for_steam_app(app_id: &str) -> Option<&'static str> {
-    COMMUNITIES.iter().find(|(id, _, _)| *id == app_id).map(|(_, c, _)| *c)
+    communities().into_iter().find(|(id, _, _)| *id == app_id).map(|(_, c, _)| c)
 }
 
 /// The full package list of a community (Thunderstore's v1 API).

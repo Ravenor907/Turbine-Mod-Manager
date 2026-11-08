@@ -107,7 +107,7 @@ impl Game {
         use crate::json::quote;
         let path = |p: &Option<PathBuf>| p.as_ref().map(|p| quote(&p.to_string_lossy())).unwrap_or_else(|| "null".into());
         format!(
-            "{{\"id\":{},\"store\":{},\"storeLabel\":{},\"launcher\":{},\"storeId\":{},\"name\":{},\"runtime\":{},\"drive\":{},\"installDir\":{},\"build\":{},\"cover\":{},\"header\":{}}}",
+            "{{\"id\":{},\"store\":{},\"storeLabel\":{},\"launcher\":{},\"storeId\":{},\"name\":{},\"runtime\":{},\"drive\":{},\"installDir\":{},\"build\":{},\"cover\":{},\"header\":{},\"support\":{}}}",
             quote(&self.id()),
             quote(self.store.key()),
             quote(self.store.label()),
@@ -120,6 +120,7 @@ impl Game {
             self.build.as_deref().map(quote).unwrap_or_else(|| "null".into()),
             path(&self.cover),
             path(&self.header),
+            quote(crate::rules::find_def(self.store, &self.store_id).map(|d| d.support).unwrap_or(crate::rules::Support::Basic).key()),
         )
     }
 }

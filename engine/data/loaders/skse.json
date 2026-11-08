@@ -1,0 +1,10 @@
+{
+  "key": "skse",
+  "name": "SKSE (Skyrim Script Extender)",
+  "explain": "SKSE lets Skyrim load mods that add new code, like SkyUI and many popular fixes.",
+  "detect": ["skse64_loader.exe"],
+  "source": "https://skse.silverlock.org/",
+  "hook": "launcher swap: SkyrimSELauncher.exe is replaced by skse64_loader.exe",
+  "launcherSwap": ["skse64_loader.exe", "SkyrimSELauncher.exe"],
+  "notes": ["Steam starts SkyrimSELauncher.exe, not the loader, so the loader also goes in under the launcher's name (the original stays in the backup folder)."]
+}

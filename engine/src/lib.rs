@@ -5,10 +5,12 @@
 #![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 
 pub mod archives;
+pub mod basic;
 pub mod browser;
 pub mod cyberpunk;
 pub mod deploy;
 pub mod fomod;
+pub mod gamedata;
 pub mod games;
 pub mod heroic;
 pub mod inflate;
@@ -19,6 +21,7 @@ pub mod md5;
 pub mod needs;
 pub mod net;
 pub mod nexus;
+pub mod nexus_games;
 pub mod nxm;
 pub mod overlaps;
 pub mod plugins;

@@ -622,6 +622,48 @@ else
   echo "::error title=No Xvfb::the Nexus page checks didn't run"; fail=1
 fi
 fi
+# 0.56, Mods for any game: Lantern Hollow (Unreal, anti-cheat, two Nexus games with its name) and Brass Pier (Data and
+# Mods folders, one exact Nexus match), with Nexus's game list from a recorded copy.
+NG="--env=TURBINE_NEXUS_GAMES=$PWD/samples/nexus_games_list.json"
+lh=steam:3999901
+bp=steam:3999902
+for size in $SIZES; do
+  SHOOT_ENV="$NG" shoot "basicgame-$size" "$size" basicgame "$PWD/home" --game=$bp
+  need "basicgame-$size" "Any game: first visit card ($size)" "First visit card: Mods for Brass Pier"
+  need "basicgame-$size" "Any game: an exact Nexus name is sure ($size)" "Nexus game for Brass Pier: brasspier"
+  SHOOT_ENV="$NG" shoot "anticheat-$size" "$size" basicgame "$PWD/home" --game=$lh
+  need "anticheat-$size" "Any game: anti-cheat card ($size)" "Anti-cheat card: Lantern Hollow \(Easy Anti-Cheat\)"
+  need "anticheat-$size" "Any game: a subtitle asks ($size)" "Nexus game for Lantern Hollow: ask \(2 candidates\)"
+  SHOOT_ENV="$NG" shoot "nexuspick-$size" "$size" nexuspick "$PWD/home" --game=$lh
+  need "nexuspick-$size" "Any game: Which game on Nexus ($size)" "Which game on Nexus: Lantern Hollow \(2 candidates\)"
+  SHOOT_ENV="$NG" shoot "basicdetails-$size" "$size" details "$PWD/home" --game=$bp
+  fresh "place-$size"; h="$PWD/fh/place-$size"
+  SHOOT_ENV="$NG" shoot "place-$size" "$size" place "$h" --game=$bp "--selftest-import=$h/Downloads/Odd Layout 1.0.zip"
+  need "place-$size" "Any game: Where do these files go? ($size)" "Asked where files go: Odd Layout"
+  fresh "overwrite-$size"; h="$PWD/fh/overwrite-$size"
+  SHOOT_ENV="$NG" shoot "overwrite-$size" "$size" overwrite "$h" --game=$bp "--selftest-import=$h/Downloads/Pier Fix 1.0.zip"
+  need "overwrite-$size" "Any game: the question about the game's files ($size)" "Asked about files Brass Pier already has: Pier Fix.*Data/pier.txt"
+  fresh "basicmenu-$size"; h="$PWD/fh/basicmenu-$size"
+  SHOOT_ENV="$NG" shoot "basicmenu-$size" "$size" basicmenu "$h" --game=$bp "--selftest-import=$h/Downloads/Brass Lamps 1.0.zip"
+  need "basicmenu-$size" "Any game: data-folder rule ($size)" "Placed by rule data-folder"
+  need "basicmenu-$size" "Any game: Change where it goes ($size)" "Mod menu: .*Change where it goes"
+  fresh "checkbasic-$size"; h="$PWD/fh/checkbasic-$size"
+  SHOOT_ENV="$NG" shoot "checkbasic-$size" "$size" check "$h" --game=$lh "--selftest-import=$h/Downloads/Wand Glow 1.0.zip"
+  need "checkbasic-$size" "Any game: unreal-paks rule ($size)" "Placed by rule unreal-paks: Lantern/Content/Paks/~mods"
+  need "checkbasic-$size" "Any game: anti-cheat before Play ($size)" "Check before Play: .*Anti-cheat"
+done
+if [ "$MODE" = 1280x800 ]; then
+  fresh placestart; h="$PWD/fh/placestart"
+  SHOOT_ENV="$NG" shoot placestart 1280x800 placestart "$h" --game=$bp "--selftest-import=$h/Downloads/Odd Layout 1.0.zip"
+  need placestart "Any game: Start puts them here" "Placed by you: the game folder \(Odd Layout"
+  fresh overwriteskip; h="$PWD/fh/overwriteskip"; g="$h/.local/share/Steam/steamapps/common/Brass Pier"
+  SHOOT_ENV="$NG" shoot overwriteskip 1280x800 overwriteskip "$h" --game=$bp "--selftest-import=$h/Downloads/Pier Fix 1.0.zip"
+  need overwriteskip "Any game: Skip those files" "Skipped existing .*Data/pier.txt"
+  need overwriteskip "Any game: the game's program is never placed" "Refused BrassPier.exe"
+  if [ "$(cat "$g/Data/pier.txt")" = "the game's own pier" ] && [ ! -s "$g/BrassPier.exe" ] && [ -f "$g/Data/pier2.txt" ]; then
+    echo "::notice title=Any game: the game's own files are untouched::pier.txt and BrassPier.exe as they were; pier2.txt added"
+  else echo "::error title=Any game: the game's own files changed::"; ls -la "$g" "$g/Data"; fail=1; fi
+fi
 if [ "$MODE" = 1920x1080 ]; then
   # 5: no sheet opened without a press when Nexus is slow to show.
   hits=$(grep -h "opened with no press" "$PWD/data/opening8s-1920x1080/turbine-mod-manager/activity.log" 2>/dev/null || true)

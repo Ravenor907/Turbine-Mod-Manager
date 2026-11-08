@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "name": "Lethal Company",
+  "ids": { "steam": ["1966720"] },
+  "support": "full",
+  "kind": "bepinex",
+  "modRoot": "BepInEx/plugins",
+  "plugins": false,
+  "ordered": false,
+  "loader": { "use": "bepinex", "source": "https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/" },
+  "nexus": "lethalcompany",
+  "thunderstore": "lethal-company",
+  "notes": []
+}

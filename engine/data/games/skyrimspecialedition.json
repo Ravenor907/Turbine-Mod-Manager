@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "name": "Skyrim Special Edition",
+  "shortName": "Skyrim Special Edition",
+  "ids": { "steam": ["489830"], "gog": ["1711230643"] },
+  "support": "full",
+  "kind": "bethesda",
+  "modRoot": "Data",
+  "plugins": true,
+  "ordered": true,
+  "loader": { "use": "skse" },
+  "nexus": "skyrimspecialedition",
+  "notes": [
+    "GOG sells it as Skyrim Anniversary Edition: product 1711230643 is The Elder Scrolls V: Skyrim Special Edition, type Game, Windows builds (gogdb.org/product/1711230643, checked Nov 6 2026)."
+  ]
+}

@@ -1,0 +1,12 @@
+[
+ {"id":1704,"name":"Skyrim Special Edition","name_lower":"skyrim special edition","domain_name":"skyrimspecialedition","mods":110000,"downloads":1,"approved_date":1,"nexusmods_url":"https://www.nexusmods.com/skyrimspecialedition"},
+ {"id":952,"name":"The Witcher 3","name_lower":"the witcher 3","domain_name":"witcher3","mods":7000,"downloads":1,"approved_date":1,"nexusmods_url":"https://www.nexusmods.com/witcher3"},
+ {"id":9001,"name":"Brass Pier","name_lower":"brass pier","domain_name":"brasspier","mods":42,"downloads":1,"approved_date":1,"nexusmods_url":"https://www.nexusmods.com/brasspier"},
+ {"id":9002,"name":"Lantern Hollow: The Long Night","name_lower":"lantern hollow: the long night","domain_name":"lanternhollow","mods":17,"downloads":1,"approved_date":1,"nexusmods_url":"https://www.nexusmods.com/lanternhollow"},
+ {"id":9003,"name":"Lantern Hollow Remastered","name_lower":"lantern hollow remastered","domain_name":"lanternhollowremastered","mods":3,"downloads":1,"approved_date":1,"nexusmods_url":"https://www.nexusmods.com/lanternhollowremastered"},
+ {"id":9004,"name":"Twin Game","name_lower":"twin game","domain_name":"twingame","mods":5,"downloads":1,"approved_date":1,"nexusmods_url":""},
+ {"id":9005,"name":"Twin Game","name_lower":"twin game","domain_name":"twingame2","mods":6,"downloads":1,"approved_date":1,"nexusmods_url":""},
+ {"id":9006,"name":"Knights & Dragons™","name_lower":"knights & dragons","domain_name":"knightsanddragons","mods":9,"downloads":1,"approved_date":1,"nexusmods_url":""},
+ {"id":9007,"name":"No Domain","domain_name":"","mods":1},
+ {"id":9008,"name":"Bad Domain","domain_name":"../x","mods":1}
+]

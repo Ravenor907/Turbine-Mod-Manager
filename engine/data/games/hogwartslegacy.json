@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "name": "Hogwarts Legacy",
+  "ids": { "steam": ["990080"] },
+  "support": "basic",
+  "kind": "generic",
+  "nexus": "hogwartslegacy",
+  "layout": [
+    { "match": "ext", "values": ["pak", "utoc", "ucas", "sig"], "to": "Phoenix/Content/Paks/~mods" }
+  ],
+  "notes": [
+    "Steam 990080 (steamcommunity.com/app/990080). Nexus domain hogwartslegacy (nexusmods.com/hogwartslegacy/mods/2060). Pak mods go in Phoenix/Content/Paks/~mods (upcomer.com/how-to-install-hogwarts-legacy-mods). Recheck each on the device before shipping."
+  ]
+}

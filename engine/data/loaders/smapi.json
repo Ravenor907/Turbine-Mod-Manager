@@ -1,0 +1,9 @@
+{
+  "key": "smapi",
+  "name": "SMAPI (Stardew Modding API)",
+  "explain": "SMAPI is the mod loader for Stardew Valley; mods in the Mods folder only work through it.",
+  "detect": ["StardewModdingAPI|StardewModdingAPI.exe"],
+  "source": "https://smapi.io/",
+  "hook": "installed from the installer's own bundle (never run); its launcher takes the game's launcher's place",
+  "launcherSwap": null
+}

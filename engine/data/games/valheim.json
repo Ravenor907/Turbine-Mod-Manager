@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "Valheim",
+  "ids": { "steam": ["892970"] },
+  "support": "full",
+  "kind": "bepinex",
+  "modRoot": "BepInEx/plugins",
+  "plugins": false,
+  "ordered": false,
+  "loader": { "use": "bepinex", "source": "https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/" },
+  "nativeLaunch": {
+    "option": "./start_game_bepinex.sh %command%",
+    "help": "Valheim runs its Linux version here, and BepInEx (the mod loader) starts through a script that comes with it. Steam only runs that script when you ask it to: in Steam, open Valheim's Properties, and under Launch Options type exactly the line below. You only do this once. Without it, the game starts without mods."
+  },
+  "nexus": "valheim",
+  "thunderstore": "valheim",
+  "notes": [
+    "Steam ships a native Linux build; its BepInEx pack starts through start_game_bepinex.sh there, and through winhttp.dll under Proton. The pack holds both, so detection is the same.",
+    "The pack's start_game_bepinex.sh starts the game with BepInEx (Doorstop) loaded; Steam only runs it when the Launch Option points at it."
+  ]
+}

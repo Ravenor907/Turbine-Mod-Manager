@@ -3,9 +3,10 @@
 //!
 //! CONTRACT (other modules and the app rely on these signatures; keep them stable).
 //!
-//! The known games and loaders are plain data in the GAMES and LOADERS tables below. They only hold strings, numbers
-//! and switches, so a later version can read the same shape from data files and add games without new code.
+//! The known games and loaders are data files (engine/data, read by gamedata.rs): a new game needs no code. Games
+//! with no file get Basic support: each mod goes where its own files show they belong (basic.rs), or Turbine asks.
 
+use crate::gamedata;
 use crate::games::{Game, Runtime, Store};
 use crate::plugins::{self, MissingMaster};
 use std::path::{Path, PathBuf};
@@ -61,7 +62,7 @@ pub struct GameRules {
     /// Mod order matters (shows order numbers and Y to reorder).
     pub ordered: bool,
     pub loader: Option<Loader>,
-    /// Shown in Game details: "Verified" or "Works generically".
+    /// Shown in Game details: "Full support", "Basic support" or "Added by you".
     pub support: String,
     /// A shorter name for tight places such as the page header, when the store's name is long
     /// ("Skyrim Special Edition" for "The Elder Scrolls V: Skyrim Special Edition"). None: use the game's own name.
@@ -78,6 +79,18 @@ pub struct GameRules {
     pub launch_help: Option<String>,
     /// Games with rules of their own (Cyberpunk 2077, The Witcher 3); Standard for the rest.
     pub family: Family,
+    /// How much Turbine knows about the game (`support` is the same in words).
+    pub support_level: Support,
+    /// Anti-cheat named by the game's data file (anti-cheat found in the game folder is added by basic.rs).
+    pub anti_cheat: Option<AntiCheat>,
+    /// Placement hints for Basic games, checked before the built-in detection rules.
+    pub layout: Vec<gamedata::HintFile>,
+    /// The game's Nexus domain and Thunderstore community from its data file.
+    pub nexus: Option<String>,
+    pub thunderstore: Option<String>,
+    /// Good first mods (Get mods' row) and where the game keeps its saves.
+    pub starters: Vec<gamedata::StarterFile>,
+    pub saves: gamedata::SavesFile,
 }
 
 /// One line of the check before Play.
@@ -93,7 +106,7 @@ pub struct Check {
 // Data tables
 // ---------------------------------------------------------------------------------------------------------------
 
-/// One known game. Data only.
+/// One known game, built from its data file (engine/data/games, or the player's own games folder).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GameDef {
     pub name: &'static str,
@@ -105,13 +118,17 @@ pub struct GameDef {
     pub mod_root: &'static str,
     pub plugins: bool,
     pub ordered: bool,
-    /// Key into LOADERS.
+    /// Key into `loaders()`.
     pub loader: Option<&'static str>,
     /// Where this game's build of the loader comes from, when it differs from the loader's own page.
     pub loader_source: Option<&'static str>,
     /// For the game's native Linux build: the Launch Option its loader needs, and why.
     pub native_launch: Option<(&'static str, &'static str)>,
     pub family: Family,
+    /// Full (Turbine's own rules), Basic or Custom (a player's file).
+    pub support: Support,
+    /// The whole data file: Nexus and Thunderstore names, anti-cheat, placement hints, starter mods, save folders.
+    pub data: &'static gamedata::GameFile,
 }
 
 /// One script loader. Data only.
@@ -128,189 +145,150 @@ pub struct LoaderDef {
     pub launcher_swap: Option<(&'static str, &'static str)>,
 }
 
-pub const GAMES: &[GameDef] = &[
-    GameDef {
-        name: "Skyrim Special Edition",
-        short_name: Some("Skyrim Special Edition"),
-        // GOG sells it as Skyrim Anniversary Edition: product 1711230643 is "The Elder Scrolls V: Skyrim Special
-        // Edition", type Game, with Windows builds (gogdb.org/product/1711230643, checked Nov 6 2026).
-        ids: &[(Store::Steam, "489830"), (Store::Gog, "1711230643")],
-        kind: Kind::Bethesda,
-        mod_root: "Data",
-        plugins: true,
-        ordered: true,
-        loader: Some("skse"),
-        loader_source: None,
-        native_launch: None,
-        family: Family::Standard,
-    },
-    GameDef {
-        name: "Stardew Valley",
-        short_name: None,
-        ids: &[(Store::Steam, "413150"), (Store::Gog, "1453375253")],
-        kind: Kind::Smapi,
-        mod_root: "Mods",
-        plugins: false,
-        ordered: false,
-        loader: Some("smapi"),
-        loader_source: None,
-        native_launch: None,
-        family: Family::Standard,
-    },
-    GameDef {
-        name: "Valheim",
-        short_name: None,
-        // Steam ships a native Linux build; its BepInEx pack starts through start_game_bepinex.sh there, and through
-        // winhttp.dll under Proton. The pack holds both, so detection is the same.
-        ids: &[(Store::Steam, "892970")],
-        kind: Kind::BepInEx,
-        mod_root: "BepInEx/plugins",
-        plugins: false,
-        ordered: false,
-        loader: Some("bepinex"),
-        loader_source: Some("https://thunderstore.io/c/valheim/p/denikson/BepInExPack_Valheim/"),
-        // The pack's start_game_bepinex.sh starts the game with BepInEx (Doorstop) loaded; Steam only runs it when the
-        // Launch Option points at it.
-        native_launch: Some((
-            "./start_game_bepinex.sh %command%",
-            "Valheim runs its Linux version here, and BepInEx (the mod loader) starts through a script that comes with \
-             it. Steam only runs that script when you ask it to: in Steam, open Valheim's Properties, and under Launch \
-             Options type exactly the line below. You only do this once. Without it, the game starts without mods.",
-        )),
-        family: Family::Standard,
-    },
-    GameDef {
-        name: "Lethal Company",
-        short_name: None,
-        ids: &[(Store::Steam, "1966720")],
-        kind: Kind::BepInEx,
-        mod_root: "BepInEx/plugins",
-        plugins: false,
-        ordered: false,
-        loader: Some("bepinex"),
-        loader_source: Some("https://thunderstore.io/c/lethal-company/p/BepInEx/BepInExPack/"),
-        native_launch: None,
-        family: Family::Standard,
-    },
-    GameDef {
-        name: "Risk of Rain 2",
-        short_name: None,
-        ids: &[(Store::Steam, "632360")],
-        kind: Kind::BepInEx,
-        mod_root: "BepInEx/plugins",
-        plugins: false,
-        ordered: false,
-        loader: Some("bepinex"),
-        loader_source: Some("https://thunderstore.io/c/riskofrain2/p/bbepis/BepInExPack/"),
-        native_launch: None,
-        family: Family::Standard,
-    },
-    GameDef {
-        name: "Cyberpunk 2077",
-        short_name: None,
-        // Steam 1091500 (store.steampowered.com/app/1091500, "Cyberpunk 2077"); GOG 1423049311 (gogdb.org, "Cyberpunk
-        // 2077", type Game). Both checked Nov 6 2026.
-        ids: &[(Store::Steam, "1091500"), (Store::Gog, "1423049311")],
-        kind: Kind::Generic,
-        mod_root: "",
-        plugins: false,
-        ordered: true,
-        // Several frameworks instead of one loader: see cyberpunk::FRAMEWORKS and mod_checks.
-        loader: None,
-        loader_source: None,
-        native_launch: None,
-        family: Family::Cyberpunk,
-    },
-    GameDef {
-        name: "The Witcher 3",
-        short_name: Some("The Witcher 3"),
-        // Steam 292030 (store.steampowered.com/app/292030, "The Witcher 3: Wild Hunt"). On GOG, 1207664663 is the
-        // Complete Edition package (gogdb.org, type Package, no builds); the installable games are 1207664643 ("The
-        // Witcher 3: Wild Hunt", type Game, the one that package holds) and 1495134320 (the Game of the Year
-        // Edition, type Game). Checked Nov 6 2026.
-        ids: &[(Store::Steam, "292030"), (Store::Gog, "1207664643"), (Store::Gog, "1495134320")],
-        kind: Kind::Generic,
-        mod_root: "",
-        plugins: false,
-        ordered: true,
-        loader: None,
-        loader_source: None,
-        native_launch: None,
-        family: Family::Witcher3,
-    },
-    GameDef {
-        name: "Kingdom Come: Deliverance",
-        short_name: None,
-        // Steam 379430 (store.steampowered.com/app/379430, "Kingdom Come: Deliverance"); GOG 1719198803 (gogdb.org,
-        // "Kingdom Come: Deliverance", type Game, Windows builds; 1182943037 is the Royal Edition package). Checked
-        // Nov 7 2026. Mods: Mods/<mod>/mod.manifest and Data/*.pak, order in Mods/mod_order.txt (kcd.rs has sources).
-        ids: &[(Store::Steam, "379430"), (Store::Gog, "1719198803")],
-        kind: Kind::Generic,
-        mod_root: "Mods",
-        plugins: false,
-        ordered: true,
-        loader: None,
-        loader_source: None,
-        native_launch: None,
-        family: Family::Kcd,
-    },
-    GameDef {
-        name: "Kingdom Come: Deliverance II",
-        short_name: None,
-        // Steam 1771300 (store.steampowered.com/app/1771300, "Kingdom Come: Deliverance II"); GOG 1248083010
-        // (gogdb.org, "Kingdom Come: Deliverance II", type Game, Windows builds; 1076704248 is its package and
-        // 1141344806 the Expansion Pass package). Checked Nov 7 2026. Mods: Warhorse's own guide (see kcd.rs).
-        ids: &[(Store::Steam, "1771300"), (Store::Gog, "1248083010")],
-        kind: Kind::Generic,
-        mod_root: "Mods",
-        plugins: false,
-        ordered: true,
-        loader: None,
-        loader_source: None,
-        native_launch: None,
-        family: Family::Kcd2,
-    },
-];
+/// How much Turbine knows about a game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Support {
+    /// Turbine's own rules for the game.
+    Full,
+    /// No rules of its own: each mod goes where its files show they belong, or Turbine asks once.
+    Basic,
+    /// Rules from a data file in the player's own games folder.
+    Custom,
+}
 
-pub const LOADERS: &[LoaderDef] = &[
-    LoaderDef {
-        key: "skse",
-        name: "SKSE (Skyrim Script Extender)",
-        explain: "SKSE lets Skyrim load mods that add new code, like SkyUI and many popular fixes.",
-        detect: &["skse64_loader.exe"],
-        source: "https://skse.silverlock.org/",
-        // Steam starts SkyrimSELauncher.exe, not the loader, so a later build swaps the launcher for the loader
-        // (keeping the original in the backup folder).
-        hook: "launcher swap: SkyrimSELauncher.exe is replaced by skse64_loader.exe",
-        launcher_swap: Some(("skse64_loader.exe", "SkyrimSELauncher.exe")),
-    },
-    LoaderDef {
-        key: "bepinex",
-        name: "BepInEx",
-        explain: "BepInEx lets Unity games load mods that add new code; most mods for this game need it.",
-        detect: &["winhttp.dll", "BepInEx/core"],
-        source: "https://github.com/BepInEx/BepInEx/releases",
-        hook: "Windows builds: winhttp.dll override in the prefix; native builds: the pack's start script",
-        launcher_swap: None,
-    },
-    LoaderDef {
-        key: "smapi",
-        name: "SMAPI (Stardew Modding API)",
-        explain: "SMAPI is the mod loader for Stardew Valley; mods in the Mods folder only work through it.",
-        detect: &["StardewModdingAPI|StardewModdingAPI.exe"],
-        source: "https://smapi.io/",
-        hook: "installed from the installer's own bundle (never run); its launcher takes the game's launcher's place",
-        launcher_swap: None,
-    },
-];
+impl Support {
+    /// The words shown in Game details.
+    pub fn words(self) -> &'static str {
+        match self {
+            Support::Full => "Full support",
+            Support::Basic => "Basic support",
+            Support::Custom => "Added by you",
+        }
+    }
+    pub fn key(self) -> &'static str {
+        match self {
+            Support::Full => "full",
+            Support::Basic => "basic",
+            Support::Custom => "custom",
+        }
+    }
+}
 
-/// The known game with this store ID, if any.
+/// A game's anti-cheat, from its data file or found in its folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AntiCheat {
+    pub name: String,
+    /// "warn" (Play anyway allowed) or "stop".
+    pub level: String,
+    pub note: String,
+}
+
+fn leak(s: &str) -> &'static str {
+    Box::leak(s.to_string().into_boxed_str())
+}
+
+fn kind_of(s: &str) -> Kind {
+    match s {
+        "bethesda" => Kind::Bethesda,
+        "bepinex" => Kind::BepInEx,
+        "smapi" => Kind::Smapi,
+        _ => Kind::Generic,
+    }
+}
+
+fn family_of(s: Option<&str>) -> Family {
+    match s {
+        Some("cyberpunk") => Family::Cyberpunk,
+        Some("witcher3") => Family::Witcher3,
+        Some("kcd") => Family::Kcd,
+        Some("kcd2") => Family::Kcd2,
+        _ => Family::Standard,
+    }
+}
+
+/// A data file as a GameDef (its strings live as long as Turbine runs; files are read once).
+fn def_from(g: &gamedata::GameFile) -> GameDef {
+    let data: &'static gamedata::GameFile = Box::leak(Box::new(g.clone()));
+    let ids: Vec<(Store, &'static str)> = data.ids.iter().map(|(s, id)| (*s, id.as_str())).collect();
+    GameDef {
+        name: &data.name,
+        short_name: data.short_name.as_deref(),
+        ids: Box::leak(ids.into_boxed_slice()),
+        kind: kind_of(&data.kind),
+        mod_root: &data.mod_root,
+        plugins: data.plugins,
+        ordered: data.ordered,
+        loader: data.loader.as_deref(),
+        loader_source: data.loader_source.as_deref(),
+        native_launch: data.native_launch.as_ref().map(|(o, h)| (o.as_str(), h.as_str())),
+        family: family_of(data.handler.as_deref()),
+        support: if !data.builtin {
+            Support::Custom
+        } else if data.support == "full" {
+            Support::Full
+        } else {
+            Support::Basic
+        },
+        data,
+    }
+}
+
+/// The games Turbine has rules for, from its own data files.
+pub fn games() -> &'static [GameDef] {
+    static G: std::sync::OnceLock<Vec<GameDef>> = std::sync::OnceLock::new();
+    G.get_or_init(|| gamedata::builtin().games.iter().map(def_from).collect())
+}
+
+/// The script loaders, from Turbine's own data files.
+pub fn loaders() -> &'static [LoaderDef] {
+    static L: std::sync::OnceLock<Vec<LoaderDef>> = std::sync::OnceLock::new();
+    L.get_or_init(|| {
+        gamedata::builtin()
+            .loaders
+            .iter()
+            .map(|l| {
+                let detect: Vec<&'static str> = l.detect.iter().map(|d| leak(d)).collect();
+                LoaderDef {
+                    key: leak(&l.key),
+                    name: leak(&l.name),
+                    explain: leak(&l.explain),
+                    detect: Box::leak(detect.into_boxed_slice()),
+                    source: leak(&l.source),
+                    hook: leak(&l.hook),
+                    launcher_swap: l.launcher_swap.as_ref().map(|(a, b)| (leak(a), leak(b))),
+                }
+            })
+            .collect()
+    })
+}
+
+fn player_list() -> &'static std::sync::RwLock<Vec<&'static GameDef>> {
+    static P: std::sync::OnceLock<std::sync::RwLock<Vec<&'static GameDef>>> = std::sync::OnceLock::new();
+    P.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Reads the player's own game files from `dir` (<TURBINE_DATA>/games) in place of the ones read before. Returns
+/// one line per file left out, saying why (for the activity log).
+pub fn load_player_games(dir: &Path) -> Vec<String> {
+    let (files, problems) = gamedata::load_player_dir(dir);
+    let defs: Vec<&'static GameDef> = files.iter().map(|f| &*Box::leak(Box::new(def_from(f)))).collect();
+    *player_list().write().unwrap_or_else(|e| e.into_inner()) = defs;
+    problems
+}
+
+/// The games added by the player's own files.
+pub fn player_games() -> Vec<&'static GameDef> {
+    player_list().read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The known game with this store ID, if any (Turbine's own files first, then the player's).
 pub fn find_def(store: Store, store_id: &str) -> Option<&'static GameDef> {
-    GAMES.iter().find(|d| d.ids.iter().any(|(s, id)| *s == store && *id == store_id))
+    let has = |d: &GameDef| d.ids.iter().any(|(s, id)| *s == store && *id == store_id);
+    games().iter().find(|d| has(d)).or_else(|| player_games().into_iter().find(|d| has(d)))
 }
 
 pub fn find_loader(key: &str) -> Option<&'static LoaderDef> {
-    LOADERS.iter().find(|l| l.key == key)
+    loaders().iter().find(|l| l.key == key)
 }
 
 impl GameRules {
@@ -345,13 +323,20 @@ impl GameRules {
                 plugins: false,
                 ordered: true,
                 loader: None,
-                support: "Works generically".into(),
+                support: Support::Basic.words().into(),
                 short_name: None,
                 runtime: game.runtime,
                 launcher_swap: None,
                 launch_option: None,
                 launch_help: None,
                 family: Family::Standard,
+                support_level: Support::Basic,
+                anti_cheat: None,
+                layout: Vec::new(),
+                nexus: None,
+                thunderstore: None,
+                starters: Vec::new(),
+                saves: gamedata::SavesFile::default(),
             },
         }
     }
@@ -370,7 +355,7 @@ impl GameRules {
             plugins: def.plugins,
             ordered: def.ordered,
             loader,
-            support: "Verified".into(),
+            support: def.support.words().into(),
             short_name: def.short_name.map(Into::into),
             runtime: Runtime::Unknown,
             launcher_swap: def
@@ -381,7 +366,19 @@ impl GameRules {
             launch_option: def.native_launch.map(|(o, _)| o.to_string()),
             launch_help: def.native_launch.map(|(_, h)| h.to_string()),
             family: def.family,
+            support_level: def.support,
+            anti_cheat: def.data.anti_cheat.as_ref().map(|a| AntiCheat { name: a.name.clone(), level: a.level.clone(), note: a.note.clone() }),
+            layout: def.data.layout.clone(),
+            nexus: def.data.nexus.clone(),
+            thunderstore: def.data.thunderstore.clone(),
+            starters: def.data.starters.clone(),
+            saves: def.data.saves.clone(),
         }
+    }
+
+    /// Does this game place mods by basic.rs's detection (no rules of its own for where files go)?
+    pub fn places_by_detection(&self) -> bool {
+        self.support_level != Support::Full && self.kind == Kind::Generic && self.family == Family::Standard
     }
 
     /// Maps the files of a mod archive (paths inside the archive, '/' separated) to paths inside the game folder.
@@ -579,14 +576,14 @@ fn ext(name_lc: &str) -> &str {
 }
 
 /// Readme, changelog and license files that come with mods but aren't part of them.
-fn is_doc(name_lc: &str) -> bool {
+pub(crate) fn is_doc(name_lc: &str) -> bool {
     let stem = name_lc.rsplit_once('.').map(|(s, _)| s).unwrap_or(name_lc);
     let doc_words = ["readme", "read me", "changelog", "change log", "changes", "whatsnew", "license", "licence", "credits"];
     let doc_ext = matches!(ext(name_lc), "txt" | "md" | "pdf" | "rtf" | "htm" | "html" | "");
     (doc_ext && doc_words.iter().any(|w| stem.contains(w))) || ext(name_lc) == "url"
 }
 
-fn is_image(name_lc: &str) -> bool {
+pub(crate) fn is_image(name_lc: &str) -> bool {
     matches!(ext(name_lc), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp")
 }
 

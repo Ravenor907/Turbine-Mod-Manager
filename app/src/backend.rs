@@ -68,6 +68,11 @@ pub mod qobject {
         #[qproperty(QString, add_result_json, cxx_name = "addResultJson")]
         /// A Mod Manager Download link's mod name, for the question before it downloads: {"link","name"}.
         #[qproperty(QString, nxm_name_json, cxx_name = "nxmNameJson")]
+        /// A Basic game's mod waiting for "Where do these files go?" or the question about the game's own files:
+        /// {"game","gameName","pending":{"name","placement","sure","conflicts","refused","tree"}}, or "".
+        #[qproperty(QString, place_json, cxx_name = "placeJson")]
+        /// "Which game on Nexus is this?": the search's answer {"state","games":[{"name","domain","mods"}]}.
+        #[qproperty(QString, nexus_games_json, cxx_name = "nexusGamesJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -118,6 +123,42 @@ pub mod qobject {
         /// Shows this game's mods and rules (opens its store the first time).
         #[qinvokable]
         fn select(self: Pin<&mut Self>, game_id: &QString);
+
+        // ------------------------------------------------ 0.56: mods for any game (anygame.rs)
+
+        /// The game's folders right in `rel` ("" for the game folder): [{"name","path","turbine"}].
+        #[qinvokable]
+        #[cxx_name = "gameFolders"]
+        fn game_folders(self: &Self, rel: &QString) -> QString;
+        /// What putting the waiting mod's `from` folder into the game's `to` would do:
+        /// {"error","files","conflicts":[...],"refused":[{"path","why"}]}.
+        #[qinvokable]
+        #[cxx_name = "placeCheck"]
+        fn place_check(self: &Self, from: &QString, to: &QString) -> QString;
+        /// Adds the waiting mod there. `replace`: it may replace files the game already has.
+        #[qinvokable]
+        #[cxx_name = "finishPlace"]
+        fn finish_place(self: Pin<&mut Self>, from: &QString, to: &QString, replace: bool);
+        /// Drops the waiting mod (the file stays in Downloads).
+        #[qinvokable]
+        #[cxx_name = "cancelPlace"]
+        fn cancel_place(self: Pin<&mut Self>);
+        /// Moves a Basic game's mod to another folder of the game.
+        #[qinvokable]
+        #[cxx_name = "changePlacement"]
+        fn change_placement(self: Pin<&mut Self>, id: &QString, to: &QString);
+        /// Lets a Basic game's mod replace the game's own files, or not.
+        #[qinvokable]
+        #[cxx_name = "setReplace"]
+        fn set_replace(self: Pin<&mut Self>, id: &QString, replace: bool);
+        /// The player's answer to "Which game on Nexus is this?" (domain "" for "It isn't on Nexus").
+        #[qinvokable]
+        #[cxx_name = "pickNexusGame"]
+        fn pick_nexus_game(self: Pin<&mut Self>, domain: &QString, name: &QString);
+        /// Searches Nexus's games by name; the answer lands in nexusGamesJson.
+        #[qinvokable]
+        #[cxx_name = "searchNexusGames"]
+        fn search_nexus_games(self: Pin<&mut Self>, text: &QString);
 
         /// Adds a mod from a zip file to the current game.
         #[qinvokable]
@@ -802,6 +843,11 @@ pub struct TurbineRust {
     pub(crate) a_browser: bool,
     /// Downloads Turbine's browser accepted and hasn't finished adding.
     pub(crate) web_downloads: Vec<crate::web::WebDownload>,
+    pub(crate) place_json: QString,
+    pub(crate) nexus_games_json: QString,
+    /// The waiting placement's archive files and game (for placeCheck).
+    pub(crate) place_files: Vec<String>,
+    pub(crate) place_game: String,
 }
 
 impl Default for TurbineRust {
@@ -878,6 +924,10 @@ impl Default for TurbineRust {
             a_enter: false,
             a_browser: false,
             web_downloads: Vec::new(),
+            place_json: QString::default(),
+            nexus_games_json: QString::from("{\"state\":\"idle\",\"games\":[]}"),
+            place_files: Vec::new(),
+            place_game: String::new(),
         }
     }
 }
@@ -905,6 +955,8 @@ pub(crate) struct Worker {
     pub(crate) share: Option<(String, turbine_engine::profiles::Share)>,
     /// LOOT's messages per game: (what the plugins looked like when they were read, plugin name lowercased: messages).
     pub(crate) loot: HashMap<String, (String, HashMap<String, Vec<crate::loot::Msg>>)>,
+    /// Basic games' mods waiting for where their files go (game id, mod), oldest first.
+    pub(crate) place_pending: std::collections::VecDeque<(String, store::PendingPlace)>,
 }
 
 pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
@@ -932,6 +984,14 @@ impl Worker {
         let needs = needs_reset(report);
         let words = format!("{} at {}: {report:?}", game.name, crate::log::file_stamp());
         crate::log::line("engine", &format!("Report for {key}: {report:?}"));
+        // 0.56: Basic games' mods leave the game's own files alone (unless the player said so) and never place the
+        // refused files.
+        if !report.skipped_existing.is_empty() {
+            crate::log::line("engine", &format!("Skipped existing (the game's own files): {}", report.skipped_existing.join(", ")));
+        }
+        for r in &report.refused {
+            crate::log::line("engine", &format!("Refused {r}: Turbine never places it"));
+        }
         self.post(move |mut t| {
             t.as_mut().rust_mut().last_report = words;
             let now = t.reset_for().to_string();
@@ -1042,7 +1102,7 @@ fn rules_json(slot: &Slot) -> String {
         ),
         None => ("null".to_string(), false),
     };
-    format!(
+    let base = format!(
         "{{\"kind\":{},\"ordered\":{},\"plugins\":{},\"modRoot\":{},\"support\":{},\"loader\":{},\"loaderInstalled\":{},\"shortName\":{},\"launchOption\":{},\"launchHelp\":{},\"community\":{},\"domain\":{},\"kcdRestore\":{}}}",
         quote(kind),
         r.ordered,
@@ -1055,9 +1115,11 @@ fn rules_json(slot: &Slot) -> String {
         r.launch_option.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
         r.launch_help.as_deref().map(quote).unwrap_or_else(|| "null".to_string()),
         crate::actions::community(&slot.game).map(quote).unwrap_or_else(|| "null".to_string()),
-        turbine_engine::nexus::domain_for_store_id(&slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string()),
+        turbine_engine::nexus::domain_for(slot.game.store, &slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string()),
         matches!(r.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root())
-    )
+    );
+    // 0.56: support, anti-cheat, the Nexus game and starter mods (anygame.rs).
+    format!("{}{}}}", &base[..base.len() - 1], crate::anygame::rules_extra(slot))
 }
 
 // ---------------------------------------------------------------------------------------------------- Proton
@@ -1333,6 +1395,8 @@ fn needs_reset(report: &turbine_engine::deploy::Report) -> bool {
 
 impl qobject::Turbine {
     pub fn scan(self: Pin<&mut Self>) {
+        // The player's own game files first, so the games list says which games they add.
+        self.load_player_games();
         let at = std::time::Instant::now();
         let scan = turbine_engine::scan_games(&turbine_engine::home_dir());
         crate::log::line(
@@ -1357,6 +1421,7 @@ impl qobject::Turbine {
         this.as_mut().rust_mut().found = scan.games;
         this.as_mut().set_games(QString::from(json.as_str()));
         this.as_mut().fetch_missing_art(missing);
+        this.as_mut().resolve_nexus();
     }
 
     /// Steam games with no cover or wide picture on the device: Steam's store has them. Downloaded once, in the
@@ -1707,6 +1772,7 @@ impl qobject::Turbine {
                     witcher_said: std::collections::HashSet::new(),
                     share: None,
                     loot: HashMap::new(),
+                    place_pending: std::collections::VecDeque::new(),
                 };
                 while let Ok(task) = rx.recv() {
                     let long = task.long;
@@ -1818,7 +1884,7 @@ impl qobject::Turbine {
         self.as_mut().hand_added(&path);
         self.as_mut().edited();
         // With a Nexus key the file is looked up by its MD5 first, so it gets its Nexus name, version and updates.
-        let domain = turbine_engine::nexus::domain_for_store_id(&game.store_id);
+        let domain = turbine_engine::nexus::domain_for(game.store, &game.store_id);
         if let (Some(d), true) = (domain, crate::online::nexus_key().is_some()) {
             return self.import_identified(game, path, d.to_string());
         }
@@ -2101,6 +2167,10 @@ impl qobject::Turbine {
                                 .map(|m| m.name.clone())
                                 .collect();
                             extra.extend(turbine_engine::kcd::checks(&[], second, &named));
+                        }
+                        // 0.56: anti-cheat while any mod is on.
+                        if let Some(c) = crate::anygame::anti_cheat_check(s) {
+                            extra.push(c);
                         }
                         if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
                             list.clear(); // "Everything checks out" no longer says it all

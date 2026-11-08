@@ -15,43 +15,94 @@ pub const API: &str = "https://api.nexusmods.com";
 pub const GRAPHQL: &str = "https://api.nexusmods.com/v2/graphql";
 pub const APP_NAME: &str = "TurbineModManager";
 
-/// Nexus game domains for the launch games: (store ID, domain, name). GOG IDs share their game's domain; see
-/// rules::GAMES for where each ID was checked.
-pub const GAMES: &[(&str, &str, &str)] = &[
-    ("489830", "skyrimspecialedition", "Skyrim Special Edition"),
-    ("413150", "stardewvalley", "Stardew Valley"),
-    ("1453375253", "stardewvalley", "Stardew Valley"),
-    ("892970", "valheim", "Valheim"),
-    ("1966720", "lethalcompany", "Lethal Company"),
-    ("632360", "riskofrain2", "Risk of Rain 2"),
-    ("1091500", "cyberpunk2077", "Cyberpunk 2077"),
-    ("1423049311", "cyberpunk2077", "Cyberpunk 2077"),
-    ("292030", "witcher3", "The Witcher 3"),
-    ("1207664643", "witcher3", "The Witcher 3"),
-    ("1495134320", "witcher3", "The Witcher 3"),
-    // nexusmods.com/kingdomcomedeliverance and nexusmods.com/kingdomcomedeliverance2 (checked Nov 7 2026).
-    ("379430", "kingdomcomedeliverance", "Kingdom Come: Deliverance"),
-    ("1719198803", "kingdomcomedeliverance", "Kingdom Come: Deliverance"),
-    ("1771300", "kingdomcomedeliverance2", "Kingdom Come: Deliverance II"),
-    ("1248083010", "kingdomcomedeliverance2", "Kingdom Come: Deliverance II"),
-];
+/// Nexus game domains: (store, store ID, domain, name). From the games' data files (engine/data/games), then the
+/// games the player picked or Turbine matched by name this run (`register`).
+fn table() -> Vec<(crate::games::Store, &'static str, &'static str, &'static str)> {
+    static BUILT: std::sync::OnceLock<Vec<(crate::games::Store, &'static str, &'static str, &'static str)>> = std::sync::OnceLock::new();
+    let mut out = BUILT
+        .get_or_init(|| {
+            let mut v = Vec::new();
+            for d in crate::rules::games() {
+                if let Some(domain) = d.data.nexus.as_deref() {
+                    for (s, id) in d.ids {
+                        v.push((*s, *id, domain, d.name));
+                    }
+                }
+            }
+            v
+        })
+        .clone();
+    for d in crate::rules::player_games() {
+        if let Some(domain) = d.data.nexus.as_deref() {
+            for (s, id) in d.ids {
+                out.push((*s, *id, domain, d.name));
+            }
+        }
+    }
+    out.extend(registered().read().unwrap_or_else(|e| e.into_inner()).iter().copied());
+    out
+}
 
+type Registered = std::sync::RwLock<Vec<(crate::games::Store, &'static str, &'static str, &'static str)>>;
+
+fn registered() -> &'static Registered {
+    static R: std::sync::OnceLock<Registered> = std::sync::OnceLock::new();
+    R.get_or_init(|| std::sync::RwLock::new(Vec::new()))
+}
+
+/// Notes a Nexus domain for a game without one in its data file (the player's pick or an exact name match), so
+/// links, downloads and Get mods find the game. Registering the same game again replaces its domain.
+pub fn register(store: crate::games::Store, store_id: &str, domain: &str, name: &str) {
+    let mut r = registered().write().unwrap_or_else(|e| e.into_inner());
+    if let Some(e) = r.iter_mut().find(|e| e.0 == store && e.1 == store_id) {
+        if e.2 == domain {
+            return;
+        }
+        e.2 = Box::leak(domain.to_string().into_boxed_str());
+        e.3 = Box::leak(name.to_string().into_boxed_str());
+        return;
+    }
+    r.push((store, Box::leak(store_id.to_string().into_boxed_str()), Box::leak(domain.to_string().into_boxed_str()), Box::leak(name.to_string().into_boxed_str())));
+}
+
+/// Takes a registered domain away again (the player said the game isn't on Nexus).
+pub fn unregister(store: crate::games::Store, store_id: &str) {
+    registered().write().unwrap_or_else(|e| e.into_inner()).retain(|e| !(e.0 == store && e.1 == store_id));
+}
+
+/// Nexus game domains as (store ID, domain, name), the shape the launch games' table had.
+pub fn games() -> Vec<(&'static str, &'static str, &'static str)> {
+    table().into_iter().map(|(_, id, d, n)| (id, d, n)).collect()
+}
+
+/// The Nexus domain for a store ID (any store; `domain_for` also checks the store).
 pub fn domain_for_store_id(store_id: &str) -> Option<&'static str> {
-    GAMES.iter().find(|(id, _, _)| *id == store_id).map(|(_, d, _)| *d)
+    table().into_iter().find(|(_, id, _, _)| *id == store_id).map(|(_, _, d, _)| d)
+}
+
+/// The Nexus domain for a game by its store and ID.
+pub fn domain_for(store: crate::games::Store, store_id: &str) -> Option<&'static str> {
+    table().into_iter().find(|(s, id, _, _)| *s == store && *id == store_id).map(|(_, _, d, _)| d)
 }
 
 /// Store IDs of the Turbine games that use this Nexus domain (the reverse of `domain_for_store_id`).
 pub fn store_ids_for_domain(domain: &str) -> Vec<&'static str> {
-    GAMES.iter().filter(|(_, d, _)| *d == domain).map(|(id, _, _)| *id).collect()
+    let mut out: Vec<&'static str> = Vec::new();
+    for (_, id, d, _) in table() {
+        if d == domain && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
 }
 
 /// The game's name for a Nexus domain Turbine supports.
 pub fn game_name_for_domain(domain: &str) -> Option<&'static str> {
-    GAMES.iter().find(|(_, d, _)| *d == domain).map(|(_, _, n)| *n)
+    table().into_iter().find(|(_, _, d, _)| *d == domain).map(|(_, _, _, n)| n)
 }
 
 fn known_domain(domain: &str) -> bool {
-    GAMES.iter().any(|(_, d, _)| *d == domain)
+    table().iter().any(|(_, _, d, _)| *d == domain)
 }
 
 /// Does Turbine support this Nexus game domain?
@@ -1432,6 +1483,12 @@ impl Nexus {
         let resp = self.request(Request::get(GRAPHQL).post_file(&body, "application/json").max_bytes(16 << 20).max_time(60));
         let _ = fs::remove_file(&body);
         resp?.take_text()
+    }
+
+    /// Nexus's games whose names hold these words ("Which game on Nexus is this?", Search Nexus).
+    pub fn games_search(&self, text: &str) -> Result<Vec<crate::nexus_games::NexusGame>, NetError> {
+        let answer = self.graphql(&crate::nexus_games::games_search_body(text))?;
+        crate::nexus_games::parse_games_search(&answer).map_err(NetError::Failed)
     }
 
     /// Browses mods for a game through GraphQL. Trending and Newest that Nexus refuses (a GraphQL error) are asked

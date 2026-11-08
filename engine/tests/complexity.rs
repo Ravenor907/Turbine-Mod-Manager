@@ -7,7 +7,7 @@ use turbine_engine::json;
 use turbine_engine::nexus::{self, SearchSort};
 
 /// List fields: they multiply their selection (by `count:`, or 20).
-const LISTS: &[&str] = &["legacyModsByDomain", "mods", "modFiles", "nexusRequirements", "dlcRequirements"];
+const LISTS: &[&str] = &["legacyModsByDomain", "mods", "modFiles", "nexusRequirements", "dlcRequirements", "games"];
 
 fn estimate(query: &str) -> u64 {
     // Tokens: names, braces, and the argument lists (kept whole, for count).
@@ -98,6 +98,7 @@ dlcRequirements { notes gameExpansion { id name } } } } } }";
         ("search", nexus::search_body("witcher3", "torch", SearchSort::Trending, 0, 30, false)),
         ("search 100", nexus::search_body("witcher3", "", SearchSort::Endorsements, 0, 100, false)),
         ("updates", nexus::by_id_body("witcher3", &(1..=50).collect::<Vec<u64>>())),
+        ("games", turbine_engine::nexus_games::games_search_body("skyrim")),
     ];
     for (what, body) in bodies {
         let q = query_of(&body);
@@ -130,4 +131,6 @@ fn write_bodies_for_the_live_check() {
     write("files-witcher3-1021", nexus::files_body(952, 1021));
     write("updates-skyrimspecialedition", nexus::by_id_body("skyrimspecialedition", &[12604, 32444, 266]));
     write("details-kingdomcomedeliverance2-14", nexus::details_body("kingdomcomedeliverance2", 14));
+    // 0.56: "Which game on Nexus is this?" searches Nexus's games by name.
+    write("games-skyrim", turbine_engine::nexus_games::games_search_body("skyrim"));
 }

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "name": "Kingdom Come: Deliverance",
+  "ids": { "steam": ["379430"], "gog": ["1719198803"] },
+  "support": "full",
+  "kind": "generic",
+  "handler": "kcd",
+  "modRoot": "Mods",
+  "plugins": false,
+  "ordered": true,
+  "nexus": "kingdomcomedeliverance",
+  "notes": [
+    "Steam 379430 (store.steampowered.com/app/379430, Kingdom Come: Deliverance); GOG 1719198803 (gogdb.org, Kingdom Come: Deliverance, type Game, Windows builds; 1182943037 is the Royal Edition package). Checked Nov 7 2026.",
+    "Mods: Mods/<mod>/mod.manifest and Data/*.pak, order in Mods/mod_order.txt (kcd.rs has sources). Nexus: nexusmods.com/kingdomcomedeliverance (checked Nov 7 2026)."
+  ]
+}

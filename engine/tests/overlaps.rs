@@ -47,7 +47,8 @@ fn later_wins_and_hidden() {
 fn from_the_store_after_a_move() {
     let t = TempDir::new("overlaps");
     let dir = t.path("lib/Game");
-    std::fs::create_dir_all(&dir).unwrap();
+    // A Basic game: its own textures folder makes the placement sure (mirrors the game's top).
+    std::fs::create_dir_all(dir.join("textures")).unwrap();
     let g = game(Launcher::Steam, "99999", "Some Game", &dir, None);
     let mut s = Store::open(&g, &t.path("data")).unwrap();
     let src = || SourceInfo { kind: "zip".into(), ..SourceInfo::default() };

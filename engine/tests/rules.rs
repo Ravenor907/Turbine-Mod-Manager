@@ -79,7 +79,7 @@ impl Drop for TempDir {
 fn known_games_get_their_rules() {
     let s = skyrim();
     assert_eq!((s.kind, s.mod_root.as_str(), s.plugins, s.ordered), (Kind::Bethesda, "Data", true, true));
-    assert_eq!(s.support, "Verified");
+    assert_eq!(s.support, "Full support");
     assert!(s.loader.as_ref().unwrap().name.starts_with("SKSE"));
     assert_eq!(s.loader.as_ref().unwrap().source, "https://skse.silverlock.org/");
 
@@ -103,7 +103,7 @@ fn unknown_games_work_generically() {
     let g = generic();
     assert_eq!(g.kind, Kind::Generic);
     assert_eq!(g.mod_root, "");
-    assert_eq!(g.support, "Works generically");
+    assert_eq!(g.support, "Basic support");
     assert!(g.loader.is_none());
     assert!(!g.plugins);
     // Same number under another store is a different game.
@@ -113,7 +113,7 @@ fn unknown_games_work_generically() {
 
 #[test]
 fn every_table_loader_exists() {
-    for g in rules::GAMES {
+    for g in rules::games() {
         if let Some(l) = g.loader {
             assert!(rules::find_loader(l).is_some(), "{} uses unknown loader {l}", g.name);
         }

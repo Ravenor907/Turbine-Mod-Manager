@@ -69,7 +69,7 @@ fn ids_and_rules() {
     let r = cp();
     assert_eq!((r.kind, r.family, r.ordered, r.plugins, r.mod_root.as_str()), (Kind::Generic, Family::Cyberpunk, true, false, ""));
     assert!(r.loader.is_none());
-    assert_eq!(r.support, "Verified");
+    assert_eq!(r.support, "Full support");
 }
 
 #[test]

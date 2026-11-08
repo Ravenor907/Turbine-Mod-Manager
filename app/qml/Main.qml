@@ -52,6 +52,8 @@ Window {
         property string bannerDone: "[]"    // games whose "No mods yet" line on Get mods was seen
         property bool tutorialDone: false
         property bool railHintDone: false   // "Up and Down pick a game, A opens it" was shown until a game was opened
+        property string antiCheatDone: "[]" // games whose anti-cheat card was shown
+        property string basicIntroDone: "[]" // Basic games whose first-visit card was shown
         property string playedWarn: "[]"    // "<game>|<mods on>|<warnings>" played through with Play anyway   // the four first-run cards were seen (Settings, Help shows them again)
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
@@ -110,7 +112,8 @@ Window {
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
-                                      "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress"].indexOf(page) >= 0 || scripted
+                                      "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
+                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
         readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
@@ -219,6 +222,8 @@ Window {
             // 0.55: Nexus inside Turbine (the frame alone; the stand-in page under X11; the second run; the watcher).
             else if (page === "browserframe" || page === "browsertest") { Turbine.setSampleFree(); app.tab = 1; app.zone = "main" }
             else if (page === "regress") Turbine.setSampleFree()
+            // 0.56, Mods for any game: Get mods for a game Nexus has under another name.
+            else if (page === "nexuspick") { app.tab = 1; app.zone = "main" }
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
     }
@@ -290,6 +295,15 @@ Window {
             else if (shot.page === "browsertest") app.browserCheckScript()
             else if (shot.page === "browserpersist") app.browserPersistScript()
             else if (shot.page === "regress") app.regressScript()
+            // 0.56: Start on Where do these files go? (Put them here); A on the question about the game's own files
+            // (Skip those files); the Nexus game question; and a Basic game's mod menu.
+            else if (shot.page === "placestart") { app.note("shot", "Place page open: " + (app.page === "place")); app.placeAct("start"); Turbine.applyNow() }
+            else if (shot.page === "overwriteskip") { app.note("shot", "Overwrite sheet open: " + (app.sheet === "msg")); app.act("a"); Turbine.applyNow() }
+            else if (shot.page === "nexuspick") app.openNexusPick()
+            else if (shot.page === "basicmenu") {
+                app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"
+                app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; "))
+            }
             if (shot.page === "mods") app.note("shot", "Row warnings: " + app.mods.filter(m => !!app.modWarns[m.id]).map(m => m.name + ": " + app.modWarns[m.id]).join("; "))
         }
     }
@@ -389,6 +403,8 @@ Window {
         selecting = false
         modPage = false
         history = []
+        // A Basic game Turbine couldn't match on Nexus: asked once, when the player opens Get mods.
+        if (tab === 1 && game && rules && rules.domainState === "ask" && !nexusAsked[game.id] && sheet === "" && pressRecent()) Qt.callLater(openNexusPick)
         if (tab === 1 && !browseData) {
             // A first visit lands on the first card (Up reaches the search bar).
             if (!restoreFocus && getText === "") restoreFocus = { area: "grid", index: 0 }
@@ -665,6 +681,7 @@ Window {
             app.linksMap = v.links || {}
             app.modWarns = v.warns || {}
             app.kcdRestore = v.kcdRestore === true
+            app.placements = v.placements || {}
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
             if (keep !== "") {
@@ -689,6 +706,7 @@ Window {
             app.rules = app.parse(Turbine.rulesJson, null)
             app.maybeLandOnGet()
             app.offerLoader()
+            app.maybeAntiCheat()
             if (app.rules && app.tab === 1 && !app.browseData) app.browseNow()
         }
         function onDownloadsJsonChanged() {
@@ -778,6 +796,18 @@ Window {
             if ((shot.page === "versions" || shot.page === "nexusversions") && app.otherVersions.length > 0) app.openVersions()
         }
         function onDownloadJsonChanged() { app.dl = app.parse(Turbine.downloadJson, { active: false }) }
+        function onPlaceJsonChanged() {
+            app.placeData = app.parse(Turbine.placeJson, null)
+            if (app.placeData) app.maybePlace()
+            else if (app.page === "place" && app.placeMode === "add") app.placeLeave()
+        }
+        function onNexusGamesJsonChanged() {
+            const v = app.parse(Turbine.nexusGamesJson, { state: "idle", games: [] })
+            if (v.state === "error") toast.problem("Nexus couldn't search its games: " + (v.error || ""))
+            if (v.state !== "done") return
+            app.nexusFound = v.games || []
+            if (app.sheet === "" || (app.sheet === "pick" && app.pickTitle.indexOf("Which game on Nexus") === 0)) app.openNexusPick()
+        }
         function onFomodJsonChanged() {
             app.fomod = app.parse(Turbine.fomodJson, null)
             if (app.fomod && app.sheet === "") app.sheet = "fomod"
@@ -1578,7 +1608,9 @@ Window {
             { icon: "update", title: "Other files", detail: "Another version or file from its page", act: "files", src: src }
         ] : []).concat([
             { icon: "info", title: "Open folder", detail: "Where Turbine keeps this mod's files", act: "folder" }
-        ])
+        ]).concat(placements[menuMod.id] ? [
+            { icon: "move", title: "Change where it goes", detail: "Now in " + folderWords(placements[menuMod.id].to), act: "place" }
+        ] : [])
         const room = Math.max(0, 7 - first.length - 2 - extras.length)
         return first.concat(modMenuFacts.slice(0, room)).concat(extras).concat([
             { icon: "info", title: "Details", detail: [modWords(menuMod), menuMod.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), act: "details" },
@@ -1587,7 +1619,12 @@ Window {
     }
     // Details: everything about the mod in one list (and Put it after... for ordered games).
     function openModDetails(m) {
-        openPick(m.name, [modWords(m), m.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), modMenuFacts.map(f => ({
+        openPick(m.name, [modWords(m), m.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), placementWords(m).map(f => ({
+            icon: f.icon, title: f.title, detail: f.detail, run: () => {
+                if (f.act === "place") openPlace("move", m)
+                else if (f.act === "replaceon") { note("action", "Replace the game's files: " + m.name); Turbine.setReplace(m.id, true) }
+                else if (f.act === "replaceoff") { note("action", "Leave the game's files alone: " + m.name); Turbine.setReplace(m.id, false) }
+            } })).concat(modMenuFacts.map(f => ({
             icon: f.icon, title: f.title, detail: f.detail, run: () => {
                 if (f.act === "overlap") openOverlap(m, f.other, f.loses)
                 else if (f.act === "needs") openNeeds(m)
@@ -1596,7 +1633,7 @@ Window {
             } })).concat(ordered ? [
             { icon: "move", title: "Put it after...", detail: "Type part of another mod's name; it goes just after that one",
               run: () => { putAfterMod = m; openAsk("putafter", "Put " + m.name + " after...", "Part of the name of the mod it goes after.", "", "Mod name", 60, false, "Move it") } }
-        ] : []).concat(modMenuFacts.length === 0 && !ordered ? [{ icon: "info", title: "Nothing else to know", detail: "", run: () => {} }] : []), "")
+        ] : []).concat(modMenuFacts.length === 0 && !ordered && !placements[m.id] ? [{ icon: "info", title: "Nothing else to know", detail: "", run: () => {} }] : [])), "")
     }
     property int menuIndex: 0
     function modMenuRun(i) {
@@ -1618,6 +1655,7 @@ Window {
         else if (item.act === "update") updateOne(m)
         else if (item.act === "move") startMove()
         else if (item.act === "details") openModDetails(m)
+        else if (item.act === "place") openPlace("move", m)
         else if (item.act === "files") {
             const id = item.src === "nexus" ? nexusModOf(m) : String(m.sourceId).split(":")[0]
             if (sources.indexOf(item.src) >= 0) getSource = item.src
@@ -1638,6 +1676,292 @@ Window {
         // Files added by hand say nothing more ("Zip file" on every row told nothing).
         if (m.source && m.source !== "Zip file") parts.push(m.source)
         return parts.join(" · ")
+    }
+
+    // ---------------------------------------------------------------- 0.56: mods for any game
+    // Games without rules of their own get Basic support: each mod goes where its files show they belong, or Turbine
+    // asks once ("Where do these files go?"). The engine decides (basic.rs); these draw it and take the answers.
+    readonly property bool basicGame: !!rules && !!rules.supportLevel && rules.supportLevel !== "full"
+    readonly property string supportChip: !basicGame ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
+    property var placements: ({})         // mod id: {from, to, rule, replace, skipped} (Basic games)
+    property var placeData: null          // the waiting mod: {game, gameName, pending: {name, placement, sure, conflicts, refused, tree}}
+    property string placeMode: ""         // "add" (a new mod) or "move" (Change where it goes)
+    property var placeMoveMod: null
+    property string placeGameRel: ""      // the game folder on screen (where the files go)
+    property string placeModRel: ""       // the mod's folder on screen (what goes in)
+    property int placePane: 0
+    property int placeGameIndex: 0
+    property int placeModIndex: 0
+    property string placeFilter: ""
+    property var placeNewFolders: []      // folders made on this page (made for real when the mod goes in)
+    property var placeFoldersNow: []
+    property var placeCheckNow: null
+    property var placeFrom: null
+    property var placeMemo: ({})          // the row last on in each folder, by "g:<folder>" and "m:<folder>"
+    readonly property bool placeTwoPanes: width >= 1280 || desktopLayout
+    readonly property string placeGameName: placeData ? placeData.gameName : gameTitle
+    function folderWords(rel) { return rel === "" ? "the game folder" : rel }
+    function parentOf(p) { const i = p.lastIndexOf("/"); return i < 0 ? "" : p.substring(0, i) }
+    function baseName(p) { const i = p.lastIndexOf("/"); return i < 0 ? p : p.substring(i + 1) }
+    readonly property var placeGameRows: {
+        if (page !== "place") return []
+        let rows = [{ kind: "here", label: "Put them here", detail: placeGameRel === "" ? "Right in " + placeGameName + "'s folder" : placeGameRel }]
+        const p = placeData && placeData.pending ? placeData.pending.placement : null
+        // The guess (and its other places) at the top of the game folder.
+        if (placeMode === "add" && p && placeGameRel === "") {
+            for (const s of [p.to].concat(p.others || [])) if (s !== "") rows.push({ kind: "suggest", label: s, path: s, badge: "Suggested" })
+        }
+        const kids = placeFoldersNow.concat(placeNewFolders.filter(n => parentOf(n).toLowerCase() === placeGameRel.toLowerCase()
+                                                                       && !placeFoldersNow.some(f => f.path.toLowerCase() === n.toLowerCase()))
+                                                         .map(n => ({ name: baseName(n), path: n, turbine: false, made: true })))
+        const f = placeFilter.toLowerCase()
+        for (const k of kids) if (f === "" || k.name.toLowerCase().indexOf(f) >= 0)
+            rows.push({ kind: k.made ? "new" : "folder", label: k.name, path: k.path, badge: k.made ? "New" : k.turbine ? "Made by Turbine" : "" })
+        return rows
+    }
+    readonly property var placeTree: placeData && placeData.pending ? (placeData.pending.tree || []) : []
+    readonly property var placeModRows: {
+        if (page !== "place" || placeMode !== "add") return []
+        const rows = placeTree.filter(t => t.path !== "" && parentOf(t.path).toLowerCase() === placeModRel.toLowerCase())
+                              .map(t => ({ kind: "folder", label: baseName(t.path), detail: plural(t.files, "file", "files"), path: t.path }))
+        return rows.length > 0 ? rows : [{ kind: "info", label: "No folders in here", detail: "Only files: they all go in together" }]
+    }
+    readonly property string placeTopLine: {
+        if (page !== "place") return ""
+        if (placeMode === "move") return (placeMoveMod ? placeMoveMod.name : "This mod") + ": pick the folder of " + placeGameName + " its files go into now. Every file keeps its place inside it."
+        const pd = placeData && placeData.pending
+        if (!pd) return ""
+        return pd.placement.state === "guess" ? pd.name + ": Turbine thinks they go in " + pd.placement.to + ". Check it, or pick another folder."
+             : pd.name + ": Turbine can't tell where these files belong in " + placeGameName + ". Pick the folder they go into."
+    }
+    readonly property string placePreview: {
+        if (page !== "place") return ""
+        if (placeMode === "move") return (placeMoveMod ? placeMoveMod.name : "The mod") + "'s files go into " + folderWords(placeGameRel) + "."
+        const r = placeCheckNow
+        if (!r) return ""
+        if (r.error) return r.error
+        return plural(r.files, "file goes", "files go") + " into " + folderWords(placeGameRel) + "."
+             + (r.conflicts.length > 0 ? " " + (r.conflicts.length === 1 ? "1 of them is" : r.conflicts.length + " of them are") + " already in the game." : "")
+             + (r.refused.length > 0 ? " " + plural(r.refused.length, "file", "files") + " can't go in (Turbine never places it)." : "")
+    }
+    function placeRefresh() {
+        placeFoldersNow = parse(Turbine.gameFolders(placeGameRel), [])
+        placeCheckNow = placeMode === "add" ? parse(Turbine.placeCheck(placeModRel, placeGameRel), null) : null
+    }
+    // A waiting mod: the page (or only the question about the game's own files) when nothing else is on screen.
+    function maybePlace() {
+        if (!placeData || !placeData.pending || page === "place" || page === "browser" || sheet !== "" || wheelOpen) return
+        const pd = placeData.pending
+        if (pd.sure) openOverwrite(pd.name, pd.placement.from, pd.placement.to, pd.conflicts || [], pd.refused || [], false)
+        else openPlace("add", null)
+    }
+    function openPlace(mode, mod) {
+        placeFrom = { page: page === "place" ? "game" : page, tab: tab, zone: zone }
+        placeMode = mode; placeMoveMod = mod || null
+        placePane = 0; placeFilter = ""; placeNewFolders = []; placeMemo = ({})
+        if (mode === "add") {
+            const p = placeData.pending.placement
+            placeModRel = p.from || ""
+            placeGameRel = ""
+            note("page", "Asked where files go: " + placeData.pending.name + " (" + p.state + (p.to !== "" ? ", suggested " + p.to : "") + ")")
+        } else {
+            const info = placements[mod.id]
+            placeModRel = ""
+            placeGameRel = info ? info.to : ""
+            note("page", "Change where it goes: " + mod.name + " (now " + folderWords(placeGameRel) + ")")
+        }
+        if (game && placeData && mode === "add" && placeData.game !== game.id) {
+            const i = games.findIndex(g => g.id === placeData.game)
+            if (i >= 0) current = i
+        }
+        sheet = ""; page = "place"; zone = "main"
+        placeRefresh()
+        const s = placeGameRows.findIndex(r => r.kind === "suggest")
+        placeGameIndex = s >= 0 ? s : 0
+        placeModIndex = 0
+    }
+    function placeLeave() {
+        const f = placeFrom || { page: "game", tab: 0, zone: "main" }
+        page = f.page === "place" ? "game" : f.page; tab = f.page === "game" ? 0 : f.tab; zone = "main"
+        placeMode = ""; placeMoveMod = null
+        Qt.callLater(maybePlace)
+    }
+    function placeGo(rel) {
+        placeMemo[(placePane === 0 ? "g:" : "m:") + (placePane === 0 ? placeGameRel : placeModRel)] = placePane === 0 ? placeGameIndex : placeModIndex
+        if (placePane === 0) { placeGameRel = rel; placeGameIndex = 0 } else { placeModRel = rel; placeModIndex = 0 }
+        placeFilter = ""
+        placeRefresh()
+    }
+    function placeUp() {
+        const rel = placePane === 0 ? placeGameRel : placeModRel
+        if (rel === "") return false
+        const up = parentOf(rel)
+        placeGo(up)
+        // Back on the folder it came out of.
+        const rows = placePane === 0 ? placeGameRows : placeModRows
+        const i = rows.findIndex(r => r.path && r.path.toLowerCase() === rel.toLowerCase() && r.kind !== "suggest")
+        if (placePane === 0) placeGameIndex = Math.max(0, i); else placeModIndex = Math.max(0, i)
+        return true
+    }
+    function placeHere() {
+        const to = placeGameRel
+        if (placeMode === "move") {
+            if (!placeMoveMod) return
+            note("action", "Change where it goes: " + placeMoveMod.name + " into " + folderWords(to))
+            Turbine.changePlacement(placeMoveMod.id, to)
+            placeLeave()
+            return
+        }
+        if (!placeData || !placeData.pending) return
+        const r = parse(Turbine.placeCheck(placeModRel, to), null)
+        if (!r || r.error) { toast.problem(r && r.error ? r.error : "That folder can't be used."); return }
+        if (r.conflicts.length > 0 || r.refused.length > 0) { openOverwrite(placeData.pending.name, placeModRel, to, r.conflicts, r.refused, true); return }
+        note("action", "Put them here: " + folderWords(to))
+        Turbine.finishPlace(placeModRel, to, false)
+        placeLeave()
+    }
+    function placeRowRun(pane, i) {
+        const rows = pane === 0 ? placeGameRows : placeModRows
+        const r = rows[i]
+        if (!r) return
+        if (r.kind === "here") placeHere()
+        else if (r.path !== undefined) placeGo(r.path)
+    }
+    function placeLeaveAsk() {
+        note("action", "Where do these files go: left")
+        if (placeMode === "add") { Turbine.cancelPlace(); toast.showPlain("Not added. The file is still in Downloads.") }
+        placeLeave()
+    }
+    function placeMenu() {
+        const rows = placePane === 0 ? placeGameRows : placeModRows
+        const r = rows[placePane === 0 ? placeGameIndex : placeModIndex]
+        let items = [{ icon: "play", title: "Put them here", detail: "Into " + folderWords(placeGameRel), run: () => placeHere() }]
+        if (r && r.path !== undefined) items.push({ icon: "move", title: "Open", detail: r.path === "" ? "The top" : r.path, run: () => placeGo(r.path) })
+        if (placePane === 0) items.push({ icon: "update", title: "New folder here", detail: "Made when the mod goes in", run: () => openAsk("placefolder", "New folder in " + folderWords(placeGameRel), "Its name. Letters, numbers and spaces work best.", "", "Folder name", 60, false, "Make it") })
+        if (placeMode === "add") items.push({ icon: "info", title: "Show the files inside", detail: "What goes in from " + (placeModRel === "" ? "the file" : placeModRel), run: () => placeShowFiles() })
+        openPick("Where do these files go?", placeGameName, items, "")
+    }
+    function placeShowFiles() {
+        const inside = placeTree.filter(t => t.path === "" ? placeModRel === "" : t.path.toLowerCase() === placeModRel.toLowerCase())
+        const sub = placeTree.filter(t => t.path !== "" && parentOf(t.path).toLowerCase() === placeModRel.toLowerCase())
+        openMsg({ title: placeModRel === "" ? "Everything in the file" : placeModRel,
+                  text: (inside[0] ? plural(inside[0].files, "file", "files") : "No files") + " go in from here" + (sub.length > 0 ? ", in these folders:" : "."),
+                  notes: sub.map(t => baseName(t.path) + ": " + plural(t.files, "file", "files")),
+                  buttons: [{ key: "b", label: "Close", run: () => {} }] })
+    }
+    function placeNewFolder(name) {
+        const n = name.trim()
+        if (n === "" || n === "." || n === ".." || /[\/\\:*?"<>|]/.test(n)) { toast.problem("That name can't be a folder name."); return }
+        const path = placeGameRel === "" ? n : placeGameRel + "/" + n
+        placeNewFolders = placeNewFolders.concat([path])
+        note("action", "New folder here: " + path)
+        placeGo(path)
+    }
+    function placeAct(b) {
+        const rows = placePane === 0 ? placeGameRows : placeModRows
+        const idx = placePane === 0 ? placeGameIndex : placeModIndex
+        const setIdx = i => { const v = Math.max(0, Math.min(rows.length - 1, i)); if (placePane === 0) placeGameIndex = v; else placeModIndex = v }
+        if (b === "up") setIdx(idx - 1)
+        else if (b === "down") setIdx(idx + 1)
+        else if (b === "lt") setIdx(idx - pageJump)
+        else if (b === "rt") setIdx(idx + pageJump)
+        else if (b === "a") placeRowRun(placePane, idx)
+        else if (b === "b") { if (!placeUp()) placeLeaveAsk() }
+        else if (b === "x") placeMenu()
+        else if (b === "y") openAsk("placefind", "Find a folder", "Part of its name. Only this folder's list is filtered.", placeFilter, "Folder name", 60, false, "Show them")
+        else if (b === "start") placeHere()
+        else if ((b === "lb" || b === "rb" || b === "left" || b === "right") && placeMode === "add") {
+            const want = b === "lb" || b === "left" ? 0 : 1
+            if (want !== placePane) { placePane = want; note("action", "Where do these files go: " + (want === 0 ? "Game folder" : "Mod files")) }
+        }
+    }
+    readonly property string placeALabel: {
+        const rows = placePane === 0 ? placeGameRows : placeModRows
+        const r = rows[placePane === 0 ? placeGameIndex : placeModIndex]
+        return !r ? "" : r.kind === "here" ? "Put them here" : r.path !== undefined ? "Open" : ""
+    }
+    // The question about files the game already has (and the ones never placed).
+    function openOverwrite(name, from, to, conflicts, refused, fromPage) {
+        const gname = placeData ? placeData.gameName : gameTitle
+        const list = conflicts.slice(0, 5).concat(conflicts.length > 5 ? ["and " + (conflicts.length - 5) + " more"] : [])
+        const refusedWords = refused.length === 0 ? ""
+            : plural(refused.length, "file", "files") + " can't be " + (conflicts.length > 0 ? "replaced" : "placed") + ": "
+              + refused.slice(0, 4).map(x => baseName(x.path) + " (" + x.why + ")").join(", ") + (refused.length > 4 ? " and " + (refused.length - 4) + " more" : "") + "."
+        const done = () => { if (fromPage) placeLeave() }
+        const cancel = () => {
+            if (fromPage) return
+            Turbine.cancelPlace(); toast.showPlain("Not added. The file is still in Downloads.")
+        }
+        note("page", "Overwrite question: " + name + ": " + conflicts.length + " the game has, " + refused.length + " never placed")
+        openMsg({
+            title: conflicts.length > 0 ? gname + " already has " + plural(conflicts.length, "of these files", "of these files") : "Some of these files can't go in",
+            text: conflicts.length > 0 ? "Turbine can leave the game's files alone and skip these, or replace them. If you replace them, Turbine keeps the game's originals and puts them back when you turn the mod off or remove it."
+                                       : "Turbine adds the rest and leaves these out.",
+            notes: list,
+            footnote: refusedWords,
+            reason: "a mod needs a choice",
+            buttons: (conflicts.length > 0 ? [
+                { key: "a", label: "Skip those files", run: () => { note("action", "Overwrite: skip"); Turbine.finishPlace(from, to, false); done() } },
+                { key: "x", label: "Replace them", run: () => { note("action", "Overwrite: replace"); Turbine.finishPlace(from, to, true); done() } }
+            ] : [
+                { key: "a", label: "Add the rest", run: () => { Turbine.finishPlace(from, to, false); done() } }
+            ]).concat([{ key: "b", label: "Cancel", run: cancel }])
+        })
+    }
+    // A sheet with words and buttons ({title, text, steps, notes, footnote, buttons: [{key, label, run}], reason}).
+    property var msgData: null
+    function openMsg(d) { msgData = d; infoIndex = 0; sheet = "msg" }
+    // "Which game on Nexus is this?": once, on opening Get mods for a game Turbine couldn't match; B asks again later.
+    property var nexusAsked: ({})
+    property var nexusFound: null         // the search's games, in place of the candidates
+    function openNexusPick() {
+        if (!game || !rules) return
+        let a = Object.assign({}, nexusAsked); a[game.id] = true; nexusAsked = a
+        const cands = nexusFound !== null ? nexusFound : (rules.nexusCandidates || [])
+        note("action", "Which game on Nexus: " + game.name + " (" + cands.length + (nexusFound !== null ? " found" : " candidates") + ")")
+        openPick("Which game on Nexus is " + gameTitle + "?", nexusFound !== null ? "Search results" : "Pick it, or search Nexus", cands.map(c => ({
+            icon: "play", title: c.name, detail: Number(c.mods).toLocaleString(Qt.locale("en_US"), "f", 0) + " mods", aLabel: "Pick",
+            run: () => { nexusFound = null; Turbine.pickNexusGame(c.domain, c.name); toast.done("Get mods shows " + c.name + " mods.") } })).concat([
+            { icon: "info", title: "Search Nexus", detail: "Type the game's name", run: () => nexusSearchAsk() },
+            { icon: "remove", title: "It isn't on Nexus", detail: "You can still add mod files", run: () => { nexusFound = null; Turbine.pickNexusGame("", "") } }
+        ]), "")
+        pickY = { label: "Search", run: () => nexusSearchAsk() }
+    }
+    function nexusSearchAsk() { openAsk("nexusgame", "Search Nexus", "The game's name, or part of it.", game ? game.name : "", "Game name", 60, false, "Search") }
+    // Y on the pick sheet (Search), when the sheet has one.
+    property var pickY: null
+    onPickTitleChanged: if (pickTitle.indexOf("Which game on Nexus") !== 0) pickY = null
+    readonly property string nexusLine: basicGame && rules && rules.domain && rules.nexusName ? "From Nexus: " + rules.nexusName : ""
+    readonly property bool nexusUnknown: basicGame && rules && !rules.domain && (rules.domainState === "ask" || rules.domainState === "unknown")
+    // Anti-cheat: an info card once per game, and a line before Play while mods are on.
+    function maybeAntiCheat() {
+        if (!game || !rules || !rules.antiCheat || page !== "game" || sheet !== "" || shot.strictSheets) return
+        const done = parse(seen.antiCheatDone, [])
+        if (done.indexOf(game.id) >= 0) return
+        if (!shot.on) { done.push(game.id); seen.antiCheatDone = JSON.stringify(done) }
+        note("page", "Anti-cheat card: " + game.name + " (" + rules.antiCheat.name + ")")
+        openMsg({ title: gameTitle + " uses anti-cheat", reason: "anti-cheat in the game",
+                  text: gameTitle + " uses anti-cheat (" + rules.antiCheat.name + "). Mods that change its files can get you kicked or banned from online play. Use mods only in offline or single player modes.",
+                  notes: rules.antiCheat.note ? [rules.antiCheat.note] : [],
+                  buttons: [{ key: "b", label: "OK", run: () => {} }] })
+    }
+    // The first visit to a Basic game with no mods: what Basic support means (once per game).
+    property var introSeen: null          // the games seen before this run (read once, so the card stays this run)
+    readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame
+                                       && (introSeen || []).indexOf(game.id) < 0
+    onBasicIntroChanged: {
+        if (introSeen === null) introSeen = parse(seen.basicIntroDone, [])
+        if (basicIntro && !shot.on) { let d = parse(seen.basicIntroDone, []); if (d.indexOf(game.id) < 0) { d.push(game.id); seen.basicIntroDone = JSON.stringify(d) } }
+        if (basicIntro) note("page", "First visit card: Mods for " + gameTitle)
+    }
+    Component.onCompleted: introSeen = parse(seen.basicIntroDone, [])
+    function placementWords(m) {
+        const p = placements[m.id]
+        if (!p) return []
+        return [{ icon: "info", title: "Placed in: " + folderWords(p.to), detail: p.rule === "you" ? "By you" : "By Turbine's rule " + p.rule, act: "place" }]
+            .concat((p.skipped || []).length > 0 ? [{ icon: "info", title: "Skipped: " + plural(p.skipped.length, "file the game already has", "files the game already has"),
+                                                      detail: "A lets this mod replace them (the game's own are kept)", act: "replaceon" }]
+                    : p.replace ? [{ icon: "info", title: "Replaces the game's own files", detail: "A leaves them alone again", act: "replaceoff" }] : [])
     }
 
     // ---------------------------------------------------------------- Add mods from Downloads
@@ -1688,7 +2012,8 @@ Window {
     // Sheets open from a press. The ones that come from outside Turbine (a download that arrived, an installer's
     // questions, install notes) and the first-run tutorial say why; anything else with no press near it is a bug.
     readonly property var sheetReasons: ({ found: "a download arrived", fomod: "the installer asks", notes: "install notes", chain: "the next requirement",
-                                           tutorial: "first run", quick: "the game closed early", oldhelper: "the browser helper is old" })
+                                           tutorial: "first run", quick: "the game closed early", oldhelper: "the browser helper is old",
+                                           msg: "a mod or the game needs a word" })
     onSheetChanged: {
         if (sheet === "") note("page", "Sheet closed")
         else if (pressRecent() || (shot.on && !shot.strictSheets)) note("page", "Sheet " + sheet + " (after " + (lastInputName || "start") + ")")
@@ -1890,7 +2215,7 @@ Window {
 
     // Sheets with a row of buttons (SheetButtons): the D-pad moves the highlight, A presses it, B is the cancel
     // button, Start the main one. No other keys. {labels, index, main, cancel, set(i), run(i), scrolls, scroll(d)}.
-    readonly property var infoSheets: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"]
+    readonly property var infoSheets: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper", "msg"]
     function buttonSheet() {
         const s = sheet
         if (s === "check") return { labels: checkChoices, index: checkIndex, main: checkStops ? -1 : checkChoices.indexOf("Play anyway"), cancel: checkChoices.indexOf("Not now"),
@@ -1945,6 +2270,7 @@ Window {
         if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
         if (s === "pick") return Object.assign({ a: bind(pickItems[menuIndex] && pickItems[menuIndex].aLabel ? pickItems[menuIndex].aLabel : "Choose", k("a")),
                                                  b: bind(pickBLabel !== "" ? pickBLabel : pickBack !== "" ? "Back" : "Close", k("b")) },
+                                               pickY ? { y: bind(pickY.label, k("y")) } : {},
                                                page === "game" && game ? { start: bind("Play", k("start")) } : {})
         if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
         if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
@@ -1988,6 +2314,7 @@ Window {
                 if (pickTitle === "Nexus") openBrowserMenu(i)
             }
             else if (b === "a") pickRun(menuIndex)
+            else if (b === "y" && pickY) { const y = pickY; sheet = ""; y.run() }
             else if (b === "b" || b === "x") { if (pickBLabel === "Not now") nxmAskNo(); sheet = pickBack }
         } else if (sheet === "modmenu") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
@@ -2131,6 +2458,19 @@ Window {
             o.rt = bind("", () => Turbine.browserClick())
             return o
         }
+        // Where do these files go? (a full page; LB and RB switch pane).
+        if (page === "place") {
+            o.a = bind(placeALabel, () => placeAct("a"))
+            o.b = bind((placePane === 0 ? placeGameRel : placeModRel) !== "" ? "Up a folder" : "Leave", () => placeAct("b"))
+            o.x = bind("Menu", () => placeAct("x"))
+            o.y = bind("Find", () => placeAct("y"))
+            o.start = bind("Put them here", () => placeAct("start"))
+            o.lb = bind("", () => placeAct("lb"))
+            o.rb = bind("", () => placeAct("rb"))
+            o.lt = bind("", () => placeAct("lt"))
+            o.rt = bind("", () => placeAct("rt"))
+            return o
+        }
         if (zone === "rail") {
             const g = railIndex < games.length
             o.a = bind(g ? "Open" : railIndex < games.length + railExtra ? "Show hidden games" : "Settings", () => railSelect(railIndex))
@@ -2187,6 +2527,12 @@ Window {
                 if (tickedCount > 0) o.x = bind("Act on " + tickedCount, () => selectAct("x"))
                 return o
             }
+            if (mods.length === 0 && modsLoaded && basicGame) {
+                o.a = rules && rules.domain ? bind("Get mods on Nexus", () => { tab = 1 }) : bind("Add a file", openAdd)
+                if (rules && rules.domain) o.x = bind("Add a file", openAdd)
+                o.b = bind("Games", () => { zone = "rail"; railIndex = current })
+                return o
+            }
             o.y = bind("Find", openFind)
             o.lt = bind("", () => { modIndex = Math.max(0, modIndex - pageJump) })
             o.rt = bind("", () => { modIndex = Math.min(listItems.length - 1, modIndex + pageJump) })
@@ -2213,7 +2559,8 @@ Window {
             return o
         }
         if (tab === 1 && sources.length === 0) {
-            o.a = bind("Add a file", openAdd)
+            if (nexusUnknown) { o.a = bind("Pick the Nexus game", openNexusPick); o.x = bind("Add a file", openAdd) }
+            else o.a = bind("Add a file", openAdd)
             o.b = bind("My mods", () => { tab = 0 })
             return o
         }
@@ -2406,7 +2753,9 @@ Window {
             { icon: "profile", title: "Loadouts", detail: "Save setups by name, switch, share", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openProfiles) } },
             { icon: "move", title: pinned ? "Unpin" : "Pin to the top", detail: pinned ? "Back in last played order" : "Stays at the top of the rail", run: () => setRailList("pinned", g.id, !pinned) },
             { icon: "info", title: "Hide from the rail", detail: "For tools that aren't games. Settings, Help shows them again.", run: () => setRailList("hidden", g.id, true) }
-        ], "")
+        ].concat(g.support && g.support !== "full" ? [
+            { icon: "update", title: "Nexus game", detail: "Which game on Nexus Mods this is", run: () => { current = railIndex; page = "game"; zone = "main"; nexusFound = null; Qt.callLater(openNexusPick) } }
+        ] : []), "")
     }
     // Load order's quick menu (X): Move, Details, Go to its mod.
     function openPluginMenu() {
@@ -2627,7 +2976,7 @@ Window {
                     const keys = h.map(x => x[0])
                     if (keys.some((k, i) => keys.indexOf(k) !== i)) bad.push("a key twice")
                     if (keys.some(k => ["lb", "rb", "view"].indexOf(k) >= 0)) bad.push("a cap in the legend")
-                    if (keys.indexOf("start") >= 0 && sheet === "" && !wheelOpen && page !== "browser") bad.push("Start in the legend with Play in view")
+                    if (keys.indexOf("start") >= 0 && sheet === "" && !wheelOpen && page !== "browser" && page !== "place") bad.push("Start in the legend with Play in view")
                     for (const k of ["a", "b", "x", "y"]) {
                         if (o[k] && o[k].label && keys.indexOf(k) < 0) bad.push(k.toUpperCase() + " missing")
                         if (keys.indexOf(k) >= 0 && !(o[k] && o[k].run)) bad.push(k.toUpperCase() + " does nothing")
@@ -3082,7 +3431,7 @@ Window {
         if (landedOn === game.id && !(landAgain && mods.length === 0)) return
         landAgain = false
         landedOn = game.id
-        if (mods.length === 0 && sources.length > 0 && tab === 0 && shot.page !== "emptygamemods" && shot.page.indexOf("mods") !== 0 && shot.page !== "removed") {
+        if (mods.length === 0 && sources.length > 0 && tab === 0 && !basicIntro && shot.page !== "emptygamemods" && shot.page.indexOf("mods") !== 0 && shot.page !== "removed") {
             // Straight onto the first mod: A opens its page.
             if (!restoreFocus) restoreFocus = { area: "grid", index: 0 }
             note("focus", "No mods yet: Get mods, first card")
@@ -4197,10 +4546,19 @@ Window {
         : sheet === "addbrowser" && addMode === "helper" ? [{ key: "a", label: "Set up the helper" }, { key: "x", label: "Steam's browser" }, { key: "b", label: "Close" }]
         : sheet === "addbrowser" ? [{ key: "a", label: "Recheck" }, { key: "x", label: "Steam's browser" }, { key: "b", label: "Close" }]
         : sheet === "found" ? (found && found.game ? [{ key: "a", label: "Add it" }] : []).concat([{ key: "x", label: found && found.game ? "Other game" : "Pick the game" }, { key: "b", label: "Not a mod" }])
+        : sheet === "msg" && msgData ? msgData.buttons.map(x => ({ key: x.key, label: x.label }))
         : [{ key: "a", label: "OK" }]
     function infoRun(i) {
         const label = infoButtons[i] ? infoButtons[i].label : ""
         note("action", "Sheet " + sheet + ": " + label)
+        if (sheet === "msg") {
+            const d = msgData, bt = d && d.buttons ? d.buttons[i] : null
+            sheet = ""
+            msgData = null
+            if (bt && bt.run) bt.run()
+            Qt.callLater(maybePlace)
+            return
+        }
         if (sheet === "quick") { quickRun(label); return }
         if (sheet === "chain") {
             const next = chainQueue[0]
@@ -4536,6 +4894,9 @@ Window {
         else if (askPurpose === "find") { findText = text; modIndex = 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
         else if (askPurpose.indexOf("renameProfile:") === 0 && text !== "" && text !== askPurpose.substring(14)) Turbine.profileRename(askPurpose.substring(14), text)
         else if (askPurpose === "code" && text !== "") Turbine.profileImportCode(text)
+        else if (askPurpose === "placefind") { placeFilter = text; if (placePane === 0) placeGameIndex = 0; else placeModIndex = 0 }
+        else if (askPurpose === "placefolder" && text !== "") placeNewFolder(text)
+        else if (askPurpose === "nexusgame" && text.trim() !== "") { note("action", "Search Nexus games: " + text); Turbine.searchNexusGames(text) }
         else if (askPurpose === "nexussearch" && text !== "" && nexusView) nexusView.load(browserAddress("https://www.nexusmods.com/games/" + ((rules && rules.domain) || "") + "/mods?keyword=" + encodeURIComponent(text)))
     }
     function askCancelled() {
@@ -5506,12 +5867,27 @@ Window {
                             width: parent.width
                             elide: Text.ElideRight
                             text: app.page === "settings" ? "Settings" : app.page === "perf" ? "Scrolling test"
+                                  : app.page === "place" ? "My mods > " + (app.placeMode === "move" ? "Change where it goes" : "Where do these files go?")
                                   : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "")
                                   : app.game ? app.gameTitle : "Turbine Mod Manager"
                             color: c.text
                             font.family: app.page === "game" && app.game && !app.modPage ? app.titleFont : app.bodyFont
                             font.pixelSize: app.px(20)
                             font.weight: Font.DemiBold
+                            // Basic support: a small outlined chip after the name (never focusable).
+                            rightPadding: supportChipBox.visible ? supportChipBox.width + app.px(10) : 0
+                            Rectangle {
+                                id: supportChipBox
+                                visible: app.page === "game" && !app.modPage && app.supportChip !== ""
+                                x: Math.min(parent.contentWidth + app.px(10), parent.width - width)
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: chipWords.implicitWidth + app.px(16); height: app.px(22); radius: height / 2
+                                color: "transparent"
+                                border.color: c.accentLo
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: app.supportChip
+                                Text { id: chipWords; anchors.centerIn: parent; text: app.supportChip; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(12); font.bold: true }
+                            }
                         }
                         Row {
                             width: parent.width
@@ -5777,11 +6153,47 @@ Window {
                         anchors.fill: parent
                         visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length === 0
                         title: "Get mods"
-                        body: "This game isn't on Nexus Mods or Thunderstore. You can still add a mod file."
+                        body: app.nexusUnknown ? "Turbine couldn't find " + app.gameTitle + " on Nexus Mods. Pick it yourself, or add a mod file (X)."
+                              : "This game isn't on Nexus Mods or Thunderstore. You can still add a mod file."
                         buttonKey: "a"
-                        buttonLabel: "Add a file from Downloads"
+                        buttonLabel: app.nexusUnknown ? "Pick the Nexus game" : "Add a file from Downloads"
                         buttonFocused: app.zone === "main"
-                        onActivated: app.openAdd()
+                        onActivated: app.nexusUnknown ? app.openNexusPick() : app.openAdd()
+                    }
+                    // A Basic game's first visit with no mods: what Basic support means.
+                    EmptyState {
+                        ui: kit
+                        anchors.fill: parent
+                        visible: app.basicIntro && !app.modPage
+                        title: "Mods for " + app.gameTitle
+                        body: "Basic support: Turbine doesn't know this game's mod rules, so it follows each mod's own layout, and asks you once when it can't tell. Turning mods off or removing them always puts the game back the way it was."
+                        buttonKey: "a"
+                        buttonLabel: app.rules && app.rules.domain ? "Get mods on Nexus" : "Add a file"
+                        buttonFocused: app.zone === "main"
+                        note: app.rules && app.rules.domain ? "X: Add a file from Downloads" : ""
+                        onActivated: app.rules && app.rules.domain ? app.tab = 1 : app.openAdd()
+                    }
+                    // Where do these files go? (Basic games), and Change where it goes.
+                    PlaceFiles {
+                        ui: kit
+                        anchors.fill: parent
+                        anchors.topMargin: app.px(4)
+                        visible: app.page === "place"
+                        active: app.sheet === "" && !app.wheelOpen
+                        moveOnly: app.placeMode === "move"
+                        twoPanes: app.placeTwoPanes
+                        topLine: app.placeTopLine
+                        gamePath: [app.placeGameName].concat(app.placeGameRel === "" ? [] : app.placeGameRel.split("/")).join(" > ")
+                        modPath: "Putting in: everything " + (app.placeModRel === "" ? "in the file" : "inside " + app.placeModRel)
+                        gameRows: app.placeGameRows
+                        modRows: app.placeModRows
+                        pane: app.placePane
+                        gameIndex: app.placeGameIndex
+                        modIndex: app.placeModIndex
+                        preview: app.placePreview
+                        onRowClicked: (pane, index) => { app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("a") }
+                        onRowHeld: (pane, index) => { app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("x") }
+                        onSwiped: (dir) => app.placeAct(dir < 0 ? "lb" : "rb")
                     }
                     GetMods {
                         id: getView
@@ -5797,7 +6209,7 @@ Window {
                         category: app.getCategory
                         bar: app.getBar
                         recent: app.recentViewed
-                        banner: app.getBanner
+                        banner: app.getBanner !== "" ? app.getBanner + (app.nexusLine !== "" ? " " + app.nexusLine + "." : "") : app.nexusLine
                         fallback: app.nexusFallback
                         fallbackTitle: "Browse " + app.gameTitle + " mods on Nexus Mods"
                         columns: app.gridColumns
@@ -6276,8 +6688,14 @@ Window {
                         ["Stored on", app.game.drive],
                         ["Folder", app.game.installDir],
                         ["Version", app.game.build || "Not reported"],
-                        ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"]
-                    ].concat(app.checkPaths.length > 0 ? [
+                        ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
+                        ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
+                                    : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
+                    ].concat(app.rules && app.rules.supportLevel !== "full" ? [
+                        ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
+                    ] : []).concat(app.rules && app.rules.antiCheat ? [
+                        ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
+                    ] : []).concat(app.checkPaths.length > 0 ? [
                         ["Same scripts", app.checkPaths.join("; ")]
                     ] : []).concat(app.rules && app.rules.launchOption ? [
                         ["Loader setup", app.rules.launchHelp || ""],
@@ -6470,7 +6888,7 @@ Window {
     InfoSheet {
         id: infoView
         ui: kit
-        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"].indexOf(app.sheet) >= 0
+        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper", "msg"].indexOf(app.sheet) >= 0
         title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
                : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
                : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
@@ -6479,6 +6897,7 @@ Window {
                : app.sheet === "addbrowser" ? "Add Chrome to Steam so it opens in Game Mode"
                : app.sheet === "found" ? "Found a download"
                : app.sheet === "oldhelper" ? "Your browser helper is out of date"
+               : app.sheet === "msg" && app.msgData ? app.msgData.title
                : "Added " + app.notesName
         text: app.sheet === "quick" ? app.quickText
               : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file in Turbine. Press Slow download; it's added too."
@@ -6491,6 +6910,7 @@ Window {
                     + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
               : app.sheet === "notes" ? "Something to know about this mod:"
               : app.sheet === "oldhelper" ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. Turbine already put the new version in its folder. After this once, the helper updates by itself."
+              : app.sheet === "msg" && app.msgData ? (app.msgData.text || "")
               : ""
         steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
                : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
@@ -6501,9 +6921,11 @@ Window {
                                            "In Desktop Mode, open Steam, then Games, then Add a Non-Steam Game to My Library.",
                                            "Tick Google Chrome and press Add Selected Programs.",
                                            "Switch back to Game Mode, open Turbine and press Recheck."]
+               : app.sheet === "msg" && app.msgData ? (app.msgData.steps || [])
                : []
-        notes: app.sheet === "notes" ? app.notesList : []
-        footnote: app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
+        notes: app.sheet === "notes" ? app.notesList : app.sheet === "msg" && app.msgData ? (app.msgData.notes || []) : []
+        footnote: app.sheet === "msg" && app.msgData ? (app.msgData.footnote || "")
+                  : app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
                   : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
                   : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
                   : app.sheet === "oldhelper" ? "Until then, Nexus pages open in Steam's browser." + (app.bridge.helper ? " Helper " + app.bridge.helper + ", Turbine's " + (app.bridge.bundled || "") + "." : "")

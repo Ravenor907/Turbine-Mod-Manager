@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "name": "Stardew Valley",
+  "ids": { "steam": ["413150"], "gog": ["1453375253"] },
+  "support": "full",
+  "kind": "smapi",
+  "modRoot": "Mods",
+  "plugins": false,
+  "ordered": false,
+  "loader": { "use": "smapi" },
+  "nexus": "stardewvalley",
+  "notes": []
+}

@@ -221,7 +221,7 @@ fn games_json(games: &[Game]) -> String {
     let items: Vec<String> = games
         .iter()
         .filter_map(|g| {
-            let d = nexus::domain_for_store_id(&g.store_id)?;
+            let d = nexus::domain_for(g.store, &g.store_id)?;
             Some(format!(
                 "{{\"id\":{},\"name\":{},\"domain\":{},\"folder\":{}}}",
                 quote(&g.id()),
@@ -256,7 +256,7 @@ fn num_of(msg: &Json, key: &str) -> u64 {
 impl qobject::Turbine {
     /// A game for a Nexus domain: the one on screen when it fits, otherwise the first installed one.
     pub(crate) fn game_for_domain(&self, domain: &str) -> Option<Game> {
-        let fits = |g: &Game| nexus::domain_for_store_id(&g.store_id) == Some(domain);
+        let fits = |g: &Game| nexus::domain_for(g.store, &g.store_id) == Some(domain);
         self.current_game().filter(|g| fits(g)).or_else(|| self.rust().found.iter().find(|g| fits(g)).cloned())
     }
 
@@ -549,7 +549,7 @@ impl qobject::Turbine {
                 let d = watch::decide_all(Some(&g.id()), None, None, None, None, false);
                 crate::log::line("catch", &format!("{name}: {}, because {}; adding it", g.name, d.basis.words()));
                 // The mod ID and version from Nexus's file name pattern, when it has one.
-                let domain = nexus::domain_for_store_id(&g.store_id).unwrap_or("").to_string();
+                let domain = nexus::domain_for(g.store, &g.store_id).unwrap_or("").to_string();
                 let hint = turbine_engine::store::nexus_ids_from_name(&name)
                     .filter(|_| !domain.is_empty())
                     .map(|(m, v)| (bridge::NexusRef { domain: domain.clone(), mod_id: m, file_id: None }, Some(v)));
@@ -590,7 +590,7 @@ impl qobject::Turbine {
         // 2. Nexus Mods by the file's MD5, for each of the installed games it has (the likeliest first).
         let mut domains: Vec<(String, Game)> = Vec::new();
         let mut add = |g: &Game| {
-            if let Some(d) = nexus::domain_for_store_id(&g.store_id) {
+            if let Some(d) = nexus::domain_for(g.store, &g.store_id) {
                 if !domains.iter().any(|(x, _)| x == d) {
                     domains.push((d.to_string(), g.clone()));
                 }
@@ -807,7 +807,7 @@ impl qobject::Turbine {
     /// steam:// address.
     pub fn watch_steam_browser(mut self: Pin<&mut Self>) -> QString {
         if let Some(game) = self.current_game() {
-            let domain = nexus::domain_for_store_id(&game.store_id).unwrap_or("").to_string();
+            let domain = nexus::domain_for(game.store, &game.store_id).unwrap_or("").to_string();
             let r = bridge::NexusRef { domain, mod_id: 0, file_id: None };
             self.as_mut().start_watch(game, r, Some(nexus::FileList::default()));
         }
@@ -928,7 +928,7 @@ impl qobject::Turbine {
         self.as_mut().set_status(&format!("Adding {label} to {}", game.name), "busy", None, &game.name, "", false, "");
         self.as_mut().edited();
         let qt = self.qt_thread();
-        let domain = hint.as_ref().map(|(r, _)| r.domain.clone()).or_else(|| nexus::domain_for_store_id(&game.store_id).map(str::to_string));
+        let domain = hint.as_ref().map(|(r, _)| r.domain.clone()).or_else(|| nexus::domain_for(game.store, &game.store_id).map(str::to_string));
         let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
             let found = known.or_else(|| domain.as_deref().filter(|d| !d.is_empty()).and_then(|d| identify(d, &path)));
             let mut source = found
@@ -1207,8 +1207,8 @@ fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::Outcome) {
             t.caught_added(&g, &name, notes, false)
         }),
         crate::actions::Outcome::Choices { name } => w.post(move |mut t| {
-            t.as_mut().add_result(&p, true, false, &name, &g, &format!("{name} has installer choices. Pick them in Turbine."));
-            t.set_status(&format!("{name} has installer choices. Pick them on the page or in Turbine."), "busy", None, &g, "", false, "")
+            t.as_mut().add_result(&p, true, false, &name, &g, &format!("{name} needs a choice from you. Make it in Turbine."));
+            t.set_status(&format!("{name} needs a choice from you. Make it on the page or in Turbine."), "busy", None, &g, "", false, "")
         }),
         crate::actions::Outcome::Failed(e) => w.post(move |mut t| {
             t.as_mut().add_result(&p, false, false, "", &g, &e);

@@ -89,6 +89,25 @@ pub struct Report {
     pub quarantined: usize,
     /// Game files still in the backup folder because something else is now at their place (reset only).
     pub left_in_backups: Vec<String>,
+    /// Files a mod has that the game already has (and Turbine didn't place), left alone because that mod may not
+    /// replace the game's files (`Wanted::may_replace`).
+    pub skipped_existing: Vec<String>,
+    /// Files never placed whatever the player chose (anti-cheat, Steam's own files; see basic::refused). Filled in by
+    /// the store, which knows which mods are Basic.
+    pub refused: Vec<String>,
+}
+
+/// One file a caller wants in the game folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Wanted {
+    /// Path inside the game folder.
+    pub rel: String,
+    /// The staged file.
+    pub source: PathBuf,
+    /// May it replace a file the game already has (one Turbine didn't place)? The game's file is kept in the backup
+    /// folder and put back when the mod goes. When false, such a file is skipped and listed in
+    /// `Report::skipped_existing`.
+    pub may_replace: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1082,6 +1101,14 @@ fn check_game(paths: &Paths) -> io::Result<()> {
 /// Makes the game folder hold exactly `wanted`. `stop_after` exists for the crash tests: it stops after that many
 /// steps as if the power went out.
 pub fn apply(paths: &Paths, wanted: &[(String, PathBuf)], stop_after: Option<usize>) -> io::Result<Report> {
+    let all: Vec<Wanted> = wanted.iter().map(|(rel, source)| Wanted { rel: rel.clone(), source: source.clone(), may_replace: true }).collect();
+    apply_guarded(paths, &all, stop_after)
+}
+
+/// `apply` where each file says whether it may replace a file the game already has. A file that may not, and whose
+/// place holds a file Turbine didn't place, is left out (`Report::skipped_existing`); one Turbine placed earlier over
+/// a game file (with its consent then) comes out again, so the game's own file goes back.
+pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>) -> io::Result<Report> {
     check_game(paths)?;
     let _lock = lock(paths)?;
     let mut report = Report::default();
@@ -1091,7 +1118,36 @@ pub fn apply(paths: &Paths, wanted: &[(String, PathBuf)], stop_after: Option<usi
     }
     clean_link_tests(&paths.game);
     let mut record = load_record(paths, &mut report)?;
-    let plan = plan(paths, &record, wanted)?;
+    let placed: HashMap<String, &Placed> = record.files.iter().map(|p| (lower(&p.rel), p)).collect();
+    let mut list: Vec<(String, PathBuf)> = Vec::with_capacity(wanted.len());
+    // Later entries win: a guarded file is only skipped when it is the one that would land.
+    let mut last: HashMap<String, usize> = HashMap::new();
+    for (i, w) in wanted.iter().enumerate() {
+        last.insert(lower(&w.rel), i);
+    }
+    for (i, w) in wanted.iter().enumerate() {
+        if !w.may_replace && last.get(&lower(&w.rel)) == Some(&i) {
+            let skip = match placed.get(&lower(&w.rel)) {
+                // Placed over a game file before: comes out, the game's file goes back.
+                Some(p) => p.backup.is_some(),
+                None => safe_rel(&w.rel) && game_has(&paths.game, &w.rel),
+            };
+            if skip {
+                if !report.skipped_existing.iter().any(|x| x.eq_ignore_ascii_case(&w.rel)) {
+                    report.skipped_existing.push(w.rel.clone());
+                }
+                continue;
+            }
+        }
+        list.push((w.rel.clone(), w.source.clone()));
+    }
+    // A skipped path drops every earlier mod's file for it too: the game's own file stays.
+    if !report.skipped_existing.is_empty() {
+        let skipped: HashSet<String> = report.skipped_existing.iter().map(|r| lower(r)).collect();
+        list.retain(|(rel, _)| !skipped.contains(&lower(rel)));
+    }
+    drop(placed);
+    let plan = plan(paths, &record, &list)?;
     report.kept = plan.kept;
     report.copied_not_linked = plan.copied_not_linked;
     report.put_back = plan.put_back;
@@ -1123,6 +1179,53 @@ pub fn apply(paths: &Paths, wanted: &[(String, PathBuf)], stop_after: Option<usi
     record.save(&paths.record)?;
     fs::remove_file(&paths.plan)?;
     Ok(report)
+}
+
+/// Is there a file or folder at `rel` in the game (matched ignoring case, no links followed on the way)?
+fn game_has(game: &Path, rel: &str) -> bool {
+    let mut cur = game.to_path_buf();
+    for part in rel.split('/') {
+        let exact = cur.join(part);
+        if fs::symlink_metadata(&exact).is_ok() {
+            cur = exact;
+            continue;
+        }
+        let Ok(rd) = fs::read_dir(&cur) else { return false };
+        match rd.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(part)) {
+            Some(e) => cur = e.path(),
+            None => return false,
+        }
+    }
+    true
+}
+
+/// What Turbine's record says against what is in the game folder now ("Check game folder"): files Turbine placed
+/// that are gone, and ones something else changed since. Read only.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Verify {
+    pub ok: usize,
+    pub missing: Vec<String>,
+    pub changed: Vec<String>,
+    /// Entries in the record that couldn't be read safely (only Reset game files deals with them).
+    pub unreadable: usize,
+}
+
+pub fn verify(paths: &Paths) -> io::Result<Verify> {
+    check_game(paths)?;
+    let mut report = Report::default();
+    let record = load_record(paths, &mut report)?;
+    let mut v = Verify { unreadable: record.quarantine.len() + report.bad_entries.len(), ..Verify::default() };
+    for p in &record.files {
+        let target = paths.game.join(&p.rel);
+        if fs::symlink_metadata(&target).is_err() {
+            v.missing.push(p.rel.clone());
+        } else if is_ours(p, &target) || (p.copy && config_like(&p.rel)) {
+            v.ok += 1;
+        } else {
+            v.changed.push(p.rel.clone());
+        }
+    }
+    Ok(v)
 }
 
 /// Finishes a deploy that stopped halfway. Returns None when there was nothing to recover.

@@ -214,6 +214,16 @@ impl Net {
         }
     }
 
+    /// Recorded samples instead of the internet (the build's checks).
+    pub fn is_sample(&self) -> bool {
+        self.sample.is_some()
+    }
+
+    /// Nexus without a key, for the game search.
+    pub fn nexus_public_client(&self) -> Nexus {
+        self.nexus_public()
+    }
+
     /// Recorded samples instead of the internet (the build's screenshot checks).
     pub fn use_samples(&mut self, dir: &Path) {
         self.sample = Some(dir.to_path_buf());

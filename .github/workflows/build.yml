@@ -103,7 +103,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/bridge
-          rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
+          # The engine's built-in game data (build.rs does this under cargo).
+          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/bridge/gen
+          CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/bridge /tmp/bridge/gen > /dev/null
+          OUT_DIR=/tmp/bridge rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
           rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/tests
           /tmp/bridge/tests
       - name: Test the controller pointer (app/src/pointer.rs needs only the standard library)
@@ -115,7 +118,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/browse
-          rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/browse/libturbine_engine.rlib
+          # The engine's built-in game data (build.rs does this under cargo).
+          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/browse/gen
+          CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/browse /tmp/browse/gen > /dev/null
+          OUT_DIR=/tmp/browse rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/browse/libturbine_engine.rlib
           rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/tests
           /tmp/browse/tests
       - name: Test the browser helper (extension/, Node 22)

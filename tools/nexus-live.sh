@@ -66,4 +66,18 @@ for t in MediaSearchFilter MediaUnionPage ImageCategory; do
   printf '%s' '{"query":"{ __type(name: \"'"$t"'\") { kind fields { name type { name kind ofType { name } } } inputFields { name type { name kind ofType { name } } } enumValues { name } } }"}' > /tmp/nexus-type.json
   post "type $t" /tmp/nexus-type.json
 done
+# 0.56: Nexus's public game list (Mods for any game matches names against it). A warning when it is gone: Turbine
+# keeps its cached copy and the game search above still works.
+code=$(curl -sS --max-time 60 -o /tmp/nexus-games.json -w '%{http_code}' -H 'Application-Name: TurbineModManager' \
+  -H 'Application-Version: 0.56' https://data.nexusmods.com/file/nexus-data/games.json 2>/dev/null || echo 000)
+if [ "$code" = 200 ] && grep -q '"domain_name"' /tmp/nexus-games.json; then
+  echo "::notice title=Nexus game list::$(grep -o '"domain_name"' /tmp/nexus-games.json | wc -l) games, $(wc -c < /tmp/nexus-games.json) bytes"
+else
+  echo "::warning title=Nexus game list::HTTP $code"
+fi
+# The fields "Get this setup" reads from a collection (types only, so nothing is downloaded).
+for t in Collection CollectionRevision CollectionRevisionMod; do
+  printf '%s' '{"query":"{ __type(name: \"'"$t"'\") { kind fields { name type { name kind ofType { name kind ofType { name } } } } } }"}' > /tmp/nexus-type.json
+  post "type $t" /tmp/nexus-type.json
+done
 exit $failed
