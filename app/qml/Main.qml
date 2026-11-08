@@ -652,6 +652,7 @@ Window {
         }
         function onRulesJsonChanged() {
             app.rules = app.parse(Turbine.rulesJson, null)
+            app.maybeLandOnGet()
             app.offerLoader()
             if (app.rules && app.tab === 1 && !app.browseData) app.browseNow()
         }
@@ -2460,7 +2461,8 @@ Window {
     property string landedOn: ""
     property bool landAgain: false
     function maybeLandOnGet() {
-        if (!game || !modsLoaded || page !== "game") return
+        // Needs the game's rules too (where its mods come from): called again when they arrive.
+        if (!game || !modsLoaded || !rules || page !== "game") return
         if (landedOn === game.id && !(landAgain && mods.length === 0)) return
         landAgain = false
         landedOn = game.id

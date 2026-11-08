@@ -202,6 +202,7 @@ jobs:
           cp engine/tests/data/*.json engine/tests/data/*.html samples/
           cp tools/selftest-data/* samples/
           fail=0
+          hung=0
           shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
             name=$1 size=$2 page=$3 home=$4
             shift 4
@@ -210,8 +211,11 @@ jobs:
             timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
               --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$PWD/data/$name" \
               --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
-              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" --selftest-data="$PWD/samples" "$@" > "shots/$name.log" 2>&1
-            if [ ! -s "$out" ]; then echo "::error title=No screenshot::$name"; cat "shots/$name.log"; fail=1; fi
+              io.github.ravenor907.TurbineModManager --screenshot="$out" --size="$size" --page="$page" --selftest-data="$PWD/samples" "$@" > "shots/$name.log" 2>&1 \
+              || { code=$?; echo "::warning title=Turbine stopped with code $code::$name"; [ $code -eq 124 ] && hung=$((hung + 1)); }
+            if [ ! -s "$out" ]; then echo "::error title=No screenshot::$name"; cat "shots/$name.log"; tail -n 40 "$PWD/data/$name/turbine-mod-manager/activity.log" 2>/dev/null || true; fail=1; fi
+            # Three pictures that never came: stop here rather than wait a minute for every other one.
+            if [ "$hung" -ge 3 ]; then echo "::error title=Turbine hangs::three pictures timed out"; exit 1; fi
             if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
             # The engine answers "not ready" while parts of it are unfinished; say so without failing the build.
             if grep -q "not yet implemented" "shots/$name.log"; then echo "::warning title=Engine not finished::$name"; fi
