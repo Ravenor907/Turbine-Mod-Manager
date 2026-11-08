@@ -74,7 +74,9 @@ Item {
         TextMetrics { id: signinFull; font: signinText.font; text: "Sign in with my browser" }
         TextMetrics { id: signinMid; font: signinText.font; text: "My browser sign-in" }
         TextMetrics { id: signinShort; font: signinText.font; text: "Sign in" }
+        // On another site than Nexus its host always shows (a warning chip): the room after the tabs keeps it.
         readonly property real tabsEnd: nb.ui.px(10) + nb.ui.px(26) + nb.ui.px(8) + nb.ui.px(12) + tabs.width + nb.ui.px(12)
+                                        + (hostChip.host !== "" && !hostChip.nexus ? hostChip.width + nb.ui.px(10) : 0)
         readonly property real signinRoom: pill.x - nb.ui.px(8) - tabsEnd
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
         // under the bar when they don't fit (pillFull).
@@ -145,6 +147,8 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: nb.ui.px(8)
             clip: true
+            // Never a chip cut in half: with no room for the site's chip the title row stays empty.
+            visible: width >= hostChip.width
             Rectangle {
                 id: hostChip
                 readonly property bool nexus: Turbine.browserIsNexus(nb.url)
