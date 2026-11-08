@@ -2807,7 +2807,10 @@ Window {
         const pageIs = (re) => !!nexusView && !!nexusView.view && !nexusView.loading && re.test(nexusView.url)
         btRun([
             { name: "Get mods", max: 20000, wait: () => !!game && modsLoaded && getItems.length > 0,
-              act: () => { Turbine.selftestCatch("watch"); openDetails(getItems[0]) } },
+              act: () => { Turbine.selftestCatch("watch")
+                           // The sign-in pass-through: a helper's answer goes into the profile (checked on disk later).
+                           Turbine.selftestCatch("signin"); browserNoteNow = null
+                           openDetails(getItems[0]) } },
             { name: "mod page", max: 15000, wait: () => !!detailsData && !detailsData.loading && mainLabel === "Get it on Nexus",
               act: () => { check("Browser check: mod page " + detailsData.name + ", button " + mainLabel); openNexus(btFiles) } },
             { name: "file page", max: 45000, wait: () => pageIs(/tab=files/),

@@ -172,8 +172,9 @@ for size in $SIZES; do
 done
 if [ "$MODE" = 1280x800 ]; then
 # 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
+# A new home for each (not a copy of the shared one, whose mods earlier pictures turned on and off): both mods start on.
 for p in controls legendcheck sheetcheck inputcheck; do
-  fresh "$p"; h="$PWD/fh/$p"
+  rm -rf "$PWD/fh/$p"; python3 tools/fake-home.py "$PWD/fh/$p" > /dev/null; h="$PWD/fh/$p"
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 done
 fresh "nexusguard"; h="$PWD/fh/nexusguard"
@@ -462,7 +463,8 @@ if command -v Xvfb > /dev/null; then
   # there) it runs without it. Players never run Turbine as root.
   BROWSER_ENV=""
   if [ "$(id -u)" = 0 ]; then BROWSER_ENV="--env=QTWEBENGINE_DISABLE_SANDBOX=1"; echo "::notice title=Chromium sandbox::off in this check only (the build container runs as root)"; fi
-  for size in $SIZES; do
+  # Both sizes here: this job is the only one with the stand-in page.
+  for size in 1280x800 1920x1080; do
     n="browsertest-$size"
     rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null; h="$PWD/fh/$n"
     mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
@@ -496,6 +498,17 @@ if command -v Xvfb > /dev/null; then
     presses=$(grep -c "Browser press [0-9]* (" "$log" || true); clicks=$(grep -c "Browser click [0-9]* (" "$log" || true)
     if [ "$presses" -gt 0 ] && [ "$presses" = "$clicks" ]; then echo "::notice title=5: one click per press ($size)::$presses presses, $clicks clicks"
     else echo "::error title=5: clicks and presses differ ($size)::$presses presses, $clicks clicks"; grep -h "Browser press\|Browser click" "$log" | head -n 40; fail=1; fi
+    # The sign-in pass-through: a helper's answer for another request is refused whole; the real one puts only
+    # Nexus's cookie into Turbine's browser, never logs its value, and the cookie is kept on disk with the profile.
+    need $n "Sign-in: an answer for another request is refused ($size)" "Sign-in from the browser refused: the sign-in answer is for another request"
+    need $n "Sign-in: only Nexus's cookie is taken ($size)" "Sign-in from the browser: 1 Nexus cookie\(s\) put into Turbine's browser \(turbine_signin_check\); 2 for other sites or unreadable, dropped"
+    need $n "Sign-in: Turbine says it is signed in ($size)" "Signed in to Nexus \(from the player's browser\)"
+    if grep -rq "valueNeverLogged7f3" "$PWD/data/$n/turbine-mod-manager/activity.log" "shots/$n.log"; then echo "::error title=Sign-in: a cookie value was logged ($size)::"; fail=1
+    else echo "::notice title=Sign-in: no cookie value in the logs ($size)::"; fi
+    kept=$(grep -rla "turbine_signin_check" "$PWD/data/$n" 2>/dev/null | grep -v "activity.log" | head -n1 || true)
+    if [ -n "$kept" ]; then echo "::notice title=Sign-in: the cookie is in the profile on disk ($size)::${kept#$PWD/}"
+    else echo "::error title=Sign-in: the cookie isn't in the profile on disk ($size)::"; find "$PWD/data/$n" -maxdepth 4 | head -n 40; fail=1; fi
+    if grep -rlaE "other_site_check|look_alike_check" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: another site's cookie got in ($size)::"; fail=1; fi
     for tag in page downloads added nokey; do
       if [ -s "$PWD/shots/$n-$tag.png" ]; then echo "::notice title=11: picture $tag ($size)::$n-$tag.png"; else echo "::error title=11: no picture $tag ($size)::"; fail=1; fi
     done

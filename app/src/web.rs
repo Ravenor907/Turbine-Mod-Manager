@@ -461,7 +461,7 @@ impl qobject::Turbine {
     /// The build's checks of the 0.54 regression fix, in a test run only: "watch" starts the Downloads watcher,
     /// "bridge:<json>" hands a helper message to Turbine as if the helper sent it, "drop:<from>|<name>" copies a file
     /// into Downloads, "partial:<name>" grows an unfinished download there, "page:<url>" opens a Nexus page the
-    /// Desktop way (the Slow download hint).
+    /// Desktop way (the Slow download hint), "signin" passes a made-up sign-in from the helper through (0.55).
     pub fn selftest_catch(mut self: Pin<&mut Self>, step: &QString) -> QString {
         if !crate::online::using_samples() {
             return QString::from("not a test run");
@@ -504,6 +504,31 @@ impl qobject::Turbine {
             }
         } else if let Some(url) = step.strip_prefix("page:") {
             self.as_mut().watch_page(&QString::from(url)).to_string()
+        } else if step == "signin" {
+            // The sign-in pass-through end to end, as if the player pressed Sign in with my browser and the helper
+            // answered: first an answer for another request (refused whole), then the real one with a Nexus cookie,
+            // another site's and a look-alike's (only Nexus's goes into the profile). The value is never logged.
+            match crate::bridge::signin_request() {
+                Ok(id) => {
+                    let msg = |id: &str| {
+                        format!(
+                            "{{\"type\":\"signin.cookies\",\"id\":{},\"cookies\":[{},{},{}]}}",
+                            quote(id),
+                            "{\"name\":\"turbine_signin_check\",\"value\":\"valueNeverLogged7f3\",\"domain\":\".nexusmods.com\",\"hostOnly\":false,\"path\":\"/\",\"secure\":true,\"httpOnly\":true,\"sameSite\":\"lax\",\"expirationDate\":4102444800}",
+                            "{\"name\":\"other_site_check\",\"value\":\"x\",\"domain\":\".google.com\",\"path\":\"/\"}",
+                            "{\"name\":\"look_alike_check\",\"value\":\"x\",\"domain\":\"evilnexusmods.com\",\"path\":\"/\"}"
+                        )
+                    };
+                    let wrong = "0".repeat(32);
+                    for m in [msg(&wrong), msg(&id)] {
+                        if let Ok(j) = turbine_engine::json::parse(&m) {
+                            self.as_mut().signin_cookies(&j);
+                        }
+                    }
+                    "sent".to_string()
+                }
+                Err(e) => format!("couldn't start: {e}"),
+            }
         } else {
             "unknown step".to_string()
         };
