@@ -52,7 +52,7 @@ Item {
     component Step: Column {
         id: st
         property int n: 1
-        property string top: ""
+        property string tile: ""
         property string words: ""
         property bool face: false
         width: tut.ui.px(150)
@@ -67,7 +67,7 @@ Item {
                 width: st.face ? tut.ui.px(46) : Math.min(tut.ui.px(126), stepTop.implicitWidth + tut.ui.px(16))
                 height: tut.ui.px(46); radius: st.face ? width / 2 : tut.ui.px(8)
                 color: tut.ui.c.accent
-                Text { id: stepTop; anchors.centerIn: parent; text: st.top; color: tut.ui.c.onAccent; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(st.face ? 24 : 14); font.bold: true }
+                Text { id: stepTop; anchors.centerIn: parent; text: st.tile; color: tut.ui.c.onAccent; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(st.face ? 24 : 14); font.bold: true }
             }
         }
         Text { width: st.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; text: st.n + ". " + st.words; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.px(16) }
@@ -139,10 +139,10 @@ Item {
             visible: tut.card === 2
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(10)
-            Step { n: 1; top: "Get mods"; words: "Open Get mods (RB)" }
-            Step { n: 2; top: "A"; face: true; words: "A on a mod, then A on Get it" }
-            Step { n: 3; top: "Slow download"; words: "Press Slow download on Nexus" }
-            Step { n: 4; top: "Added"; words: "Turbine adds it to your game" }
+            Step { n: 1; tile: "Get mods"; words: "Open Get mods (RB)" }
+            Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it" }
+            Step { n: 3; tile: "Slow download"; words: "Press Slow download on Nexus" }
+            Step { n: 4; tile: "Added"; words: "Turbine adds it to your game" }
         }
         // 4: Start.
         Column {
