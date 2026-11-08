@@ -53,6 +53,8 @@ pub mod qobject {
         #[qproperty(bool, pointer_shown, cxx_name = "pointerShown")]
         #[qproperty(bool, pointer_paused, cxx_name = "pointerPaused")]
         #[qproperty(bool, stick_dpad, cxx_name = "stickDpad")]
+        /// While the quick wheel is open: the left stick's angle (0 Up, clockwise), -1 near the middle.
+        #[qproperty(i32, wheel_angle, cxx_name = "wheelAngle")]
         #[qproperty(QString, labs_json, cxx_name = "labsJson")]
         /// Turbine's browser has the controller (its page is on screen, no sheet or wheel over it): A clicks at the
         /// pointer (QML sets this).
@@ -191,6 +193,22 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "modFolder"]
         fn mod_folder(self: &Self, id: &QString) -> QString;
+        /// 0.56: the current game's save backups (health.rs).
+        #[qinvokable]
+        #[cxx_name = "savesJson"]
+        fn saves_json(self: &Self) -> QString;
+        /// 0.56: puts a save backup back (the saves as they are now are kept first).
+        #[qinvokable]
+        #[cxx_name = "restoreSaves"]
+        fn restore_saves(self: Pin<&mut Self>, id: &QString);
+        /// 0.56: Why won't it start? and Check game folder (read only).
+        #[qinvokable]
+        #[cxx_name = "gameHealth"]
+        fn game_health(self: &Self) -> QString;
+        /// The files a mod puts in the game (game-relative, A to Z, at most 2,000), as a JSON list.
+        #[qinvokable]
+        #[cxx_name = "modFiles"]
+        fn mod_files(self: &Self, id: &QString) -> QString;
 
         /// Applies waiting changes to the game now (does nothing when there are none).
         #[qinvokable]
@@ -810,6 +828,7 @@ pub struct TurbineRust {
     pub(crate) pointer_paused: bool,
     /// The left stick is only a D-pad (no scroll wheel) while the quick wheel is open.
     pub(crate) stick_dpad: bool,
+    pub(crate) wheel_angle: i32,
     /// Which sources hold each mouse button down: [left, right], a bit per source (RT 1, R3 2 on the left; LT 1
     /// on the right). The button is let go only when the last source lets go.
     pub(crate) mouse_src: [u8; 2],
@@ -905,6 +924,7 @@ impl Default for TurbineRust {
             pointer_shown: false,
             pointer_paused: false,
             stick_dpad: false,
+            wheel_angle: -1,
             mouse_src: [0, 0],
             pointer: crate::pointer::Pointer::default(),
             pointer_at: None,
@@ -1502,6 +1522,19 @@ impl qobject::Turbine {
         let mut events = events;
         let dpad = *self.stick_dpad();
         self.as_mut().rust_mut().pointer.dpad_only = dpad;
+        // The quick wheel is open: the left stick points at a wedge by its angle instead of pressing the D-pad.
+        let mut sticks = sticks;
+        if dpad {
+            if let Some(a) = crate::pointer::wedge_angle(sticks.lx, sticks.ly) {
+                if *self.wheel_angle() != a {
+                    self.as_mut().set_wheel_angle(a);
+                }
+            }
+            sticks.lx = 0.0;
+            sticks.ly = 0.0;
+        } else if *self.wheel_angle() != -1 {
+            self.as_mut().set_wheel_angle(-1);
+        }
         events.extend(self.as_mut().pointer_tick(&sticks).into_iter().filter(|(_, down)| !(quiet && *down)));
         for (button, pressed) in events {
             self.as_mut().handle_pad(button, pressed);
@@ -1950,6 +1983,35 @@ impl qobject::Turbine {
         }
     }
 
+    pub fn mod_files(&self, id: &QString) -> QString {
+        let dir = self.mod_folder(id).to_string();
+        if dir.is_empty() {
+            return QString::from("[]");
+        }
+        let root = std::path::PathBuf::from(&dir);
+        let mut out: Vec<String> = Vec::new();
+        let mut todo = vec![root.clone()];
+        while let Some(d) = todo.pop() {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            for e in rd.flatten() {
+                let Ok(ft) = e.file_type() else { continue };
+                let p = e.path();
+                if ft.is_dir() {
+                    todo.push(p);
+                } else if ft.is_file() {
+                    if let Ok(rel) = p.strip_prefix(&root) {
+                        out.push(rel.to_string_lossy().replace('\\', "/"));
+                    }
+                }
+                if out.len() >= 2000 {
+                    break;
+                }
+            }
+        }
+        out.sort_by_key(|a| a.to_lowercase());
+        QString::from(format!("[{}]", out.iter().map(|f| turbine_engine::json::quote(f)).collect::<Vec<_>>().join(",")).as_str())
+    }
+
     pub fn undo_remove(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {e}")));
@@ -2210,6 +2272,8 @@ impl qobject::Turbine {
                     w.say(format!("{} is still running. Close it, then press Play again.", game.name), "error");
                     return;
                 }
+                // 0.56: a copy of the saves first, so a mod that breaks them can't take them with it.
+                crate::health::backup_before_play(&game);
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
                 crate::actions::sync_order(w, &game);
                 if result.is_ok() {

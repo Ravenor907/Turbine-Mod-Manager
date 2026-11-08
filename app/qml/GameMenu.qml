@@ -170,6 +170,9 @@ Item {
                         danger: modelData.danger === true
                         more: modelData.more === true
                         focused: index === root.focusIndex
+                        Accessible.role: Accessible.MenuItem
+                        Accessible.name: (modelData.label || "") + (modelData.enabled === false ? ", not available" : "") + (modelData.detail ? ", " + modelData.detail : "") + ", " + (index + 1) + " of " + root.allItems.length
+                        Accessible.focused: index === root.focusIndex
                         // Curved icons aren't clipped by the list, so a row cut off at an edge hides its icon.
                         iconShown: y >= flick.contentY - 1 && y + height <= flick.contentY + flick.height + 1
                         dangerColor: root.readable(root.ui.c.warn, root.ui.c.panel)

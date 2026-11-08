@@ -512,6 +512,8 @@ if command -v Xvfb > /dev/null; then
     need $n "M6: the question names mod and file, opens on Not now, page input off ($size)" "Browser check: Mod Manager Download asks: Get .* \(.*\) for .*\?, focus Not now, A Not now, B Not now, page input off"
     need $n "M6: A at once on the question is ignored ($size)" "Browser check: A at once on the question: ignored"
     need $n "M6: Right then A after a second gets it ($size)" "Browser check: Right then A after a second gets it: yes"
+    need $n "L1: two taps on Get it don't get it ($size)" "Browser check: two taps on Get it: still asking"
+    need $n "L2: a page alert or confirm doesn't replace the question ($size)" "Browser check: a page alert and confirm while asking: the question stays"
     need $n "4: and its file goes into Game Mods ($size)" "Test run: pretending to download nxm://skyrimspecialedition/mods/1/files/2.* into Game Mods/$sky"
     need $n "4: the page stays on the file page ($size)" "after Mod Manager Download the page is still the file page: yes"
     need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
@@ -612,7 +614,7 @@ PY
     echo "::error title=1: a link with no press got through::"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
   echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
-  pneed "10: closing midway says the download goes on" "Still downloading 1 mod. It's added by itself. To watch it: View, Full menu, Nexus downloads."
+  pneed "10: closing midway says the download goes on" "Still downloading 1 mod. It's added by itself. To watch it: View, Game menu, Nexus downloads."
   pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
   pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
   pneed "10: ... and the screen doesn't jump to it when it lands" "New mod from a download that went on after Nexus closed: the focus stays where it is"
@@ -651,6 +653,14 @@ for size in $SIZES; do
   SHOOT_ENV="$NG" shoot "checkbasic-$size" "$size" check "$h" --game=$lh "--selftest-import=$h/Downloads/Wand Glow 1.0.zip"
   need "checkbasic-$size" "Any game: unreal-paks rule ($size)" "Placed by rule unreal-paks: Lantern/Content/Paks/~mods"
   need "checkbasic-$size" "Any game: anti-cheat before Play ($size)" "Check before Play: .*Anti-cheat"
+done
+# 0.56, layout: a renamed mod, the header tucked away with the details panel, Get mods four to a row, the pie wheel.
+for size in $SIZES; do
+  shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+  need "tucked-$size" "Rename ($size)" "Renamed .* to Lanterns of the Road"
+  need "tucked-$size" "Header slides away going down ($size)" "Header tucked: true; panel: true"
+  shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
+  need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"
 done
 if [ "$MODE" = 1280x800 ]; then
   fresh placestart; h="$PWD/fh/placestart"

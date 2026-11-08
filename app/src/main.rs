@@ -4,6 +4,7 @@ mod backend;
 mod bridge;
 mod browse;
 mod catch;
+mod health;
 mod labs;
 mod launch;
 mod log;
