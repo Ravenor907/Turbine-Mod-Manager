@@ -1358,7 +1358,7 @@ Window {
         if (was) note("pad", "Holds stopped (" + why + ")")
     }
     // The danger holds stop whenever the sheet or the page changes.
-    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop() }
+    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); clickHeld = false }
     // (onPageChanged and onTabChanged, near the top, call it too.)
     onModPageChanged: stopDangerHolds()
     readonly property var gameMenuItems: [
@@ -2550,42 +2550,44 @@ Window {
                     page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""
                     m.bad = 0
                     m.ok = (good, text) => { if (!good) m.bad++; check(text + (good ? "" : "  PROBLEM")) } },
-            // 1. Holds run only while a real press is held: never from a click, a tap, R3, or a lost release.
-            () => { holdsDone = 0; askDelete("check:none", "Test") },
+            // 1. Holds run only while a real press is held: never from a click, a tap, R3, or a lost release. Each step
+            // opens its own Delete for good sheet ("check:" only logs) and counts what finished during it.
+            () => { askDelete("check:none", "Test") },
             () => { const it = confirmSheet.buttonItem(0); if (!it || !confirmSheet.visible) return false
-                    const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
-            () => { if (Date.now() - m.t < 1000) return false
-                    m.ok(holdsDone === 0 && !confirmHold.running && sheet === "confirm", "Hold check: a click on Hold A to delete: " + (confirmHold.running || holdsDone > 0 ? "the hold ran" : "only the highlight moved"))
-                    Turbine.pointerHide(); confirmIndex = 0; pad("r3"); m.t = Date.now() },
-            () => { if (Date.now() - m.t < 1000) return false
-                    m.ok(holdsDone === 0 && !confirmHold.running, "Hold check: R3 on Hold A to delete: " + (confirmHold.running || holdsDone > 0 ? "the hold ran" : "no hold"))
-                    confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; windowActive(false); windowActive(true)
+                    m.d = holdsDone; const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 2500) return false
+                    m.ok(holdsDone === m.d && !confirmHold.running && sheet === "confirm", "Hold check: a click on Hold A to delete: " + (confirmHold.running || holdsDone > m.d ? "the hold ran" : "only the highlight moved"))
+                    Turbine.pointerHide(); askDelete("check:none", "Test"); m.d = holdsDone; pad("r3"); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 2500) return false
+                    m.ok(holdsDone === m.d && !confirmHold.running, "Hold check: R3 on Hold A to delete: " + (confirmHold.running || holdsDone > m.d ? "the hold ran" : "no hold"))
+                    askDelete("check:none", "Test"); Turbine.selftestPad("a", true); m.run = confirmHold.running; windowActive(false); windowActive(true)
                     m.ok(m.run && !confirmHold.running, "Hold check: A held, then Turbine in the background: " + (m.run ? "the hold started, " : "the hold never started, ") + (confirmHold.running ? "still running" : "stopped"))
                     Turbine.selftestPad("a", false) },
-            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; Turbine.selftestPad("lost", false)
-                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the controller went away: " + (confirmHold.running ? "still running" : "stopped"))
+            () => { askDelete("check:none", "Test"); Turbine.selftestPad("a", true); m.run = confirmHold.running; Turbine.selftestPad("lost", false)
+                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the controller went away: " + (m.run ? "" : "never started, ") + (confirmHold.running ? "still running" : "stopped"))
                     Turbine.selftestPad("a", false) },
-            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.run = confirmHold.running; sheet = "removed"
-                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the sheet changed: " + (confirmHold.running ? "still running" : "stopped"))
-                    Turbine.selftestPad("a", false); askDelete("check:none", "Test") },
-            () => { confirmIndex = 0; Turbine.selftestPad("a", true); m.t = Date.now() },
+            () => { askDelete("check:none", "Test"); Turbine.selftestPad("a", true); m.run = confirmHold.running; sheet = "removed"
+                    m.ok(m.run && !confirmHold.running, "Hold check: A held, then the sheet changed: " + (m.run ? "" : "never started, ") + (confirmHold.running ? "still running" : "stopped"))
+                    Turbine.selftestPad("a", false) },
+            () => { askDelete("check:none", "Test"); m.d = holdsDone; Turbine.selftestPad("a", true); m.t = Date.now() },
             () => { if (Date.now() - m.t < 2600) return false
                     Turbine.selftestPad("a", false)
-                    m.ok(holdsDone === 1, "Hold check: A really held for 2 seconds: " + (holdsDone === 1 ? "Delete for good ran" : "nothing ran")) },
-            () => { holdsDone = 0; sheet = ""; sheet = "gamemenu"; m.ri = gameMenuItems.findIndex(x => x.act === "reset"); if (m.ri < 0) return false
-                    menuIndex = m.ri; pad("a"); m.t = Date.now() },
+                    m.ok(holdsDone === m.d + 1, "Hold check: A really held for 2 seconds: " + (holdsDone === m.d + 1 ? "Delete for good ran" : "nothing ran")) },
+            () => { sheet = ""; sheet = "gamemenu"; m.ri = gameMenuItems.findIndex(x => x.act === "reset"); if (m.ri < 0) return false
+                    m.d = holdsDone; menuIndex = m.ri; pad("a"); m.t = Date.now() },
             () => { if (Date.now() - m.t < 1000) return false
-                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: a tap of A on Reset game files: " + (resetHold.running ? "still counting" : "stopped at the release"))
+                    m.ok(holdsDone === m.d && !resetHold.running, "Hold check: a tap of A on Reset game files: " + (resetHold.running ? "still counting" : "stopped at the release"))
                     menuIndex = m.ri; Turbine.selftestPad("a", true); m.run = resetHold.running; pad("b")
-                    m.ok(m.run && !resetHold.running && sheet === "", "Hold check: A held on Reset, then B closed the menu: " + (resetHold.running ? "still counting" : "stopped"))
+                    m.ok(m.run && !resetHold.running && sheet === "", "Hold check: A held on Reset, then B closed the menu: " + (m.run ? "" : "never started, ") + (resetHold.running ? "still counting" : "stopped"))
                     Turbine.selftestPad("a", false) },
-            () => { sheet = "gamemenu"; menuIndex = m.ri; const it = gameMenuView.entryItem(m.ri); if (!it || !gameMenuView.visible) return false
-                    const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { sheet = "gamemenu"; menuIndex = m.ri },
+            () => { const it = gameMenuView.entryItem(m.ri); if (!it || !gameMenuView.visible) return false
+                    m.d = holdsDone; const p = it.mapToItem(null, it.width / 2, it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
             () => { if (Date.now() - m.t < 1000) return false
-                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: a click on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
-                    Turbine.pointerHide(); menuIndex = m.ri; pad("r3"); m.t = Date.now() },
+                    m.ok(holdsDone === m.d && !resetHold.running, "Hold check: a click on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
+                    Turbine.pointerHide(); sheet = "gamemenu"; menuIndex = m.ri; pad("r3"); m.t = Date.now() },
             () => { if (Date.now() - m.t < 1000) return false
-                    m.ok(holdsDone === 0 && !resetHold.running, "Hold check: R3 on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
+                    m.ok(holdsDone === m.d && !resetHold.running, "Hold check: R3 on Reset game files: " + (resetHold.running ? "counting" : "no hold"))
                     pad("b") },
             // 7. RT and R3 hold the left button each on their own.
             () => { sheet = ""; probeOn = true; Turbine.pointerShowAt(width / 2, height / 2); m.pe = padEvents
@@ -2616,8 +2618,9 @@ Window {
                     m.ok(order[m.pi] && order[m.pi].active !== m.pa, "Click check: a click on a load order row: " + (order[m.pi] && order[m.pi].active !== m.pa ? "turned it " + (order[m.pi].active ? "on" : "off") : "did nothing"))
                     m.ok(!!it && it.height >= 44, "Click check: a load order row is " + (it ? Math.round(it.height) : 0) + " px tall")
                     Turbine.pointerHide(); tab = 0 },
-            () => { openSettings(); setSection = settingsSections.indexOf("Look"); m.row = lookRows.findIndex(r => r.key === "theme"); m.theme = look.theme
-                    const it = lookList.itemAtIndex(m.row); if (!it) return false
+            () => { openSettings(); setSection = settingsSections.indexOf("Look"); m.row = lookRows.findIndex(r => r.key === "theme"); m.theme = look.theme },
+            // (The next look: the Settings row is laid out where it shows.)
+            () => { const it = lookList.itemAtIndex(m.row); if (!it || !lookList.visible) return false
                     const p = it.mapToItem(null, app.px(40), it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
             () => { const it = lookList.itemAtIndex(m.row)
                     m.ok(look.theme !== m.theme && setRow === m.row, "Click check: a click on a Settings choice row: " + (look.theme !== m.theme ? "changed it" : "did nothing"))

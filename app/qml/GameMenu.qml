@@ -155,10 +155,12 @@ Item {
                 spacing: root.ui.px(5)
                 Repeater {
                     id: itemRepeater
-                    model: root.allItems
+                    // By count, so a row whose words change (Keep holding A: 4...) updates in place: a rebuilt row
+                    // would lose the finger or the pointer pressing it, and with it the release that stops a hold.
+                    model: root.allItems.length
                     MenuEntry {
                         required property int index
-                        required property var modelData
+                        readonly property var modelData: root.allItems[index] || ({})
                         ui: root.ui
                         width: body.width
                         label: modelData.label || ""

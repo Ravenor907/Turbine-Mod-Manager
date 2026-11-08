@@ -18,11 +18,13 @@ Flow {
     function itemAt(i) { return rep.itemAt(i) }
     Repeater {
         id: rep
-        model: sb.labels
+        // By count, so a label that changes (Keep holding A: 2...) updates in place: a rebuilt button would lose
+        // the finger or the pointer pressing it, and with it the release that stops a hold.
+        model: sb.labels.length
         Rectangle {
             id: btn
             required property int index
-            required property string modelData
+            readonly property string modelData: sb.labels[index] || ""
             readonly property bool foc: index === sb.focusIndex
             width: btnText.implicitWidth + sb.ui.px(36)
             height: sb.ui.px(44)
