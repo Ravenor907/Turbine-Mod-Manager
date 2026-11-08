@@ -178,3 +178,17 @@ extern "C" int turbine_pointer_event(int kind, double x, double y, int button, i
     QCoreApplication::sendEvent(win, &ev);
     return 1;
 }
+
+// Turbine's browser: an arrow key or Enter from the controller, delivered into the window like a real keyboard's, so
+// the web page (which has the keyboard focus while it is on screen) moves its own focus ring or presses the focused
+// link. key: Qt's key code. text: what the key types ("\r" for Enter, "" for arrows). Returns 1 when sent.
+#include <QtGui/QKeyEvent>
+extern "C" int turbine_key_event(int key, int pressed, const char *text)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    QKeyEvent ev(pressed ? QEvent::KeyPress : QEvent::KeyRelease, key, Qt::NoModifier, QString::fromUtf8(text ? text : ""));
+    QCoreApplication::sendEvent(win, &ev);
+    return 1;
+}

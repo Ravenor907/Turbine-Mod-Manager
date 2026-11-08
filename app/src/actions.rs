@@ -1404,17 +1404,29 @@ impl qobject::Turbine {
 
     pub fn nxm_download(mut self: Pin<&mut Self>, link: &QString, game_id: &QString) {
         let Some(game) = self.find(&game_id.to_string()) else { return };
-        let link = match turbine_engine::nxm::parse(&link.to_string()) {
+        let link_text = link.to_string();
+        let link = match turbine_engine::nxm::parse(&link_text) {
             Ok(l) => l,
             Err(e) => return self.as_mut().say(&e, "error"),
         };
+        // Pressed in Turbine's browser: the file goes into Game Mods/<Game>, like a Slow download.
+        let into = crate::browse::from_page(&link_text).then(|| crate::web::game_mods_dir(&game));
+        if let Some(d) = &into {
+            crate::log::line("nxm", &format!("From Turbine's browser: the file goes into {}", d.display()));
+        }
         self.as_mut().say("Getting the file from Nexus Mods...", "work");
         self.net_send(
             &format!("Nexus link {}", link.redacted()),
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let mut prog = progress(qt);
-                match net.fetch_nxm(&link, &mut prog) {
-                    Ok(f) => hand_over(qt, &game)(f),
+                match net.fetch_nxm(&link, into.as_deref(), &mut prog) {
+                    Ok(f) => match into {
+                        Some(dir) => {
+                            let g = game.clone();
+                            post(qt, move |t| t.web_place_fetched(g, f, dir));
+                        }
+                        None => hand_over(qt, &game)(f),
+                    },
                     Err(e) => say(qt, e, "error"),
                 }
             }),

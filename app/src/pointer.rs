@@ -100,11 +100,14 @@ pub struct Pointer {
     pub holding: bool,
     /// Only directions, never the scroll wheel (while the quick wheel is open, so every slot can be reached).
     pub dpad_only: bool,
+    /// Never hides (Turbine's browser is open: the pointer is how the page is used). It still counts how long it
+    /// has been still, so the page can dim it.
+    pub sticky: bool,
 }
 
 impl Default for Pointer {
     fn default() -> Self {
-        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, left: Left::Idle, holding: false, dpad_only: false }
+        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, left: Left::Idle, holding: false, dpad_only: false, sticky: false }
     }
 }
 
@@ -150,6 +153,11 @@ impl Pointer {
         self.idle_ms = 0.0;
     }
 
+    /// How long the right stick has left it still, in milliseconds.
+    pub fn still_ms(&self) -> f64 {
+        self.idle_ms
+    }
+
     /// Turbine stops listening to the left stick for now (it went to the back, or the keyboard came up): a held
     /// direction is let go (returned, so it can be sent as a release) and nothing more happens until the stick has
     /// been back in the middle.
@@ -186,7 +194,7 @@ impl Pointer {
             out.moved = true;
         } else {
             self.idle_ms += dt_ms;
-            if self.shown && !self.holding && self.idle_ms >= HIDE_MS {
+            if self.shown && !self.holding && !self.sticky && self.idle_ms >= HIDE_MS {
                 self.shown = false;
                 out.hid = true;
             }
@@ -571,5 +579,19 @@ mod tests {
         assert_eq!(unit(32767), 1.0);
         assert_eq!(unit(-32768), -1.0);
         assert_eq!(unit(0), 0.0);
+    }
+
+    #[test]
+    fn a_sticky_pointer_never_hides_but_counts_its_stillness() {
+        let mut p = Pointer::default();
+        p.sticky = true;
+        run(&mut p, Sticks { rx: 0.8, ..Default::default() }, 100.0);
+        assert!(p.shown);
+        let t = run(&mut p, Sticks::default(), 10_000.0);
+        assert!(p.shown && !t.hid);
+        assert!(p.still_ms() >= HIDE_MS);
+        p.sticky = false;
+        let t = run(&mut p, Sticks::default(), 100.0);
+        assert!(!p.shown && t.hid);
     }
 }

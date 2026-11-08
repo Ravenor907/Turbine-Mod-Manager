@@ -90,6 +90,18 @@ jobs:
         run: |
           rustc +1.97.0 --edition 2021 --test app/src/pointer.rs -o /tmp/pointer-tests
           /tmp/pointer-tests
+      - name: Test Turbine's browser decisions (app/src/browse.rs needs only the engine)
+        shell: bash
+        run: |
+          mkdir -p /tmp/browse
+          rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/browse/libturbine_engine.rlib
+          rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/tests
+          /tmp/browse/tests
+      - name: Test the browser helper (extension/, Node 22)
+        shell: bash
+        run: |
+          node --version
+          cd extension && node test/test.js
 
   nexus:
     name: Nexus without a key (live)
@@ -177,7 +189,11 @@ jobs:
           fi
           flatpak build-bundle repo TurbineModManager.flatpak io.github.ravenor907.TurbineModManager \
             --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
-          echo "::notice title=TurbineModManager.flatpak::$(stat -c %s TurbineModManager.flatpak) bytes"
+          # The bundle carries Qt WebEngine now (the BaseApp is merged in): its real size, and a gate at 300 MB.
+          bytes=$(stat -c %s TurbineModManager.flatpak)
+          mb=$(( (bytes + 524288) / 1048576 ))
+          echo "::notice title=TurbineModManager.flatpak::$bytes bytes ($mb MB)"
+          if [ "$bytes" -gt $((300 * 1048576)) ]; then echo "::error title=Bundle too big::$mb MB, over the 300 MB limit"; exit 1; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
@@ -188,6 +204,12 @@ jobs:
         shell: bash
         run: |
           flatpak install --user -y --noninteractive TurbineModManager.flatpak > /dev/null
+          # Qt WebEngine is inside the app (from the BaseApp), with its helper process.
+          if web=$(flatpak run --command=sh io.github.ravenor907.TurbineModManager -c 'ls /app/lib/libQt6WebEngineQuick.so* /app/bin/QtWebEngineProcess && ls -d /app/lib/qml/QtWebEngine' 2>&1); then
+            echo "::notice title=Qt WebEngine in the Flatpak::$(echo "$web" | tr '\n' ' ' | cut -c1-240)"
+          else
+            echo "::error title=Qt WebEngine missing from the Flatpak::$web"; exit 1
+          fi
           # The programs the engine runs from the runtime: curl (downloads) and bsdtar (7z and rar).
           for tool in curl bsdtar; do
             if v=$(flatpak run --command=$tool io.github.ravenor907.TurbineModManager --version 2>&1 | head -n1); then
@@ -498,6 +520,13 @@ jobs:
             else
               echo "::error title=The new mod wasn't named cleanly or focused ($size)::"; (grep -h "New mod\|Add " "$log" | tail -n 10 || true); fail=1
             fi
+          done
+          # 0.55: the nxm scheme and WebEngine are set up before the application exists, in every run.
+          for p in game-1280x800 settings-1920x1080; do
+            log="$PWD/data/$p/turbine-mod-manager/activity.log"
+            a=$(grep -n "nxm scheme registered" "$log" | head -n1 | cut -d: -f1); b=$(grep -n "WebEngine ready" "$log" | head -n1 | cut -d: -f1)
+            if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then echo "::notice title=WebEngine set up ($p)::nxm scheme line $a, WebEngine ready line $b"
+            else echo "::error title=WebEngine wasn't set up before the app ($p)::"; (grep -h "web\]" "$log" | head -n 10 || true); fail=1; fi
           done
           # Words that must never be on screen any more.
           hits=$(grep -n -E "No controller found|Play original|\"Accounts\"|RECENTLY REMOVED" app/qml/*.qml || true)

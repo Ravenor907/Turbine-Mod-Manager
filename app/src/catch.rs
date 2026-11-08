@@ -37,6 +37,9 @@ pub const SLOW_DOWNLOAD: &str =
     "Sign in to Nexus if it asks (free). Press Slow download on this page. Then Steam button, Turbine to come back: the mod is added by itself.";
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
+/// How long a browser's report of a download holds the Downloads watcher back once the file is ready: past this,
+/// the watcher adds it itself (0.54 left it waiting for a finish that never came).
+pub const DEFER: Duration = Duration::from_secs(20);
 
 fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
@@ -195,6 +198,11 @@ pub struct Catching {
     pub partial_size: u64,
     /// Downloads the browser helper reported with a known game: (file name, game id, Nexus page).
     pub helper_games: std::collections::VecDeque<(String, String, Option<bridge::NexusRef>)>,
+    /// Finished files the watcher saw while the browser helper was still reporting them: held back until the helper
+    /// says it finished, or until the deadline, then decided the usual way.
+    pub deferred: Vec<(Arrival, std::time::Instant)>,
+    /// The status text last written to the log (each new one is logged once).
+    pub said: String,
 }
 
 fn status_text(active: bool, text: &str, level: &str, progress: Option<f64>, game: &str, added: &str, done: bool, ask: &str) -> String {
@@ -255,7 +263,12 @@ impl qobject::Turbine {
     /// Sets the overlay's status and tells the browser helper.
     pub(crate) fn set_status(mut self: Pin<&mut Self>, text: &str, level: &str, progress: Option<f64>, game: &str, added: &str, done: bool, ask: &str) {
         let j = status_text(true, text, level, progress, game, added, done, ask);
-        self.as_mut().rust_mut().catching.busy = !done;
+        // A hint ("press Slow download") never counts as busy: any Downloading or Adding status replaces it.
+        self.as_mut().rust_mut().catching.busy = !done && level != "hint";
+        if self.rust().catching.said != text {
+            crate::log::line("catch", &format!("Status ({level}): {text}"));
+            self.as_mut().rust_mut().catching.said = text.to_string();
+        }
         self.as_mut().set_status_json(QString::from(j.as_str()));
         let p = progress.map(|p| format!("{:.3}", p.clamp(0.0, 1.0))).unwrap_or_else(|| "null".into());
         let g = if game.is_empty() { "null".to_string() } else { quote(game) };
@@ -363,7 +376,7 @@ impl qobject::Turbine {
     /// Starts watching Downloads for every new mod archive, for as long as Turbine runs (once, at start; never in
     /// the build's screenshot checks). Archives that arrived since Turbine last looked are caught up on first; on the
     /// very first run, the last 24 hours count and Turbine asks before adding any of those.
-    fn start_downloads_watch(mut self: Pin<&mut Self>) {
+    pub(crate) fn start_downloads_watch(mut self: Pin<&mut Self>) {
         let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
         let saved = CatchState::load(&path);
         let now = now_secs();
@@ -424,6 +437,8 @@ impl qobject::Turbine {
                 if looks % 30 == 5 {
                     post(&qt, |t| t.catch_save(false));
                 }
+                // Files held back for a browser's report whose finish never came.
+                post(&qt, |t| t.catch_deferred());
                 std::thread::sleep(Duration::from_secs(watch::POLL_SECS));
             }
         });
@@ -498,7 +513,7 @@ impl qobject::Turbine {
 
     /// A finished archive arrived in Downloads: decide which game it goes into (in the background when Nexus is
     /// asked about it), then add it or ask.
-    fn catch_arrival(mut self: Pin<&mut Self>, a: Arrival) {
+    pub(crate) fn catch_arrival(mut self: Pin<&mut Self>, a: Arrival) {
         let name = label_of(&a.path);
         crate::log::line(
             "catch",
@@ -516,7 +531,15 @@ impl qobject::Turbine {
             return;
         }
         if self.rust().catching.downloads.iter().any(|(_, d)| d.label == name) {
-            crate::log::line("catch", &format!("{name}: the browser helper is reporting this download; it adds it when it finishes"));
+            if self.rust().catching.deferred.iter().any(|(x, _)| x.path == a.path) {
+                return;
+            }
+            crate::log::line(
+                "catch",
+                &format!("{name}: the browser helper is reporting this download; it adds it when it finishes (Turbine adds it itself after {} seconds otherwise)", DEFER.as_secs()),
+            );
+            let until = std::time::Instant::now() + DEFER;
+            self.as_mut().rust_mut().catching.deferred.push((a, until));
             return;
         }
         // 0. Saved into Downloads/Game Mods/<game> (by the browser helper): a sure match for that game.
@@ -589,6 +612,63 @@ impl qobject::Turbine {
             let md5 = domains.into_iter().find_map(|(d, g)| identify(&d, &a.path).map(|s| (g, s)));
             post(&qt, move |t| t.catch_decide(a, None, md5, page));
         });
+    }
+
+    /// Every second: a file held back for the browser helper's report past its deadline is decided the usual way.
+    pub(crate) fn catch_deferred(mut self: Pin<&mut Self>) {
+        if self.rust().catching.deferred.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        let due: Vec<Arrival> = {
+            let mut rm = self.as_mut().rust_mut();
+            let d = &mut rm.catching.deferred;
+            let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(d).into_iter().partition(|(_, until)| *until <= now);
+            *d = keep;
+            due.into_iter().map(|(a, _)| a).collect()
+        };
+        for a in due {
+            let name = label_of(&a.path);
+            if self.handled(&a.path) {
+                continue;
+            }
+            crate::log::line("catch", &format!("The browser didn't report {name} finished; adding it from Downloads"));
+            self.as_mut().undefer_now(a);
+        }
+    }
+
+    /// Decides a held-back file now: the helper's report of it is dropped (its game, when known, still counts).
+    fn undefer_now(mut self: Pin<&mut Self>, a: Arrival) {
+        let name = label_of(&a.path);
+        {
+            let mut rm = self.as_mut().rust_mut();
+            let c = &mut rm.catching;
+            c.deferred.retain(|(x, _)| x.path != a.path);
+            c.downloads.retain(|(_, d)| d.label != name);
+        }
+        self.catch_arrival(a);
+    }
+
+    /// The helper said a download finished but Turbine couldn't take its report (or never saw it start): the
+    /// watcher's copy of that file is decided the usual way, now if the watcher has it, otherwise when it does.
+    fn fallback_to_watcher(mut self: Pin<&mut Self>, label: &str, path: Option<PathBuf>) {
+        let held = self.rust().catching.deferred.iter().find(|(x, _)| label_of(&x.path) == label || path.as_ref().is_some_and(|p| *p == x.path)).map(|(x, _)| x.clone());
+        self.as_mut().rust_mut().catching.downloads.retain(|(_, d)| d.label != label);
+        match held {
+            Some(a) => {
+                crate::log::line("catch", &format!("{label}: deciding the watcher's copy the usual way"));
+                self.undefer_now(a);
+            }
+            None => match path.filter(|p| p.is_file()) {
+                // Already there and in a watched folder: decided the usual way now.
+                Some(p) if accept_download(&p.to_string_lossy()).is_ok() => {
+                    let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                    crate::log::line("catch", &format!("{label}: deciding it the usual way"));
+                    self.catch_arrival(Arrival { path: p, size, arrived: now_secs(), catch_up: false });
+                }
+                _ => crate::log::line("catch", &format!("{label}: the Downloads watcher adds it when it sees it")),
+            },
+        }
     }
 
     /// Picks the game in order (the helper, Nexus by MD5, a matching Nexus page, the game last open in Turbine), then
@@ -716,8 +796,9 @@ impl qobject::Turbine {
         // in Turbine, over the browser and in the helper's panel says so until the download starts.
         let premium = turbine_engine::json::parse(&self.account_json().to_string()).ok().and_then(|a| a.get("premium").and_then(Json::as_bool)).unwrap_or(false);
         if mod_page && !premium {
+            // A hint, not a wait: it never holds back the watcher's own "Downloading" (0.54 kept it up instead).
             crate::log::line("catch", "Status: press Slow download on the page (a free account downloads there)");
-            self.as_mut().set_status(SLOW_DOWNLOAD, "wait", None, &name, "", false, "");
+            self.as_mut().set_status(SLOW_DOWNLOAD, "hint", None, &name, "", false, "");
         }
         out(true, &name, "")
     }
@@ -780,12 +861,12 @@ impl qobject::Turbine {
         }
     }
 
-    fn handled(&self, path: &Path) -> bool {
+    pub(crate) fn handled(&self, path: &Path) -> bool {
         let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.rust().catching.handled.contains(&real)
     }
 
-    fn mark_handled(mut self: Pin<&mut Self>, path: &Path) {
+    pub(crate) fn mark_handled(mut self: Pin<&mut Self>, path: &Path) {
         let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let mut rm = self.as_mut().rust_mut();
         let h = &mut rm.catching.handled;
@@ -793,6 +874,14 @@ impl qobject::Turbine {
             h.pop_front();
         }
         h.push_back(real);
+    }
+
+    /// The opposite: the file may be decided again (Turbine's browser marks its downloads at accept, before they
+    /// exist, and lets go of the mark to add them).
+    pub(crate) fn unmark_handled(mut self: Pin<&mut Self>, path: &Path) {
+        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let raw = path.to_path_buf();
+        self.as_mut().rust_mut().catching.handled.retain(|p| *p != real && *p != raw);
     }
 
     /// The player's answer to "Found <file>. Add it to <game>?": yes adds it; no means it isn't a mod, and Turbine
@@ -1019,17 +1108,29 @@ impl qobject::Turbine {
                     let taken = i.map(|i| c.downloads.remove(i).1);
                     taken
                 };
-                let path = msg.str_at("path").unwrap_or("");
-                let path = match accept_download(path) {
+                let raw = msg.str_at("path").unwrap_or("");
+                let label = d.as_ref().map(|d| d.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| label_of(Path::new(raw)));
+                let path = match accept_download(raw) {
                     Ok(p) => p,
                     Err(e) => {
-                        crate::log::line("bridge", &format!("Finished download not taken: {e}"));
-                        if d.is_some() {
+                        // Never silent: the watcher's own copy of the file (if it has one) is decided the usual way.
+                        crate::log::line("bridge", &format!("Finished download not taken: {e}; the Downloads watcher takes {label} instead"));
+                        let held = self.rust().catching.deferred.iter().any(|(x, _)| label_of(&x.path) == label);
+                        self.as_mut().fallback_to_watcher(&label, None);
+                        if d.is_some() && !held && !e.contains("isn't in Downloads") {
                             self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them from Get Mods, Add from Downloads.", "warn", None, "", "", true, "");
                         }
                         return;
                     }
                 };
+                if d.is_none() {
+                    // A finish Turbine never saw start (the helper restarted mid-download): decided the usual way.
+                    crate::log::line("bridge", &format!("Finished download {label} wasn't reported starting; deciding it the usual way"));
+                    self.as_mut().fallback_to_watcher(&label, Some(path));
+                    return;
+                }
+                // Reported and taken: nothing is held back for it any more.
+                self.as_mut().rust_mut().catching.deferred.retain(|(x, _)| x.path != path);
                 let r = d.as_ref().and_then(|d| d.r.clone());
                 let game = d.as_ref().and_then(|d| d.game.clone()).or_else(|| r.as_ref().and_then(|r| self.game_for_domain(&r.domain)));
                 match game {
@@ -1049,6 +1150,8 @@ impl qobject::Turbine {
                     }
                 }
             }
+            // The sign-in from the player's own browser (web.rs checks it against the waiting request).
+            "signin.cookies" => self.signin_cookies(msg),
             "choice" | "choice.back" | "choice.cancel" => {
                 let session = msg.str_at("sessionId").unwrap_or("").to_string();
                 let step = num_of(msg, "step") as usize;
@@ -1071,6 +1174,7 @@ impl qobject::Turbine {
         if only_if_busy && !self.rust().catching.busy {
             return;
         }
+        crate::log::line("catch", &format!("Added to {game}: {name}"));
         self.as_mut().set_status(&format!("Added to {game}: {name}. It's on."), "ok", None, game, name, true, "");
         let notes: Vec<String> = notes.iter().map(|n| quote(n)).collect();
         bridge::broadcast(&format!("{{\"type\":\"added\",\"game\":{},\"mod\":{},\"notes\":[{}],\"needs\":[]}}", quote(game), quote(name), notes.join(",")));

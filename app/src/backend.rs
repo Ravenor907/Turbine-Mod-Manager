@@ -54,6 +54,11 @@ pub mod qobject {
         #[qproperty(bool, pointer_paused, cxx_name = "pointerPaused")]
         #[qproperty(bool, stick_dpad, cxx_name = "stickDpad")]
         #[qproperty(QString, labs_json, cxx_name = "labsJson")]
+        /// Turbine's browser has the controller (its page is on screen, no sheet or wheel over it): A clicks at the
+        /// pointer (QML sets this).
+        #[qproperty(bool, browser_input, cxx_name = "browserInput")]
+        /// The page has a focused link or button (the read-only probe, QML sets this): A held still is Enter on it.
+        #[qproperty(bool, browser_enter, cxx_name = "browserEnter")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -443,6 +448,68 @@ pub mod qobject {
         #[qinvokable]
         fn restart(self: Pin<&mut Self>);
 
+        // ------------------------------------------------ Nexus inside Turbine (web.rs, browse.rs)
+
+        /// The browser is on screen or closed (the pointer stays while it is open).
+        #[qinvokable]
+        #[cxx_name = "browserMode"]
+        fn browser_mode(self: Pin<&mut Self>, on: bool);
+        /// An arrow key into the page ("up", "down", "left", "right").
+        #[qinvokable]
+        #[cxx_name = "browserKey"]
+        fn browser_key(self: Pin<&mut Self>, dir: &QString);
+        /// A press and release of A on the page (the build's scripted presses).
+        #[qinvokable]
+        #[cxx_name = "browserClick"]
+        fn browser_click(self: Pin<&mut Self>);
+        /// The file page a mod's Get it opens.
+        #[qinvokable]
+        #[cxx_name = "browserStartUrl"]
+        fn browser_start_url(self: &Self, domain: &QString, mod_id: f64, file_id: f64) -> QString;
+        /// Is this page Nexus's (or the build's stand-in)?
+        #[qinvokable]
+        #[cxx_name = "browserIsNexus"]
+        fn browser_is_nexus(self: &Self, url: &QString) -> bool;
+        /// How large pages start for this window height and Interface size.
+        #[qinvokable]
+        #[cxx_name = "browserZoomDefault"]
+        fn browser_zoom_default(self: &Self, height: f64, size: f64) -> f64;
+        /// A Mod Manager Download link the navigation guard caught.
+        #[qinvokable]
+        #[cxx_name = "browserNxm"]
+        fn browser_nxm(self: Pin<&mut Self>, url: &QString);
+        /// Where a download goes: {"ok","dir","name","path","game","folder","error"} (the file is marked as Turbine's).
+        #[qinvokable]
+        #[cxx_name = "browserPlan"]
+        fn browser_plan(self: Pin<&mut Self>, url: &QString, suggested: &QString, page_url: &QString, total: f64) -> QString;
+        /// A download finished: added to its game.
+        #[qinvokable]
+        #[cxx_name = "browserDone"]
+        fn browser_done(self: Pin<&mut Self>, path: &QString);
+        /// A download stopped ("interrupted: <reason>" or "cancelled").
+        #[qinvokable]
+        #[cxx_name = "browserFailed"]
+        fn browser_failed(self: Pin<&mut Self>, path: &QString, why: &QString);
+        /// Settings, Accounts: Sign out of Nexus in Turbine.
+        #[qinvokable]
+        #[cxx_name = "browserSignOut"]
+        fn browser_sign_out(self: Pin<&mut Self>);
+        /// Labs: Nexus page: draw without the GPU (from the next start).
+        #[qinvokable]
+        #[cxx_name = "setWebNoGpu"]
+        fn set_web_no_gpu(self: Pin<&mut Self>, on: bool);
+        #[qinvokable]
+        #[cxx_name = "webNoGpu"]
+        fn web_no_gpu(self: &Self) -> bool;
+        /// Sign in with my browser (Google and others): {"how","url","steam","text"}.
+        #[qinvokable]
+        #[cxx_name = "signinStart"]
+        fn signin_start(self: Pin<&mut Self>) -> QString;
+        /// The build's checks of the Downloads watcher's fallback (test runs only).
+        #[qinvokable]
+        #[cxx_name = "selftestCatch"]
+        fn selftest_catch(self: Pin<&mut Self>, step: &QString) -> QString;
+
         // ------------------------------------------------ catching browser downloads (catch.rs)
 
         /// Once at start: the browser helper's link and the browser check.
@@ -541,6 +608,12 @@ pub mod qobject {
         /// The check before Play finished; the same JSON as `checkJson`.
         #[qsignal]
         fn checked(self: Pin<&mut Self>, json: QString);
+
+        /// The sign-in from the player's own browser went into Turbine's browser: what to say ("Signed in to Nexus as
+        /// <name>"), and how to come back to the front in Game Mode (a steam:// link, or "" to tell the player).
+        #[qsignal]
+        #[cxx_name = "webSignedIn"]
+        fn web_signed_in(self: Pin<&mut Self>, text: QString, back: QString);
 
         /// Pages to open in the browser (free accounts): title, then JSON [{"name","url"}].
         #[qsignal]
@@ -656,6 +729,15 @@ pub struct TurbineRust {
     /// a list redrawn under it (a mod turned on, a sheet opened) gets its outline back.
     pub(crate) resend_ms: f64,
     pub(crate) labs_json: QString,
+    pub(crate) browser_input: bool,
+    pub(crate) browser_enter: bool,
+    /// Presses of A, RT and R3 in the browser, and the clicks they made (the build checks the two match).
+    pub(crate) browser_presses: u32,
+    pub(crate) browser_clicks: u32,
+    /// A is holding Enter down (not the mouse button).
+    pub(crate) a_enter: bool,
+    /// Downloads Turbine's browser accepted and hasn't finished adding.
+    pub(crate) web_downloads: Vec<crate::web::WebDownload>,
 }
 
 impl Default for TurbineRust {
@@ -719,6 +801,12 @@ impl Default for TurbineRust {
             mouse_down: [false, false],
             rehover: 0,
             resend_ms: 0.0,
+            browser_input: false,
+            browser_enter: false,
+            browser_presses: 0,
+            browser_clicks: 0,
+            a_enter: false,
+            web_downloads: Vec::new(),
         }
     }
 }
@@ -1249,6 +1337,15 @@ impl qobject::Turbine {
 
     /// One press or release, from a pad or the build's checks (selftestPad).
     fn handle_pad(mut self: Pin<&mut Self>, button: &'static str, pressed: bool) {
+        // Turbine's browser: A is a click at the pointer (one press, one click; held, it holds the button down).
+        if button == "a" && (*self.browser_input() || self.rust().mouse_src[0] & 4 != 0 || self.rust().a_enter) {
+            return self.browser_a(pressed);
+        }
+        if pressed && *self.browser_input() && (button == "rt" || button == "r3") {
+            let n = self.rust().browser_presses + 1;
+            self.as_mut().rust_mut().browser_presses = n;
+            crate::log::line("pad", &format!("Browser press {n} ({})", button.to_uppercase()));
+        }
         // While the pointer shows, RT and R3 are the left mouse button and LT the right one (held for dragging).
         // Each source is tracked on its own: R3 let go while RT still drags doesn't drop the drag, and a source
         // whose press went to the mouse never sends its release on to the interface (or the other way round).
@@ -1284,7 +1381,7 @@ impl qobject::Turbine {
             crate::log::line("pad", &format!("Press {button}"));
             // Any other press means the player is using the buttons: the pointer goes, so the triggers page
             // again at once. (R3 with the pointer hidden shows it at the focus: Main.qml.)
-            if mouse.is_none() && self.rust().pointer.shown && self.rust().mouse_down == [false, false] {
+            if mouse.is_none() && self.rust().pointer.shown && !self.rust().pointer.sticky && self.rust().mouse_down == [false, false] {
                 self.as_mut().pointer_hide();
             }
         }
@@ -1308,7 +1405,7 @@ impl qobject::Turbine {
     }
 
     pub fn pointer_hide(mut self: Pin<&mut Self>) {
-        if !self.rust().pointer.shown || self.rust().mouse_down != [false, false] {
+        if !self.rust().pointer.shown || self.rust().pointer.sticky || self.rust().mouse_down != [false, false] {
             return;
         }
         self.as_mut().rust_mut().pointer.shown = false;
@@ -1401,7 +1498,7 @@ impl qobject::Turbine {
     }
 
     /// The pointer's place and whether it shows, for the pointer drawn in QML.
-    fn pointer_publish(mut self: Pin<&mut Self>) {
+    pub(crate) fn pointer_publish(mut self: Pin<&mut Self>) {
         let (x, y, shown) = (self.rust().pointer.x, self.rust().pointer.y, self.rust().pointer.shown);
         if *self.pointer_x() != x {
             self.as_mut().set_pointer_x(x);
@@ -1415,7 +1512,7 @@ impl qobject::Turbine {
     }
 
     /// A trigger as a mouse button: `i` 0 left (RT, R2 on some pads), 1 right (LT, L2).
-    fn mouse_button(mut self: Pin<&mut Self>, i: usize, pressed: bool, from: &str) {
+    pub(crate) fn mouse_button(mut self: Pin<&mut Self>, i: usize, pressed: bool, from: &str) {
         if self.rust().mouse_down[i] == pressed {
             return;
         }
@@ -1427,6 +1524,12 @@ impl qobject::Turbine {
         if pressed {
             let what = if i == 0 { "Left click" } else { "Right click" };
             crate::log::line("pad", &format!("{what} ({}) at {x:.0}, {y:.0}", from.to_uppercase()));
+            // In the browser every click is counted against the presses that made it (the build checks they match).
+            if i == 0 && self.rust().pointer.sticky {
+                let n = self.rust().browser_clicks + 1;
+                self.as_mut().rust_mut().browser_clicks = n;
+                crate::log::line("pad", &format!("Browser click {n} ({})", from.to_uppercase()));
+            }
         }
         let kind = if pressed { crate::pad::Kind::Press } else { crate::pad::Kind::Release };
         crate::pad::send(kind, x, y, button, self.mouse_mask(), 0);

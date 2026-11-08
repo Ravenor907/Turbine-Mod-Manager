@@ -170,3 +170,35 @@ pub fn find_browser(home: &Path) -> Option<BrowserShortcut> {
     }
     None
 }
+
+/// Words that mark Turbine's own shortcut (the Flatpak's id, or its program), lower case.
+pub const TURBINE_MARKS: &[&str] = &["io.github.ravenor907.turbinemodmanager", "turbine-mod-manager"];
+
+/// Is this shortcut Turbine itself (by its program path or launch options, never by its name alone)?
+pub fn is_turbine(s: &Shortcut) -> bool {
+    let hay = format!("{} {}", s.exe, s.launch_options).to_lowercase();
+    TURBINE_MARKS.iter().any(|m| hay.contains(m))
+}
+
+/// Turbine's own entry among the player's non-Steam games, if it was added to Steam: after signing in with the
+/// player's own browser in Game Mode, steam://rungameid/<its id> brings Turbine back to the front. Read only.
+pub fn find_turbine(home: &Path) -> Option<(u32, String)> {
+    for f in shortcut_files(home) {
+        let Ok(bytes) = std::fs::read(&f) else { continue };
+        if bytes.len() > 16 << 20 {
+            continue;
+        }
+        let Ok(list) = parse(&bytes) else { continue };
+        if let Some(s) = list.iter().find(|s| is_turbine(s)) {
+            return Some((s.appid, s.name.clone()));
+        }
+    }
+    None
+}
+
+/// The steam://rungameid link for a game id Steam put in the environment (SteamGameId, set for a game or
+/// non-Steam shortcut Steam started), when it is a plausible one.
+pub fn rungameid_from_env(value: &str) -> Option<String> {
+    let v = value.trim();
+    (!v.is_empty() && v.len() <= 20 && v.bytes().all(|b| b.is_ascii_digit()) && v != "0").then(|| format!("steam://rungameid/{v}"))
+}

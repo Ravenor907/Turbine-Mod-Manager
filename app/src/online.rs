@@ -865,9 +865,10 @@ impl Net {
     }
 
     /// Downloads what an nxm link (Mod Manager Download on the site) points at. Works for free accounts.
-    pub fn fetch_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
+    /// `into`: Turbine's browser asked for it, so the file goes into that Game Mods folder afterwards (web.rs).
+    pub fn fetch_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, into: Option<&std::path::Path>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
         if self.sample.is_some() {
-            return self.pretend_nxm(link, progress);
+            return self.pretend_nxm(link, into, progress);
         }
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.")?;
         let file = nx.file_info(&link.domain, link.mod_id, link.file_id).map_err(err)?;
@@ -883,12 +884,15 @@ impl Net {
     }
 
     /// The screenshot checks have no internet: a link shows its progress from the recorded file details, then stops.
-    fn pretend_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
+    fn pretend_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, into: Option<&std::path::Path>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
         let file = nexus::parse_file(&self.sample_text("nexus_file.json").ok_or("The sample file details are missing.")??)?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
         let total = file.size_bytes.max(1);
         CANCEL.store(false, Ordering::SeqCst);
-        crate::log::line("nxm", &format!("Test run: pretending to download {}", link.redacted()));
+        match into {
+            Some(dir) => crate::log::line("nxm", &format!("Test run: pretending to download {} into Game Mods/{}", link.redacted(), dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
+            None => crate::log::line("nxm", &format!("Test run: pretending to download {}", link.redacted())),
+        }
         for i in 0..=200u64 {
             if CANCEL.load(Ordering::SeqCst) {
                 break;

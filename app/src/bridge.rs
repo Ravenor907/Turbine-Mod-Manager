@@ -567,6 +567,8 @@ const HELPER_VERSION_FILE: &str = "bridge-helper-version";
 /// The first helper version that knows "open" (opens a Nexus page in a new tab).
 pub const OPEN_SINCE: &str = "0.53";
 /// The first helper version that knows "reload" (reloads itself from its folder with chrome.runtime.reload()).
+/// The helper version that knows the sign-in request (0.55).
+pub const SIGNIN_SINCE: &str = "0.55";
 pub const RELOAD_SINCE: &str = "0.54";
 /// What the player does once when the helper is too old to reload itself.
 pub const OLD_HELPER_TEXT: &str =
@@ -1019,6 +1021,14 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
                     log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
                 }
             }
+            if let Some(id) = signin_waiting(Instant::now()) {
+                if version_older(&hv, SIGNIN_SINCE) {
+                    log(&format!("Didn't ask helper {hv} for the sign-in: it is too old to know how (it needs {SIGNIN_SINCE})"));
+                } else {
+                    let sent = send(&out, OP_TEXT, signin_request_message(&id).as_bytes());
+                    log(&format!("Asked the helper for the Nexus sign-in{}", if sent { "" } else { " (it didn't take it)" }));
+                }
+            }
             if reload {
                 // Turbine's newer files go into its folder first (catch.rs), so the reload picks them up.
                 let copied = BEFORE_RELOAD.get().is_none_or(|f| f());
@@ -1042,6 +1052,221 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
         log(&format!("Browser helper {ext} disconnected"));
         handler("disconnected", &Json::Null);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------- sign-in
+
+// Sign-in pass-through (0.55): Nexus's Google button (and any other provider the embedded browser can't use) works
+// in the player's own browser. The player presses "Sign in with my browser" in Turbine; Turbine makes a one-time
+// request id and sends {"type":"signin.request","id","url"} to the helper. After the player has signed in there, the
+// helper answers {"type":"signin.cookies","id","cookies":[...]} with Nexus's cookies only, and Turbine puts them into
+// its own browser's profile. Nothing is taken without that request: a message with no request waiting, another id,
+// or an old one (SIGNIN_WAIT) is refused whole. Cookies for any other site are dropped one by one. Cookie values are
+// never logged or written anywhere but the browser's own cookie store.
+
+/// Nexus's sign-in page.
+pub const SIGNIN_URL: &str = "https://users.nexusmods.com/auth/sign_in";
+/// How long a sign-in request stays good.
+pub const SIGNIN_WAIT: Duration = Duration::from_secs(15 * 60);
+/// The most cookies one answer may carry, and their sizes.
+pub const MAX_COOKIES: usize = 80;
+pub const MAX_COOKIE_NAME: usize = 256;
+pub const MAX_COOKIE_VALUE: usize = 4096;
+
+/// One cookie from the player's browser, checked.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SigninCookie {
+    pub name: String,
+    pub value: String,
+    /// The host with no leading dot: nexusmods.com or under it.
+    pub host: String,
+    /// For that host alone (no Domain attribute).
+    pub host_only: bool,
+    pub path: String,
+    pub secure: bool,
+    pub http_only: bool,
+    /// 0 not set, 1 lax, 2 strict, 3 none (webglue.cpp's numbers).
+    pub same_site: i32,
+    /// Seconds since 1970; 0 for a session cookie.
+    pub expires: f64,
+}
+
+/// The waiting request: its id and when it was made.
+static SIGNIN: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+
+/// A cookie's domain as Chrome reports it (".nexusmods.com", "users.nexusmods.com") when it is Nexus's own: the
+/// host in lower case with no leading dot. None for every other site, look-alikes included.
+pub fn cookie_host(domain: &str) -> Option<String> {
+    let d = domain.strip_prefix('.').unwrap_or(domain).to_ascii_lowercase();
+    if d.is_empty() || d.len() > 253 || !d.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+        return None;
+    }
+    if d.split('.').any(str::is_empty) {
+        return None;
+    }
+    (d == "nexusmods.com" || d.ends_with(".nexusmods.com")).then_some(d)
+}
+
+/// A cookie name: a token (RFC 6265), nothing a Set-Cookie line could be split on.
+fn cookie_name_ok(n: &str) -> bool {
+    !n.is_empty() && n.len() <= MAX_COOKIE_NAME && n.bytes().all(|b| b.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?={}".contains(&b))
+}
+
+/// A cookie value: printable ASCII with no space, quote, comma, semicolon or backslash (RFC 6265 cookie-octet), with
+/// an optional pair of double quotes around it.
+fn cookie_value_ok(v: &str) -> bool {
+    let inner = v.strip_prefix('"').and_then(|x| x.strip_suffix('"')).unwrap_or(v);
+    v.len() <= MAX_COOKIE_VALUE && inner.bytes().all(|b| b == 0x21 || (0x23..=0x2B).contains(&b) || (0x2D..=0x3A).contains(&b) || (0x3C..=0x5B).contains(&b) || (0x5D..=0x7E).contains(&b))
+}
+
+fn cookie_path_ok(p: &str) -> bool {
+    p.starts_with('/') && p.len() <= 1024 && p.bytes().all(|b| b.is_ascii_graphic() && b != b';')
+}
+
+/// A request id: 32 hex digits.
+pub fn signin_id_ok(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// {"type":"signin.request","id":...,"url":...}
+pub fn signin_request_message(id: &str) -> String {
+    format!("{{\"type\":\"signin.request\",\"id\":{},\"url\":{}}}", quote(id), quote(SIGNIN_URL))
+}
+
+/// {"type":"signin.done","id":...,"ok":...,"text":...}: what the helper's panel says afterwards.
+pub fn signin_done_message(id: &str, ok: bool, text: &str) -> String {
+    format!("{{\"type\":\"signin.done\",\"id\":{},\"ok\":{ok},\"text\":{}}}", quote(id), quote(text))
+}
+
+/// The player pressed "Sign in with my browser": a new request (any older one is dropped), sent to the helper now
+/// when it is connected, otherwise right after it connects (within SIGNIN_WAIT). Returns the id.
+pub fn signin_request() -> Result<String, String> {
+    let id = new_token().map_err(|e| format!("no random numbers ({e})"))?[..32].to_string();
+    *SIGNIN.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.clone(), Instant::now()));
+    if connected() {
+        broadcast(&signin_request_message(&id));
+    }
+    Ok(id)
+}
+
+/// The waiting request's id, when there is one that is still good.
+pub fn signin_waiting(now: Instant) -> Option<String> {
+    let g = SIGNIN.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().filter(|(_, at)| now.saturating_duration_since(*at) <= SIGNIN_WAIT).map(|(id, _)| id.clone())
+}
+
+/// Ends the waiting request (signed in, or the player signed out).
+pub fn signin_end() {
+    *SIGNIN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Checks a signin.cookies message against the waiting request `want` (None: no request waits). Answers the
+/// Nexus cookies and how many others were dropped, or why the whole message is refused.
+pub fn signin_cookies(msg: &Json, want: Option<&str>) -> Result<(Vec<SigninCookie>, usize), String> {
+    if msg.str_at("type") != Some("signin.cookies") {
+        return Err("not a sign-in answer".into());
+    }
+    let Some(want) = want else { return Err("Turbine didn't ask for a sign-in (or the request is over 15 minutes old)".into()) };
+    let id = msg.str_at("id").unwrap_or("");
+    if !signin_id_ok(id) || !same_token(id, want) {
+        return Err("the sign-in answer is for another request".into());
+    }
+    let list = match msg.get("cookies") {
+        Some(Json::Arr(a)) => a,
+        _ => return Err("the sign-in answer has no cookie list".into()),
+    };
+    if list.len() > MAX_COOKIES {
+        return Err(format!("the sign-in answer has {} cookies, more than {MAX_COOKIES}", list.len()));
+    }
+    let mut out = Vec::new();
+    let mut dropped = 0;
+    for c in list {
+        let host = c.str_at("domain").and_then(cookie_host);
+        let name = c.str_at("name").unwrap_or("");
+        let value = c.str_at("value").unwrap_or("");
+        let path = c.str_at("path").filter(|p| !p.is_empty()).unwrap_or("/");
+        let (Some(host), true, true, true) = (host, cookie_name_ok(name), cookie_value_ok(value), cookie_path_ok(path)) else {
+            dropped += 1;
+            continue;
+        };
+        let flag = |k: &str| c.get(k).and_then(Json::as_bool).unwrap_or(false);
+        let same_site = match c.str_at("sameSite") {
+            Some("lax") => 1,
+            Some("strict") => 2,
+            Some("no_restriction") => 3,
+            _ => 0,
+        };
+        // SameSite=None is only kept for secure cookies (browsers refuse it otherwise).
+        if same_site == 3 && !flag("secure") {
+            dropped += 1;
+            continue;
+        }
+        let expires = match c.get("expirationDate") {
+            Some(Json::Num(n)) if n.is_finite() && *n > 0.0 => n.floor(),
+            _ => 0.0,
+        };
+        out.push(SigninCookie {
+            name: name.to_string(),
+            value: value.to_string(),
+            host,
+            host_only: flag("hostOnly"),
+            path: path.to_string(),
+            secure: flag("secure"),
+            http_only: flag("httpOnly"),
+            same_site,
+            expires,
+        });
+    }
+    Ok((out, dropped))
+}
+
+/// The signed-in account's name, when one of the cookies carries it (a session token whose middle part names the
+/// user). Only read in memory, never logged with the cookie.
+pub fn signin_name(cookies: &[SigninCookie]) -> Option<String> {
+    for c in cookies {
+        let parts: Vec<&str> = c.value.split('.').collect();
+        if parts.len() != 3 || parts[1].len() > 8192 {
+            continue;
+        }
+        let Some(bytes) = base64url_decode(parts[1]) else { continue };
+        let Ok(text) = String::from_utf8(bytes) else { continue };
+        let Ok(j) = json::parse(&text) else { continue };
+        let user = j.get("user");
+        let name = user
+            .and_then(|u| u.str_at("username").or(u.str_at("name")))
+            .or(j.str_at("username"))
+            .or(j.str_at("preferred_username"))
+            .or(j.str_at("name"));
+        if let Some(n) = name.map(str::trim).filter(|n| !n.is_empty() && n.len() <= 64 && n.chars().all(|ch| !ch.is_control())) {
+            return Some(n.to_string());
+        }
+    }
+    None
+}
+
+/// Base64 with the URL alphabet, padding optional (a session token's parts).
+pub fn base64url_decode(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut acc: u32 = 0;
+    let mut bits = 0;
+    for b in s.trim_end_matches('=').bytes() {
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// Turbine's version for the welcome message (set once at start).
@@ -1582,4 +1807,138 @@ mod tests {
         assert_eq!(page_guard(&mut l, "a", t0 + Duration::from_secs(9), w), None);
         assert_eq!(l.len(), 1, "old pages are forgotten");
     }
+
+    // ------------------------------------------------------------------------------------------------ sign-in
+
+    fn cookie(domain: &str, name: &str, value: &str) -> String {
+        format!("{{\"name\":{},\"value\":{},\"domain\":{},\"path\":\"/\",\"secure\":true,\"httpOnly\":true,\"hostOnly\":false,\"sameSite\":\"lax\",\"expirationDate\":1893456000.5}}", quote(name), quote(value), quote(domain))
+    }
+
+    fn answer_with(id: &str, cookies: &[String]) -> Json {
+        json::parse(&format!("{{\"type\":\"signin.cookies\",\"id\":{},\"cookies\":[{}]}}", quote(id), cookies.join(","))).unwrap()
+    }
+
+    const ID: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn only_nexus_cookies_pass_the_domain_filter() {
+        assert_eq!(cookie_host(".nexusmods.com").as_deref(), Some("nexusmods.com"));
+        assert_eq!(cookie_host("nexusmods.com").as_deref(), Some("nexusmods.com"));
+        assert_eq!(cookie_host("users.nexusmods.com").as_deref(), Some("users.nexusmods.com"));
+        assert_eq!(cookie_host(".WWW.NexusMods.com").as_deref(), Some("www.nexusmods.com"));
+        for bad in [
+            "evilnexusmods.com",
+            "nexusmods.com.evil.example",
+            ".google.com",
+            "accounts.google.com",
+            "nexusmods.co",
+            "",
+            ".",
+            "..nexusmods.com",
+            "a..nexusmods.com",
+            "nexus mods.com",
+            "nexusmods.com/",
+            "xn--nexusmods.com.evil",
+            "nexusmods.com:443",
+            "127.0.0.1",
+        ] {
+            assert_eq!(cookie_host(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_sign_in_answer_needs_the_players_request() {
+        let msg = answer_with(ID, &[cookie(".nexusmods.com", "nexusmods_session", "abc123")]);
+        // No request waiting: refused whole, even with a good id.
+        assert!(signin_cookies(&msg, None).is_err());
+        // Another request's id.
+        assert!(signin_cookies(&msg, Some("ffffffffffffffffffffffffffffffff")).is_err());
+        // Not an id at all.
+        assert!(signin_cookies(&answer_with("short", &[]), Some("short")).is_err());
+        let (got, dropped) = signin_cookies(&msg, Some(ID)).unwrap();
+        assert_eq!(dropped, 0);
+        assert_eq!(got.len(), 1);
+        let c = &got[0];
+        assert_eq!((c.name.as_str(), c.value.as_str(), c.host.as_str(), c.path.as_str()), ("nexusmods_session", "abc123", "nexusmods.com", "/"));
+        assert!(c.secure && c.http_only && !c.host_only);
+        assert_eq!(c.same_site, 1);
+        assert_eq!(c.expires, 1893456000.0);
+        // Wrong type, no list, too many.
+        let wrong = json::parse(&format!("{{\"type\":\"signin.request\",\"id\":{}}}", quote(ID))).unwrap();
+        assert!(signin_cookies(&wrong, Some(ID)).is_err());
+        let nolist = json::parse(&format!("{{\"type\":\"signin.cookies\",\"id\":{},\"cookies\":{{}}}}", quote(ID))).unwrap();
+        assert!(signin_cookies(&nolist, Some(ID)).is_err());
+        let many: Vec<String> = (0..=MAX_COOKIES).map(|i| cookie(".nexusmods.com", &format!("c{i}"), "v")).collect();
+        assert!(signin_cookies(&answer_with(ID, &many), Some(ID)).is_err());
+    }
+
+    #[test]
+    fn other_sites_and_broken_cookies_are_dropped_one_by_one() {
+        let list = vec![
+            cookie(".nexusmods.com", "good", "1"),
+            cookie(".google.com", "SID", "secret"),
+            cookie("accounts.google.com", "LSID", "secret"),
+            cookie("nexusmods.com.evil.example", "x", "1"),
+            cookie(".nexusmods.com", "bad;name", "1"),
+            cookie(".nexusmods.com", "badvalue", "a;b"),
+            cookie(".nexusmods.com", "space", "a b"),
+            cookie(".nexusmods.com", "", "1"),
+            cookie("users.nexusmods.com", "quoted", "\"ok\""),
+        ];
+        let (got, dropped) = signin_cookies(&answer_with(ID, &list), Some(ID)).unwrap();
+        let names: Vec<&str> = got.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["good", "quoted"]);
+        assert_eq!(dropped, 7);
+        assert!(got.iter().all(|c| c.host == "nexusmods.com" || c.host.ends_with(".nexusmods.com")));
+        // SameSite=None without Secure is dropped; a session cookie has no expiry.
+        let none = r#"{"name":"n","value":"v","domain":".nexusmods.com","sameSite":"no_restriction","secure":false}"#.to_string();
+        let session = r#"{"name":"s","value":"v","domain":"www.nexusmods.com","hostOnly":true,"path":"/account"}"#.to_string();
+        let (got, dropped) = signin_cookies(&answer_with(ID, &[none, session]), Some(ID)).unwrap();
+        assert_eq!(dropped, 1);
+        assert_eq!(got[0].name, "s");
+        assert!(got[0].host_only);
+        assert_eq!(got[0].expires, 0.0);
+        assert_eq!(got[0].path, "/account");
+    }
+
+    #[test]
+    fn sign_in_messages_and_ids() {
+        assert!(signin_id_ok(ID));
+        assert!(!signin_id_ok(&ID.to_uppercase()));
+        assert!(!signin_id_ok(&ID[..31]));
+        let m = json::parse(&signin_request_message(ID)).unwrap();
+        assert_eq!(m.str_at("type"), Some("signin.request"));
+        assert_eq!(m.str_at("url"), Some("https://users.nexusmods.com/auth/sign_in"));
+        let d = json::parse(&signin_done_message(ID, true, "Signed in")).unwrap();
+        assert_eq!(d.str_at("type"), Some("signin.done"));
+        assert_eq!(d.get("ok").and_then(Json::as_bool), Some(true));
+    }
+
+    #[test]
+    fn the_account_name_comes_from_a_session_token() {
+        let mk = |payload: &str| {
+            let b = base64(payload.as_bytes()).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
+            SigninCookie { name: "t".into(), value: format!("eyJhbGciOiJIUzI1NiJ9.{b}.sig"), host: "nexusmods.com".into(), host_only: false, path: "/".into(), secure: true, http_only: true, same_site: 0, expires: 0.0 }
+        };
+        assert_eq!(signin_name(&[mk(r#"{"user":{"id":1,"username":"Ravenor907"}}"#)]).as_deref(), Some("Ravenor907"));
+        assert_eq!(signin_name(&[mk(r#"{"preferred_username":"Someone"}"#)]).as_deref(), Some("Someone"));
+        assert_eq!(signin_name(&[mk(r#"{"sub":"1"}"#)]), None);
+        let plain = SigninCookie { value: "abc".into(), ..mk("{}") };
+        assert_eq!(signin_name(&[plain]), None);
+        assert_eq!(base64url_decode("SGk"), Some(b"Hi".to_vec()));
+        assert_eq!(base64url_decode("S*k"), None);
+    }
+
+    #[test]
+    fn a_request_waits_then_ends() {
+        signin_end();
+        assert_eq!(signin_waiting(Instant::now()), None);
+        let id = signin_request().unwrap();
+        assert!(signin_id_ok(&id));
+        assert_eq!(signin_waiting(Instant::now()).as_deref(), Some(id.as_str()));
+        assert_eq!(signin_waiting(Instant::now() + SIGNIN_WAIT + Duration::from_secs(1)), None);
+        signin_end();
+        assert_eq!(signin_waiting(Instant::now()), None);
+    }
+
 }

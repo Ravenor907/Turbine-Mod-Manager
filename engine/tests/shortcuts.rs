@@ -229,3 +229,32 @@ fn only_nexus_pages_open_as_tabs() {
     }
     assert!(!nexus_tab_url(&format!("https://www.nexusmods.com/{}", "a".repeat(2100))));
 }
+
+#[test]
+fn finds_turbines_own_shortcut_to_come_back_to() {
+    let home = std::env::temp_dir().join(format!("turbine-shortcuts-self-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    assert!(shortcuts::find_turbine(&home).is_none());
+    let mut b = Bin::default();
+    b.open("shortcuts");
+    // A shortcut merely named Turbine isn't it; the Flatpak's id in the launch options is.
+    entry(&mut b, "0", Some(0x8000_0001), "Turbine", "\"/usr/bin/true\"", "");
+    entry(&mut b, "1", Some(0x8765_4321), "Mods", "\"/usr/bin/flatpak\"", "run --branch=stable --arch=x86_64 --command=turbine-mod-manager io.github.ravenor907.TurbineModManager");
+    b.close().close();
+    let f = home.join(".local/share/Steam/userdata/333/config/shortcuts.vdf");
+    write(&f, &b.0);
+    std::fs::create_dir_all(home.join(".local/share/Steam/steamapps")).unwrap();
+    let (appid, name) = shortcuts::find_turbine(&home).unwrap();
+    assert_eq!((appid, name.as_str()), (0x8765_4321, "Mods"));
+    assert_eq!(shortcuts::rungameid_url(appid), format!("steam://rungameid/{}", shortcuts::game_id(appid)));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn the_game_id_steam_set_is_checked() {
+    assert_eq!(shortcuts::rungameid_from_env("10376293824963018752").as_deref(), Some("steam://rungameid/10376293824963018752"));
+    assert_eq!(shortcuts::rungameid_from_env(" 489830 ").as_deref(), Some("steam://rungameid/489830"));
+    for bad in ["", "0", "12a", "steam://x", "123456789012345678901", "-1"] {
+        assert_eq!(shortcuts::rungameid_from_env(bad), None, "{bad}");
+    }
+}
