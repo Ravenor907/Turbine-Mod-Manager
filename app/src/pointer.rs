@@ -1,8 +1,10 @@
-//! The controller pointer, laid out like Steam's desktop controls: the right stick moves a mouse pointer, the left
-//! stick is a scroll wheel turned by circling it (clockwise scrolls down, like a wheel rolled toward you), and pushing
-//! it straight up or down also scrolls. This file is only the arithmetic: stick positions in, where the pointer is and
-//! how many wheel steps to send out. backend.rs reads the sticks (pad.rs) and sends the mouse and wheel events
-//! (qtglue.cpp). It needs nothing but the standard library, so the build tests it on its own.
+//! The controller pointer and the left stick, laid out like Steam's desktop controls: the right stick moves a mouse
+//! pointer, and the left stick is either a D-pad or a scroll wheel. Pushed out and held in one direction it presses
+//! that direction (with the D-pad's repeat, done in Main.qml); swept around the rim it turns a scroll wheel
+//! (clockwise scrolls down, like a wheel rolled toward you). This file is only the arithmetic: stick positions in,
+//! where the pointer is, which direction is pressed and how many wheel notches to send out. backend.rs reads the
+//! sticks (pad.rs) and sends the presses, mouse and wheel events (qtglue.cpp). It needs nothing but the standard
+//! library, so the build tests it on its own.
 
 use std::f64::consts::PI;
 
@@ -12,13 +14,16 @@ pub const DEADZONE: f64 = 0.14;
 pub const CROSS_SECS: f64 = 0.85;
 /// The pointer hides after this long without the right stick moving.
 pub const HIDE_MS: f64 = 3000.0;
-/// The left stick counts as on the wheel's rim past this much travel.
-pub const RIM: f64 = 0.55;
-/// One wheel step for this much turning (twelve steps a full turn).
-pub const STEP_RAD: f64 = PI / 6.0;
-/// Pushed straight up or down past this much travel, held this long while not turning: scrolls by itself.
-pub const PUSH: f64 = 0.65;
-pub const PUSH_HOLD_MS: f64 = 220.0;
+/// Left stick: past this much travel it counts as pushed; under `LET_GO` it is back in the middle again.
+pub const PUSH_ON: f64 = 0.5;
+pub const LET_GO: f64 = 0.35;
+/// A push that stays within `CONE` of where it started for `COMMIT_MS` is one direction press.
+pub const COMMIT_MS: f64 = 80.0;
+pub const CONE: f64 = 25.0 * PI / 180.0;
+/// Swept this far from where it started (before or after the press) it is the scroll wheel instead.
+pub const SWEEP: f64 = 40.0 * PI / 180.0;
+/// One wheel notch (three rows) for this much turning.
+pub const NOTCH: f64 = 30.0 * PI / 180.0;
 
 /// The sticks as -1..1 (x right, y down, the way SDL reports them) and the triggers as 0..1.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -52,8 +57,24 @@ pub struct Tick {
     pub moved: bool,
     /// It was showing and has just hidden.
     pub hid: bool,
-    /// Wheel steps to send: positive scrolls down, negative up.
+    /// Wheel notches to send: positive scrolls down, negative up.
     pub wheel: i32,
+    /// The left stick let go of a direction ("up", "down", "left", "right"), then pressed one.
+    pub release: Option<&'static str>,
+    pub press: Option<&'static str>,
+}
+
+/// What the left stick is doing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Left {
+    /// In the middle.
+    Idle,
+    /// Pushed out at angle `from`, for `ms`, not decided yet.
+    Pending { from: f64, ms: f64 },
+    /// Holding a direction, pressed at angle `from`.
+    Dir { dir: &'static str, from: f64 },
+    /// Turning the wheel: the angle at the last look and the turning not yet sent as a notch.
+    Wheel { last: f64, turned: f64 },
 }
 
 #[derive(Clone, Debug)]
@@ -63,20 +84,26 @@ pub struct Pointer {
     pub shown: bool,
     /// Time since the right stick last moved it.
     idle_ms: f64,
-    /// Left stick: the angle at the last look while on the rim, the turning not yet sent as a step, how fast it is
-    /// turning (smoothed, radians a second), how long it has been pushed straight, and pushed steps not yet sent.
-    angle: Option<f64>,
-    turned: f64,
-    spin: f64,
-    pushed_ms: f64,
-    pushed: f64,
-    /// Held down by a trigger (keeps the pointer showing while dragging).
+    pub left: Left,
+    /// Held down by a trigger or R3 (keeps the pointer showing while dragging).
     pub holding: bool,
 }
 
 impl Default for Pointer {
     fn default() -> Self {
-        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, angle: None, turned: 0.0, spin: 0.0, pushed_ms: 0.0, pushed: 0.0, holding: false }
+        Pointer { x: -1.0, y: -1.0, shown: false, idle_ms: 0.0, left: Left::Idle, holding: false }
+    }
+}
+
+/// The D-pad direction for a stick angle (y down): the larger axis wins.
+pub fn direction(a: f64) -> &'static str {
+    let (dx, dy) = (a.cos(), a.sin());
+    if dx.abs() >= dy.abs() {
+        if dx >= 0.0 { "right" } else { "left" }
+    } else if dy >= 0.0 {
+        "down"
+    } else {
+        "up"
     }
 }
 
@@ -130,59 +157,87 @@ impl Pointer {
         if self.holding {
             self.idle_ms = 0.0;
         }
-        out.wheel = self.wheel(s, dt_ms);
+        self.left_stick(s, dt_ms, &mut out);
         out
     }
 
-    /// Left stick: steps from circling it, or from pushing it straight up or down.
-    fn wheel(&mut self, s: &Sticks, dt_ms: f64) -> i32 {
+    /// Left stick: a direction press when pushed and held one way, wheel notches when swept around.
+    fn left_stick(&mut self, s: &Sticks, dt_ms: f64, out: &mut Tick) {
         let m = s.lx.hypot(s.ly);
-        let secs = (dt_ms / 1000.0).max(1e-3);
-        let mut steps = 0;
-        if m >= RIM {
-            // y points down, so the angle grows clockwise as seen on the screen.
-            let a = s.ly.atan2(s.lx);
-            if let Some(prev) = self.angle {
-                let d = wrap(a - prev);
-                // A jump of more than a third of a turn in one look is the stick snapping across, not turning.
-                if d.abs() < 2.1 {
-                    self.turned += d;
-                    self.spin = self.spin * 0.8 + (d.abs() / secs) * 0.2;
+        // y points down, so the angle grows clockwise as seen on the screen.
+        let a = s.ly.atan2(s.lx);
+        self.left = match self.left {
+            Left::Idle => {
+                if m >= PUSH_ON {
+                    Left::Pending { from: a, ms: 0.0 }
+                } else {
+                    Left::Idle
                 }
             }
-            self.angle = Some(a);
-            while self.turned >= STEP_RAD {
-                self.turned -= STEP_RAD;
-                steps += 1;
-            }
-            while self.turned <= -STEP_RAD {
-                self.turned += STEP_RAD;
-                steps -= 1;
-            }
-        } else {
-            self.angle = None;
-            self.turned = 0.0;
-            self.spin = 0.0;
-        }
-        // Pushed straight up or down (within about 25 degrees), not turning: scrolls on its own, faster the further.
-        let straight = m >= PUSH && s.lx.abs() <= s.ly.abs() * 0.47;
-        if straight && self.spin < 0.8 && steps == 0 {
-            self.pushed_ms += dt_ms;
-            if self.pushed_ms >= PUSH_HOLD_MS {
-                let rate = 4.0 + 14.0 * ((m - PUSH) / (1.0 - PUSH)).clamp(0.0, 1.0);
-                self.pushed += rate * secs;
-                let whole = self.pushed.floor();
-                if whole >= 1.0 {
-                    self.pushed -= whole;
-                    let n = whole as i32;
-                    steps += if s.ly > 0.0 { n } else { -n };
+            Left::Pending { from, ms } => {
+                if m < LET_GO {
+                    // A flick shorter than a press: nothing.
+                    Left::Idle
+                } else {
+                    let d = wrap(a - from);
+                    let ms = ms + dt_ms;
+                    if d.abs() >= SWEEP {
+                        let mut w = Left::Wheel { last: from, turned: 0.0 };
+                        Self::turn(&mut w, a, out);
+                        w
+                    } else if ms >= COMMIT_MS && d.abs() <= CONE {
+                        let dir = direction(from);
+                        out.press = Some(dir);
+                        Left::Dir { dir, from }
+                    } else {
+                        Left::Pending { from, ms }
+                    }
                 }
             }
-        } else {
-            self.pushed_ms = 0.0;
-            self.pushed = 0.0;
+            Left::Dir { dir, from } => {
+                if m < LET_GO {
+                    out.release = Some(dir);
+                    Left::Idle
+                } else if wrap(a - from).abs() >= SWEEP {
+                    // Started out still, then swept around: the wheel after all.
+                    out.release = Some(dir);
+                    let mut w = Left::Wheel { last: from, turned: 0.0 };
+                    Self::turn(&mut w, a, out);
+                    w
+                } else {
+                    Left::Dir { dir, from }
+                }
+            }
+            Left::Wheel { last, turned } => {
+                if m < LET_GO {
+                    Left::Idle
+                } else {
+                    let mut w = Left::Wheel { last, turned };
+                    Self::turn(&mut w, a, out);
+                    w
+                }
+            }
+        };
+    }
+
+    /// The wheel turned to angle `a`: whole notches go out, the rest waits.
+    fn turn(w: &mut Left, a: f64, out: &mut Tick) {
+        if let Left::Wheel { last, turned } = w {
+            let d = wrap(a - *last);
+            // A jump of more than a third of a turn in one look is the stick snapping across, not turning.
+            if d.abs() < 2.1 {
+                *turned += d;
+            }
+            *last = a;
+            while *turned >= NOTCH - 1e-9 {
+                *turned -= NOTCH;
+                out.wheel += 1;
+            }
+            while *turned <= -NOTCH + 1e-9 {
+                *turned += NOTCH;
+                out.wheel -= 1;
+            }
         }
-        steps
     }
 }
 
@@ -268,43 +323,83 @@ mod tests {
         assert!(p.shown, "dragging keeps it showing");
     }
 
-    fn circle(p: &mut Pointer, clockwise: bool, turns: f64) -> i32 {
-        let steps = (turns * 60.0) as usize; // a turn in about a second
-        let mut wheel = 0;
-        for i in 0..=steps {
-            let a = (i as f64 / 60.0) * 2.0 * PI * if clockwise { 1.0 } else { -1.0 } - PI / 2.0;
-            wheel += p.tick(&Sticks { lx: a.cos() * 0.95, ly: a.sin() * 0.95, ..Default::default() }, 16.0, W, H).wheel;
+    /// Runs the left stick along `path` (one look per 16 ms) and collects what came out.
+    fn left(p: &mut Pointer, path: &[(f64, f64)]) -> (Vec<&'static str>, Vec<&'static str>, i32) {
+        let (mut presses, mut releases, mut wheel) = (Vec::new(), Vec::new(), 0);
+        for (lx, ly) in path {
+            let t = p.tick(&Sticks { lx: *lx, ly: *ly, ..Default::default() }, 16.0, W, H);
+            presses.extend(t.press);
+            releases.extend(t.release);
+            wheel += t.wheel;
         }
-        wheel
+        (presses, releases, wheel)
     }
 
     #[test]
-    fn circling_the_left_stick_scrolls() {
+    fn a_held_push_is_one_direction() {
+        // Acceptance check 1: pushed to 0.6 and held 80 ms is one press, let go is one release.
         let mut p = Pointer::default();
-        // Clockwise as seen on the screen (up, right, down, left): down, twelve steps a turn.
-        assert_eq!(circle(&mut p, true, 1.0), 12);
-        p.tick(&Sticks::default(), 16.0, W, H);
-        assert_eq!(circle(&mut p, false, 2.0), -24);
-        p.tick(&Sticks::default(), 16.0, W, H);
-        // Half a step's turning then letting go sends nothing.
-        assert_eq!(circle(&mut p, true, 1.0 / 24.0), 0);
+        let mut path = vec![(0.0, -0.6); 6]; // 0, 16, ... 80 ms
+        path.extend(vec![(0.0, -0.6); 20]); // held longer: still one press (Main.qml repeats it like the D-pad)
+        path.push((0.0, 0.0));
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["up"]);
+        assert_eq!(releases, vec!["up"]);
+        assert_eq!(wheel, 0);
+        // Each way, the larger axis winning.
+        for ((x, y), want) in [((0.6, 0.1), "right"), ((-0.6, 0.2), "left"), ((0.2, 0.7), "down")] {
+            let mut p = Pointer::default();
+            let (presses, _, _) = left(&mut p, &vec![(x, y); 7]);
+            assert_eq!(presses, vec![want]);
+        }
+    }
+
+    #[test]
+    fn a_flick_is_nothing() {
+        let mut p = Pointer::default();
+        let mut path = vec![(0.0, 0.9); 4]; // 48 ms
+        path.push((0.0, 0.0));
+        assert_eq!(left(&mut p, &path), (vec![], vec![], 0));
+        // Under the push line it never counts.
+        let mut p = Pointer::default();
+        assert_eq!(left(&mut p, &vec![(0.45, 0.0); 40]), (vec![], vec![], 0));
+    }
+
+    fn sweep(from_deg: f64, to_deg: f64, looks: usize) -> Vec<(f64, f64)> {
+        (0..=looks)
+            .map(|i| {
+                let a = (from_deg + (to_deg - from_deg) * i as f64 / looks as f64).to_radians();
+                (a.cos() * 0.9, a.sin() * 0.9)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_quarter_turn_clockwise_is_three_notches_down() {
+        // Acceptance check 1: a 90 degree clockwise sweep (up to right, as seen) is 3 down notches and no direction.
+        let mut p = Pointer::default();
+        let mut path = sweep(-90.0, 0.0, 8);
+        path.push((0.0, 0.0));
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert!(presses.is_empty() && releases.is_empty(), "{presses:?} {releases:?}");
+        assert_eq!(wheel, 3);
+        // Counter-clockwise, a full turn: twelve up.
+        let mut p = Pointer::default();
+        let (presses, _, wheel) = left(&mut p, &sweep(90.0, -270.0, 40));
+        assert!(presses.is_empty());
+        assert_eq!(wheel, -12);
         assert!(!p.shown, "the left stick never shows the pointer");
     }
 
     #[test]
-    fn pushing_straight_scrolls_after_a_moment() {
+    fn held_then_swept_becomes_the_wheel() {
         let mut p = Pointer::default();
-        let down = Sticks { ly: 1.0, ..Default::default() };
-        assert_eq!(run(&mut p, down, 200.0).wheel, 0, "a quick flick doesn't scroll");
-        let n = run(&mut p, down, 1000.0).wheel;
-        assert!((14..=20).contains(&n), "{n} steps a second at full push");
-        let mut p = Pointer::default();
-        let up = Sticks { ly: -0.75, lx: 0.1, ..Default::default() };
-        let n = run(&mut p, up, 1200.0).wheel;
-        assert!((-10..=-4).contains(&n), "{n}");
-        // Pushed sideways doesn't scroll.
-        let mut p = Pointer::default();
-        assert_eq!(run(&mut p, Sticks { lx: 1.0, ..Default::default() }, 1000.0).wheel, 0);
+        let mut path = vec![(0.0, -0.9); 7];
+        path.extend(sweep(-90.0, 0.0, 12));
+        let (presses, releases, wheel) = left(&mut p, &path);
+        assert_eq!(presses, vec!["up"]);
+        assert_eq!(releases, vec!["up"]);
+        assert_eq!(wheel, 3);
     }
 
     #[test]

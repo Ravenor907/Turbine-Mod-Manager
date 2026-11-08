@@ -1,9 +1,103 @@
-# QML components for 0.2
+# QML components
 
 One component per file in this folder. Every .qml file here is part of the Turbine module (see app/build.rs), so
 Main.qml can use them by name with no extra import. They only draw and report taps: the controller still goes
 through `app.act()`, which moves `focusIndex` and calls the actions. Taps on rows, buttons and pills emit the
 signals below, so touch works too.
+
+## Controls (0.54): one focus ring, one meaning per button
+
+| Button | Meaning everywhere |
+| --- | --- |
+| A | Do the focused thing |
+| B | Back one level, focus put back where it was. Hold 1 s: home |
+| X | Quick menu for the focused item (max 6 rows) |
+| Y | Find (My mods, Load order) or Search (Get mods) |
+| LB / RB | Previous / next tab of this view: game tabs, Settings sections, installer steps; on a mod page the previous / next result. Never another game |
+| LT / RT | Pointer hidden: a page up / down (move mode: top / bottom). Pointer showing: LT right click, RT left click |
+| R3 | Left mouse button. Pointer showing: press and release at the pointer, held it drags. Pointer hidden: the pointer shows on the focused item and A runs |
+| Start | Play; on a sheet its main button. Hold 0.6 s: Play options |
+| View | The quick wheel |
+| D-pad, left stick pushed | Move the focus (repeat 380 ms, then 85 ms, 5 rows at a time after 1.5 s) |
+| Left stick swept round | Scroll wheel, clockwise down; every 30 degrees one notch (3 rows) |
+| Right stick | The pointer: hover moves the focus ring, it hides on any other press or a touch, or after 3 s still |
+| Grips | Only when a layout sends them: L4/R4 are LT/RT, L5 is Y, R5 is View. Never in the legend |
+
+The left stick (pointer.rs `left_stick`): pushed past 0.5 and kept within 25 degrees for 80 ms it is one D-pad
+press (released under 0.35); swept 40 degrees first it is the wheel until it comes back under 0.35.
+
+### One table: `binds()`
+
+`binds()` in Main.qml answers what each button does in the context on screen right now:
+`{a, b, x, y, start, lb, rb, lt, rt, view}`, each `{label, run, pre}`. `act()` runs it; `legendFor(binds())` is the
+legend, so the legend can't promise something a button doesn't do. The D-pad and the stick go to `navigate()` and
+are never in the legend. Sheets answer through `sheetBinds()`.
+
+Legend rules: at most 5; A, B, X, Y in that order, then one more (the pointer's "RT Click, LT Menu" while it shows,
+or Start when a sheet covers Play). LB/RB are caps at the ends of the tab bar (and the Settings sections and the mod
+page header), View is the cap on the quick wheel's button, Start is the cap on Play: never printed twice. Holds read
+"hold A Delete". After a touch the legend hides until the next press.
+
+### Focus
+
+Zones: the rail, Play (in the header), the content. Left at the first column reaches the rail; Right or A comes
+back. Up from the top row reaches the filter bar, then Play. Tab bars aren't focusable (LB/RB, a swipe). Each game
+remembers its tab and row (`focusMemo`, `lastFocusId`), each tab its own row; Get mods remembers its search and card.
+
+| After | Focus lands on |
+| --- | --- |
+| Toggle | the same row |
+| Uninstall | the same row, dimmed "Removed: name. A puts it back." for 8 s, then the next row |
+| Move put down or cancelled | the moved row |
+| Get it on Nexus | the same button, "Opening Nexus..." (A does nothing for 8 s) |
+| A sheet or menu closes | the item that opened it |
+| B on a mod page | its card |
+| Switching games | the game's tab and row; first visit: the first mod (a game with no mods: Get mods, first card) |
+| B in Settings | the screen and row Settings was opened from |
+| A mod arrives | Play |
+
+No sheet opens without a press: the ones that come from outside (a download, an installer's questions, install notes)
+say why in the activity log; anything else is logged as "opened with no press" and fails the build's checks.
+
+### Touch
+
+Tap does it. Hold 0.5 s: the quick menu (mod rows, cards, plugins). A sideways swipe on the tab bar is LB/RB. Tap
+outside a sheet closes it. A touch moves the ring, hides the pointer and the legend.
+
+## QuickWheel
+
+View's wheel: eight places around a circle, the same on every screen; a place with nothing to do here is dimmed,
+never moved. Tap View: it stays open, the D-pad picks (Up then Right is Up-right), A does it, B closes. Hold View,
+push, let go of View: that place. In Labs the middle is Report.
+
+| Place | My mods | Get mods | Load order |
+| --- | --- | --- | --- |
+| Up | Find | Search | Find plugin |
+| Up-right | Sort | Sort | Sort |
+| Right | Show | Category | Show (dimmed) |
+| Down-right | Play options | Play options | Play options |
+| Down | Full menu | Full menu | Full menu |
+| Down-left | Settings | Settings | Settings |
+| Left | Games | Games | Games |
+| Up-left | Updates (n) | Add a file | Loadouts |
+
+Properties: `slots` ([{label, ok}]), `focusIndex` (-1 the middle), `labs`, `viewGlyph`. Signals: `activated(index)`,
+`closed()`. Full menu is GameMenu with Activity log and Help added.
+
+## SheetButtons
+
+The row of buttons on every sheet with buttons (Before you play, the loader prompt, InfoSheet, AskText, Delete for
+good). `labels`, `focusIndex` (the highlight), `mainIndex` (Start's button, drawn a little stronger). Signal
+`activated(index)` (a tap). The rule lives in Main.qml's `buttonSheet()`: the D-pad moves the highlight, A presses
+it, B is the cancel button, Start the main one. No key caps on the buttons and no other keys.
+
+## Tutorial
+
+The beginner tutorial, four cards on first run with the real buttons drawn large: A picks and B goes back with X
+options and Y find; View and the wheel; getting a mod (Get mods, A on a mod, Slow download on Nexus, Turbine adds
+it); Start plays. `card`, `count`, `viewGlyph`, `startGlyph`; signals `next()` and `skip()`. A or Right: next, Left:
+back, B or Start: skip. The last card's A says "Pick a game to start" and lands on the rail. Remembered once seen
+(`seen.tutorialDone`); Settings, Help shows it again.
 
 ## The `ui` object
 
@@ -51,12 +145,13 @@ One mod in the list. Height 54 (design px); set `width`.
 | `order` | int | 0 | the number shown |
 | `badge` | string | "" | one action badge, e.g. "Needs SKSE"; empty hides it |
 | `badgeLevel` | string | "warn" | `ok`, `info` (brass), `warn`, `stop` |
-| `focused` | bool | false | focus look, and the inline hints |
-| `showHints` | bool | `focused` | show "A Turn off · X More" |
+| `focused` | bool | false | focus look |
+| `showHints` | bool | `focused` | show "A Turn off · X More" (Main.qml sets false: the legend says it) |
 | `aLabel` | string | "Turn off" / "Turn on" | follows `isOn`; "" hides the A hint |
 | `xLabel` | string | "More" | "" hides the X hint |
 
-Signals: `clicked()` (row tapped), `toggleClicked()` (ON/OFF pill tapped).
+Signals: `clicked()` (row tapped), `toggleClicked()` (ON/OFF pill tapped), `menuClicked()` (right click, or a 0.5 s
+hold on touch: the quick menu).
 
 ```qml
 ListView {
@@ -189,8 +284,8 @@ GameMenu {
 | --- | --- | --- | --- |
 | `title` | string | "Before you play" | shown in capitals |
 | `checks` | array | [] | `{ level: "ok" | "warn" | "stop", title, detail }`; warn and stop lines are tinted |
-| `buttons` | array | [] | up to 3 `{ key, label }`; key is optional |
-| `focusIndex` | int | 0 | the focused button is drawn in brass |
+| `buttons` | array | [] | up to 4 `{ label, main }` (SheetButtons): Fix it, Play anyway, Play without mods, Not now |
+| `focusIndex` | int | 0 | the highlighted button (A presses it; B is Not now, Start Play anyway when nothing stops play) |
 | `note` | string | "" | small line under the buttons |
 
 Signals: `activated(int index, string key)`, `closed()`.
@@ -204,9 +299,9 @@ PrePlayCheck {
         { level: "warn", title: "SKSE needs an update", detail: "Steam updated Skyrim today. 6 of your mods won't load until SKSE catches up." },
         { level: "ok", title: "Space OK", detail: "41 GB free" }
     ]
-    buttons: [{ key: "a", label: "Play original" }, { label: "Play anyway" }, { key: "b", label: "Wait" }]
+    buttons: app.checkChoices.map(label => ({ label: label, main: label === "Play anyway" }))
     focusIndex: app.checkIndex
-    onActivated: (index, key) => { app.checkIndex = index; app.act("a") }
+    onActivated: (index, key) => { app.checkIndex = index; app.checkChoose(index) }
     onClosed: app.act("b")
 }
 ```
@@ -281,7 +376,7 @@ AddMods {
 | `canDownload` | bool | false | false (0.2): an info line, buttons A "Show where to get it" and B "Close". true: A "Install", B "Not now" |
 | `sourceShown` | bool | false | shows `sourceUrl` as text; set it when A is pressed in the 0.2 variant |
 | `infoText` | string | "This test version doesn't download anything. Get SKSE from its official site in Desktop Mode, then add its zip with Add mods." | |
-| `buttons` | array | [] | `{ key, label }`; empty uses the defaults above |
+| `buttons` | array | [] | `{ label }` (SheetButtons); empty uses the defaults above |
 | `focusIndex` | int | 0 | |
 
 Signals: `activated(int index, string key)`, `closed()`.
@@ -297,8 +392,9 @@ LoaderPrompt {
     neededBy: ["SkyUI", "RaceMenu"]
     sourceUrl: "skse.silverlock.org"
     sourceShown: app.loaderSourceShown
+    buttons: app.loaderLabels.map(l => ({ label: l }))
     focusIndex: app.loaderIndex
-    onActivated: (index, key) => app.act(key)
+    onActivated: (index, key) => { app.loaderIndex = index; app.act("a") }
     onClosed: app.act("b")
 }
 ```
@@ -353,11 +449,15 @@ Labs > Performance check: Run check (about 13 seconds: still, scrolling, idle), 
 
 - `GetMods`: the Get Mods tab (search, source, sort, Add from Downloads, categories, mod cards in three columns).
   Main.qml gives `result` (the engine's browse answer), `bar`, `focusArea` ("bar", "cats", "grid") and `focusIndex`.
-- `ModDetails`: a mod's details with what it also installs and Install. `info` is the engine's details answer.
+- `ModDetails`: a mod's page, its own full screen (header "Get mods > Name", no Back button, LB/RB the previous or
+  next result). `info` is the engine's details answer; the main button has the focus. `helpLabels` and `helpFocus`:
+  the two buttons that show under the main one 8 seconds after Open ("Open in Steam's browser", "Always use Steam's
+  browser"), `helpClicked(index)`.
 - `FomodSheet`: installer choices, one question per page with a picture preview. Main.qml passes buttons to
   `handleButton(b)`; it emits `choose(group, option)`, `next()`, `back()` and `stop()`.
 - `LoadOrderList`: the Load order tab (Skyrim). `plugins` is the engine's load order, `focusIndex` -1 is Sort
   automatically.
 - `ProfilesSheet`: Profiles from the game menu, and a share being imported (`plan`).
 - `AskText`: one line of text typed with Steam's keyboard: `open(title, note, start, placeholder, max, secret,
-  done)`, then `accepted(text)` or `cancelled()`.
+  done)`, then `accepted(text)` or `cancelled()`. `focusIndex` -1 is the field (A opens Steam's keyboard again), then
+  Clear, Cancel and Done (SheetButtons); Start is Done.

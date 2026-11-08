@@ -86,7 +86,8 @@ Rectangle {
     }
 
     HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
-    TapHandler { onTapped: root.clicked() }
+    // Touch: hold a moment for the mod's options (like X).
+    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
 
     Row {

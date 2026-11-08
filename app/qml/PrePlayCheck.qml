@@ -173,24 +173,15 @@ Item {
                 }
             }
 
-            Flow {
+            SheetButtons {
                 id: buttonFlow
+                ui: root.ui
                 width: parent.width
-                spacing: root.ui.px(10)
                 topPadding: root.ui.px(6)
-                Repeater {
-                    model: (root.buttons || []).slice(0, 4)
-                    ActionButton {
-                        required property int index
-                        required property var modelData
-                        ui: root.ui
-                        // A runs the highlighted button, so A is drawn on it; the others show their own key.
-                        k: index === root.focusIndex ? "a" : (modelData.key && modelData.key !== "a" ? modelData.key : "")
-                        label: modelData.label || ""
-                        focused: index === root.focusIndex
-                        onClicked: root.activated(index, modelData.key || "")
-                    }
-                }
+                labels: (root.buttons || []).slice(0, 4).map(b => b.label || "")
+                focusIndex: root.focusIndex
+                mainIndex: (root.buttons || []).findIndex(b => b.main === true)
+                onActivated: (i) => root.activated(i, "")
             }
 
             Text {

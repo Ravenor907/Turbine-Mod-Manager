@@ -2,8 +2,8 @@ import QtQuick
 
 // A plain sheet: a title, a few sentences, numbered steps or a list of notes, and one or two buttons. Used for the
 // no-browser warning, the browser helper's setup steps, a mod's install notes and "Add this file?" for a download
-// the watcher could only guess. A runs the focused button (drawn with A); the others show their own key (X, Y, B).
-// Main.qml handles the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the
+// the watcher could only guess. A presses the highlighted button, B the cancel one, Start the
+// first (SheetButtons); Main.qml handles the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the
 // wheel) and the buttons stay in view at the bottom.
 Item {
     id: sh
@@ -134,43 +134,17 @@ Item {
                 GradientStop { position: 1; color: sh.ui.c.panel }
             }
         }
-            Flow {
+            SheetButtons {
                 id: btnFlow
+                ui: sh.ui
                 x: sh.ui.px(22)
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: sh.ui.px(18)
                 width: parent.width - sh.ui.px(44)
-                spacing: sh.ui.px(10)
-                Repeater {
-                    model: sh.buttons
-                    Rectangle {
-                        required property int index
-                        required property var modelData
-                        readonly property bool foc: sh.focusIndex === index
-                        width: btnRow.implicitWidth + sh.ui.px(24); height: sh.ui.px(40)
-                        radius: sh.ui.px(6)
-                        color: foc ? sh.ui.c.focusFill : sh.ui.c.card
-                        border.color: foc ? sh.ui.c.accent : sh.ui.c.line
-                        border.width: foc ? sh.ui.px(2) : Math.max(1, sh.ui.px(1))
-                        Row {
-                            id: btnRow
-                            anchors.centerIn: parent
-                            spacing: sh.ui.px(8)
-                            // A runs the highlighted button, so A is drawn on it; the others show their own key.
-                            Rectangle {
-                                id: capKey
-                                readonly property string k: parent.parent.foc ? "a" : (modelData.key && modelData.key !== "a" ? modelData.key : "")
-                                visible: k !== ""
-                                width: sh.ui.px(24); height: width; radius: width / 2; color: sh.ui.c.raised; border.color: sh.ui.c.accentLo
-                                anchors.verticalCenter: parent.verticalCenter
-                                Text { anchors.centerIn: parent; text: capKey.k.toUpperCase(); color: sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(13); font.bold: true }
-                            }
-                            Text { text: modelData.label; color: parent.parent.foc ? sh.ui.c.accentText : sh.ui.c.text; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        }
-                        HoverHandler { onHoveredChanged: sh.ui.hover(parent, hovered) }
-                        TapHandler { onTapped: sh.activated(index) }
-                    }
-                }
+                labels: sh.buttons.map(b => b.label)
+                focusIndex: sh.focusIndex
+                mainIndex: 0
+                onActivated: (i) => sh.activated(i)
             }
     }
 }

@@ -49,6 +49,15 @@ Window {
         property string onceDone: "[]"      // "<game id>|<title>": check lines read once (REDmod)
         property string played: "[]"        // game ids, last played first (the rail's order)
         property string bannerDone: "[]"    // games whose "No mods yet" line on Get mods was seen
+        property bool tutorialDone: false
+        property string playedWarn: "[]"    // "<game>|<mods on>|<warnings>" played through with Play anyway   // the four first-run cards were seen (Settings, Help shows them again)
+    }
+    // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
+    Settings {
+        id: railSet
+        category: "rail"
+        property string pinned: "[]"
+        property string hidden: "[]"
     }
     // Get mods: the last 8 mod pages opened, per game ({"<game id>": [{id, name, icon, source}]}).
     Settings {
@@ -64,6 +73,7 @@ Window {
         property bool addShown: false       // "Add Chrome to Steam" was shown once (Game Mode)
         property bool helperHintShown: false // "Set up the browser helper too" was shown once (Game Mode)
         property string oldHelperShown: ""  // "Your browser helper is out of date" was shown for this helper version
+        property bool alwaysSteam: false    // Game Mode opens Nexus in Steam's browser straight away
     }
     // Settings > Updates (and Labs > Update channel).
     Settings {
@@ -94,7 +104,12 @@ Window {
                                       "loadorder", "profiles", "accounts", "updates", "lootsort", "lootnotes", "versions", "code",
                                       "nexusdetails", "nexusversions", "nexusfree", "nxm", "browser", "helper",
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
-                                      "checkfocus", "menuskse", "addbrowser", "slowhint"].indexOf(page) >= 0
+                                      "checkfocus", "menuskse", "addbrowser", "slowhint",
+                                      "wheel", "ghost", "railmenu"].indexOf(page) >= 0 || scripted
+        // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount"].indexOf(page) >= 0
+        // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
+        readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
         readonly property bool labs: ["about", "labs", "report", "perfcheck", "activity"].indexOf(page) >= 0
         // --layout=desktop or tv (not saved from a picture); --external-display pretends an HDMI display is there.
@@ -192,6 +207,10 @@ Window {
             else if (page === "perfcheck") app.openPerf()
             else if (page === "activity") { app.openSection("Labs"); app.openActivity() }
             else if (page === "slowhint") Turbine.setSampleFree()
+            // 0.54: the beginner tutorial's cards; pages for the new controls.
+            else if (page.indexOf("tutorial") === 0) app.openTutorial(parseInt(page.substring(8)) - 1)
+            else if (page === "nexusguard" || page === "inlinebrowser") { Turbine.setSampleFree(); app.tab = 1; app.zone = "main" }
+            else if (page === "presscount") Turbine.setSampleFree()
             else if (page === "settings" && arg("season") !== "") app.setRow = 6
         }
     }
@@ -227,13 +246,13 @@ Window {
             else if (shot.page === "opening") { app.getArea = "fallback"; app.getAct("a") }
             // Hold Start: Play options; R3 Find with "glow" typed; Select several with one mod ticked.
             else if (shot.page === "playoptions") { app.press("start"); playOptionsShot.start() }
-            else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("r3"); askView.open("Find a mod", "", "glow", "", 60, false, "Show them"); askView.accept() }
-            else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.startSelect(app.mods[0]); app.act("down") }
+            else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("y"); askView.open("Find a mod", "", "glow", "", 60, false, "Show them"); askView.accept() }
+            else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.startSelect(app.mods[0]); app.act("down") }
             // 0.54: a mod's file page opened on a free account: the status says to press Slow download.
             else if (shot.page === "slowhint") app.openNexus("https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1")
             else if (shot.page === "opening8s") { app.getArea = "fallback"; app.getAct("a"); app.openHelpNow() }
             // 0.51: the mod menu of a mod that loses a file; the closed-early prompt; the next requirement; the list bar.
-            else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 1; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; ")) }
+            else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; ")) }
             else if (shot.page === "quickexit" && app.game && app.mods.length > 0) {
                 // A setup from yesterday that worked, with only the first mod on.
                 app.setups = [{ id: "s1", savedAt: Math.floor(Date.now() / 1000) - 86400, modsOn: 1, played: true, on: [app.mods[0].id] }]
@@ -253,12 +272,16 @@ Window {
                 app.sheet = "modmenu"
                 app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; "))
             }
+            else if (shot.scripted) app.runScript(shot.page)
+            else if (shot.page === "wheel") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.pad("view"); app.pad("up"); app.pad("right") }
+            else if (shot.page === "ghost") { app.tab = 0; app.zone = "main"; app.modIndex = 0; if (app.mods[0]) app.uninstall(app.mods[0]) }
+            else if (shot.page === "railmenu") { app.zone = "rail"; app.railIndex = app.current; app.pad("x") }
             if (shot.page === "mods") app.note("shot", "Row warnings: " + app.mods.filter(m => !!app.modWarns[m.id]).map(m => m.name + ": " + app.modWarns[m.id]).join("; "))
         }
     }
     Timer {
         running: shot.on
-        interval: shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -327,36 +350,20 @@ Window {
         if (lost) { look.layout = "handheld"; toast.info("TV unplugged. Back to the handheld layout.") }
     }
     Connections { target: Qt.application; function onScreensChanged() { app.checkDisplays() } }
-    // Interface size and Layout preview live; "Keep this size?" puts them back after 10 seconds unless kept.
+    // Pictures only: a size tried without saving it.
     property int sizeTrial: 0
-    property string layoutBefore: ""
-    property int sizeBefore: 0
-    property int keepLeft: 10
-    // What "Keep this size?" is trying: "size" or "layout". Left and Right keep changing it while the sheet is open.
-    property string keepWhat: "size"
+    // Size and Layout apply live: no "Keep this size?" sheet (the slider never goes past what fits).
     function sizePreview(v) {
-        if (sheet !== "keepsize") { sizeBefore = look.size; layoutBefore = look.layout }
         v = Math.max(80, Math.min(sizeCap, v))
-        if (v === sizeNow && sheet !== "keepsize") return   // already this size: nothing to try
-        sizeTrial = v
-        keepWhat = "size"
+        if (v === sizeNow) return
         note("action", "Try size " + v + "% (largest that fits " + sizeCap + "%)")
-        keepLeft = 10; keepTimer.restart(); sheet = "keepsize"
+        // Pictures never save settings.
+        if (shot.on) sizeTrial = v; else { look.size = v; sizeTrial = 0 }
     }
     function layoutPreview(v) {
-        if (sheet !== "keepsize") { sizeBefore = look.size; layoutBefore = look.layout }
-        look.layout = v
-        keepWhat = "layout"
-        keepLeft = 10; keepTimer.restart(); sheet = "keepsize"
+        note("action", "Layout " + v)
+        if (!shot.on) look.layout = v
     }
-    function keepSize(yes) {
-        keepTimer.stop()
-        if (yes) { if (sizeTrial > 0) look.size = sizeTrial; note("action", "Kept size " + sizeNow + "%, layout " + look.layout) }
-        else { look.layout = layoutBefore || look.layout; note("action", "Size put back") }
-        sizeTrial = 0
-        if (sheet === "keepsize") sheet = ""
-    }
-    Timer { id: keepTimer; interval: 1000; repeat: true; onTriggered: { if (shot.on) return; app.keepLeft--; if (app.keepLeft <= 0) app.keepSize(false) } }
 
     // ---------------------------------------------------------------- Labs mode and the activity log
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
@@ -368,7 +375,7 @@ Window {
         modPage = false
         history = []
         if (tab === 1 && !browseData) browseNow()
-        else if (tab === 2) { orderIndex = 0; orderLand = true; Turbine.loadOrder() }
+        else if (tab === 2) { if (orderMemo < 0 && order.length > 0) orderMemo = orderIndex; orderLand = true; Turbine.loadOrder() }
     }
     onZoneChanged: note("page", "Focus zone " + zone)
     onSetSectionChanged: {
@@ -459,8 +466,14 @@ Window {
     readonly property var needLoader: loaderMissing ? mods.filter(m => m.enabled && m.needsLoader) : []
     readonly property var tabs: ["My mods (" + mods.length + ")", "Get mods"].concat(rules && rules.plugins ? ["Load order"] : [])
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
-    readonly property var listItems: [{ kind: "get", m: { id: "", name: "" } }].concat(shownMods.map(m => ({ kind: "mod", m: m })))
-        .concat(removedMods.length > 0 ? [{ kind: "removed", m: { id: "", name: "" } }] : [])
+    readonly property var listItems: {
+        let l = shownMods.map(m => ({ kind: "mod", m: m }))
+        // Just uninstalled: the row stays, dimmed, for 8 seconds ("Removed", A puts it back), then the next row.
+        if (ghost && game && ghost.game === game.id) l.splice(Math.max(0, Math.min(ghost.index, l.length)), 0, { kind: "ghost", m: { id: ghost.id, name: ghost.name } })
+        return l.concat(removedMods.length > 0 ? [{ kind: "removed", m: { id: "", name: "" } }] : [])
+    }
+    property var ghost: null              // {game, id, name, index}
+    Timer { id: ghostTimer; interval: 8000; onTriggered: app.ghost = null }
     // Find (R3): only the mods whose name has every word typed, as it is typed.
     property string findText: ""
     property string findBefore: ""
@@ -525,12 +538,12 @@ Window {
     function startSelect(m) { selecting = true; let t = {}; if (m) t[m.id] = true; ticked = t; note("action", "Select several") }
     function selectAct(b) {
         const it = focusedItem
-        if (b === "up") modIndex = Math.max(1, modIndex - 1)
-        else if (b === "down") modIndex = Math.min(Math.max(1, listItems.length - 1), modIndex + 1)
+        if (b === "up") modIndex = Math.max(0, modIndex - 1)
+        else if (b === "down") modIndex = Math.min(Math.max(0, listItems.length - 1), modIndex + 1)
         else if (b === "a" && it && it.kind === "mod") { let t = Object.assign({}, ticked); t[it.m.id] = !t[it.m.id]; ticked = t }
         else if (b === "x" && tickedCount > 0) selectMenu()
         else if (b === "b") { selecting = false; ticked = {}; note("action", "Select several: done") }
-        else if (b === "lt" || b === "rt" || b === "left") { selecting = false; ticked = {}; act(b) }
+        else if (b === "lb" || b === "rb" || b === "left") { selecting = false; ticked = {}; act(b) }
     }
     function selectMenu() {
         const list = mods.filter(m => ticked[m.id])
@@ -608,18 +621,8 @@ Window {
     Connections {
         target: Turbine
         function onGamesChanged() {
-            // Last played first.
-            const order = app.parse(seen.played, [])
-            let list = app.parse(Turbine.games, []).map((g, i) => ({ g: g, i: i }))
-            list.sort((a, b) => {
-                const x = order.indexOf(a.g.id), y = order.indexOf(b.g.id)
-                return (x < 0 ? 1e6 + a.i : x) - (y < 0 ? 1e6 + b.i : y)
-            })
-            list = list.map(x => x.g)
-            app.games = list
-            const want = shot.arg("game") || seen.lastGame
-            let i = list.findIndex(g => g.id === want)
-            app.current = i >= 0 ? i : 0
+            app.allGames = app.parse(Turbine.games, [])
+            app.orderGames(shot.arg("game") || seen.lastGame)
         }
         function onModsJsonChanged() {
             if (Turbine.modsJson === "") { app.modsLoaded = false; app.mods = []; app.removedMods = []; app.setups = []; return }
@@ -638,7 +641,7 @@ Window {
                 app.landFocus = false
                 const want = app.lastFocusId[app.game.id]
                 const i = want ? app.listItems.findIndex(x => x.kind === "mod" && x.m.id === want) : -1
-                app.modIndex = i >= 0 ? i : app.listItems.length > 1 && app.listItems[1].kind === "mod" ? 1 : 0
+                app.modIndex = i >= 0 ? i : 0
             }
             if (app.removedIndex > app.removedMods.length) app.removedIndex = app.removedMods.length
             if (app.sheet === "removed" && app.removedMods.length === 0) app.sheet = ""
@@ -748,7 +751,11 @@ Window {
             app.orderMessages = v.messages || {}
             if (v.note) app.orderNote = v.note
             // Focus starts on the first plugin that can move (the game's own files are fixed at the top).
-            if (app.orderLand && app.order.length > 0) { app.orderLand = false; app.orderIndex = Math.max(0, app.order.findIndex(x => !x.fixed)) }
+            if (app.orderLand && app.order.length > 0) {
+                app.orderLand = false
+                app.orderIndex = app.orderMemo >= 0 && app.orderMemo < app.order.length ? app.orderMemo : Math.max(0, app.order.findIndex(x => !x.fixed))
+                app.orderMemo = -1
+            }
             if (shot.page === "lootsort" && v.sortedBy === "loot") app.orderIndex = app.order.length - 1
             if (shot.page === "lootnotes" && v.sortedBy === "loot") {
                 const i = app.order.findIndex(x => (app.orderMessages[x.name.toLowerCase()] || []).length > 1)
@@ -792,18 +799,58 @@ Window {
             if (app.selfUpd.state === "ready" && app.backToStable) { app.backToStable = false; updates.prerelease = false }
         }
     }
-    // The mod last focused in each game: switching back lands on it (else on the first mod, not the Get mods row).
+    // The rail's order: pinned games, then the last played, then the rest; hidden games (tools) left off. The game on
+    // screen stays the same game when the order changes.
+    property var allGames: []
+    readonly property var pinnedIds: parse(railSet.pinned, [])
+    readonly property var hiddenIds: parse(railSet.hidden, [])
+    function orderGames(want) {
+        const keep = want !== undefined ? want : (game ? game.id : "")
+        const order = parse(seen.played, []), pins = pinnedIds, hide = hiddenIds
+        let list = allGames.map((g, i) => ({ g: g, i: i })).filter(x => hide.indexOf(x.g.id) < 0 || x.g.id === shot.arg("game"))
+        const rank = x => { const p = pins.indexOf(x.g.id), o = order.indexOf(x.g.id); return p >= 0 ? p : 1000 + (o < 0 ? 1e6 + x.i : o) }
+        list.sort((a, b) => rank(a) - rank(b))
+        list = list.map(x => x.g)
+        const i = list.findIndex(g => g.id === keep)
+        // Only the order changed: the game on screen isn't "switched" (its focus and Get mods stay as they are).
+        sameGameReorder = !!game && i >= 0 && list[i].id === game.id
+        games = list
+        current = i >= 0 ? i : 0
+        sameGameReorder = false
+        if (zone === "rail") railIndex = current
+    }
+    property bool sameGameReorder: false
+    function setRailList(which, id, on) {
+        let l = parse(which === "pinned" ? railSet.pinned : railSet.hidden, []).filter(x => x !== id)
+        if (on) l.push(id)
+        if (!shot.on) { if (which === "pinned") railSet.pinned = JSON.stringify(l); else railSet.hidden = JSON.stringify(l) }
+        note("action", (which === "pinned" ? (on ? "Pin " : "Unpin ") : (on ? "Hide from rail " : "Show on rail ")) + id)
+        orderGames()
+    }
+    // Focus memory per game and tab: which tab, Get mods' search and card, Load order's row (My mods' row is
+    // lastFocusId). Saved as a game is left, put back when it is opened again.
+    property var focusMemo: ({})
+    property string memoGame: ""
+    property int orderMemo: -1
+    function saveFocus(gid) {
+        let all = Object.assign({}, focusMemo)
+        all[gid] = { tab: tab, get: { area: getArea === "fallback" ? "bar" : getArea, index: getIndex, text: getText }, order: orderIndex }
+        focusMemo = all
+    }
+    // The mod last focused in each game: switching back lands on it (else on the first mod).
     property var lastFocusId: ({})
     property bool landFocus: true
-    onModIndexChanged: if (game && !moving && focusedItem && focusedItem.kind === "mod") lastFocusId[game.id] = focusedItem.m.id
+    // Not while a game's mods are still on their way in (the list on screen is the last game's until then).
+    onModIndexChanged: if (game && !moving && !landFocus && focusedItem && focusedItem.kind === "mod") lastFocusId[game.id] = focusedItem.m.id
     onGameChanged: {
-        if (!game) return
-        seen.lastGame = game.id
+        if (!game || sameGameReorder) return
+        if (memoGame !== "" && memoGame !== game.id) saveFocus(memoGame)
+        memoGame = game.id
+        if (!shot.on) seen.lastGame = game.id
         moving = false
-        modIndex = 0
         landFocus = true
+        modIndex = 0
         checks = []
-        if (tab >= 2) tab = 0
         modPage = false
         history = []
         landedOn = ""
@@ -811,6 +858,14 @@ Window {
         getArea = "bar"; getIndex = 0; getText = ""; getCategory = ""
         order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
+        // Back to a game: its tab and the row it was on. First visit: My mods, the first mod.
+        const f = focusMemo[game.id]
+        orderMemo = f && f.order !== undefined ? f.order : -1
+        if (f) {
+            tab = f.tab
+            if (f.get) { getText = f.get.text || ""; restoreFocus = { area: f.get.area, index: f.get.index } }
+            note("focus", "Back to " + game.name + ": tab " + f.tab + ", row " + (f.tab === 0 ? (lastFocusId[game.id] || "first") : f.tab === 1 ? f.get.area + " " + f.get.index : f.order))
+        } else tab = 0
         Turbine.select(game.id)
         // Its loadouts, for the header chip (shown with two or more).
         Turbine.profiles()
@@ -830,6 +885,7 @@ Window {
         else if (shot.page === "details") sheet = "details"
         else if (shot.page === "perf") { page = "perf"; zone = "perf" }
         else if (shot.page === "notice") sheet = "notice"
+        else if (!shot.on && !seen.tutorialDone) openTutorial(0)
         else if (!shot.on && !Turbine.steamos && !seen.notSteamOS) sheet = "notice"
         if (look.size === 0 && look.textSize !== 100) look.size = Math.max(80, Math.min(150, Math.round(look.textSize / 10) * 10))
         checkDisplays()
@@ -918,17 +974,20 @@ Window {
         list.splice(from, 1)
         list.splice(to, 0, m)
         mods = list
-        modIndex = to + 1
+        modIndex = to
         Turbine.moveTo(m.id, to)
         edited()
     }
     function uninstall(m) {
         note("action", "Uninstall " + m.name)
+        const at = Math.max(0, listItems.findIndex(x => x.kind === "mod" && x.m.id === m.id))
         mods = mods.filter(x => x.id !== m.id)
         Turbine.removeMod(m.id)
         edited()
-        modIndex = Math.max(0, Math.min(modIndex, listItems.length - 1))
-        toast.showUndo(m.id, m.name)
+        // The same row, dimmed: A puts it back for 8 seconds; then the focus is on the next row.
+        ghost = { game: game ? game.id : "", id: m.id, name: m.name, index: at }
+        ghostTimer.restart()
+        modIndex = at
     }
     // ---------------------------------------------------------------- Recently removed (one collapsed row; a sheet)
     property int removedIndex: 0
@@ -947,7 +1006,8 @@ Window {
     property string confirmText: ""
     // 2 seconds for a mod already in Removed mods; 5 for a loadout or profile.
     readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 ? 5 : 2
-    function askDelete(what, text) { confirmWhat = what; confirmText = text; infoIndex = 0; stopReset(); sheet = "confirm" }
+    function askDelete(what, text) { confirmWhat = what; confirmText = text; confirmIndex = 0; stopReset(); sheet = "confirm" }
+    property int confirmIndex: 0
     function confirmDone() {
         const w = confirmWhat
         if (w.indexOf("profile:") === 0) {
@@ -964,6 +1024,7 @@ Window {
     }
     function putBack(id) {
         note("action", "Put back " + id)
+        if (ghost && ghost.id === id) { ghost = null; ghostTimer.stop() }
         Turbine.undoRemove(id)
         toast.hide()
         edited()
@@ -972,7 +1033,7 @@ Window {
     // Reorder mode (Y): the D-pad moves the mod, A, B or Y puts it down.
     property bool moving: false
     property int moveFrom: -1
-    // In move mode modIndex still counts the pinned row: the mod at modIndex is mods[modIndex - 1].
+    // In move mode the list is whole and in your order: the mod at modIndex is mods[modIndex].
     property var moveSaved: []
     function startMove() {
         if (!ordered || !focusedItem || focusedItem.kind !== "mod") return
@@ -991,23 +1052,24 @@ Window {
     }
     // d rows (Up/Down 1, Left/Right 10); LT/RT pass a large number for top or bottom.
     function stepMove(d) {
-        const from = modIndex - 1
+        const from = modIndex
         const to = Math.max(0, Math.min(mods.length - 1, from + d))
         if (to === from) return
         let list = mods.slice()
         const m = list.splice(from, 1)[0]
         list.splice(to, 0, m)
         mods = list
-        modIndex = to + 1
+        modIndex = to
     }
     function endMove() {
         moving = false
-        const m = mods[modIndex - 1]
+        const m = mods[modIndex]
         if (modIndex !== moveFrom && m) {
-            note("action", "Reorder " + m.name + " from " + moveFrom + " to " + modIndex)
-            Turbine.moveTo(m.id, modIndex - 1)
+            note("action", "Reorder " + m.name + " from " + (moveFrom + 1) + " to " + (modIndex + 1))
+            Turbine.moveTo(m.id, modIndex)
             edited()
         }
+        note("focus", "Move done: focus on row " + (modIndex + 1))
     }
     // B: the mod goes back where it was.
     function cancelMove() {
@@ -1022,10 +1084,19 @@ Window {
     property bool loaderSourceShown: false
     property int loaderIndex: 0
     function openLoader() { loaderSourceShown = false; loaderIndex = 0; sheet = "loader" }
+    readonly property var loaderLabels: loaderCanGet ? ["Install", "Not now"] : [loaderSourceShown ? "OK" : "Show where to get it", "Close"]
+    function loaderRun(i) {
+        note("action", "Loader prompt: " + (loaderLabels[i] || i))
+        if (i === 0 && loaderCanGet) getLoader()
+        else if (i === 0 && !loaderSourceShown) loaderSourceShown = true
+        else sheet = ""
+    }
     function offerLoader() {
         if (!game || !modsLoaded || loaderOffered === game.id || needLoader.length === 0) return
         if (shot.on && shot.page !== "loader") return
         if (sheet !== "" || page !== "game") return
+        // Offered after a press (opening the game, turning a mod on), never out of nowhere.
+        if (!pressRecent() && !shot.on) return
         loaderOffered = game.id
         loaderFor = needLoader.map(m => m.name)
         openLoader()
@@ -1055,8 +1126,24 @@ Window {
         note("engine", "Check before Play buttons: " + checkChoices.join("; "))
         const trouble = list.some(x => x.level === "stop" || x.level === "warn")
         if (msgLevel === "work" && msgText === "Checking before Play...") msgText = ""
-        if (trouble || shot.page === "check" || shot.page === "checkend" || shot.page === "checkfocus") { checkIndex = 0; sheet = "check" }
+        // Warnings already played through with these same mods: a note after launch instead of a stop.
+        const warnKey = playKey(list)
+        const known = !list.some(x => x.level === "stop") && parse(seen.playedWarn, []).indexOf(warnKey) >= 0
+        if (trouble && known && shot.page.indexOf("check") !== 0) {
+            note("engine", "Check before Play: the same warnings were played through with these mods: playing, then a note")
+            Turbine.play(game.id)
+            toast.info("Played with the same warnings as last time: " + list.filter(x => x.level === "warn").map(x => x.title).join("; "))
+            return
+        }
+        if (trouble || shot.page === "check" || shot.page === "checkend" || shot.page === "checkfocus") {
+            // The highlight starts on the fix; else Not now when something stops play; else Play anyway.
+            checkIndex = checkOffer ? 0 : checkStops ? checkChoices.indexOf("Not now") : Math.max(0, checkChoices.indexOf("Play anyway"))
+            sheet = "check"
+        }
         else Turbine.play(game.id)
+    }
+    function playKey(list) {
+        return (game ? game.id : "") + "|" + mods.filter(m => m.enabled).map(m => m.id).sort().join(",") + "|" + list.filter(x => x.level === "warn").map(x => x.title).sort().join(",")
     }
     readonly property bool checkStops: checks.some(x => x.level === "stop")
     // One fix the check can do in a press (Y): turn off the newer of two Witcher 3 mods that change the same script,
@@ -1067,10 +1154,8 @@ Window {
         if (loaderMissing && needLoader.length > 0) return { label: (loaderCanGet ? "Install " : "Get ") + loaderShort, loader: true }
         return null
     }
-    readonly property var checkChoices: (checkStops ? ["Play without mods"] : ["Play anyway", "Play without mods"])
-        .concat(checkOffer ? [checkOffer.label] : []).concat(["Not now"])
-    // Each button's own key; A always runs the highlighted one.
-    function checkKey(label) { return label === "Play without mods" ? "x" : label === "Not now" ? "b" : checkOffer && label === checkOffer.label ? "y" : "" }
+    // Fix it, Play anyway, Play without mods, Not now. A runs the highlighted one, B is Not now, Start Play anyway.
+    readonly property var checkChoices: (checkOffer ? [checkOffer.label] : []).concat(checkStops ? [] : ["Play anyway"]).concat(["Play without mods", "Not now"])
     // Script paths from the last check (Game details shows them).
     readonly property var checkPaths: checks.filter(x => x.paths && x.paths.length > 0).map(x => x.paths.join(", "))
     property int checkIndex: 0
@@ -1086,7 +1171,10 @@ Window {
         if (once.length > 0 && what !== "Not now" && !shot.on) {
             let done = parse(seen.onceDone, []); for (const x of once) done.push(game.id + "|" + x.title); seen.onceDone = JSON.stringify(done)
         }
-        if (what === "Play anyway") Turbine.play(game.id)
+        if (what === "Play anyway") {
+            if (!shot.on) { let k = parse(seen.playedWarn, []).filter(x => x.indexOf(game.id + "|") !== 0); k.push(playKey(checks)); seen.playedWarn = JSON.stringify(k.slice(-50)) }
+            Turbine.play(game.id)
+        }
         else if (what === "Play without mods") Turbine.playOriginal()
         else if (checkOffer && what === checkOffer.label) runOffer(checkOffer)
     }
@@ -1222,7 +1310,9 @@ Window {
     ] : []).concat(updateCount > 0 ? [
         { icon: "update", title: "Update all", detail: plural(updateCount, "mod has", "mods have") + " a newer version", ok: true, act: "updateall" }
     ] : []).concat([
-        { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" }
+        { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" },
+        { icon: "info", title: "Activity log", detail: "What Turbine did, to read, copy or save", ok: true, act: "activity" },
+        { icon: "info", title: "Help", detail: "The buttons, and the beginner tutorial again", ok: true, act: "help" }
     ])
     // Every saved setup, newest first ("Nov 4, 9:12 PM · 16 mods on · Played"); A puts one back.
     function openSetups() {
@@ -1243,6 +1333,8 @@ Window {
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
         else if (item.act === "setups") openSetups()
         else if (item.act === "overlaps") openOverlaps()
+        else if (item.act === "activity") openActivity()
+        else if (item.act === "help") { sheet = ""; openSection("Help") }
         else if (item.act === "updateall") { sheet = ""; if (account.premium === true || updateList.every(x => x.u.kind !== "nexus")) Turbine.updateAll(); else openUpdates() }
         else sheet = "details"
     }
@@ -1259,16 +1351,19 @@ Window {
         note("action", "New mod " + name + " in " + gameId)
         const i = games.findIndex(g => g.id === gameId)
         const words = "New: " + name + (on ? " (on)" : " (off)") + ". Start: Play"
-        // The build's pictures add their test mods this way: only the new-mod picture follows them.
-        if (shot.on && shot.page !== "newmod") return
+        // The build's pictures add their test mods this way: only the new-mod picture (and the press count) follow them.
+        if (shot.on && shot.page !== "newmod" && shot.page !== "presscount") return
         // Installed from the mod page of the game on screen: stay on the page (its button says Installed).
-        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); showChain(name); return }
+        if (modPage && game && game.id === gameId) { busyHere = false; toast.done(words); zone = "play"; note("focus", "New mod: focus on Play"); showChain(name); return }
         if (i >= 0 && i !== current) current = i
         if (page !== "game") { page = "game" }
         if (sheet === "add" || sheet === "found") sheet = ""
         zone = "main"; tab = 0; modPage = false
         arrivedMod = { id: id, name: name }
         focusArrived()
+        // Next is playing it: the Play button has the focus (B or Down goes to the list, on the new mod).
+        zone = "play"
+        note("focus", "New mod: focus on Play")
         toast.done(words)
         showChain(name)
     }
@@ -1342,30 +1437,48 @@ Window {
         moveMod(m, from < to ? to : to + 1)
         toast.done(m.name + " is now after " + target.name + ".")
     }
-    readonly property var modMenuItems: !menuMod ? [] : (menuMod.needsLoader && loaderMissing ? [
-        { icon: "update", title: "Get " + loaderShort, detail: loaderCanGet ? "This mod needs it. Turbine gets it from its official page." : "This mod needs it. Shows where it comes from.", act: "loader" }
-    ] : []).concat([
-        { icon: "power", title: menuMod.enabled ? "Turn off" : "Turn on", detail: menuMod.enabled ? "Stays installed" : "Goes into the game", act: "toggle" }
-    ]).concat(modWarns[menuMod.id] ? [
+    // X on a mod: the quick menu, at most 6 rows. What to do first (the missing loader, Move, an update), then what
+    // to know (a warning, shared files, requirements), Details (everything else, Put it after...) and Uninstall.
+    readonly property var modMenuFacts: !menuMod ? [] : (modWarns[menuMod.id] ? [
         { icon: "info", title: modWarns[menuMod.id], detail: "Before you play says why. It may not work in " + gameTitle + ".", act: "check" }
-    ] : []).concat(updateMap[menuMod.id] ? [
-        { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
-    ] : []).concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].wins || []).slice(0, 2).map(o => (
-        { icon: "info", title: "Wins " + plural(o.count, "file", "files") + " over " + o.name, detail: "The game gets this mod's copy", act: "overlap", other: o, loses: false })) : [])
-    .concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].loses || []).slice(0, 2).map(o => (
+    ] : []).concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].loses || []).slice(0, 2).map(o => (
         { icon: "info", title: "Loses " + plural(o.count, "file", "files") + " to " + o.name, detail: ordered ? "A shows them, and Make this one win" : "The game gets " + o.name + "'s copy", act: "overlap", other: o, loses: true })) : [])
+    .concat(overlapsMap[menuMod.id] ? (overlapsMap[menuMod.id].wins || []).slice(0, 2).map(o => (
+        { icon: "info", title: "Wins " + plural(o.count, "file", "files") + " over " + o.name, detail: "The game gets this mod's copy", act: "overlap", other: o, loses: false })) : [])
     .concat(linksMap[menuMod.id] && (linksMap[menuMod.id].needs || []).length > 0 ? [
         { icon: "info", title: "Needs: " + linksMap[menuMod.id].needs.map(n => n.name).join(", "),
           detail: missingNeeds(menuMod).length === 0 ? "All installed and on" : missingNeeds(menuMod).length + " missing or turned off", act: "needs" }
     ] : []).concat(linksMap[menuMod.id] && (linksMap[menuMod.id].neededBy || []).length > 0 ? [
         { icon: "info", title: "Needed by: " + plural(linksMap[menuMod.id].neededBy.length, "mod", "mods"), detail: linksMap[menuMod.id].neededBy.map(modName).slice(0, 3).join(", "), act: "neededby" }
-    ] : []).concat(ordered ? [
-        { icon: "move", title: "Move to top", detail: "First in the load order. Mods below it win when files overlap.", act: "top" },
-        { icon: "move", title: "Move to bottom", detail: "Last in the load order. It wins when files overlap.", act: "bottom" },
-        { icon: "move", title: "Put it after...", detail: "Type part of another mod's name; it goes just after that one", act: "putafter" }
-    ] : []).concat([
-        { icon: "remove", title: "Uninstall", detail: "Kept in Removed mods for 7 days", act: "remove", danger: true }
-    ])
+    ] : [])
+    readonly property var modMenuItems: {
+        if (!menuMod) return []
+        const first = (menuMod.needsLoader && loaderMissing ? [
+            { icon: "update", title: "Get " + loaderShort, detail: loaderCanGet ? "This mod needs it. Turbine gets it from its official page." : "This mod needs it. Shows where it comes from.", act: "loader" }
+        ] : []).concat(ordered && mods.length > 1 ? [
+            { icon: "move", title: "Move", detail: "D-pad moves it, LT and RT to the top or bottom, A puts it down", act: "move" }
+        ] : []).concat(updateMap[menuMod.id] ? [
+            { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
+        ] : [])
+        const room = Math.max(0, 6 - first.length - 2)
+        return first.concat(modMenuFacts.slice(0, room)).concat([
+            { icon: "info", title: "Details", detail: [modWords(menuMod), menuMod.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), act: "details" },
+            { icon: "remove", title: "Uninstall", detail: "The row stays for 8 seconds: A puts it back. Then kept in Removed mods for 7 days.", act: "remove", danger: true }
+        ])
+    }
+    // Details: everything about the mod in one list (and Put it after... for ordered games).
+    function openModDetails(m) {
+        openPick(m.name, [modWords(m), m.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), modMenuFacts.map(f => ({
+            icon: f.icon, title: f.title, detail: f.detail, run: () => {
+                if (f.act === "overlap") openOverlap(m, f.other, f.loses)
+                else if (f.act === "needs") openNeeds(m)
+                else if (f.act === "neededby") openNeededBy(m)
+                else if (f.act === "check") startPlay()
+            } })).concat(ordered ? [
+            { icon: "move", title: "Put it after...", detail: "Type part of another mod's name; it goes just after that one",
+              run: () => { putAfterMod = m; openAsk("putafter", "Put " + m.name + " after...", "Part of the name of the mod it goes after.", "", "Mod name", 60, false, "Move it") } }
+        ] : []).concat(modMenuFacts.length === 0 && !ordered ? [{ icon: "info", title: "Nothing else to know", detail: "", run: () => {} }] : []), "")
+    }
     property int menuIndex: 0
     function modMenuRun(i) {
         const item = modMenuItems[i], m = menuMod
@@ -1375,8 +1488,8 @@ Window {
         if (item.act === "toggle") toggle(m)
         else if (item.act === "loader") getLoader()
         else if (item.act === "check") startPlay()
-        else if (item.act === "top") { moveMod(m, 0); modIndex = 1 }
-        else if (item.act === "bottom") { moveMod(m, mods.length - 1); modIndex = mods.length }
+        else if (item.act === "top") moveMod(m, 0)
+        else if (item.act === "bottom") moveMod(m, mods.length - 1)
         else if (item.act === "remove") uninstall(m)
         else if (item.act === "select") startSelect(m)
         else if (item.act === "overlap") openOverlap(m, item.other, item.loses)
@@ -1384,6 +1497,8 @@ Window {
         else if (item.act === "neededby") openNeededBy(m)
         else if (item.act === "putafter") { putAfterMod = m; openAsk("putafter", "Put " + m.name + " after...", "Part of the name of the mod it goes after.", "", "Mod name", 60, false, "Move it") }
         else if (item.act === "update") updateOne(m)
+        else if (item.act === "move") startMove()
+        else if (item.act === "details") openModDetails(m)
     }
     function modWords(m) {
         let parts = []
@@ -1428,8 +1543,17 @@ Window {
     property int setRow: 0
     property int perfIndex: 0
     readonly property int railCount: games.length + 1   // the games, then Settings
+    // Sheets open from a press. The ones that come from outside Turbine (a download that arrived, an installer's
+    // questions, install notes) and the first-run tutorial say why; anything else with no press near it is a bug.
+    readonly property var sheetReasons: ({ found: "a download arrived", fomod: "the installer asks", notes: "install notes", chain: "the next requirement",
+                                           tutorial: "first run", quick: "the game closed early", oldhelper: "the browser helper is old" })
     onSheetChanged: {
-        note("page", sheet === "" ? "Sheet closed" : "Sheet " + sheet); menuIndex = 0; stopReset(); stopConfirm()
+        if (sheet === "") note("page", "Sheet closed")
+        else if (pressRecent() || (shot.on && !shot.strictSheets)) note("page", "Sheet " + sheet + " (after " + (lastInputName || "start") + ")")
+        else if (sheetReasons[sheet]) note("page", "Sheet " + sheet + " (" + sheetReasons[sheet] + ")")
+        else note("page", "Sheet " + sheet + " opened with no press")
+        menuIndex = 0; stopReset(); stopConfirm()
+        if (sheet !== "") closeWheel()
         pickHover()
         if (sheet === "" && fomod) sheet = "fomod"
         else if (sheet === "" && found) { infoIndex = 0; sheet = "found" }
@@ -1466,34 +1590,62 @@ Window {
     }
     // Hold Start (0.6 s): Play options. A short press is Play, as always.
     Timer { id: startHold; interval: 600; onTriggered: app.openPlayOptions() }
-    // The back grips (L4 L5 R4 R5) send nothing in Steam's default layout; once one is pressed the legend shows them.
-    property bool gripsSeen: false
+    // Every press counts as input: a sheet that opens with no press near it is a bug (logged, and checked by the build).
+    property int inputCount: 0
+    property real lastInputAt: 0
+    property string lastInputName: ""
+    function pressRecent() { return Date.now() - lastInputAt < 2500 }
+    // The back grips (L4 L5 R4 R5) send nothing in Steam's default layout; when a layout sends them: L4/R4 are LT/RT,
+    // L5 is Y and R5 is View. They are never in the legend.
     function press(b) {
-        if (["r4", "l4", "r5", "l5"].indexOf(b) >= 0) {
-            if (!gripsSeen) { gripsSeen = true; note("pad", "Back grips in use") }
-            if (b === "r4" || b === "l4") { for (let i = 0; i < 6; i++) act(b === "r4" ? "down" : "up") }
-            else act(b === "r5" ? "r3" : "view")
-            return
-        }
-        if (b === "start" && sheet === "" && !moving && !orderMoving && page === "game" && game) { startHold.restart(); return }
+        inputCount++; lastInputAt = Date.now(); lastInputName = b
+        if (lastInput === "touch") lastInput = "pad"
+        const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
+        if (grip[b]) b = grip[b]
+        // R3 here means the pointer was hidden: it shows at the focused item and clicks it, the same as A.
+        if (b === "r3") { r3Click(); return }
+        if (b === "start" && sheet === "" && !wheelOpen && !moving && !orderMoving && page === "game" && game) { startHold.restart(); return }
         if (["up", "down", "left", "right"].indexOf(b) >= 0) {
             repeatButton = b
             repeatSince = Date.now()
             repeater.interval = 380
             repeater.restart()
         }
-        if (b === "view") holdStart("View")
+        if (b === "view" && sheet === "" && !moving && !orderMoving) { wheelPress(); return }
         if (b === "b") homeHold.restart()
-        if (b === "a" && sheet === "confirm") { startConfirm(); return }
+        if (b === "a" && sheet === "confirm" && confirmIndex === 0) { startConfirm(); return }
         act(b)
     }
     function release(b) {
+        const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
+        if (grip[b]) b = grip[b]
         if (b === "start" && startHold.running) { startHold.stop(); act("start"); return }
         if (b === repeatButton) { repeater.stop(); repeatButton = "" }
         if (b === "a" && resetHold.running) stopReset()
         if (b === "a" && confirmHold.running) stopConfirm()
         if (b === "b") homeHold.stop()
-        if (b === "view") holdStop()
+        if (b === "view") wheelRelease()
+    }
+    // R3 with the pointer hidden: the pointer appears on the focused item and A runs (a click there does the same).
+    function r3Click() {
+        const p = focusCenter()
+        Turbine.pointerShowAt(p.x, p.y)
+        note("pad", "R3: pointer shown on the focus, same as A")
+        act("a")
+    }
+    // The middle of whatever has the focus ring, in window pixels.
+    function focusCenter() {
+        let it = null
+        try {
+            if (sheet === "" && !wheelOpen) {
+                if (zone === "rail") it = railIndex < games.length ? railList.itemAtIndex(railIndex) : gear
+                else if (zone === "play") it = playBtn
+                else if (page === "game" && tab === 0 && !modPage && modIndex >= 0) it = modList.itemAtIndex(modIndex)
+                else if (page === "game" && modPage) it = modView.focusItem ? modView.focusItem() : null
+            }
+            if (it) { const p = it.mapToItem(null, it.width / 2, it.height / 2); return { x: p.x, y: p.y } }
+        } catch (e) {}
+        return { x: width / 2, y: height / 2 }
     }
     property real confirmHeld: 0
     Timer {
@@ -1524,28 +1676,92 @@ Window {
             map[Qt.Key_X] = "x"; map[Qt.Key_Tab] = "x"; map[Qt.Key_Y] = "y"
             map[Qt.Key_PageUp] = "lt"; map[Qt.Key_PageDown] = "rt"
             map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"
-            map[Qt.Key_P] = "start"; map[Qt.Key_V] = "view"; map[Qt.Key_F] = "r3"
+            map[Qt.Key_P] = "start"; map[Qt.Key_V] = "view"; map[Qt.Key_F] = "y"
             const b = map[e.key]
             if (!b) return
             e.accepted = true
             if (Turbine.pads && app.lastInput !== "keys") app.lastInput = "keys"
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
-            if (b === "start") { if (!e.isAutoRepeat) app.press("start"); return }
-            if (b === "view" && !e.isAutoRepeat) app.holdStart("V")
+            app.inputCount++; app.lastInputAt = Date.now(); app.lastInputName = b
+            if (b === "start" || b === "view") { if (!e.isAutoRepeat) app.press(b); return }
             if (b === "b" && !e.isAutoRepeat) homeHold.restart()
-            // Holding a key repeats it, except A (Reset waits for A to be held down) and View (held for Labs reports).
-            if (b === "a" && app.sheet === "confirm") { if (!e.isAutoRepeat) app.startConfirm(); return }
-            if (!((b === "a" || b === "view") && e.isAutoRepeat)) app.act(b)
+            // Holding a key repeats it, except A (Reset waits for A to be held down).
+            if (b === "a" && app.sheet === "confirm" && app.confirmIndex === 0) { if (!e.isAutoRepeat) app.startConfirm(); return }
+            if (!(b === "a" && e.isAutoRepeat)) app.act(b)
         }
         Keys.onReleased: (e) => {
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
-            if (!e.isAutoRepeat && e.key === Qt.Key_V) app.holdStop()
+            if (!e.isAutoRepeat && e.key === Qt.Key_V) app.release("view")
             if (!e.isAutoRepeat && e.key === Qt.Key_P) app.release("start")
             if (!e.isAutoRepeat && (e.key === Qt.Key_Escape || e.key === Qt.Key_Backspace)) homeHold.stop()
         }
     }
 
+    // Sheets with a row of buttons (SheetButtons): the D-pad moves the highlight, A presses it, B is the cancel
+    // button, Start the main one. No other keys. {labels, index, main, cancel, set(i), run(i), scrolls, scroll(d)}.
+    readonly property var infoSheets: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"]
+    function buttonSheet() {
+        const s = sheet
+        if (s === "check") return { labels: checkChoices, index: checkIndex, main: checkStops ? -1 : checkChoices.indexOf("Play anyway"), cancel: checkChoices.indexOf("Not now"),
+                                    set: i => { checkIndex = i }, run: i => checkChoose(i), scrolls: checkView.scrolls, scroll: d => checkView.scroll(d) }
+        if (s === "loader") return { labels: loaderLabels, index: loaderIndex, main: 0, cancel: 1, set: i => { loaderIndex = i }, run: i => loaderRun(i), scrolls: false }
+        if (infoSheets.indexOf(s) >= 0) {
+            const cancel = infoButtons.findIndex(x => x.key === "b")
+            return { labels: infoButtons.map(x => x.label), index: infoIndex, main: 0, cancel: cancel, set: i => { infoIndex = i }, run: i => infoRun(i),
+                     scrolls: infoView.scrolls, scroll: d => infoView.scrollBy(d) }
+        }
+        if (s === "ask") return { labels: ["Clear", "Cancel", askView.doneLabel], index: askIndex, main: 2, cancel: 1, set: i => { askIndex = i }, run: i => askRun(i), scrolls: false }
+        if (s === "confirm") return { labels: ["Delete", "Keep"], index: confirmIndex, main: -1, cancel: 1, set: i => { confirmIndex = i },
+                                      run: i => { if (i === 1) { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : removedMods.length > 0 ? "removed" : "" } }, scrolls: false }
+        return null
+    }
+    // The build's check of the button rule: with sheetDry on, a press only says which button it would run.
+    property bool sheetDry: false
+    function buttonSheetAct(bs, b) {
+        const n = bs.labels.length
+        // Text entry: the field first (A opens Steam's keyboard again), then Clear, Cancel and Done.
+        if (sheet === "ask" && askIndex < 0 && (b === "down" || b === "right")) { askIndex = 2; return }
+        if (sheet === "ask" && askIndex >= 0 && b === "up") { askIndex = -1; return }
+        const runIt = i => {
+            if (i < 0 || i >= n) return
+            if (sheetDry) { lastDry = bs.labels[i]; note("check", "Sheet " + sheet + " " + b.toUpperCase() + ": " + bs.labels[i]); return }
+            bs.run(i)
+        }
+        if ((b === "up" || b === "down") && bs.scrolls) bs.scroll(b === "down" ? 1 : -1)
+        else if (b === "left" || b === "up") bs.set(Math.max(0, bs.index - 1))
+        else if (b === "right" || b === "down") bs.set(Math.min(n - 1, bs.index + 1))
+        else if (b === "a") { if (sheet === "ask" && askIndex < 0) askKeyboard(); else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1)) }
+        else if (b === "b") { if (bs.cancel >= 0) runIt(bs.cancel); else if (!sheetDry) sheet = "" }
+        else if (b === "start") runIt(bs.main)
+    }
+    function sheetBinds() {
+        const bs = buttonSheet()
+        if (bs) {
+            const hl = sheet === "ask" && askIndex < 0 ? (Turbine.gamemode ? "Keyboard" : "") : sheet === "confirm" && confirmIndex === 0 ? "Delete" : bs.labels[bs.index] || ""
+            let o = { a: bind(hl, () => sheetAct("a"), sheet === "confirm" && confirmIndex === 0 ? "hold" : ""), b: bind(bs.cancel >= 0 ? bs.labels[bs.cancel] : "Close", () => sheetAct("b")) }
+            if (bs.main >= 0) o.start = bind(bs.labels[bs.main], () => sheetAct("start"))
+            return o
+        }
+        const s = sheet
+        const k = key => () => sheetAct(key)
+        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
+        if (s === "pick") return { a: bind("Choose", k("a")), b: bind(pickBack !== "" ? "Back" : "Close", k("b")) }
+        if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
+        if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
+        if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
+        if (s === "profiles") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), x: bind(!importData && profIndex < profileList.length ? "Options" : "", k("x")) }
+        if (s === "pages") return { a: bind("Open", k("a")), b: bind("Close", k("b")) }
+        if (s === "versions") return { a: bind(detailsData && detailsData.premium === false ? "Get it on Nexus" : "Install", k("a")), b: bind("Close", k("b")) }
+        if (s === "code") return { a: bind(codeData && codeData.state === "ready" ? "Copy" : "", k("a")), b: bind("Back", k("b")) }
+        if (s === "plugin") return { a: bind(pluginOwner ? "Go to its mod" : "", k("a")), b: bind("Close", k("b")) }
+        if (s === "pickgame") return { a: bind("Add here", k("a")), b: bind("Back", k("b")) }
+        if (s === "fomod") return { a: bind("Choose", k("a")), b: bind("Back a step", k("b")), start: bind("Next", k("start")) }
+        if (s === "report") return { b: bind(reportView.editing ? "Done typing" : "Close", k("b")) }
+        return { a: bind("", k("a")), b: bind("Close", k("b")) }
+    }
     function sheetAct(b) {
+        const bs = buttonSheet()
+        if (bs) { buttonSheetAct(bs, b); return }
         if (sheet === "report") reportView.handleButton(b)
         else if (sheet === "perf") perfView.handleButton(b)
         else if (sheet === "activity") activityView.handleButton(b)
@@ -1579,22 +1795,6 @@ Window {
             // Y: every mod file, not only the ones for this game.
             else if (b === "y") { addAll = !addAll; addIndex = 0; note("action", addAll ? "Add: all files" : "Add: this game's files") }
             else if (b === "b") sheet = ""
-        } else if (sheet === "check") {
-            // A runs the highlighted button (as on every sheet); X, Y and B are each button's own key. Start plays
-            // when nothing stops it.
-            if (b === "left") checkIndex = Math.max(0, checkIndex - 1)
-            else if (b === "right") checkIndex = Math.min(checkChoices.length - 1, checkIndex + 1)
-            else if (b === "a") checkChoose(Math.min(checkIndex, checkChoices.length - 1))
-            else if (b === "start" && !checkStops) checkChoose(checkChoices.indexOf("Play anyway"))
-            else if (b === "x") checkChoose(checkChoices.indexOf("Play without mods"))
-            else if (b === "y" && checkOffer) checkChoose(checkChoices.indexOf(checkOffer.label))
-            else if (b === "up" || b === "down") checkView.scroll(b === "up" ? -1 : 1)
-            else if (b === "b") checkChoose(checkChoices.indexOf("Not now"))
-        } else if (sheet === "loader") {
-            // Direct keys: A Get it, B Not now.
-            if (b === "a" && loaderCanGet) getLoader()
-            else if (b === "a" && !loaderSourceShown) loaderSourceShown = true
-            else if (b === "a" || b === "b") sheet = ""
         } else if (sheet === "pages") {
             if (b === "up") pagesIndex = Math.max(0, pagesIndex - 1)
             else if (b === "down") pagesIndex = Math.min(pagesList.length - 1, pagesIndex + 1)
@@ -1622,32 +1822,12 @@ Window {
             else if (b === "a") removedRun(removedIndex)
             else if (b === "x") removedDelete(removedIndex)
             else if (b === "b") sheet = ""
-        } else if (sheet === "confirm") {
-            if (b === "b") { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : removedMods.length > 0 ? "removed" : "" }
-        } else if (sheet === "keepsize") {
-            if (b === "a") keepSize(true)
-            else if (b === "b") keepSize(false)
-            else if (b === "left" || b === "right") {
-                // Keep changing it; the countdown starts again.
-                const r = lookRows.find(x => x.key === keepWhat)
-                if (r) r.step(b === "left" ? -1 : 1)
-            }
-        } else if (sheet === "openhelp") {
-            if (b === "a") { sheet = ""; steamOpen() }
-            else if (b === "b") { sheet = ""; note("action", "Didn't see it open: Close") }
         } else if (sheet === "cardmenu") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
             else if (b === "down") menuIndex = Math.min(cardMenuItems.length - 1, menuIndex + 1)
             else if (b === "a") cardMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
-        } else if (["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper"].indexOf(sheet) >= 0) infoAct(b)
-        else if (sheet === "fomod") fomodView.handleButton(b)
-        else if (sheet === "ask") {
-            // X shows Steam's keyboard again (closed by mistake); Y clears the field.
-            if (b === "x" && Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard")
-            else if (b === "y" && askView.clear) askView.clear()
-            else askView.handleButton(b)
-        }
+        } else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "profiles") {
             if (b === "up") profIndex = Math.max(0, profIndex - 1)
             else if (b === "down") profIndex = Math.min(profilesView.rows - 1, profIndex + 1)
@@ -1664,8 +1844,15 @@ Window {
     // Turbine can fetch the loader itself (SKSE, BepInEx, SMAPI).
     readonly property bool loaderCanGet: !!rules && !!rules.loader && ["bethesda", "bepinex", "smapi"].indexOf(rules.kind) >= 0
 
+    // ---------------------------------------------------------------- one table for every button
+    // binds() says what each button does right now: {a, b, x, y, start, lb, rb, lt, rt, view} of {label, run, pre}.
+    // act() runs it and the legend prints it, so the legend can't say something the button doesn't do. The D-pad
+    // and the left stick move the focus (navigate()); they are never in the legend.
+    function bind(label, run, pre) { return { label: label, run: run, pre: pre || "" } }
     function act(b) {
         landFocus = false
+        if (sheet === "tutorial") { tutorialAct(b); return }
+        if (wheelOpen) { wheelAct(b); return }
         if (sheet !== "") { sheetAct(b); return }
         if (moving) {
             if (b === "up") stepMove(-1)
@@ -1674,112 +1861,541 @@ Window {
             else if (b === "right") stepMove(10)
             else if (b === "lt") stepMove(-100000)
             else if (b === "rt") stepMove(100000)
-            else if (b === "a" || b === "y") endMove()
+            else if (b === "a") endMove()
             else if (b === "b") cancelMove()
             return
         }
         if (orderMoving) { orderAct(b); return }
-        if (b === "y" && undoShown) { putBack(undoId); return }
-        if (b === "start") { startPlay(); return }
+        const e = binds()[b]
+        if (e && e.run) { e.run(); return }
+        navigate(b)
+    }
+    // How many rows LT and RT jump.
+    readonly property int pageJump: Math.max(3, Math.floor((content.height - px(40)) / px(desktopLayout ? 44 : 58)))
+    function binds() {
+        let o = {}
+        if (sheet === "tutorial") return { a: bind(tutCard < tutCount - 1 ? "Next" : "Pick a game", () => tutorialAct("a")), b: bind("Skip", () => tutorialAct("b")), start: bind("", () => tutorialAct("start")) }
+        if (wheelOpen) {
+            const s = wheelSlot >= 0 ? wheelSlots[wheelSlot] : null
+            return { a: bind(s ? (s.ok ? s.label : "") : (labsOn ? "Report" : ""), () => wheelAct("a")), b: bind("Close", () => wheelAct("b")), view: bind("", () => wheelAct("b")) }
+        }
+        if (sheet !== "") return sheetBinds()
+        if (moving || orderMoving) return { a: bind("Done", () => act("a")), b: bind("Cancel", () => act("b")), lt: bind("", () => act("lt")), rt: bind("", () => act("rt")) }
+        o.view = bind("", wheelPress)
+        if (page === "game" && game) o.start = bind("", startPlay)
+        if (zone === "rail") {
+            const g = railIndex < games.length
+            o.a = bind(g ? "Open" : "Settings", () => railSelect(railIndex))
+            if (page !== "game" || game) o.b = bind("Back", () => { zone = page === "settings" ? "settings" : page === "perf" ? "perf" : "main" })
+            if (g) o.x = bind("Options", openRailMenu)
+            o.lt = bind("", () => { railIndex = Math.max(0, railIndex - 5) })
+            o.rt = bind("", () => { railIndex = Math.min(railCount - 1, railIndex + 5) })
+            return o
+        }
+        if (zone === "play" && page === "game" && game) {
+            o.a = bind("Play", startPlay)
+            o.b = bind("Back", () => { zone = "main"; note("focus", "Back from Play to the list") })
+            return o
+        }
+        if (page === "settings") {
+            const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
+            const kind = sec === "Look" ? "look" : sec === "About" ? "about" : r ? r.kind : ""
+            const aLabel = kind === "look" || kind === "choice" || kind === "toggle" ? "Change" : kind === "item" ? "Choose"
+                : kind === "about" ? (setRow === 0 ? "" : "Open") : kind === "action" ? (r.action || "") : ""
+            if (aLabel !== "" || kind === "about") o.a = bind(aLabel, settingsA)
+            o.b = bind("Back", settingsBack)
+            o.lb = bind("", () => settingsSection(-1))
+            o.rb = bind("", () => settingsSection(1))
+            const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
+            o.lt = bind("", () => { setRow = Math.max(0, setRow - pageJump) })
+            o.rt = bind("", () => { setRow = Math.min(rows - 1, setRow + pageJump) })
+            return o
+        }
+        if (page === "perf") {
+            o.b = bind("Back", () => { page = "settings"; zone = "settings" })
+            o.lt = bind("", () => { perfIndex = Math.max(0, perfIndex - pageJump) })
+            o.rt = bind("", () => { perfIndex = Math.min(1999, perfIndex + pageJump) })
+            return o
+        }
+        if (!game) { o.a = bind("Look again", load); return o }
+        if (modPage) {
+            o.a = bind(pageALabel, () => modPageAct("a"))
+            o.b = bind("Back", getBack)
+            if (pageMenuItems.length > 0) o.x = bind("Options", () => { menuIndex = 0; openPick(detailsData && detailsData.name ? detailsData.name : "This mod", "", pageMenuItems, "") })
+            o.lb = bind("", () => modPageAct("lb"))
+            o.rb = bind("", () => modPageAct("rb"))
+            o.lt = bind("", () => modView.scroll(-4))
+            o.rt = bind("", () => modView.scroll(4))
+            return o
+        }
+        // The tab bar: LB and RB (never another game).
+        o.lb = bind("", () => switchTab(-1))
+        o.rb = bind("", () => switchTab(1))
+        if (tab === 0) {
+            if (selecting) {
+                const it = focusedItem
+                if (it && it.kind === "mod") o.a = bind(ticked[it.m.id] ? "Untick" : "Tick", () => selectAct("a"))
+                o.b = bind("Done", () => selectAct("b"))
+                if (tickedCount > 0) o.x = bind("Act on " + tickedCount, () => selectAct("x"))
+                return o
+            }
+            o.y = bind("Find", openFind)
+            o.lt = bind("", () => { modIndex = Math.max(0, modIndex - pageJump) })
+            o.rt = bind("", () => { modIndex = Math.min(listItems.length - 1, modIndex + pageJump) })
+            if (modIndex < 0) {
+                if (listBar[listBarIndex]) o.a = bind("Choose", () => listBarRun(listBarIndex))
+                o.b = bind("Back", () => { modIndex = 0 })
+                return o
+            }
+            const it = focusedItem
+            if (it && it.kind === "mod") {
+                o.a = bind(it.m.enabled ? "Turn off" : "Turn on", () => toggle(it.m))
+                o.x = bind("Options", () => { menuIndex = 0; sheet = "modmenu" })
+            } else if (it && it.kind === "ghost") o.a = bind("Put back", () => putBack(it.m.id))
+            else if (it && it.kind === "removed") {
+                o.a = bind("Open", openRemoved)
+                o.x = bind("Options", openRemoved)
+            }
+            o.b = bind(listFiltered ? "Show all" : "Games", () => {
+                if (listFiltered) { findText = ""; listShow = "all"; listSort = "order"; modIndex = 0; note("action", "Find, Show and Sort cleared") }
+                else { zone = "rail"; railIndex = current }
+            })
+            return o
+        }
+        if (tab === 1 && sources.length === 0) {
+            o.a = bind("Add a file", openAdd)
+            o.b = bind("My mods", () => { tab = 0 })
+            return o
+        }
+        if (tab === 1) {
+            o.b = bind(getArea === "bar" ? (getText !== "" ? "Clear search" : "My mods") : getArea === "fallback" ? "My mods" : "Back", getBack)
+            if (getArea === "fallback") {
+                o.a = bind("Open on Nexus", openNexusMods)
+                o.x = bind("Try again here", retryBrowse)
+                return o
+            }
+            o.y = bind("Search", () => getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))))
+            if (getArea === "bar") o.a = bind("Choose", () => getBarRun(getIndex))
+            else if (getArea === "recent") o.a = bind("Open", () => getAct("a"))
+            else {
+                if (getItems[getIndex]) o.a = bind("Open", () => getAct("a"))
+                if (getItems[getIndex]) o.x = bind("Options", () => { menuIndex = 0; sheet = "cardmenu" })
+                // A screen of rows; the rows stop at both ends.
+                const jump = gridColumns * 2
+                o.lt = bind("", () => { getIndex = Math.max(getIndex % gridColumns, getIndex - jump) })
+                o.rt = bind("", () => { getIndex = Math.min(getItems.length - 1, getIndex + jump); if (getIndex >= getItems.length - gridColumns) browseMore() })
+            }
+            return o
+        }
+        // Load order.
+        const p = orderPlugin
+        if (orderIndex === -1) o.a = bind("Sort", () => orderAct("a"))
+        else if (p && !p.fixed) o.a = bind(p.active ? "Turn off" : "Turn on", () => orderAct("a"))
+        o.b = bind("My mods", () => { tab = 0 })
+        if (p) o.x = bind("Options", openPluginMenu)
+        o.y = bind("Find plugin", openFindPlugin)
+        o.lt = bind("", () => { orderIndex = Math.max(-1, orderIndex - pageJump) })
+        o.rt = bind("", () => { orderIndex = Math.min(order.length - 1, orderIndex + pageJump) })
+        return o
+    }
+    // The legend: A, B, X, Y as binds() has them, then one more: the pointer's buttons while it shows, else Start
+    // when a sheet covers the Play button. LB/RB, View and Start are caps on the tab bar, the wheel button and Play.
+    function legendFor(o) {
+        let h = []
+        for (const k of ["a", "b", "x", "y"]) if (o[k] && o[k].label) h.push([k, o[k].label, o[k].pre || ""])
+        if (Turbine.pointerShown && !keyboardUp) h.push(["rt", "Click", "", "lt", "Menu"])
+        else if (o.start && o.start.label) h.push(["start", o.start.label, ""])
+        return h.slice(0, 5)
+    }
+    function navigate(b) {
         if (zone === "rail") {
             if (b === "up") railIndex = Math.max(0, railIndex - 1)
             else if (b === "down") railIndex = Math.min(railCount - 1, railIndex + 1)
-            else if (b === "right" || b === "b") zone = page === "settings" ? "settings" : page === "perf" ? "perf" : "main"
-            else if (b === "a") railSelect(railIndex)
-            else if (b === "lb") switchGame(-1)
-            else if (b === "rb") switchGame(1)
-            // X or View: the game menu for the focused game.
-            else if ((b === "x" || b === "view") && railIndex < games.length) { current = railIndex; page = "game"; menuIndex = 0; sheet = "gamemenu" }
-            return
-        }
-        if (page === "game" && modPage) { modPageAct(b); return }
-        if (b === "lb") { switchGame(-1); return }
-        if (b === "rb") { switchGame(1); return }
-        if (page === "game" && tab === 1 && game && sources.length > 0 && ["up", "down", "left", "right", "a", "b", "x", "y", "r3"].indexOf(b) >= 0) { getAct(b); return }
-        if (page === "game" && tab === 2 && game && ["up", "down", "left", "a", "x", "y"].indexOf(b) >= 0) { orderAct(b); return }
-        if (page === "game") {
-            if (b === "left") { zone = "rail"; railIndex = current }
-            else if (b === "lt") tab = Math.max(0, tab - 1)
-            else if (b === "rt") tab = Math.min(tabs.length - 1, tab + 1)
-            else if (b === "view" && game) { menuIndex = 0; sheet = "gamemenu" }
-            else if (b === "a" && games.length === 0) load()
-            else if (b === "b" && tab === 2) tab = 0
-            else if (b === "b" && tab === 1) tab = 0
-            else if (tab === 0 && game && selecting) selectAct(b)
-            else if (b === "b" && tab === 0 && listFiltered) { findText = ""; listShow = "all"; listSort = "order"; modIndex = 0; note("action", "Find, Show and Sort cleared") }
-            else if (b === "b") { zone = "rail"; railIndex = current }
-            else if (tab === 0 && game && b === "r3") openFind()
-            else if (tab === 0 && game && modIndex < 0) {
-                // The bar over the list.
-                const k = listBar[listBarIndex] ? listBar[listBarIndex].key : ""
-                if (b === "left") { if (listBarIndex > 0) listBarIndex--; else { zone = "rail"; railIndex = current } }
-                else if (b === "right") listBarIndex = Math.min(listBar.length - 1, listBarIndex + 1)
-                else if (b === "down") modIndex = 0
-                else if (b === "a") listBarRun(listBarIndex)
-            }
-            else if (tab === 0 && game) {
-                const it = focusedItem
-                if (b === "up" && modIndex === 0) { modIndex = -1; listBarIndex = Math.min(listBarIndex, listBar.length - 1) }
-                else if (b === "up") modIndex = Math.max(0, modIndex - 1)
-                else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
-                else if (b === "a" && it && it.kind === "get") tab = 1
-                else if (b === "a" && it && it.kind === "removed") openRemoved()
-                else if (b === "a" && it && it.kind === "mod") toggle(it.m)
-                else if (b === "x" && menuMod) sheet = "modmenu"
-                else if (b === "x" && it && it.kind === "removed") openRemoved()
-                else if (b === "y") startMove()
-            } else if (tab === 1 && game) {
-                if (b === "a") openAdd()
-            }
+            else if (b === "right") zone = page === "settings" ? "settings" : page === "perf" ? "perf" : "main"
             return
         }
         if (page === "settings") {
             const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
             const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
             const kind = r ? r.kind : ""
-            if (b === "b") { page = "game"; zone = "main" }
-            else if (b === "lt") { if (setSection > 0) { setSection--; setRow = 0 } }
-            else if (b === "rt") { if (setSection < settingsSections.length - 1) { setSection++; setRow = 0 } }
-            else if (b === "up") setRow = Math.max(0, setRow - 1)
+            if (b === "up") setRow = Math.max(0, setRow - 1)
             else if (b === "down") setRow = Math.min(rows - 1, setRow + 1)
+            // Left and Right change values; Left never leaves Settings (B does).
             else if (sec === "Look" && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
-            else if (sec === "Look" && b === "a") lookRows[setRow].step(1)
-            else if (sec === "About" && b === "a") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
             else if (kind === "item" && b === "left") labsChip = Math.max(0, labsChip - 1)
             else if (kind === "item" && b === "right") labsChip = Math.min(2, labsChip + 1)
-            else if (kind === "item" && b === "a") labsChoose(r, ["works", "problem", ""][labsChip])
-            else if ((kind === "choice" || kind === "toggle") && (b === "left" || b === "right" || b === "a")) rowStep(r, b === "left" ? -1 : 1)
-            else if (kind === "action" && b === "a") rowRun(r)
-            else if (b === "left") zone = "rail"
+            else if ((kind === "choice" || kind === "toggle") && (b === "left" || b === "right")) rowStep(r, b === "left" ? -1 : 1)
             return
         }
         if (page === "perf") {
-            if (b === "b") { page = "settings"; zone = "settings" }
-            else if (b === "up") perfIndex = Math.max(0, perfIndex - 1)
+            if (b === "up") perfIndex = Math.max(0, perfIndex - 1)
             else if (b === "down") perfIndex = Math.min(1999, perfIndex + 1)
             else if (b === "left") zone = "rail"
+            return
         }
+        if (!game) { if (b === "left") { zone = "rail"; railIndex = 0 } return }
+        if (zone === "play") {
+            if (b === "down") zone = "main"
+            else if (b === "left") { zone = "rail"; railIndex = current }
+            return
+        }
+        if (modPage) { modPageAct(b); return }
+        if (tab === 1 && sources.length > 0) {
+            // Up from the top of Get mods' bar: the Play button.
+            if (b === "up" && getArea === "bar") { zone = "play"; return }
+            getAct(b); return
+        }
+        if (tab === 2) {
+            if (b === "up" && orderIndex === -1) { zone = "play"; return }
+            orderAct(b); return
+        }
+        if (tab === 1 || listItems.length === 0) {
+            if (b === "left") { zone = "rail"; railIndex = current }
+            else if (b === "up") zone = "play"
+            return
+        }
+        if (selecting) { if (b === "left") { selecting = false; ticked = {}; zone = "rail"; railIndex = current } else selectAct(b); return }
+        if (modIndex < 0) {
+            // The bar over the list (Find, Show, Sort, Select several).
+            if (b === "left") { if (listBarIndex > 0) listBarIndex--; else { zone = "rail"; railIndex = current } }
+            else if (b === "right") listBarIndex = Math.min(listBar.length - 1, listBarIndex + 1)
+            else if (b === "down") modIndex = 0
+            else if (b === "up") zone = "play"
+            return
+        }
+        if (b === "up" && modIndex === 0) { modIndex = -1; listBarIndex = Math.min(listBarIndex, listBar.length - 1) }
+        else if (b === "up") modIndex = Math.max(0, modIndex - 1)
+        else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
+        else if (b === "left") { zone = "rail"; railIndex = current }
     }
-    function switchGame(step) {
-        if (games.length === 0) return
-        current = (current + step + games.length) % games.length
-        note("action", "Switch game to " + games[current].name)
-        if (page !== "game") page = "game"
-        modPage = false; history = []
-        selecting = false; findText = ""
-        railIndex = current
+    function switchTab(d) {
+        const t = Math.max(0, Math.min(tabs.length - 1, tab + d))
+        if (t === tab) return
+        if (zone !== "main") zone = "main"
+        tab = t
     }
-    // The rail's label: the game's name, and where it comes from when two copies share a name (Steam and Heroic).
-    function railName(i) {
-        const g = games[i]
-        if (!g) return ""
-        const twins = games.filter(x => x.name === g.name).length > 1
-        return g.name + (twins ? " · " + (g.launcher === "Steam" ? "Steam" : (g.storeLabel || g.launcher) + " (Heroic)") : "")
+    function settingsSection(d) {
+        const s = Math.max(0, Math.min(settingsSections.length - 1, setSection + d))
+        if (s !== setSection) { setSection = s; setRow = 0 }
+    }
+    function settingsA() {
+        const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
+        const kind = r ? r.kind : ""
+        if (sec === "Look") lookRows[setRow].step(1)
+        else if (sec === "About") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
+        else if (kind === "item") labsChoose(r, ["works", "problem", ""][labsChip])
+        else if (kind === "choice" || kind === "toggle") rowStep(r, 1)
+        else if (kind === "action") rowRun(r)
+    }
+    // B from Settings: the screen and row it was opened from.
+    property var settingsFrom: null
+    function settingsBack() {
+        const f = settingsFrom
+        settingsFrom = null
+        page = "game"
+        if (f) { tab = f.tab; zone = f.zone === "settings" ? "main" : f.zone; if (f.zone === "rail") railIndex = f.railIndex; modPage = f.modPage; note("focus", "Back from Settings to " + f.zone + ", tab " + f.tab) }
+        else zone = "main"
+    }
+    // The rail's quick menu (X): Play options, Loadouts, Pin, Hide from rail.
+    function openRailMenu() {
+        const g = games[railIndex]
+        if (!g) return
+        const pinned = pinnedIds.indexOf(g.id) >= 0
+        note("action", "Rail options: " + g.name)
+        openPick(g.name, g.launcher || "", [
+            { icon: "play", title: "Play options", detail: "With or without mods, or another loadout", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openPlayOptions) } },
+            { icon: "profile", title: "Loadouts", detail: "Save setups by name, switch, share", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openProfiles) } },
+            { icon: "move", title: pinned ? "Unpin" : "Pin to the top", detail: pinned ? "Back in last played order" : "Stays at the top of the rail", run: () => setRailList("pinned", g.id, !pinned) },
+            { icon: "remove", title: "Hide from the rail", detail: "For tools that aren't games. Settings, Help shows them again.", run: () => setRailList("hidden", g.id, true) }
+        ], "")
+    }
+    // Load order's quick menu (X): Move, Details, Go to its mod.
+    function openPluginMenu() {
+        const p = orderPlugin
+        if (!p) return
+        openPick(p.name, p.fixed ? "Always loaded by the game" : (p.active ? "On" : "Off"), (p.fixed ? [] : [
+            { icon: "move", title: "Move", detail: "D-pad moves it, A puts it down", run: () => { orderMoving = true; orderFrom = orderIndex; orderSaved = order.slice() } }
+        ]).concat([
+            { icon: "info", title: "Details", detail: "What LOOT says about it", run: () => { note("action", "Plugin details: " + p.name); sheet = "plugin" } }
+        ]).concat(pluginOwner ? [
+            { icon: "info", title: "Go to its mod", detail: modName(pluginOwner), run: () => goToMod(pluginOwner) }
+        ] : []), "")
+    }
+    function openFindPlugin() {
+        openAsk("findplugin", "Find a plugin", "Jumps to the first plugin whose name has these words.", "", "Part of a plugin's name", 60, false, "Find")
+    }
+    function findPlugin(text) {
+        const words = text.toLowerCase().split(/\s+/).filter(w => w !== "")
+        const i = order.findIndex(p => words.every(w => p.name.toLowerCase().indexOf(w) >= 0))
+        if (i >= 0) { orderIndex = i; note("action", "Find plugin \"" + text + "\": row " + (i + 1)) }
+        else toast.info("No plugin has \"" + text + "\" in its name.")
     }
     function railSelect(i) {
         note("action", "Rail " + (i < games.length ? games[i].name : "Settings"))
         if (i < games.length) { current = i; page = "game"; zone = "main" }
         else openSettings()
+    }
+    // ---------------------------------------------------------------- the quick wheel (View)
+    // Eight fixed slots, the same places on every screen; a slot with nothing to do here is dimmed, never moved.
+    // Tap View: it stays open, the D-pad picks (Up then Right is Up-right), A does it, B closes. Or hold View, push a
+    // direction and let go of View. In Labs the middle takes the report shot.
+    property bool wheelOpen: false
+    property int wheelSlot: -1            // 0 Up, 1 Up-right, 2 Right, 3 Down-right, 4 Down, 5 Down-left, 6 Left, 7 Up-left
+    property bool wheelHeld: false
+    property bool wheelPicked: false
+    readonly property string wheelKind: !game || page !== "game" ? "none" : tab === 1 || modPage ? "get" : tab === 2 ? "order" : "mods"
+    function slot(label, ok, run) { return { label: label, ok: ok, run: run } }
+    readonly property var wheelSlots: {
+        const g = !!game
+        const k = wheelKind
+        const common = [slot("Play options", g, openPlayOptions), slot("Full menu", g, () => { menuIndex = 0; sheet = "gamemenu" }),
+                        slot("Settings", true, openSettings), slot("Games", games.length > 0, openGamesPick)]
+        if (k === "get") return [slot("Search", sources.length > 0, () => { if (modPage) getBack(); getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))) }),
+                                 slot("Sort", sources.length > 0, () => pickBar("sort")),
+                                 slot("Category", getCats.length > 0, () => pickBar("category"))].concat(common).concat([slot("Add a file", g, openAdd)])
+        if (k === "order") return [slot("Find plugin", order.length > 0, openFindPlugin), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }),
+                                   slot("Show", false, () => {})].concat(common).concat([slot("Loadouts", g, openProfiles)])
+        return [slot("Find", k === "mods" && mods.length > 0, openFind), slot("Sort", k === "mods" && mods.length > 1, () => listBarRunKey("sort")),
+                slot("Show", k === "mods" && mods.length > 0, () => listBarRunKey("show"))].concat(common)
+                .concat([slot(updateList.length > 0 ? "Updates (" + updateList.length + ")" : "Updates", k === "mods" && updateList.length > 0, openUpdates)])
+    }
+    function listBarRunKey(key) {
+        const keys = key === "show" ? showKeys : sortKeys2, names = key === "show" ? showNames : sortNames2
+        const now = keys.indexOf(key === "show" ? listShow : listSort)
+        openPick(key === "show" ? "Show" : "Sort", gameTitle, keys.map((kk, i) => ({
+            icon: i === now ? "power" : "info", title: names[kk], detail: i === now ? "Showing now" : "",
+            run: () => { if (key === "show") listShow = kk; else listSort = kk; note("action", "My mods: " + key + " " + names[kk]) } })), "")
+        menuIndex = now
+    }
+    function wheelPress() {
+        if (wheelOpen) { closeWheel(); return }
+        wheelOpen = true; wheelSlot = -1; wheelHeld = true; wheelPicked = false
+        note("action", "Quick wheel open (" + wheelKind + "): " + wheelSlots.map(x => x.label + (x.ok ? "" : " (dim)")).join("; "))
+    }
+    function wheelRelease() {
+        if (!wheelHeld) return
+        wheelHeld = false
+        // Held, pushed, let go: that slot.
+        if (wheelOpen && wheelPicked && wheelSlot >= 0) wheelFire(wheelSlot)
+    }
+    function closeWheel() { if (wheelOpen) { wheelOpen = false; wheelHeld = false; note("action", "Quick wheel closed") } }
+    function wheelMove(b) {
+        const card = { up: 0, right: 2, down: 4, left: 6 }[b]
+        if (card === undefined) return
+        const now = wheelSlot
+        if (now < 0 || now % 2 === 1 || now === card || (now + 4) % 8 === card) wheelSlot = card
+        else wheelSlot = (now === 0 && card === 6) || (now === 6 && card === 0) ? 7 : (now + card) / 2
+        wheelPicked = true
+    }
+    function wheelFire(i) {
+        const s = wheelSlots[i]
+        if (!s || !s.ok) { note("action", "Quick wheel: " + (s ? s.label : i) + " is dimmed here"); return }
+        closeWheel()
+        note("action", "Quick wheel: " + s.label)
+        s.run()
+    }
+    function wheelAct(b) {
+        if (["up", "down", "left", "right"].indexOf(b) >= 0) wheelMove(b)
+        else if (b === "a") { if (wheelSlot >= 0) wheelFire(wheelSlot); else if (labsOn) { closeWheel(); quickReport() } }
+        else if (b === "b" || b === "view") closeWheel()
+        else if (b === "start") { closeWheel(); act("start") }
+    }
+    // The wheel's Games: every game, last played first.
+    function openGamesPick() {
+        openPick("Games", plural(games.length, "game", "games"), games.map((g, i) => ({
+            icon: i === current ? "power" : "play", title: railName(i), detail: i === current ? "On screen now" : "",
+            run: () => { railIndex = i; railSelect(i) } })), "")
+        menuIndex = current
+    }
+
+    // ---------------------------------------------------------------- the build's scripted checks (0.54 controls)
+    // Each page is a list of steps run 0.6 s apart; a step that answers false waits and is tried again (up to 12
+    // times). Presses go through Turbine.selftestPad, the same path a controller's take (pointer included).
+    property var script: []
+    property int scriptStep: 0
+    property int scriptTries: 0
+    property int launchCount: 0
+    property var scriptMemo: ({})
+    property string lastDry: ""
+    Timer { id: scriptTimer; interval: 600; repeat: true; onTriggered: app.scriptTick() }
+    function pad(b) { Turbine.selftestPad(b, true); Turbine.selftestPad(b, false) }
+    function check(text) { note("check", text) }
+    function scriptTick() {
+        if (scriptStep >= script.length) { scriptTimer.stop(); return }
+        let ok = true
+        try { ok = script[scriptStep]() !== false } catch (e) { check("Step " + (scriptStep + 1) + " stopped: " + e); ok = true }
+        if (ok || ++scriptTries > 12) {
+            if (!ok) check("Step " + (scriptStep + 1) + " gave up waiting")
+            scriptStep++; scriptTries = 0
+        }
+    }
+    function runScript(name) {
+        const m = scriptMemo
+        if (name === "controls") script = [
+            () => { if (mods.length < 2) return false; page = "game"; zone = "main"; tab = 0; modIndex = 0 },
+            // 2: LB and RB in Settings change the section, never the game.
+            () => { m.g = game.id; openSettings(); pad("rb"); pad("rb"); pad("lb"); check("Settings LB/RB: section " + sec + ", game " + (game.id === m.g ? "unchanged" : "changed to " + game.id)); pad("b") },
+            // 7: pointer shown: RT is one click (the ON pill), LT the quick menu; after a D-pad press LT and RT page.
+            () => { const it = modList.itemAtIndex(0); if (!it || !it.pill) return false
+                    const p = it.pill.mapToItem(null, it.pill.width / 2, it.pill.height / 2); m.on = mods[0].enabled; m.toggles = 0
+                    Turbine.pointerShowAt(p.x, p.y); pad("rt") },
+            () => { check("Pointer RT: " + (mods[0].enabled !== m.on ? "one click, the mod turned " + (mods[0].enabled ? "on" : "off") : "no click reached the mod")) },
+            () => { const it = modList.itemAtIndex(0); const p = it.mapToItem(null, it.width * 0.4, it.height / 2); Turbine.pointerShowAt(p.x, p.y); pad("lt") },
+            () => { check("Pointer LT: sheet \"" + sheet + "\""); pad("b") },
+            () => { const it = modList.itemAtIndex(0); const p = it.mapToItem(null, it.width * 0.4, it.height / 2); Turbine.pointerShowAt(p.x, p.y); modIndex = 0; pad("down") },
+            () => { m.row = modIndex; m.shown = Turbine.pointerShown; pad("lt"); m.row2 = modIndex; pad("rt")
+                    check("After a D-pad press: pointer " + (m.shown ? "still showing" : "hidden") + ", LT row " + (m.row + 1) + " to " + (m.row2 + 1) + ", RT to " + (modIndex + 1) + ", sheet \"" + sheet + "\"") },
+            // R3 with the pointer hidden: shows it on the focus and does what A does; with it showing, a left click.
+            () => { modIndex = 0; m.on = mods[0].enabled; pad("r3") },
+            () => { check("R3 hidden: pointer " + (Turbine.pointerShown ? "shown" : "not shown") + ", " + (mods[0].enabled !== m.on ? "same as A (the mod turned " + (mods[0].enabled ? "on" : "off") + ")" : "A didn't run")); pad("r3") },
+            () => { pad("down"); pad("up") },
+            // 8: the focus table: toggle keeps the row; a menu closes back to it; tabs and a game round trip keep it.
+            () => { modIndex = 1; pad("a"); check("Toggle: focus on row " + (modIndex + 1)); pad("x"); m.sheet = sheet; pad("b"); check("Menu " + m.sheet + " closed: focus on row " + (modIndex + 1)) },
+            () => { modIndex = 1; pad("rb"); m.tab = tab; pad("lb"); check("Tabs round trip: tab " + m.tab + " and back to " + tab + ", row " + (modIndex + 1)) },
+            () => { m.home = game.id; m.other = games.findIndex(g => g.id !== game.id); if (m.other < 0) { check("Game round trip: only one game"); return }
+                    tab = 0; zone = "main"; modIndex = 1; m.want = mods[1] ? mods[1].name : ""; zone = "rail"; railIndex = m.other; pad("a") },
+            () => { if (!game || game.id === m.home) return false; zone = "rail"; railIndex = games.findIndex(g => g.id === m.home); pad("a") },
+            () => { if (!game || game.id !== m.home || !modsLoaded || mods.length < 2) return false
+                    check("Game round trip: back on " + game.name + ", tab " + tab + ", row " + (modIndex + 1) + " (" + (focusedItem && focusedItem.m ? focusedItem.m.name : "") + ", was " + m.want + ")") },
+            // The quick wheel: tap View, Up then Right is Up-right (Sort); hold View, push Left, let go: Games.
+            () => { pad("view"); pad("up"); pad("right"); check("Wheel: slot " + wheelSlot + " " + (wheelSlots[wheelSlot] ? wheelSlots[wheelSlot].label : "")); pad("b") },
+            () => { Turbine.selftestPad("view", true); pad("left"); Turbine.selftestPad("view", false); check("Wheel held, Left, let go: sheet " + sheet + " \"" + pickTitle + "\""); pad("b") },
+            // Uninstall: the same row stays (dimmed, A puts it back).
+            () => { zone = "main"; tab = 0; modIndex = 0; m.name = mods[0].name; pad("x"); menuIndex = modMenuItems.findIndex(x => x.act === "remove"); pad("a") },
+            () => { check("Uninstall: row " + (modIndex + 1) + " is " + (focusedItem ? focusedItem.kind : "nothing") + (focusedItem && focusedItem.kind === "ghost" ? " (" + focusedItem.m.name + ")" : "")); pad("a") },
+            () => { if (!mods.some(x => x.name === m.name)) return false; check("Put back: " + m.name + " is back"); pad("x") }
+        ]
+        else if (name === "legendcheck") script = [
+            () => { if (mods.length < 2) return false
+                const ctxs = [
+                    ["My mods", () => { sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0 }],
+                    ["My mods bar", () => { modIndex = -1 }],
+                    ["Rail", () => { modIndex = 0; zone = "rail"; railIndex = current }],
+                    ["Play", () => { zone = "play" }],
+                    ["Get mods bar", () => { zone = "main"; tab = 1; getArea = "bar"; getIndex = 0 }],
+                    ["Get mods grid", () => { getArea = "grid"; getIndex = 0 }],
+                    ["Load order", () => { tab = 2; orderIndex = 0 }],
+                    ["Settings", () => { tab = 0; openSettings() }],
+                    ["Settings Look", () => { setSection = settingsSections.indexOf("Look"); setRow = 0 }],
+                    ["Settings Help", () => { setSection = settingsSections.indexOf("Help"); setRow = 0 }],
+                    ["Mod menu", () => { settingsBack(); zone = "main"; tab = 0; modIndex = 0; sheet = "modmenu" }],
+                    ["Game menu", () => { sheet = "gamemenu" }],
+                    ["Before you play", () => { sheet = ""; checks = [{ level: "warn", title: "A test warning", detail: "" }]; checkIndex = 0; sheet = "check" }],
+                    ["Loader", () => { sheet = ""; loaderFor = ["Lantern Glow SKSE"]; openLoader() }],
+                    ["Delete for good", () => { sheet = ""; askDelete("all", "Test") }],
+                    ["Text entry", () => { sheet = ""; openFind() }],
+                    ["Text entry buttons", () => { askIndex = 2 }],
+                    ["Play options", () => { askView.close(); sheet = ""; openPlayOptions() }],
+                    ["Removed", () => { sheet = ""; openRemoved() }],
+                    ["Quick wheel", () => { sheet = ""; wheelPress(); wheelHeld = false }],
+                    ["Quick wheel slot", () => { wheelMove("up") }],
+                    ["Tutorial", () => { closeWheel(); openTutorial(0) }],
+                    ["Moving", () => { sheet = ""; modIndex = 0; startMove() }],
+                    ["Pointer", () => { cancelMove(); const it = modList.itemAtIndex(0); const p = it.mapToItem(null, 20, 20); Turbine.pointerShowAt(p.x, p.y) }]
+                ]
+                let problems = 0
+                for (const c of ctxs) {
+                    c[1]()
+                    const o = binds(), h = legendFor(o), shown = legendHints
+                    let bad = []
+                    if (h.length > 5) bad.push("more than 5")
+                    const keys = h.map(x => x[0])
+                    if (keys.some((k, i) => keys.indexOf(k) !== i)) bad.push("a key twice")
+                    if (keys.some(k => ["lb", "rb", "view"].indexOf(k) >= 0)) bad.push("a cap in the legend")
+                    if (keys.indexOf("start") >= 0 && sheet === "" && !wheelOpen) bad.push("Start in the legend with Play in view")
+                    for (const k of ["a", "b", "x", "y"]) {
+                        if (o[k] && o[k].label && keys.indexOf(k) < 0) bad.push(k.toUpperCase() + " missing")
+                        if (keys.indexOf(k) >= 0 && !(o[k] && o[k].run)) bad.push(k.toUpperCase() + " does nothing")
+                    }
+                    if (JSON.stringify(shown) !== JSON.stringify(h)) bad.push("the legend on screen differs")
+                    problems += bad.length > 0 ? 1 : 0
+                    check("Legend " + c[0] + ": " + h.map(x => (x[2] ? x[2] + " " : "") + x[0].toUpperCase() + " " + x[1] + (x[3] ? ", " + x[3].toUpperCase() + " " + x[4] : "")).join(" · ") + (bad.length > 0 ? "  PROBLEM: " + bad.join(", ") : ""))
+                }
+                Turbine.pointerHide()
+                check("Legend check: " + ctxs.length + " contexts, " + problems + " problems")
+                sheet = ""
+            }
+        ]
+        else if (name === "sheetcheck") script = [
+            () => { if (mods.length < 2) return false
+                const cases = [
+                    ["check", () => { checks = [{ level: "warn", title: "A test warning", detail: "" }]; checkIndex = 0; sheet = "check" }],
+                    ["loader", () => { loaderFor = ["Lantern Glow SKSE"]; openLoader() }],
+                    ["chain", () => { chainQueue = [{ name: "Test Patch", url: "https://www.nexusmods.com/skyrimspecialedition/mods/1?tab=files" }]; infoIndex = 0; sheet = "chain" }],
+                    ["found", () => { found = { path: "/tmp/x.zip", name: "x.zip", size: 1024, game: game.id, gameName: game.name, why: "test", more: 0 }; infoIndex = 0; sheet = "found" }],
+                    ["notes", () => { notesName = "Test"; notesList = ["A note"]; infoIndex = 0; sheet = "notes" }],
+                    ["confirm", () => { askDelete("all", "Test") }],
+                    ["ask", () => { openFind() }]
+                ]
+                sheetDry = true
+                let problems = 0
+                for (const c of cases) {
+                    sheet = ""; c[1]()
+                    let bs = buttonSheet()
+                    if (!bs) { check("Sheet rule " + c[0] + ": not a button sheet"); problems++; continue }
+                    act("right")
+                    bs = buttonSheet()
+                    const want = { a: bs.labels[bs.index] || "", b: bs.cancel >= 0 ? bs.labels[bs.cancel] : "", start: bs.main >= 0 ? bs.labels[bs.main] : "" }
+                    let got = {}
+                    for (const k of ["a", "b", "start"]) { lastDry = ""; act(k); got[k] = lastDry }
+                    const ok = got.a === want.a && got.b === want.b && got.start === want.start
+                    if (!ok) problems++
+                    check("Sheet rule " + c[0] + ": highlighted " + want.a + ", A ran " + (got.a || "nothing") + ", B ran " + (got.b || "nothing") + ", Start ran " + (got.start || "nothing") + (ok ? "" : "  PROBLEM"))
+                }
+                sheetDry = false; found = null; askView.close(); sheet = ""
+                check("Sheet rule: " + cases.length + " sheets, " + problems + " problems")
+            }
+        ]
+        else if (name === "nexusguard" || name === "inlinebrowser") script = [
+            () => { if (getItems.length === 0) return false; openDetails(getItems[0]) },
+            () => { if (!detailsData || detailsData.loading || mainLabel !== "Get it on Nexus") return false; m.before = launchCount
+                    pad("a"); if (name === "nexusguard") { pad("a"); pad("a") } },
+            () => { if (name === "nexusguard") { check("Nexus guard: 3 presses of A, " + (launchCount - m.before) + " browser launch" + (launchCount - m.before === 1 ? "" : "es") + ", button \"" + mainLabel + "\""); return }
+                    openHelpNow(); pad("down") },
+            () => { if (name === "inlinebrowser") check("Inline browser buttons: " + pageHelpLabels.join("; ") + ", focus on " + pageALabel + ", sheet \"" + sheet + "\"") }
+        ]
+        else if (name === "presscount") script = [
+            // After the tutorial: the rail, the game with no mods focused. Count every press to a mod added and Play.
+            () => { if (!game || !modsLoaded) return false; sheet = ""; zone = "rail"; railIndex = current; m.start = inputCount; m.log = [] },
+            () => { pad("a"); m.log.push("A open " + game.name) },
+            () => { if (tab !== 1 || getArea !== "grid" || getItems.length === 0) return false; pad("a"); m.log.push("A on " + getItems[getIndex].name) },
+            () => { if (!detailsData || detailsData.loading || pageIndex !== 0 || mainLabel === "") return false; m.log.push("A " + mainLabel); pad("a") },
+            // On Nexus: Slow download (counted, outside Turbine); the download arrives and Turbine adds it.
+            () => { m.log.push("Slow download on Nexus"); Turbine.importZip(shot.arg("presscount-file")) },
+            () => { if (zone !== "play") return false; m.log.push("A Play (focused)"); pad("a") },
+            () => { const n = inputCount - m.start
+                    check("Presses from the rail to a mod added and Play: " + n + " in Turbine + 1 on Nexus = " + (n + 1) + " (" + m.log.join(", ") + ")") }
+        ]
+        scriptStep = 0; scriptTries = 0
+        scriptTimer.start()
+    }
+
+    // ---------------------------------------------------------------- the beginner tutorial (first run)
+    // Four cards with the real buttons drawn large: A and B, X and Y; View and the quick wheel; getting a mod; Play.
+    // A or Right: next card; Left: back one; B or Start: skip. It ends on the rail ("Pick a game to start"), runs
+    // once (remembered) and Settings, Help shows it again.
+    readonly property int tutCount: 4
+    property int tutCard: 0
+    function openTutorial(n) {
+        tutCard = n || 0
+        note("action", "Beginner tutorial, card " + (tutCard + 1))
+        sheet = "tutorial"
+    }
+    function tutorialAct(b) {
+        if (b === "a" || b === "right") {
+            if (tutCard < tutCount - 1) { tutCard++; note("action", "Tutorial card " + (tutCard + 1)) }
+            else tutorialDone("finished")
+        }
+        else if (b === "left") tutCard = Math.max(0, tutCard - 1)
+        else if (b === "b" || b === "start") tutorialDone("skipped")
+    }
+    function tutorialDone(how) {
+        if (!shot.on) seen.tutorialDone = true
+        note("action", "Tutorial " + how + ": pick a game")
+        sheet = ""
+        page = "game"
+        zone = "rail"
+        railIndex = Math.min(current, Math.max(0, games.length - 1))
     }
 
     // ---------------------------------------------------------------- Get mods
@@ -1848,7 +2464,12 @@ Window {
         if (landedOn === game.id && !(landAgain && mods.length === 0)) return
         landAgain = false
         landedOn = game.id
-        if (mods.length === 0 && sources.length > 0 && tab === 0 && shot.page !== "emptygamemods" && shot.page.indexOf("mods") !== 0 && shot.page !== "removed") tab = 1
+        if (mods.length === 0 && sources.length > 0 && tab === 0 && shot.page !== "emptygamemods" && shot.page.indexOf("mods") !== 0 && shot.page !== "removed") {
+            // Straight onto the first mod: A opens its page.
+            if (!restoreFocus) restoreFocus = { area: "grid", index: 0 }
+            note("focus", "No mods yet: Get mods, first card")
+            tab = 1
+        }
     }
     onModsChanged: if (game && mods.length > 0 && parse(seen.bannerDone, []).indexOf(game.id) < 0 && !shot.on) {
         let d = parse(seen.bannerDone, []); d.push(game.id); seen.bannerDone = JSON.stringify(d)
@@ -1921,7 +2542,6 @@ Window {
     function getAct(b) {
         const cols = gridColumns
         if (b === "b") { getBack(); return }
-        if (b === "r3") { getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))); return }
         if (getArea === "fallback") {
             if (b === "a") openNexusMods()
             else if (b === "x") retryBrowse()
@@ -1952,7 +2572,6 @@ Window {
             else if (b === "down") getIndex = Math.min(getItems.length - 1, getIndex + cols)
             else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
             else if (b === "x" && getItems[getIndex]) { menuIndex = 0; sheet = "cardmenu" }
-            else if (b === "y" && getItems[getIndex]) quickGet(getItems[getIndex])
             // Infinite scroll: the next 30 when the focus reaches the last row.
             if (getIndex >= getItems.length - cols) browseMore()
         }
@@ -2007,17 +2626,19 @@ Window {
         }
         Turbine.updateMod(m.id); edited()
     }
-    // X on a card: Other files and Open on Nexus.
+    // X on a card: Get it, Other files, Open on Nexus.
     readonly property var cardItem: getArea === "grid" ? getItems[getIndex] : null
     readonly property var cardMenuItems: !cardItem ? [] : [
-        { icon: "info", title: "Open its page", detail: "Pictures, files and what it needs", act: "page" },
-        { icon: "update", title: "Get it", detail: getWords(), act: "get" }
+        { icon: "update", title: "Get it", detail: getWords(), act: "get" },
+        { icon: "info", title: "Other files", detail: "Older versions and extra files, on its page", act: "files" }
     ].concat(srcNow === "nexus" ? [{ icon: "play", title: "Open on Nexus", detail: "In your browser", act: "nexus" }] : [])
+    property bool pendingFiles: false
     function cardMenuRun(i) {
         const it = cardMenuItems[i], c = cardItem
         if (!it || !c) return
         sheet = ""
-        if (it.act === "page") openDetails(c)
+        note("action", "Card menu: " + it.title + " for " + c.name)
+        if (it.act === "files") { pendingFiles = true; openDetails(c) }
         else if (it.act === "get") quickGet(c)
         else if (it.act === "nexus") openNexus("https://www.nexusmods.com/" + rules.domain + "/mods/" + c.id)
     }
@@ -2054,7 +2675,8 @@ Window {
         detailsItem = item
         detailsData = { loading: true }
         modPage = true
-        pageIndex = 0
+        // The main button ("Get it on Nexus", "Install") has the focus.
+        pageIndex = 0; pageInline = -1
         Turbine.details(String(item.id), item.source || srcNow)
     }
     function partialPage(item, problem) {
@@ -2065,7 +2687,10 @@ Window {
                  version: item.version || "", downloads: item.downloads || 0, rating: item.rating || 0, updated: item.updated || "",
                  premium: false, page: page, filePage: page, partial: true, problem: problem, versions: [], needs: null }
     }
-    onDetailsDataChanged: if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails() }
+    onDetailsDataChanged: {
+        if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails() }
+        if (pendingFiles && detailsData && !detailsData.loading) { pendingFiles = false; if (otherVersions.length > 0) openVersions(); else toast.info("No other files for this mod.") }
+    }
     readonly property bool pageInstalled: !!detailsData && (detailsData.installed === true || (detailsItem && detailsItem.installed === true))
     // The installed mod this page is about (to say On or Off, turn it on, or show it in My mods).
     readonly property var pageMod: {
@@ -2076,11 +2701,11 @@ Window {
     readonly property bool pageModOff: pageInstalled && !!pageMod && !pageMod.enabled
     readonly property string mainLabel: !detailsData || detailsData.loading ? "" : detailsData.error ? "" : detailsData.partial ? (detailsData.page ? "Open on Nexus" : "") : pageInstalled ? (pageModOff ? "Installed · Off" : "Show in My mods")
         : busyHere ? (dl.active ? "Installing " + Math.round(Math.max(0, dlPart) * 100) + "%" : "Installing...")
-        : detailsData.source === "nexus" && detailsData.premium === false ? (nexusFallback ? "Open on Nexus" : "Get it on Nexus")
+        : detailsData.source === "nexus" && detailsData.premium === false ? (launching ? "Opening Nexus..." : nexusFallback ? "Open on Nexus" : "Get it on Nexus")
         : "Install"
     readonly property string mainLine: !detailsData || detailsData.loading || detailsData.error ? ""
         : detailsData.partial ? (detailsData.page ? "Some details didn't load. A opens it on Nexus." : "Some details didn't load.")
-        : pageInstalled ? (pageModOff ? "In your mods, turned off. A turns it on." : "In your mods and on.") + (otherVersions.length > 0 ? " X: Other files" : "")
+        : pageInstalled ? (pageModOff ? "In your mods, turned off. A turns it on." : "In your mods and on.")
         : detailsData.source === "nexus" && detailsData.premium === false ? "Opens this file's page. Press Slow download there and wait the few seconds Nexus asks. Turbine adds it by itself."
         : ""
     property bool busyHere: false
@@ -2096,24 +2721,43 @@ Window {
         if (!n || !n.missing || n.missing.length === 0) return -1
         return (n.installed || []).length
     }
+    // The two browser buttons under the main one, 8 seconds after Open (openHelp).
+    readonly property bool pageHelp: openHelp && modPage && !!detailsData && !detailsData.loading
+    readonly property var pageHelpLabels: pageHelp ? ["Open in Steam's browser", "Always use Steam's browser"] : []
+    onPageHelpChanged: if (!pageHelp) pageInline = -1
+    readonly property string pageALabel: pageInline >= 0 ? (pageHelpLabels[pageInline] || "") : pageIndex === 0 ? mainLabel : pageIndex === 1 ? "Other files" : "Open its page"
+    // X on the mod page: Other files, Get what it needs, Open on Nexus.
+    readonly property var pageMenuItems: !detailsData || detailsData.loading ? [] : (otherVersions.length > 0 ? [
+        { icon: "update", title: "Other files", detail: plural(otherVersions.length, "other file", "other files"), run: () => openVersions() }
+    ] : []).concat(pageMissing >= 0 ? [
+        { icon: "update", title: "Get what it needs", detail: pageNeeds[pageMissing] ? pageNeeds[pageMissing].name : "", run: () => { pageIndex = pageMissing + 2; openNeed(pageMissing) } }
+    ] : []).concat((detailsData.source || srcNow) === "nexus" && detailsData.page ? [
+        { icon: "play", title: "Open on Nexus", detail: "Its page, in the browser", run: () => openNexus(detailsData.page) }
+    ] : [])
     function modPageAct(b) {
         if (b === "b") { getBack(); return }
         if (b === "a") {
-            if (pageIndex === 0) installFromDetails()
+            if (pageInline === 0) steamOpen()
+            else if (pageInline === 1) alwaysSteamNow()
+            else if (pageIndex === 0) installFromDetails()
             else if (pageIndex === 1) openVersions()
             else openNeed(pageIndex - 2)
         }
-        else if (b === "x") openVersions()
-        else if (b === "y" && pageMissing >= 0) { pageIndex = pageMissing + 2; openNeed(pageMissing) }
-        else if (b === "up") { if (pageIndex > 0) pageIndex = pageIndex === 2 && otherVersions.length === 0 ? 0 : pageIndex - 1; else modView.scroll(-1) }
+        else if (b === "up") {
+            if (pageInline === 1) pageInline = 0
+            else if (pageInline === 0) pageInline = -1
+            else if (pageHelp && pageIndex > 0 && (pageIndex === 1 || (pageIndex === 2 && otherVersions.length === 0))) { pageIndex = 0; pageInline = 1 }
+            else if (pageIndex > 0) pageIndex = pageIndex === 2 && otherVersions.length === 0 ? 0 : pageIndex - 1
+            else modView.scroll(-1)
+        }
         else if (b === "down") {
+            if (pageInline < 0 && pageIndex === 0 && pageHelp) { pageInline = 0; return }
+            if (pageInline === 0) { pageInline = 1; return }
             // The Other files row (1) is hidden when there are none: skip it, and scroll when no row is left.
             const next = pageIndex === 0 && otherVersions.length === 0 ? 2 : pageIndex + 1
-            if (next <= pageRows - 1) pageIndex = next; else modView.scroll(1)
+            if (next <= pageRows - 1) { pageIndex = next; pageInline = -1 } else modView.scroll(1)
         }
         else if (b === "left") { zone = "rail"; railIndex = current }
-        else if (b === "lt") { modPage = false; history = []; tab = Math.max(0, tab - 1) }
-        else if (b === "rt") { modPage = false; history = []; tab = Math.min(tabs.length - 1, tab + 1) }
         // LB and RB: the previous or next mod in the results.
         else if (b === "lb" || b === "rb") {
             const i = getItems.findIndex(x => detailsItem && String(x.id) === String(detailsItem.id))
@@ -2126,7 +2770,6 @@ Window {
                 openDetails(getItems[j], true)
             }
         }
-        else if (b === "view" && game) { menuIndex = 0; sheet = "gamemenu" }
     }
     // A on a requirement: its page, pushed on the history.
     function openNeed(i) {
@@ -2193,18 +2836,39 @@ Window {
     property string openUrlNow: ""
     property double openAt: 0
     property string addMode: ""           // "noshortcut" or "helper": what the Add Chrome to Steam sheet says
+    // A pressed again while the browser is still starting does nothing for 8 seconds (one browser, not three);
+    // launch.rs keeps the same guard for the same page.
+    property bool launching: false
+    Timer { id: launchGuard; interval: 8000; onTriggered: app.launching = false }
+    // After 8 seconds with Turbine still in front: "Open in Steam's browser" and "Always use Steam's browser" under
+    // the mod page's button (no sheet).
+    property bool openHelp: false
+    property int pageInline: -1           // the mod page: -1, or which of those two buttons has the focus
     function openNexus(url) {
         if (!browserFound) { noBrowser(); return false }
+        if (launching && url === openUrlNow) {
+            note("browser", "A ignored: already opening this page (" + (Date.now() - openAt) + " ms ago)")
+            return true
+        }
         const w = parse(Turbine.watchPage(url), {})
         if (w.watching) note("catch", "Watching Downloads for this mod (" + w.game + ")")
         openUrlNow = url
         openAt = Date.now()
+        openHelp = false; pageInline = -1
+        launching = true; launchGuard.restart()
+        launchCount++
+        note("browser", "Browser launch: " + url)
         openName = browser.result && browser.result.name ? browser.result.name : shot.on ? "Chrome" : "the browser"
         if (shot.on) { openState = "opening"; openTimer.restart(); return true }
+        // Settings, Getting mods: Always use Steam's browser (Game Mode).
+        if (Turbine.gamemode && browserSet.alwaysSteam) { note("browser", "Always use Steam's browser: on"); steamOpen(); return true }
         const r = parse(Turbine.openUrl(url), { how: "desktop" })
+        if (r.how === "guarded") return true
         if (r.how === "noshortcut") {
-            if (!browserSet.addShown) { browserSet.addShown = true; showAddBrowser("noshortcut") }
-            else { note("browser", "No browser in Steam: Steam's browser instead"); steamOpen() }
+            // Nothing to set up first: Steam's browser opens the page now; adding Chrome is optional (said once).
+            note("browser", "No browser in Steam: Steam's browser instead")
+            steamOpen()
+            if (!browserSet.addShown) { browserSet.addShown = true; toast.showPlain("Opened in Steam's browser. To use Chrome instead: Settings, Getting mods, Use Chrome in Game Mode.") }
             return true
         }
         if (r.how === "oldhelper") {
@@ -2223,8 +2887,8 @@ Window {
             openState = "opening"
             openTimer.restart()
             if (!r.helper) {
-                if (!browserSet.helperHintShown) { browserSet.helperHintShown = true; showAddBrowser("helper") }
-                else toast.showPlain(openName + " opens on its start page: the browser helper takes it to the mod (Settings, Getting mods).")
+                if (!browserSet.helperHintShown) { browserSet.helperHintShown = true; note("browser", "Said once: set up the browser helper too") }
+                toast.showPlain(openName + " opens on its start page: the browser helper takes it to the mod (Settings, Getting mods).")
             }
             return true
         }
@@ -2265,6 +2929,7 @@ Window {
     function steamOpen() {
         note("action", "Open in Steam's browser")
         openState = ""
+        openHelp = false; pageInline = -1
         if (shot.on) return
         const link = Turbine.openInSteam(openUrlNow)
         if (link === "") { toast.showPlain("Steam's browser can't open that address."); return }
@@ -2274,7 +2939,20 @@ Window {
         openState = "opening"
         openTimer.restart()
     }
-    function openHelpNow() { openTimer.stop(); if (sheet === "") { note("browser", "Still in front 8 seconds after Open: offering Steam's browser"); sheet = "openhelp" } }
+    // Still in front 8 seconds after Open: the two buttons under the mod page's button; elsewhere a line saying where
+    // they are. Never a sheet.
+    function openHelpNow() {
+        openTimer.stop()
+        openHelp = true
+        note("browser", "Still in front 8 seconds after Open: Open in Steam's browser and Always use Steam's browser are under the button" + (modPage ? "" : " (mod page)"))
+        if (!modPage) toast.showPlain("Nexus didn't show? Settings, Getting mods: Always use Steam's browser.")
+    }
+    function alwaysSteamNow() {
+        if (!shot.on) browserSet.alwaysSteam = true
+        note("action", "Always use Steam's browser")
+        toast.showPlain("Game Mode opens Nexus in Steam's browser from now on. Settings, Getting mods changes it.")
+        steamOpen()
+    }
     // 8 seconds after Open, Turbine still in front and no browser window: the safety net (Game Mode only).
     Timer {
         id: openTimer
@@ -2394,18 +3072,6 @@ Window {
         }
         else sheet = ""
     }
-    function infoAct(b) {
-        // Words that don't fit scroll with Up and Down; Left and Right still choose the button.
-        if ((b === "up" || b === "down") && infoView.scrolls) { infoView.scrollBy(b === "down" ? 1 : -1); return }
-        if (b === "left" || b === "up") infoIndex = Math.max(0, infoIndex - 1)
-        else if (b === "right" || b === "down") infoIndex = Math.min(infoButtons.length - 1, infoIndex + 1)
-        else if (b === "a") infoRun(infoIndex)
-        else if ((b === "x" || b === "y") && infoButtons.findIndex(x => x.key === b) >= 0) infoRun(infoButtons.findIndex(x => x.key === b))
-        else if (b === "b") {
-            const i = infoButtons.findIndex(x => x.key === "b")
-            if (i >= 0) infoRun(i); else sheet = ""
-        }
-    }
 
     // The status card over other apps: only while Turbine isn't the window in front (the player is in the
     // browser), only with Settings > Accounts > Show status over other apps on. Game Mode uses the input-less
@@ -2516,8 +3182,9 @@ Window {
             }
             return
         }
-        if (b === "up") orderIndex = Math.max(-1, orderIndex - 1)
-        else if (b === "down") orderIndex = Math.min(order.length - 1, orderIndex + 1)
+        // The game's own plugins are locked: Up and Down skip them.
+        if (b === "up") { let i = orderIndex - 1; while (i >= 0 && order[i].fixed) i--; orderIndex = Math.max(-1, i) }
+        else if (b === "down") { let i = orderIndex + 1; while (i < order.length && order[i].fixed) i++; if (i < order.length) orderIndex = i }
         else if (b === "a" && orderIndex === -1) Turbine.orderSort()
         else if (b === "a" && p && !p.fixed) {
             order = order.map((x, i) => i === orderIndex ? Object.assign({}, x, { active: !x.active }) : x)
@@ -2601,7 +3268,15 @@ Window {
     // A line of text (search, profile name, code, Nexus key), typed with Steam's keyboard in Game Mode.
     property string askPurpose: ""
     property string askReturn: ""
+    property int askIndex: -1            // -1 the field, then Clear, Cancel, Done
+    function askKeyboard() { note("action", "Text entry: keyboard"); if (Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard") }
+    function askRun(i) {
+        if (i === 0) { askView.clear(); askIndex = -1 }
+        else if (i === 1) askView.cancel()
+        else askView.accept()
+    }
     function openAsk(purpose, title, noteText, start, placeholder, max, secret, done) {
+        askIndex = -1
         askPurpose = purpose
         askReturn = sheet
         askView.open(title, noteText, start, placeholder, max, secret, done)
@@ -2615,7 +3290,8 @@ Window {
         else if (askPurpose === "nexusKey" && text !== "") Turbine.setNexusKey(text)
         else if (askPurpose === "newProfile" && text !== "") Turbine.profileCreate(text)
         else if (askPurpose === "putafter") putAfter(text)
-        else if (askPurpose === "find") { findText = text; modIndex = shownMods.length > 0 ? 1 : 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
+        else if (askPurpose === "findplugin" && text !== "") findPlugin(text)
+        else if (askPurpose === "find") { findText = text; modIndex = 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
         else if (askPurpose.indexOf("renameProfile:") === 0 && text !== "" && text !== askPurpose.substring(14)) Turbine.profileRename(askPurpose.substring(14), text)
         else if (askPurpose === "code" && text !== "") Turbine.profileImportCode(text)
     }
@@ -2626,10 +3302,12 @@ Window {
     }
 
     // ---------------------------------------------------------------- Labs
-    readonly property var settingsSections: ["Getting mods", "Look", "Updates", "About"].concat(labsOn ? ["Labs"] : [])
+    readonly property var settingsSections: ["Getting mods", "Look", "Updates", "Help", "About"].concat(labsOn ? ["Labs"] : [])
     readonly property string sec: settingsSections[setSection] || "Getting mods"
     // With a newer Turbine ready, Settings opens on Updates.
     function openSettings() {
+        // B comes back here.
+        if (page !== "settings" && !settingsFrom) settingsFrom = { zone: zone, tab: tab, modPage: modPage, railIndex: railIndex }
         page = "settings"; zone = "settings"; setRow = 0
         if (selfUpd.state === "available" && settingsSections.indexOf("Updates") >= 0) setSection = settingsSections.indexOf("Updates")
         if (sec === "Look") checkDisplays()
@@ -2638,7 +3316,17 @@ Window {
     onLabsOnChanged: if (!labsOn && setSection >= settingsSections.length) { setSection = settingsSections.indexOf("About"); setRow = 0 }
     // Accounts, Updates and Labs: rows of one kind each. action (A does it), toggle and choice (Left, Right or A
     // change it), item (a Labs checklist item), info (words only).
-    readonly property var rowsNow: sec === "Getting mods" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : []
+    readonly property var rowsNow: sec === "Getting mods" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : sec === "Help" ? helpRows : []
+    // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
+    readonly property var helpRows: [
+        { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
+        { kind: "info", key: "buttons", title: "The buttons",
+          how: "A does the highlighted thing. B goes back (hold it to go home). X: options for what's highlighted. Y: Find or Search. LB and RB: tabs. LT and RT: a page up or down. View: the quick wheel. Start: Play (hold it for Play options). Right stick: the pointer; RT or R3 clicks, LT opens options." },
+        { kind: "info", key: "touch", title: "Touch",
+          how: "Tap does it. Hold a moment for options. Hold, then drag to reorder. Swipe sideways on the tabs to switch them." }
+    ].concat(hiddenIds.length > 0 ? [
+        { kind: "action", key: "unhide", title: "Games hidden from the rail: " + hiddenIds.length, how: "Puts them back on the rail", action: "Show them" }
+    ] : [])
     readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
         : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: installs in one press with no browser" : " · Free account: Get it on Nexus opens the file's page")
         : account.state === "error" ? account.message
@@ -2676,6 +3364,10 @@ Window {
         { kind: "action", key: "pair", title: bridgeTitle, how: bridgeWords, action: bridge.paired ? "Pair again" : "Pair" }
     ] : []).concat([
         { kind: "action", key: "browser", title: "Web browser", how: browserWords, action: browserFound ? "Check again" : "How to get one" },
+        { kind: "toggle", key: "alwaysSteam", title: "Always use Steam's browser (Game Mode)",
+          how: "Nexus opens in Steam's own browser right away, instead of your browser through Steam.",
+          value: browserSet.alwaysSteam, options: [false, true], names: ["Off", "On"] },
+        { kind: "action", key: "addChrome", title: "Use Chrome in Game Mode", how: "How to add Chrome to Steam once, so Nexus opens in it right over Turbine", action: "Show how" },
         { kind: "action", key: "nxmHandler", title: "Use Turbine for Mod Manager Download",
           how: handler.state === "yes" ? "Turbine gets Mod Manager Download links from the browser (they need a Nexus key)."
              : handler.state === "no" ? "Mod Manager Download links now go to " + (handler.current || "another program") + ". A makes Turbine get them."
@@ -2703,6 +3395,7 @@ Window {
     function rowStep(r, d) {
         if (r.key === "auto") updates.auto = !updates.auto
         else if (r.key === "overlay") browserSet.overlay = !browserSet.overlay
+        else if (r.key === "alwaysSteam") { if (!shot.on) browserSet.alwaysSteam = !browserSet.alwaysSteam }
         else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
         note("action", "Setting " + r.key + " changed")
     }
@@ -2715,6 +3408,9 @@ Window {
         else if (r.key === "pasteKey") pasteKey()
         else if (r.key === "keyPage") { if (openNexus(keyPageUrl)) toast.showPlain("Opened API Keys. Copy the Personal API Key at the bottom, come back and press Paste.") }
         else if (r.key === "signOut") Turbine.nexusSignOut()
+        else if (r.key === "tutorial") openTutorial(0)
+        else if (r.key === "unhide") { if (!shot.on) railSet.hidden = "[]"; orderGames(); toast.done("Every game is back on the rail.") }
+        else if (r.key === "addChrome") showAddBrowser("noshortcut")
         else if (r.key === "nxmHandler") Turbine.handlerSet()
         else if (r.key === "browser") { if (browserFound) Turbine.browserCheck(); else noBrowser() }
         else if (r.key === "helper") setupHelper()
@@ -2747,7 +3443,7 @@ Window {
         { id: "nexus-keyless", title: "Get mods without a key", how: "Labs, Nexus without a key: Check. Then open Get mods in Skyrim, The Witcher 3 or Cyberpunk 2077.",
           expect: "The check says Nexus answered, and Get mods shows the game's mods as pictures with no key." },
         { id: "nexus-gamemode", title: "Nexus opens in Game Mode", how: "Game Mode: a mod page, A Get it on Nexus.",
-          expect: "The browser opens over Turbine on that file's page. If not, after 8 seconds Turbine offers Steam's browser." },
+          expect: "The browser opens over Turbine on that file's page. If not, after 8 seconds two buttons under Get it offer Steam's browser." },
         { id: "game-mods-folder", title: "Slow download with no Save box", how: "Browser helper set up in Chrome. Press Slow download on a mod's file page.",
           expect: "No Save box; the file lands in Downloads, Game Mods, the game's folder, and Turbine adds it to that game." },
         { id: "desktop-pad", title: "Controller in Desktop Mode", how: "Desktop Mode with Steam running: use Turbine with the controller.",
@@ -2758,8 +3454,8 @@ Window {
           expect: "The mod shows in the list, turned on, with its name and version." },
         { id: "auto-apply", title: "Auto-apply, then start from Steam", how: "Turn a mod on or off, wait 5 seconds, close Turbine, start the game from the Steam library.",
           expect: "The game has the change without pressing Play in Turbine." },
-        { id: "uninstall-undo", title: "Uninstall and Undo", how: "Uninstall a mod from its menu (X), then press Y for Undo.",
-          expect: "It moves to Removed mods and comes back with Undo, in the same place." },
+        { id: "uninstall-undo", title: "Uninstall and put back", how: "Uninstall a mod from its options (X), then press A on its dimmed row.",
+          expect: "The row stays, dimmed, for 8 seconds; A puts the mod back in the same place. After that it is in Removed (n) at the bottom." },
         { id: "play-original", title: "Play without mods", how: "Game menu (View) > Play without mods.",
           expect: "The game starts with no mods. The mods stay in Turbine and go back in at the next Play." },
         { id: "restore", title: "Restore last setup played", how: "Play with mods, change some, then Game menu (View) > Restore last working setup.",
@@ -2770,7 +3466,7 @@ Window {
           expect: "Heroic starts the game with the mods in place." },
         { id: "seasonal", title: "Seasonal leaves and snow", how: "Settings > Look > Seasonal: Autumn, then Snow; try Amount and Size.",
           expect: "They fall smoothly behind the panels and stop while a game runs." },
-        { id: "quick-report", title: "Screenshot and report", how: "Hold View for 7 seconds (or hold the icon at the top of the rail).",
+        { id: "quick-report", title: "Screenshot and report", how: "Labs on: tap View and press A on the middle of the wheel (or hold the icon at the top of the rail for 7 seconds).",
           expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." },
         { id: "ts-install", title: "Thunderstore install", how: "Valheim, Lethal Company or Risk of Rain 2: Get mods, pick a mod, A Install.",
           expect: "It downloads with progress on the status line and the rail ring, and shows in Mods with what it needs." },
@@ -2778,7 +3474,7 @@ Window {
           expect: "The loader downloads from its official home, shows as a mod, and the Needs badges go away." },
         { id: "fomod", title: "Installer choices (FOMOD)", how: "Add a Skyrim mod with an installer, from Get mods or Downloads.",
           expect: "One question per page with pictures; B goes back; the files of the chosen options go in." },
-        { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one with Y, then Sort automatically.",
+        { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one (X, Move), then Sort automatically.",
           expect: "The game loads plugins in that order; masters stay first; missing masters are named." },
         { id: "ts-code", title: "Thunderstore code", how: "Lethal Company or another Thunderstore game, online: game menu (View), Loadouts, Create a Thunderstore code.",
           expect: "A code shows big and is copied; importing it on another device (or Loadouts, Import a Thunderstore profile code) gets the same mods." },
@@ -2819,9 +3515,29 @@ Window {
         { id: "nexus-no-key", title: "Open on Nexus when browsing fails", how: "If Get mods shows Browse ... mods on Nexus Mods: A Open on Nexus, then X Try again here.",
           expect: "The game's mods open in the browser and Turbine says: Download with Slow download. Turbine adds it when it lands in Downloads." },
         { id: "pointer", title: "Controller pointer", how: "Push the right stick, then press RT on a button, a mod's ON pill, a tab and a Settings row; press LT on a mod. Hold RT and move to drag. Try Game Mode and Desktop Mode, built-in controls and an Xbox pad.",
-          expect: "A brass pointer moves smoothly (slow for small moves, fast across the screen), outlines what it's over, RT clicks it, LT on a mod opens its menu. It hides 3 seconds after the stick stops; A and the D-pad work as before; with the pointer hidden LT and RT still switch tabs." },
-        { id: "scroll-stick", title: "Left stick scroll wheel", how: "Over a long list (Labs, Scrolling test, or Get mods), turn the left stick in circles both ways, then push it straight up and down.",
-          expect: "Clockwise scrolls down, counterclockwise up, smoothly; pushing straight scrolls too. While Steam's keyboard is up, the sticks and triggers do nothing in Turbine." },
+          expect: "A brass pointer moves smoothly, outlines what it's over, RT clicks it, LT on a mod opens its options. It hides 3 seconds after the stick stops, or at once on any other button; then LT and RT page up and down." },
+        { id: "r3-click", title: "R3 is the left mouse button", how: "Show the pointer and press R3 on a mod's ON pill; hold R3 and move the right stick. Then let the pointer hide and press R3 on a mod.",
+          expect: "With the pointer: R3 clicks like RT and holding it drags. Hidden: the pointer shows on the highlighted mod and R3 does what A does." },
+        { id: "left-stick", title: "Left stick: D-pad and wheel", how: "On My mods push the left stick down and hold it, then let go. Then sweep it round the edge both ways over a long list.",
+          expect: "Pushed and held, it moves like the D-pad (one row, then repeating). Swept round, it scrolls: clockwise down, a few rows every 30 degrees, and the highlight stays on a row you can see." },
+        { id: "bumpers-tabs", title: "LB and RB are tabs", how: "Press LB and RB on a game, in Settings and on a mod page from Get mods.",
+          expect: "Game tabs, Settings sections and the previous or next mod change. The game never changes; the rail does that." },
+        { id: "quick-wheel", title: "Quick wheel", how: "Tap View, press Up then Right, then A. Then hold View, push Left, let go.",
+          expect: "Tap: the wheel stays open and Sort opens. Hold and push: Games opens when you let go. Empty places are dimmed, never moved." },
+        { id: "tutorial", title: "Beginner tutorial", how: "Settings, Help: Beginner tutorial, Show it. Go through the four cards with A; open it again and skip with B.",
+          expect: "Big pictures of the real buttons; it ends on the rail with \"Pick a game to start\" and doesn't come back by itself." },
+        { id: "focus-memory", title: "Focus comes back", how: "Highlight the third mod, open another game from the rail, come back. Open X on a mod and close it. Open Settings from the wheel and press B.",
+          expect: "Each time the highlight is where you left it, on the same tab." },
+        { id: "inline-browser", title: "Didn't see Nexus open?", how: "Game Mode: a mod page, A Get it on Nexus, and stay in Turbine for 8 seconds. Press A again quickly the first time.",
+          expect: "Only one browser starts. After 8 seconds two buttons show under Get it: Open in Steam's browser and Always use Steam's browser. No box pops up." },
+        { id: "rail-menu", title: "Pin and hide on the rail", how: "On the rail press X on a game: Pin to the top; on a tool like Lossless Scaling: Hide from the rail. Settings, Help shows it again.",
+          expect: "The pinned game stays at the top; the hidden one is gone from the rail until shown again." },
+        { id: "touch-hold", title: "Touch: hold for options", how: "Touch a mod row, a Get mods card and a plugin and hold half a second; swipe sideways on the tabs.",
+          expect: "Holding opens that item's options; the swipe changes the tab; the legend hides until the next button press." },
+        { id: "fewer-steps", title: "Fewer presses to a mod", how: "A game with no mods, free Nexus account, Game Mode: A on the game in the rail, A on a mod, A Get it on Nexus, Slow download, then Play.",
+          expect: "The game opens on Get mods with the first mod highlighted, Get it is highlighted on its page, and Play is highlighted when the mod arrives." },
+        { id: "scroll-stick", title: "Left stick in Steam's keyboard", how: "Open Find (Y) so Steam's keyboard shows, move both sticks and press the triggers.",
+          expect: "While Steam's keyboard is up, the sticks and triggers do nothing in Turbine." },
         { id: "md5-identify", title: "Files named from Nexus", how: "With a Nexus key, add a mod you downloaded from Nexus by hand (Add from Downloads).",
           expect: "It shows with its Nexus name and version, and gets Update ready badges like mods installed from Get mods." },
         { id: "overlay-desktop", title: "Status over the browser (Desktop Mode)", how: "Desktop Mode: start a Nexus download from Turbine, then stay in the browser.",
@@ -3148,16 +3864,22 @@ Window {
         id: hint
         property string k: ""
         property string label: ""
+        property string pre: ""           // "hold": the legend reads "hold A Delete"
+        property string k2: ""            // a second key and its words in one hint ("RT Click, LT Menu")
+        property string label2: ""
         // In the legend, a hint for one button is also a button: a tap or click does what the button does.
-        readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y", "view"].indexOf(k) >= 0
+        readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y"].indexOf(k) >= 0
         spacing: app.px(6)
         TapHandler { enabled: hint.clickable; onTapped: { app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
+        Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Repeater {
             model: hint.k.split("+")
             Key { required property string modelData; k: modelData; visible: modelData !== ""; anchors.verticalCenter: parent.verticalCenter }
         }
-        Label { visible: hint.label !== ""; text: hint.label; font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.label !== ""; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Key { visible: hint.k2 !== ""; k: hint.k2; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
     }
     component Icon: Shape {
         property string d: ""
@@ -3415,7 +4137,7 @@ Window {
                     }
                     Rectangle {
                         id: backBtn
-                        visible: app.page !== "game" || app.modPage
+                        visible: app.page !== "game"
                         x: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
                         width: backRow.implicitWidth + app.px(20); height: app.px(32); radius: app.px(6)
@@ -3426,16 +4148,18 @@ Window {
                     }
                     Column {
                         x: backBtn.visible ? backBtn.x + backBtn.width + app.px(14) : app.px(16)
-                        width: parent.width - x - playBtn.width - app.px(40)
+                        width: parent.width - x - playBtn.width - app.px(40) - (resultCaps.visible ? resultCaps.width + app.px(14) : 0)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(2)
                         Text {
                             id: headerTitle
                             width: parent.width
                             elide: Text.ElideRight
-                            text: app.page === "settings" ? "Settings" : app.page === "perf" ? "Scrolling test" : app.game ? app.gameTitle : "Turbine Mod Manager"
+                            text: app.page === "settings" ? "Settings" : app.page === "perf" ? "Scrolling test"
+                                  : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "")
+                                  : app.game ? app.gameTitle : "Turbine Mod Manager"
                             color: c.text
-                            font.family: app.page === "game" && app.game ? app.titleFont : app.bodyFont
+                            font.family: app.page === "game" && app.game && !app.modPage ? app.titleFont : app.bodyFont
                             font.pixelSize: app.px(20)
                             font.weight: Font.DemiBold
                         }
@@ -3473,6 +4197,18 @@ Window {
                             }
                         }
                     }
+                    // The mod page: LB and RB step through the results.
+                    Row {
+                        id: resultCaps
+                        visible: app.page === "game" && app.modPage && app.getItems.length > 1
+                        anchors.right: playBtn.left
+                        anchors.rightMargin: app.px(14)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: app.px(6)
+                        Key { k: "lb"; anchors.verticalCenter: parent.verticalCenter }
+                        Label { text: "Mod " + (Math.max(0, app.getItems.findIndex(x => app.detailsItem && String(x.id) === String(app.detailsItem.id))) + 1) + " of " + app.getItems.length; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                        Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
+                    }
                     Rectangle {
                         id: playBtn
                         visible: app.page === "game" && app.game !== null
@@ -3481,6 +4217,9 @@ Window {
                         anchors.verticalCenter: parent.verticalCenter
                         width: playRow.implicitWidth + app.px(24); height: app.px(38); radius: app.px(8)
                         opacity: Turbine.busy ? 0.7 : 1
+                        // The focus ring when Play has the focus (a mod just arrived, or Up from the top).
+                        border.color: c.text
+                        border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
                         gradient: Gradient {
                             GradientStop { position: 0; color: c.accentHi }
                             GradientStop { position: 1; color: c.accent }
@@ -3497,9 +4236,10 @@ Window {
                     }
                 }
 
-                // Tabs (game page only): My mods, Get mods, and Load order for plugin games. Always shown.
+                // Tabs (game page only): My mods, Get mods, and Load order for plugin games. LB and RB switch them.
+                // The mod page is its own screen: no tabs over it.
                 Rectangle {
-                    visible: app.page === "game" && app.game !== null
+                    visible: app.page === "game" && app.game !== null && !app.modPage
                     width: parent.width
                     height: app.px(38)
                     radius: app.px(6)
@@ -3509,7 +4249,7 @@ Window {
                         anchors.fill: parent
                         anchors.margins: app.px(3)
                         spacing: app.px(4)
-                        Key { id: ltKey; k: "lt"; anchors.verticalCenter: parent.verticalCenter }
+                        Key { id: ltKey; k: "lb"; anchors.verticalCenter: parent.verticalCenter }
                         Repeater {
                             model: app.tabs
                             Rectangle {
@@ -3525,7 +4265,14 @@ Window {
                                 TapHandler { onTapped: { app.modPage = false; app.tab = parent.index } }
                             }
                         }
-                        Key { k: "rt"; anchors.verticalCenter: parent.verticalCenter }
+                        Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    // Touch: a sideways swipe on the tabs is LB or RB.
+                    DragHandler {
+                        target: null
+                        xAxis.enabled: true; yAxis.enabled: false
+                        acceptedDevices: PointerDevice.TouchScreen
+                        onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the tabs"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
                     }
                 }
                 // Page content
@@ -3636,7 +4383,8 @@ Window {
                                        : app.updateMap[entry.m.id] ? "Update ready" : entry.kind === "mod" && entry.m.enabled && app.isHidden(entry.m) ? "Hidden by another mod"
                                        : entry.kind === "mod" && app.isNew(entry.m) ? "New" : "")
                                 badgeLevel: app.moving && entry.foc ? "info" : (entry.m.needsLoader && app.loaderMissing) || (entry.kind === "mod" && entry.m.enabled && (!!app.modWarns[entry.m.id] || app.missingNeeds(entry.m).length > 0)) ? "warn" : "info"
-                                showHints: entry.foc && !app.moving
+                                // The legend says what A and X do: nothing printed twice.
+                                showHints: false
                                 onClicked: app.modIndex = entry.index
                                 onToggleClicked: { app.modIndex = entry.index; app.toggle(entry.m) }
                                 // A right-click (LT with the pointer) opens the mod's menu, like X.
@@ -3648,25 +4396,21 @@ Window {
                                 width: parent.width - app.px(8)
                                 height: parent.height
                                 radius: app.px(6)
-                                color: entry.foc ? c.focusFill : entry.kind === "get" ? c.card : "transparent"
+                                // Removed (n) at the bottom; a mod just uninstalled stays dimmed in its place for 8 seconds.
+                                color: entry.foc ? c.focusFill : "transparent"
                                 border.color: entry.foc ? c.accent : c.line
-                                border.width: entry.foc ? Math.max(1, app.px(2)) : (entry.kind === "removed" ? Math.max(1, app.px(1)) : 0)
+                                border.width: entry.foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
+                                opacity: entry.kind === "ghost" && !entry.foc ? 0.6 : 1
                                 Label {
                                     x: app.px(14)
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - app.px(180)
-                                    text: entry.kind === "get" ? "+ Get mods for " + app.gameTitle
-                                          : app.plural(app.removedMods.length, "removed mod", "removed mods") + " (kept 7 days)"
-                                    color: entry.kind === "get" ? c.accentText : c.muted
+                                    width: parent.width - app.px(28)
+                                    elide: Text.ElideRight
+                                    text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
+                                          : "Removed (" + app.removedMods.length + "), kept 7 days"
+                                    color: entry.kind === "ghost" ? c.soft : c.muted
                                     font.pixelSize: app.px(15)
-                                    font.weight: entry.kind === "get" ? Font.DemiBold : Font.Normal
-                                }
-                                Hint {
-                                    visible: entry.foc
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: app.px(12)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    k: "a"; label: entry.kind === "get" ? "Get mods" : "Open"
+                                    font.italic: entry.kind === "ghost"
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                 TapHandler { onTapped: { app.modIndex = entry.index; app.act("a") } }
@@ -3725,8 +4469,11 @@ Window {
                         mainLabel: app.mainLabel
                         mainLine: app.mainLine
                         mainProgress: app.busyHere && app.dl.active ? Math.max(0, app.dlPart) : -1
-                        focusIndex: app.pageIndex
-                        onInstallClicked: { app.pageIndex = 0; app.installFromDetails() }
+                        focusIndex: app.pageInline >= 0 ? -1 : app.pageIndex
+                        helpLabels: app.pageHelpLabels
+                        helpFocus: app.pageInline
+                        onHelpClicked: (i) => { app.pageInline = i; app.modPageAct("a") }
+                        onInstallClicked: { app.pageIndex = 0; app.pageInline = -1; app.installFromDetails() }
                         onVersionsClicked: { app.pageIndex = 1; app.openVersions() }
                         onNeedClicked: (i) => { app.pageIndex = i + 2; app.openNeed(i) }
                     }
@@ -3746,6 +4493,7 @@ Window {
                         active: app.zone === "main" && app.sheet === ""
                         onSortClicked: { app.orderIndex = -1; Turbine.orderSort() }
                         onRowClicked: (i) => app.orderIndex = i
+                        onRowMenu: (i) => { if (app.sheet === "") { app.orderIndex = i; app.openPluginMenu() } }
                         onToggleClicked: (i) => { app.orderIndex = i; app.orderAct("a") }
                     }
 
@@ -3757,6 +4505,8 @@ Window {
                         Column {
                             width: app.px(170)
                             spacing: app.px(4)
+                            // LB and RB move between the sections (caps at both ends of the list).
+                            Key { k: "lb"; anchors.horizontalCenter: parent.horizontalCenter }
                             Repeater {
                                 model: app.settingsSections
                                 Rectangle {
@@ -3770,6 +4520,7 @@ Window {
                                     TapHandler { onTapped: { app.setSection = parent.index; app.setRow = 0 } }
                                 }
                             }
+                            Key { k: "rb"; anchors.horizontalCenter: parent.horizontalCenter }
                         }
                         // Look
                         ListView {
@@ -3923,7 +4674,7 @@ Window {
                             id: labsList
                             width: parent.width - app.px(184)
                             height: parent.height
-                            visible: app.sec === "Getting mods" || app.sec === "Updates" || app.sec === "Labs"
+                            visible: app.sec === "Getting mods" || app.sec === "Updates" || app.sec === "Labs" || app.sec === "Help"
                             clip: true
                             spacing: app.px(4)
                             model: app.rowsNow
@@ -4180,7 +4931,7 @@ Window {
         ui: kit
         visible: app.sheet === "check"
         checks: app.checks
-        buttons: app.checkChoices.map(label => ({ key: app.checkKey(label), label: label }))
+        buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
         focusIndex: app.checkIndex
         note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
         onActivated: (index, key) => { app.checkIndex = index; app.checkChoose(index) }
@@ -4197,6 +4948,7 @@ Window {
         sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
         sourceShown: app.loaderSourceShown
         canDownload: app.loaderCanGet
+        buttons: app.loaderLabels.map(l => ({ key: "", label: l }))
         focusIndex: app.loaderIndex
         onActivated: (index, key) => { app.loaderIndex = index; app.act(key || "a") }
         onClosed: app.act("b")
@@ -4343,21 +5095,10 @@ Window {
         visible: app.sheet === "confirm"
         title: "Delete for good?"
         text: app.confirmText
-        buttons: [{ key: "a", label: confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold to delete" },
-                  { key: "b", label: "Keep" }]
-        focusIndex: 0
-        onActivated: (i) => { if (i === 0) app.startConfirm(); else app.act("b") }
-        onClosed: app.act("b")
-    }
-    // "Didn't see Nexus open?": a choice, not a failure (info look).
-    InfoSheet {
-        ui: kit
-        visible: app.sheet === "openhelp"
-        title: "Didn't see Nexus open?"
-        text: "Turbine started " + app.openName + " for you. If it isn't showing, Steam's own browser opens the same page. Turbine still adds your download by itself."
-        buttons: [{ key: "a", label: "Open in Steam's browser" }, { key: "b", label: "Close" }]
-        focusIndex: 0
-        onActivated: (i) => app.act(i === 0 ? "a" : "b")
+        buttons: [{ key: "", label: confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to delete" },
+                  { key: "", label: "Keep" }]
+        focusIndex: app.confirmIndex
+        onActivated: (i) => { app.confirmIndex = i; if (i === 0) app.startConfirm(); else app.act("b") }
         onClosed: app.act("b")
     }
     // X on a Get mods card.
@@ -4381,50 +5122,6 @@ Window {
         focusIndex: app.menuIndex
         onActivated: (index) => { app.menuIndex = index; app.pickRun(index) }
         onClosed: app.act("b")
-    }
-    // Keep this size? Drawn at a fixed safe scale, so it is always readable whatever size is being tried.
-    Item {
-        id: keepSheet
-        anchors.fill: parent
-        visible: app.sheet === "keepsize"
-        z: 60
-        readonly property real k: Math.max(0.5, Math.min(app.width / 883, app.height / 514))
-        function kp(v) { return Math.round(v * k) }
-        Rectangle {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: keepSheet.kp(70)
-            width: keepCol.implicitWidth + keepSheet.kp(40)
-            height: keepCol.implicitHeight + keepSheet.kp(28)
-            radius: keepSheet.kp(10)
-            color: c.panel
-            border.color: c.accent
-            border.width: Math.max(1, keepSheet.kp(2))
-            Column {
-                id: keepCol
-                anchors.centerIn: parent
-                spacing: keepSheet.kp(10)
-                Text { text: "Keep this size?"; color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(20); font.weight: Font.DemiBold }
-                Text { text: "Going back in " + app.keepLeft + " · Interface size " + app.sizeNow + "%" + (app.sizeNow === app.sizeCap && app.sizeCap < 150 ? " (largest that fits)" : "") + " · " + (app.layoutNow === "tv" ? "TV" : app.layoutNow.charAt(0).toUpperCase() + app.layoutNow.substring(1)); color: c.soft; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(15) }
-                Row {
-                    spacing: keepSheet.kp(18)
-                    Repeater {
-                        model: [["◀▶", "Change"], ["a", "Keep"], ["b", "Go back"]]
-                        Row {
-                            required property var modelData
-                            spacing: keepSheet.kp(8)
-                            Rectangle {
-                                width: Math.max(keepSheet.kp(26), capText.implicitWidth + keepSheet.kp(12)); height: keepSheet.kp(26); radius: height / 2
-                                color: c.raised; border.color: c.accentLo
-                                Text { id: capText; anchors.centerIn: parent; text: parent.parent.modelData[0].toUpperCase(); color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(14); font.bold: true }
-                            }
-                            Text { text: parent.modelData[1]; color: c.text; font.family: app.bodyFont; font.pixelSize: keepSheet.kp(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                            TapHandler { onTapped: if (parent.modelData[0] !== "◀▶") app.keepSize(parent.modelData[0] === "a") }
-                        }
-                    }
-                }
-            }
-        }
     }
     // The focused game's name beside the rail.
     Rectangle {
@@ -4479,8 +5176,9 @@ Window {
     AskText {
         id: askView
         ui: kit
+        focusIndex: app.askIndex
         onAccepted: (text) => app.askDone(text)
-        onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = app.shownMods.length > 0 ? 1 : 0 } }
+        onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = 0 } }
         onCancelled: app.askCancelled()
     }
 
@@ -4519,76 +5217,10 @@ Window {
         onEditEnded: app.reportEditing(false)
     }
 
-    // Legend: built from the same rules act() follows, so what it says is what the buttons do. The focused item
-    // shows its own A and X; the legend lists the rest. Declared after the menus so their backdrop never dims it.
-    readonly property var legendHints: {
-        const s = sheet
-        if (moving) return [["▲▼", "Move"], ["◀▶", "10 rows"], ["lt+rt", "Top or bottom"], ["a", "Done"], ["b", "Cancel"]]
-        if (orderMoving) return [["▲▼", "Move"], ["◀▶", "10 rows"], ["lt+rt", "Top or bottom"], ["a", "Done"], ["b", "Cancel"]]
-        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return [["a", "Choose"], ["b", "Close"], ["start", "Play"]]
-        if (s === "pick") return [["a", "Choose"], ["b", pickBack !== "" ? "Back" : "Close"]]
-        if (s === "add") return [["▲▼", "Choose"], ["a", "Add"], ["y", addAll ? "This game's files" : "All files"], ["b", "Close"]]
-        if (s === "shares") return [["▲▼", "Choose"], ["a", "Read"], ["b", "Back"]]
-        if (s === "profiles") return [["a", "Choose"]].concat(!importData && profIndex < profileList.length ? [["x", "Rename or delete"]] : []).concat([["b", "Close"]])
-        // Sheets with buttons: the buttons show their own keys; the legend only says how to choose.
-        // Before you play: its buttons show their own keys (A on the highlighted one, X, Y, B); the legend only says
-        // how to move between them, and that Start plays as it is.
-        if (s === "check") return [["◀▶", "Choose"]].concat(checkView.scrolls ? [["▲▼", "Scroll"]] : []).concat(checkStops ? [] : [["start", "Play anyway"]])
-        if (s === "loader") return [["a", loaderCanGet ? "Get it" : "Where it comes from"], ["b", "Not now"]]
-        if (s === "pages") return [["▲▼", "Choose"], ["a", "Open"], ["b", "Close"]]
-        if (s === "versions") return [["▲▼", "Choose"], ["a", detailsData && detailsData.premium === false ? "Get it on Nexus" : "Install"], ["b", "Close"]]
-        if (s === "code") return (codeData && codeData.state === "ready" ? [["a", "Copy"]] : []).concat([["b", "Back"]])
-        if (s === "plugin" && pluginOwner) return [["a", "Go to its mod"], ["b", "Close"]]
-        if (s === "plugin" || s === "details" || s === "notice") return [["b", "Close"]]
-        if (s === "pickgame") return [["▲▼", "Choose"], ["a", "Add here"], ["b", "Back"]]
-        if (s === "removed") return [["▲▼", "Choose"], ["b", "Close"], ["start", "Play"]]
-        if (s === "confirm") return [["a", "Hold to delete"], ["b", "Keep"]]
-        // Keep this size? shows its own keys (Change, Keep, Go back) at a fixed size; no legend under it.
-        if (s === "keepsize") return []
-        if (s === "openhelp") return [["a", "Open in Steam's browser"], ["b", "Close"]]
-        if (s === "oldhelper") return [["a", "OK"]].concat(infoView.scrolls ? [["▲▼", "Scroll"]] : [])
-        if (s === "nobrowser" || s === "helper" || s === "addbrowser") return [["◀▶", "Choose"]].concat(infoView.scrolls ? [["▲▼", "Scroll"]] : [])
-        if (s === "found") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Not a mod"]]
-        if (s === "notes") return [["a", "OK"]]
-        if (s === "quick" || s === "chain") return [["◀▶", "Choose"], ["a", "Choose"], ["b", "Close"]]
-        if (s === "fomod") return [["a", "Choose"], ["start", "Next"], ["b", "Back a step"]]
-        if (s === "ask") return [["a", "Done"], ["b", "Cancel"]].concat(Turbine.gamemode ? [["x", "Keyboard"]] : []).concat([["y", "Clear"]])
-        if (s === "perf") return [["◀▶", "Choose"], ["b", "Close"]]
-        if (s === "activity") return [["▲▼", "Scroll"], ["◀▶", "Choose"], ["b", "Close"]]
-        if (s === "report") return reportView.editing ? [["b", "Done typing"]] : [["▲▼", "Move"], ["b", "Close"]]
-        if (s !== "") return [["b", "Close"]]
-        if (zone === "rail") return [["a", "Open"], ["b", "Back"]].concat(railIndex < games.length ? [["x", "Game menu"]] : []).concat([["lb+rb", "Switch game"]])
-        if (page === "settings") {
-            // Left changes the value on Look, choice and toggle rows and moves between a checklist item's answers;
-            // only on the other rows does it go to the game list.
-            const kind = sec === "Look" ? "look" : sec === "About" ? "about" : rowsNow[setRow] ? rowsNow[setRow].kind : ""
-            return [["lt+rt", "Sections"]]
-                .concat(kind === "look" || kind === "choice" || kind === "toggle" ? [["◀▶", "Change"]] : [])
-                .concat(kind === "item" ? [["◀▶", "Choose"]] : [])
-                .concat([["b", "Back to the game"]])
-                .concat(kind === "look" || kind === "choice" || kind === "toggle" || kind === "item" ? [] : [["◀", "Game list"]])
-        }
-        if (page === "perf") return [["▲▼", "Scroll"], ["b", "Back"]]
-        if (!game) return [["a", "Look again"]]
-        if (modPage) return [["b", "Back to the results"]].concat(pageMissing >= 0 ? [["y", "Get what it needs"]] : []).concat([["lb+rb", "Prev / next mod"], ["▲▼", "Scroll"], ["view", "Game menu"]])
-        let h = []
-        if (tab === 0 && selecting) return [["b", "Done"], ["lb+rb", "Switch game"], ["lt+rt", "Tabs"]]
-        if (tab === 0) {
-            if (undoShown) h.push(["y", "Undo"])
-            else if (ordered && focusedItem && focusedItem.kind === "mod" && mods.length > 1) h.push(["y", "Move"])
-            if (modIndex < 0 && listBar[listBarIndex]) h = [["a", listBar[listBarIndex].key === "find" ? "Find" : "Choose"]].concat(h)
-            h.push(["b", listFiltered ? "Show all" : "Game list"])
-            if (mods.length >= 20 || findText !== "") h.push(["r3", "Find"])
-        } else if (tab === 1 && sources.length > 0) {
-            if (getArea === "fallback") h = [["b", "My mods"]]   // the card shows A, X and Y
-            else if (getArea === "grid") h = [["a", "Open"], ["y", "Get it"], ["x", "More"], ["b", "Search bar"]]
-            else if (getArea === "bar" && getBar[getIndex] && ["sort", "category", "source"].indexOf(getBar[getIndex].key) >= 0) h = [["a", "Choose"], ["b", getText !== "" ? "Clear search" : "My mods"]]
-            else h = [["a", "Choose"], ["b", getText !== "" ? "Clear search" : "My mods"]]
-            if (getArea !== "fallback") h.push(["r3", "Search"])
-        } else if (tab === 1) h = [["b", "My mods"]]
-        else if (tab === 2) h = (orderPlugin && !orderPlugin.fixed ? [["y", "Move"]] : []).concat(orderPlugin ? [["x", "Details"]] : []).concat([["b", "My mods"]])
-        return h.concat([["lb+rb", "Switch game"], ["lt+rt", "Tabs"], ["view", "Game menu"]]).concat(gripsSeen ? [["l4+r4", "Page"]] : [])
-    }
+    // Legend: what binds() says A, B, X and Y do here, then one more (the pointer's buttons, or Start when a sheet
+    // covers Play). At most five; LB/RB, View and Start are caps on the tab bar, the wheel button and Play. Hidden
+    // after a touch until the next press. Declared after the menus so their backdrop never dims it.
+    readonly property var legendHints: legendFor(binds())
     Rectangle {
         id: legend
         anchors.bottom: parent.bottom
@@ -4601,7 +5233,7 @@ Window {
         radius: app.px(6)
         color: c.panel
         z: 40
-        visible: app.legendHints.length > 0 || pointerHints.visible
+        visible: app.lastInput !== "touch" && app.sheet !== "tutorial"
         Row {
             id: legendRow
             anchors.verticalCenter: parent.verticalCenter
@@ -4613,22 +5245,66 @@ Window {
                     required property var modelData
                     k: modelData[0]
                     label: modelData[1]
-                    visible: x + width < legend.width - pointerHints.width - app.px(30)
+                    pre: modelData[2] || ""
+                    k2: modelData[3] || ""
+                    label2: modelData[4] || ""
                 }
             }
         }
-        // The controller pointer (Steam's desktop layout), only while it shows: RT clicks, the left stick scrolls.
-        Row {
-            id: pointerHints
+        // The quick wheel's button: View's cap (a tap opens it too).
+        Rectangle {
+            id: wheelBtn
             anchors.right: parent.right
-            anchors.rightMargin: app.px(12)
+            anchors.rightMargin: app.px(4)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: app.px(16)
-            visible: Turbine.pointerShown && !app.keyboardUp
-            width: visible ? implicitWidth : 0
-            Hint { k: "rt"; label: "Click" }
-            Hint { k: "ls"; label: "Scroll" }
+            width: wheelRow.implicitWidth + app.px(16); height: app.px(30); radius: app.px(6)
+            color: app.wheelOpen ? c.focusFill : c.raised
+            visible: app.sheet === "" || app.wheelOpen
+            Row {
+                id: wheelRow
+                anchors.centerIn: parent
+                spacing: app.px(6)
+                Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
+                Label { text: "Quick wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+            }
+            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+            TapHandler { onTapped: app.wheelPress() }
         }
+    }
+    QuickWheel {
+        ui: kit
+        visible: app.wheelOpen
+        slots: app.wheelSlots
+        focusIndex: app.wheelSlot
+        labs: app.labsOn
+        viewGlyph: app.glyph("view")
+        onActivated: (i) => { app.wheelSlot = i; app.wheelFire(i) }
+        onClosed: app.closeWheel()
+    }
+    Tutorial {
+        ui: kit
+        visible: app.sheet === "tutorial"
+        card: app.tutCard
+        count: app.tutCount
+        viewGlyph: app.glyph("view")
+        startGlyph: app.glyph("start")
+        onNext: app.tutorialAct("a")
+        onSkip: app.tutorialAct("b")
+    }
+    // Touch anywhere: the pointer goes and the legend hides (the next press brings it back). A tap still does its
+    // thing; this only watches.
+    Item {
+        anchors.fill: parent
+        z: 9999
+        PointHandler {
+            acceptedDevices: PointerDevice.TouchScreen
+            onActiveChanged: if (active) app.touched()
+        }
+    }
+    function touched() {
+        if (lastInput !== "touch") note("touch", "Touch: legend hidden, pointer gone")
+        lastInput = "touch"
+        Turbine.pointerHide()
     }
 
     // ---------------------------------------------------------------- toast
@@ -4728,7 +5404,7 @@ Window {
     }
     property int pointerTries: 0
     function pointerCheck() {
-        const second = modList.itemAtIndex(2), first = modList.itemAtIndex(1)
+        const second = modList.itemAtIndex(1), first = modList.itemAtIndex(0)
         const it = second && second.kind === "mod" ? second : first && first.kind === "mod" ? first : null
         if (!it || !it.pill) {
             // The test mods may still be going in: look again shortly.

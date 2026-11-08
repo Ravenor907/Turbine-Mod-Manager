@@ -5,7 +5,9 @@ import QtQuick
 // under it ("Get it on Nexus", "Install", "Installed · On"), "Other files", then "Also needs" (each requirement with
 // Installed, Will be added or Get it; A on one opens its page). On a narrow window the right column goes under the
 // picture. Main.qml moves the focus (focusIndex: 0 main button, 1 Other files, 2 and on the requirements) and scrolls
-// with the D-pad (scroll()).
+// with the D-pad (scroll()). After 8 seconds with Turbine still in front, two buttons show under the main one
+// ("Open in Steam's browser", "Always use Steam's browser": helpLabels, helpFocus, helpClicked). No key caps on the
+// page: the legend says what A and X do.
 Item {
     id: md
     required property var ui
@@ -17,8 +19,11 @@ Item {
     property bool mainBusy: false
     property real mainProgress: -1
     property int focusIndex: 0
+    property var helpLabels: []           // the two browser buttons, when they show
+    property int helpFocus: -1
 
     signal installClicked()
+    signal helpClicked(int index)
     signal versionsClicked()
     signal needClicked(int index)
 
@@ -62,15 +67,19 @@ Item {
         view.contentY = Math.max(0, Math.min(Math.max(0, view.contentHeight - view.height), view.contentY + d * ui.px(70)))
     }
     function focusItem() {
+        if (helpFocus >= 0) return helpRep.itemAt(helpFocus)
         return focusIndex === 0 ? mainBtn : focusIndex === 1 ? otherRow : needRep.itemAt(focusIndex - 2)
     }
-    onFocusIndexChanged: Qt.callLater(function () {
+    onHelpFocusChanged: follow()
+    onFocusIndexChanged: follow()
+    function follow() { Qt.callLater(md.followNow) }
+    function followNow() {
         const it = md.focusItem()
         if (!it) return
         const p = it.mapToItem(view.contentItem, 0, 0)
         if (p.y < view.contentY) view.contentY = Math.max(0, p.y - ui.px(8))
         else if (p.y + it.height > view.contentY + view.height) view.contentY = p.y + it.height - view.height + ui.px(8)
-    })
+    }
     onInfoChanged: view.contentY = 0
 
     Text {
@@ -175,18 +184,7 @@ Item {
                     color: md.ui.c.onAccent
                     opacity: 0.5
                 }
-                Row {
-                    anchors.centerIn: parent
-                    spacing: md.ui.px(8)
-                    Rectangle {
-                        visible: md.focused && md.focusIndex === 0
-                        width: md.ui.px(26); height: width; radius: width / 2
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(0, 0, 0, 0.18)
-                        Text { anchors.centerIn: parent; text: "A"; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14); font.bold: true }
-                    }
-                    Text { text: md.mainLabel; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                }
+                Text { anchors.centerIn: parent; text: md.mainLabel; color: md.ui.c.onAccent; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.installClicked() }
             }
@@ -198,6 +196,32 @@ Item {
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.px(14)
+            }
+            Text {
+                visible: md.helpLabels.length > 0
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: "Didn't see Nexus open?"
+                color: md.ui.c.text
+                font.family: md.ui.bodyFont
+                font.pixelSize: md.ui.px(14)
+                font.weight: Font.DemiBold
+            }
+            Repeater {
+                id: helpRep
+                model: md.helpLabels
+                Rectangle {
+                    required property int index
+                    required property string modelData
+                    readonly property bool foc: md.focused && md.helpFocus === index
+                    width: rightCol.width; height: md.ui.px(44); radius: md.ui.px(6)
+                    color: foc ? md.ui.c.focusFill : md.ui.c.card
+                    border.color: foc ? md.ui.c.accent : md.ui.c.line
+                    border.width: foc ? md.ui.px(2) : Math.max(1, md.ui.px(1))
+                    Text { x: md.ui.px(12); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold }
+                    HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
+                    TapHandler { onTapped: md.helpClicked(parent.index) }
+                }
             }
             Text {
                 visible: !!md.info && !!md.info.mainLine
@@ -228,11 +252,6 @@ Item {
                     x: md.ui.px(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: md.ui.px(8)
-                    Rectangle {
-                        width: md.ui.px(24); height: width; radius: width / 2; color: md.ui.c.raised; border.color: md.ui.c.accentLo
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "X"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
-                    }
                     Text { text: "Other files (" + md.otherCount + ")"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }

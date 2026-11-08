@@ -1,7 +1,8 @@
 import QtQuick
 
 // A line of text from the player: a search, a profile name, a Thunderstore profile code, the Nexus Mods key. In Game
-// Mode Steam's on-screen keyboard opens with it (Main.qml asks Steam). A or Enter is Done, B or Esc cancels.
+// Mode Steam's on-screen keyboard opens with it (Main.qml asks Steam). The field has the focus first: A opens the
+// keyboard again. Down: the buttons Clear, Cancel and Done (SheetButtons). Start or Enter is Done, B or Esc cancels.
 Item {
     id: ask
     required property var ui
@@ -14,6 +15,7 @@ Item {
     property int maxLength: 200
     property bool secret: false           // shown as dots (the Nexus key)
     property string doneLabel: "Done"
+    property int focusIndex: -1           // -1 the field, then Clear, Cancel, Done (Main.qml moves it)
 
     signal accepted(string text)
     signal cancelled()
@@ -67,8 +69,8 @@ Item {
                 height: ask.ui.px(48)
                 radius: ask.ui.px(6)
                 color: ask.ui.c.ground
-                border.color: ask.ui.c.accent
-                border.width: ask.ui.px(2)
+                border.color: ask.focusIndex < 0 ? ask.ui.c.accentHi : ask.ui.c.line
+                border.width: ask.focusIndex < 0 ? ask.ui.px(3) : Math.max(1, ask.ui.px(1))
                 TextInput {
                     id: field
                     anchors.fill: parent
@@ -95,32 +97,13 @@ Item {
                     }
                 }
             }
-            Row {
+            SheetButtons {
                 anchors.right: parent.right
-                spacing: ask.ui.px(10)
-                Repeater {
-                    model: [["b", "Cancel"], ["a", ask.doneLabel]]
-                    Rectangle {
-                        required property var modelData
-                        required property int index
-                        width: r.implicitWidth + ask.ui.px(26); height: ask.ui.px(40); radius: ask.ui.px(8)
-                        color: index === 1 ? ask.ui.c.accent : ask.ui.c.raised
-                        Row {
-                            id: r
-                            anchors.centerIn: parent
-                            spacing: ask.ui.px(8)
-                            Rectangle {
-                                width: ask.ui.px(24); height: width; radius: width / 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: ask.ui.c.raised; border.color: ask.ui.c.accentLo
-                                Text { anchors.centerIn: parent; text: parent.parent.parent.modelData[0].toUpperCase(); color: ask.ui.c.text; font.family: ask.ui.bodyFont; font.pixelSize: ask.ui.px(13); font.bold: true }
-                            }
-                            Text { text: parent.parent.modelData[1]; color: parent.parent.index === 1 ? ask.ui.c.onAccent : ask.ui.c.text; font.family: ask.ui.bodyFont; font.pixelSize: ask.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                        }
-                        HoverHandler { onHoveredChanged: ask.ui.hover(parent, hovered) }
-                        TapHandler { onTapped: parent.index === 1 ? ask.accept() : ask.cancel() }
-                    }
-                }
+                ui: ask.ui
+                labels: ["Clear", "Cancel", ask.doneLabel]
+                focusIndex: ask.focusIndex
+                mainIndex: 2
+                onActivated: (i) => { if (i === 0) { ask.clear(); field.forceActiveFocus() } else if (i === 1) ask.cancel(); else ask.accept() }
             }
         }
     }

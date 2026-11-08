@@ -1,7 +1,7 @@
 //! Controllers through SDL. In Game Mode, Steam hands non-Steam apps a virtual Xbox pad, the same path games use;
 //! SDL's controller mappings cover Xbox 360 and Series pads and the handhelds' built-in controls the same way.
 //! Buttons and the triggers become plain presses ("rt", "lt"); the sticks are kept as positions for the controller
-//! pointer (pointer.rs): right stick moves it, left stick scrolls.
+//! pointer (pointer.rs): the right stick moves it; the left stick is the D-pad when pushed and held, a wheel when swept.
 
 use sdl2::controller::{Axis, Button, GameController};
 use sdl2::event::Event;

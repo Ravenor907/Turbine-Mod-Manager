@@ -283,7 +283,8 @@ Item {
                             }
                         }
                         HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
-                        TapHandler { onTapped: gm.itemClicked(cell.index) }
+                        // Touch: hold a moment for the card's options (like X).
+                        TapHandler { longPressThreshold: 0.5; onTapped: gm.itemClicked(cell.index); onLongPressed: gm.itemMenu(cell.index) }
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: gm.itemMenu(cell.index) }
                     }
                 }
@@ -336,7 +337,9 @@ Item {
             id: akRow
             anchors.centerIn: parent
             spacing: gm.ui.px(8)
+            // No key caps on cards: the legend says what A and X do.
             Rectangle {
+                visible: false
                 width: gm.ui.px(24); height: width; radius: width / 2
                 anchors.verticalCenter: parent.verticalCenter
                 color: ak.strong ? Qt.rgba(0, 0, 0, 0.18) : gm.ui.c.panel

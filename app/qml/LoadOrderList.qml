@@ -3,7 +3,7 @@ import QtQuick.Shapes
 
 // The Load order tab (Skyrim): the game's plugins in the order they load, each ON or OFF, with Master and Light
 // marked, the game's own files fixed at the top, and a warning on plugins whose masters are missing. Sort
-// automatically sits above the list (focus index -1). Main.qml handles the keys: A turns a plugin on or off, Y moves
+// automatically sits above the list (focus index -1). Main.qml handles the keys: A turns a plugin on or off, X Move moves
 // it, X shows a plugin's details, A on Sort automatically sorts (with LOOT's masterlist when it can be had). Plugins
 // LOOT has notes on carry a badge: "LOOT: problem" (red), "Dirty" or "LOOT: warning" (amber), "LOOT: note".
 Item {
@@ -29,6 +29,7 @@ Item {
 
     signal sortClicked()
     signal rowClicked(int index)
+    signal rowMenu(int index)             // right-click or a long press: the plugin's options (like X)
     signal toggleClicked(int index)
 
     onFocusIndexChanged: if (focusIndex >= 0) list.positionViewAtIndex(focusIndex, ListView.Contain)
@@ -157,7 +158,7 @@ Item {
                     }
                 }
                 HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }
-                TapHandler { onTapped: lo.rowClicked(row.index) }
+                TapHandler { longPressThreshold: 0.5; onTapped: lo.rowClicked(row.index); onLongPressed: lo.rowMenu(row.index) }
             }
         }
     }

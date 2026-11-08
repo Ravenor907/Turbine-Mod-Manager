@@ -71,6 +71,21 @@ pub mod qobject {
         fn selftest_pointer(self: Pin<&mut Self>, x: f64, y: f64, click: bool, wheel: i32);
 
         /// Turbine's window came back to the front: drops controller presses made meanwhile (in a game).
+        /// R3 with the pointer hidden: shows it at (x, y) (the focused item's center, worked out in QML).
+        #[qinvokable]
+        #[cxx_name = "pointerShowAt"]
+        fn pointer_show_at(self: Pin<&mut Self>, x: f64, y: f64);
+
+        /// For the build's checks: a pad press or release through the same path a controller's takes.
+        #[qinvokable]
+        #[cxx_name = "selftestPad"]
+        fn selftest_pad(self: Pin<&mut Self>, button: &QString, pressed: bool);
+
+        /// Touch: the pointer goes (the ring follows the finger instead).
+        #[qinvokable]
+        #[cxx_name = "pointerHide"]
+        fn pointer_hide(self: Pin<&mut Self>);
+
         #[qinvokable]
         fn wake(self: Pin<&mut Self>);
 
@@ -491,9 +506,9 @@ pub mod qobject {
         #[qsignal]
         fn asked(self: Pin<&mut Self>, json: QString);
 
-        /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view",
-        /// "up", "down", "left", "right" (the D-pad). The triggers come here only while the pointer is hidden;
-        /// while it shows they click (RT left, LT right).
+        /// A controller button went down or up: "a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view", "r3",
+        /// "up", "down", "left", "right" (the D-pad, and the left stick pushed and held one way). The triggers and
+        /// R3 come here only while the pointer is hidden; while it shows they click (RT and R3 left, LT right).
         #[qsignal]
         fn pad(self: Pin<&mut Self>, button: QString, pressed: bool);
 
@@ -1175,38 +1190,68 @@ impl qobject::Turbine {
             let name = self.rust().reader.as_ref().and_then(|r| r.names().into_iter().next()).unwrap_or_default();
             self.as_mut().set_pad_name(QString::from(name.as_str()));
         }
-        self.as_mut().pointer_tick(&sticks);
+        // The left stick pushed and held one way is a D-pad press, in with the buttons.
+        let mut events = events;
+        events.extend(self.as_mut().pointer_tick(&sticks));
         for (button, pressed) in events {
-            // While the pointer shows, RT and LT are the left and right mouse buttons (held for dragging).
-            let mouse = match button {
-                "rt" => Some(0),
-                "lt" => Some(1),
-                _ => None,
-            };
-            if let Some(i) = mouse {
-                let held = self.rust().mouse_down[i];
-                if held || (pressed && self.rust().pointer.shown && !*self.pointer_paused()) {
-                    self.as_mut().mouse_button(i, pressed);
-                    continue;
-                }
-            }
-            if pressed {
-                crate::log::line("pad", &format!("Press {button}"));
-                // A D-pad or face button means the player is using the buttons: the pointer goes, so the triggers
-                // switch tabs again at once.
-                let face = matches!(button, "a" | "b" | "x" | "y" | "up" | "down" | "left" | "right");
-                if face && self.rust().pointer.shown && self.rust().mouse_down == [false, false] {
-                    self.as_mut().rust_mut().pointer.shown = false;
-                    self.as_mut().pointer_publish();
-                }
-            }
-            self.as_mut().pad(QString::from(button), pressed);
+            self.as_mut().handle_pad(button, pressed);
         }
+    }
+
+    /// One press or release, from a pad or the build's checks (selftestPad).
+    fn handle_pad(mut self: Pin<&mut Self>, button: &'static str, pressed: bool) {
+        // While the pointer shows, RT and R3 are the left mouse button and LT the right one (held for dragging).
+        let mouse = match button {
+            "rt" | "r3" => Some(0),
+            "lt" => Some(1),
+            _ => None,
+        };
+        if let Some(i) = mouse {
+            let held = self.rust().mouse_down[i];
+            if held || (pressed && self.rust().pointer.shown && !*self.pointer_paused()) {
+                self.as_mut().mouse_button(i, pressed, button);
+                return;
+            }
+        }
+        if pressed {
+            crate::log::line("pad", &format!("Press {button}"));
+            // Any other press means the player is using the buttons: the pointer goes, so the triggers page
+            // again at once. (R3 with the pointer hidden shows it at the focus: Main.qml.)
+            if mouse.is_none() && self.rust().pointer.shown && self.rust().mouse_down == [false, false] {
+                self.as_mut().pointer_hide();
+            }
+        }
+        self.as_mut().pad(QString::from(button), pressed);
+    }
+
+    pub fn selftest_pad(mut self: Pin<&mut Self>, button: &QString, pressed: bool) {
+        const ALL: [&str; 20] = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view", "r3", "l3", "up", "down", "left", "right", "l4", "r4", "l5", "r5"];
+        let b = button.to_string();
+        if let Some(k) = ALL.iter().find(|k| **k == b) {
+            self.as_mut().handle_pad(*k, pressed);
+        }
+    }
+
+    pub fn pointer_show_at(mut self: Pin<&mut Self>, x: f64, y: f64) {
+        crate::log::line("pad", &format!("Pointer shown at the focus ({x:.0}, {y:.0})"));
+        self.as_mut().rust_mut().pointer.place(x, y);
+        self.as_mut().pointer_publish();
+        crate::pad::send(crate::pad::Kind::Move, x, y, 0, self.mouse_mask(), 0);
+    }
+
+    pub fn pointer_hide(mut self: Pin<&mut Self>) {
+        if !self.rust().pointer.shown || self.rust().mouse_down != [false, false] {
+            return;
+        }
+        self.as_mut().rust_mut().pointer.shown = false;
+        self.as_mut().pointer_publish();
+        // Off the window, so nothing stays outlined under a hidden pointer.
+        crate::pad::send(crate::pad::Kind::Move, -100.0, -100.0, 0, 0, 0);
     }
 
     /// One look at the sticks for the controller pointer: moves it (right stick), scrolls (left stick), hides it
     /// after 3 seconds without the right stick. Nothing while the on-screen keyboard is up (`pointerPaused`).
-    fn pointer_tick(mut self: Pin<&mut Self>, sticks: &crate::pointer::Sticks) {
+    fn pointer_tick(mut self: Pin<&mut Self>, sticks: &crate::pointer::Sticks) -> Vec<(&'static str, bool)> {
         let now = std::time::Instant::now();
         let dt = self.rust().pointer_at.map(|t| now.duration_since(t).as_secs_f64() * 1000.0).unwrap_or(16.0);
         self.as_mut().rust_mut().pointer_at = Some(now);
@@ -1215,9 +1260,9 @@ impl qobject::Turbine {
                 self.as_mut().rust_mut().pointer.shown = false;
                 self.as_mut().pointer_publish();
             }
-            return;
+            return Vec::new();
         }
-        let Some((w, h)) = crate::pad::window_size() else { return };
+        let Some((w, h)) = crate::pad::window_size() else { return Vec::new() };
         let t = {
             let mut rm = self.as_mut().rust_mut();
             rm.pointer.tick(sticks, dt, w, h)
@@ -1259,6 +1304,18 @@ impl qobject::Turbine {
             }
             self.as_mut().pointer_publish();
         }
+        if t.wheel != 0 {
+            crate::log::line("pad", &format!("Left stick wheel: {} notch(es)", t.wheel));
+        }
+        let mut out = Vec::new();
+        if let Some(d) = t.release {
+            out.push((d, false));
+        }
+        if let Some(d) = t.press {
+            crate::log::line("pad", &format!("Left stick: {d}"));
+            out.push((d, true));
+        }
+        out
     }
 
     fn mouse_mask(&self) -> i32 {
@@ -1281,7 +1338,7 @@ impl qobject::Turbine {
     }
 
     /// A trigger as a mouse button: `i` 0 left (RT, R2 on some pads), 1 right (LT, L2).
-    fn mouse_button(mut self: Pin<&mut Self>, i: usize, pressed: bool) {
+    fn mouse_button(mut self: Pin<&mut Self>, i: usize, pressed: bool, from: &str) {
         if self.rust().mouse_down[i] == pressed {
             return;
         }
@@ -1291,7 +1348,8 @@ impl qobject::Turbine {
         let (x, y) = (self.rust().pointer.x, self.rust().pointer.y);
         let button = if i == 0 { 1 } else { 2 };
         if pressed {
-            crate::log::line("pad", &format!("{} at {x:.0}, {y:.0}", if i == 0 { "Left click (RT)" } else { "Right click (LT)" }));
+            let what = if i == 0 { "Left click" } else { "Right click" };
+            crate::log::line("pad", &format!("{what} ({}) at {x:.0}, {y:.0}", from.to_uppercase()));
         }
         let kind = if pressed { crate::pad::Kind::Press } else { crate::pad::Kind::Release };
         crate::pad::send(kind, x, y, button, self.mouse_mask(), 0);
@@ -1306,8 +1364,8 @@ impl qobject::Turbine {
         self.as_mut().pointer_publish();
         crate::pad::send(crate::pad::Kind::Move, x, y, 0, 0, 0);
         if click {
-            self.as_mut().mouse_button(0, true);
-            self.as_mut().mouse_button(0, false);
+            self.as_mut().mouse_button(0, true, "rt");
+            self.as_mut().mouse_button(0, false, "rt");
         }
         if wheel != 0 {
             crate::pad::send(crate::pad::Kind::Wheel, x, y, 0, 0, wheel);

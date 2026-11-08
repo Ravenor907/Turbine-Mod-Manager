@@ -313,7 +313,58 @@ jobs:
             shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
             shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
             shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
+            # 0.54 controls: the beginner tutorial's four cards, the quick wheel (Up then Right: Sort), a removed mod
+            # dimmed in its row, the rail's quick menu, and the browser buttons under a mod page's button.
+            for n in 1 2 3 4; do shoot "tutorial$n-$size" "$size" "tutorial$n" "$PWD/home"; done
+            for p in wheel ghost; do
+              fresh "$p-$size"; h="$PWD/fh/$p-$size"
+              shoot "$p-$size" "$size" $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+            done
+            shoot "railmenu-$size" "$size" railmenu "$PWD/home" --game=$skyrim
+            fresh "inlinebrowser-$size"; h="$PWD/fh/inlinebrowser-$size"
+            shoot "inlinebrowser-$size" "$size" inlinebrowser "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
           done
+          # 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
+          for p in controls legendcheck sheetcheck; do
+            fresh "$p"; h="$PWD/fh/$p"
+            shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+          done
+          fresh "nexusguard"; h="$PWD/fh/nexusguard"
+          shoot "nexusguard-1280x800" 1280x800 nexusguard "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
+          fresh "presscount"; h="$PWD/fh/presscount"
+          shoot "presscount-1280x800" 1280x800 presscount "$h" --game=$w3 "--presscount-file=$h/Downloads/Better Torches 1.0.zip"
+          need() {   # need <shot> <title> <grep -E pattern>
+            if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"
+            else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 25 || true); fail=1; fi
+          }
+          c=controls-1280x800
+          need $c "2: LB/RB in Settings keep the game" "Settings LB/RB: section .*, game unchanged"
+          need $c "7: RT is one click with the pointer" "Pointer RT: one click"
+          need $c "7: LT opens the quick menu" 'Pointer LT: sheet "modmenu"'
+          need $c "7: after a D-pad press the triggers page" 'After a D-pad press: pointer hidden, LT row 2 to 1, RT to 2, sheet ""'
+          need $c "R3 with the pointer hidden is A" "R3 hidden: pointer shown, same as A"
+          need $c "R3 with the pointer showing clicks" "Left click \(R3\)"
+          need $c "8: toggle keeps the row" "Toggle: focus on row 2"
+          need $c "8: a menu closes back to its row" "Menu modmenu closed: focus on row 2"
+          need $c "8: tabs keep the row" "Tabs round trip: tab 1 and back to 0, row 2"
+          need $c "8: a game round trip keeps tab and row" "Game round trip: back on .*, tab 0, row 2 \((.*), was \1\)"
+          need $c "Quick wheel: Up then Right" "Wheel: slot 1 Sort"
+          need $c "Quick wheel held" 'Wheel held, Left, let go: sheet pick "Games"'
+          need $c "Uninstall keeps the row" "Uninstall: row 1 is ghost"
+          need $c "Put back" "Put back: .* is back"
+          # 5: no sheet opened without a press (in the scripted pages and when Nexus is slow to show).
+          for p in controls-1280x800 presscount-1280x800 nexusguard-1280x800 opening8s-1280x800 opening8s-1920x1080; do
+            hits=$(grep -h "opened with no press" "$PWD/data/$p/turbine-mod-manager/activity.log" 2>/dev/null || true)
+            if [ -n "$hits" ]; then echo "::error title=5: a sheet opened with no press ($p)::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
+          done
+          need opening8s-1280x800 "No sheet when Nexus is slow" "Still in front 8 seconds after Open: Open in Steam's browser and Always use Steam's browser are under the button"
+          need nexusguard-1280x800 "3: three A presses, one browser" "Nexus guard: 3 presses of A, 1 browser launch,"
+          need legendcheck-1280x800 "4: the legend is binds()" "Legend check: [0-9]+ contexts, 0 problems"
+          need sheetcheck-1280x800 "6: A highlighted, B cancel, Start main" "Sheet rule: [0-9]+ sheets, 0 problems"
+          for size in 1280x800 1920x1080; do
+            need inlinebrowser-$size "Inline browser buttons ($size)" "Inline browser buttons: Open in Steam's browser; Always use Steam's browser, focus on Open in Steam's browser, sheet \"\""
+          done
+          need presscount-1280x800 "Presses to a mod and Play" "Presses from the rail to a mod added and Play: "
           # 0.51: Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
           # the next requirement for a free account, and the bar over My mods.
           shoot "getmods-cyberpunk-1280x800" 1280x800 getmods "$PWD/home" --game=steam:1091500

@@ -209,22 +209,14 @@ Item {
                 }
             }
 
-            Flow {
+            SheetButtons {
+                ui: root.ui
                 width: parent.width
-                spacing: root.ui.px(10)
                 topPadding: root.ui.px(6)
-                Repeater {
-                    model: (root.shownButtons || []).slice(0, 3)
-                    ActionButton {
-                        required property int index
-                        required property var modelData
-                        ui: root.ui
-                        k: modelData.key || ""
-                        label: modelData.label || ""
-                        focused: index === root.focusIndex
-                        onClicked: root.activated(index, modelData.key || "")
-                    }
-                }
+                labels: (root.shownButtons || []).slice(0, 3).map(b => b.label || "")
+                focusIndex: root.focusIndex
+                mainIndex: 0
+                onActivated: (i) => root.activated(i, "")
             }
         }
     }

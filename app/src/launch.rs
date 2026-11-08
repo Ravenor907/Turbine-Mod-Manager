@@ -23,6 +23,12 @@ use turbine_engine::shortcuts;
 ///   (steam://openurl) with the page, which the app opens right away;
 /// - "noshortcut": Game Mode, no Chrome-family browser among the player's non-Steam games.
 pub fn open(url: &str, game_mode: bool, browser_json: &str) -> String {
+    // The same page asked for again while the browser is still starting (A pressed twice because nothing seemed to
+    // happen): nothing is started a second time.
+    if let Some(ago) = recently_opened(url, std::time::Instant::now()) {
+        crate::log::line("browser", &format!("Already opening this page ({ago} ms ago): not starting the browser again"));
+        return "{\"how\":\"guarded\",\"name\":\"\",\"error\":\"\"}".into();
+    }
     let check = json::parse(browser_json).ok();
     let result = check.as_ref().and_then(|c| c.get("result"));
     let name = result.and_then(|r| r.str_at("name")).unwrap_or("").to_string();
@@ -86,6 +92,25 @@ pub fn open_through_steam(url: &str) -> String {
         quote(&sc.name),
         quote(&link)
     )
+}
+
+/// How long the same page isn't opened again: the browser can take this long to come up in Game Mode.
+pub const RELAUNCH_GUARD: std::time::Duration = std::time::Duration::from_secs(8);
+
+static LAST_OPEN: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// Some(milliseconds since) when `url` was opened less than `RELAUNCH_GUARD` ago; otherwise remembers it as opened
+/// now and answers None. Steam's browser (the player's own choice after a press) is never held back by this.
+fn recently_opened(url: &str, now: std::time::Instant) -> Option<u128> {
+    let mut last = LAST_OPEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((u, at)) = last.as_ref() {
+        let ago = now.saturating_duration_since(*at);
+        if u == url && ago < RELAUNCH_GUARD {
+            return Some(ago.as_millis());
+        }
+    }
+    *last = Some((url.to_string(), now));
+    None
 }
 
 /// Labs and Recheck: is there a browser among Steam's non-Steam games? {"found":false} or the shortcut's JSON.
