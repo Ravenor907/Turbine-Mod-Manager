@@ -340,7 +340,7 @@ jobs:
           shoot "presscount-1280x800" 1280x800 presscount "$h" --game=$w3 "--presscount-file=$h/Downloads/Better Torches 1.0.zip"
           need() {   # need <shot> <title> <grep -E pattern>
             if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"
-            else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 25 || true); fail=1; fi
+            else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet\|focus\|Rail " "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 60 || true); fail=1; fi
           }
           c=controls-1280x800
           need $c "2: LB/RB in Settings keep the game" "Settings LB/RB: section .*, game unchanged"
