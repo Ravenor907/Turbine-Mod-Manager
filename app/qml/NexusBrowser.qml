@@ -76,6 +76,10 @@ Item {
         TextMetrics { id: signinShort; font: signinText.font; text: "Sign in" }
         readonly property real tabsEnd: nb.ui.px(10) + nb.ui.px(26) + nb.ui.px(8) + nb.ui.px(12) + tabs.width + nb.ui.px(12)
         readonly property real signinRoom: pill.x - nb.ui.px(8) - tabsEnd
+        // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
+        // under the bar when they don't fit (pillFull).
+        readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
+        readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd
         readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)
         readonly property int signinFit: {
             if (!nb.signinShown) return 0
@@ -101,7 +105,7 @@ Item {
             }
             Text {
                 id: nameText
-                visible: bar.signinFit === 4 || bar.signinFit === 0
+                visible: bar.signinFit === 4 || (bar.signinFit === 0 && bar.tabsEnd + bar.nameW <= pill.x - nb.ui.px(10))
                 text: nb.gameName !== "" ? nb.gameName : "Nexus Mods"
                 color: nb.ui.c.accentText
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(15); font.weight: Font.DemiBold
@@ -180,7 +184,7 @@ Item {
             visible: nb.pillText !== ""
             anchors.right: legendRow.left; anchors.rightMargin: nb.ui.px(10)
             anchors.verticalCenter: parent.verticalCenter
-            width: visible ? Math.min(pillMetrics.advanceWidth + nb.ui.px(24), nb.width * 0.30) : 0
+            width: visible ? Math.max(0, Math.min(bar.pillWant, bar.pillRoom)) : 0
             TextMetrics { id: pillMetrics; font: pillText.font; text: nb.pillText }
             height: nb.ui.px(28); radius: height / 2
             color: nb.pillLevel === "warn" ? nb.ui.c.focusFill : nb.ui.c.card
@@ -234,6 +238,28 @@ Item {
             Text { anchors.centerIn: parent; text: "×"; color: nb.ui.c.text; font.pixelSize: nb.ui.px(18); font.family: nb.ui.bodyFont }
             HoverHandler { onHoveredChanged: nb.ui.hover(closeBtn, hovered) }
             TapHandler { onTapped: nb.closeClicked() }
+        }
+    }
+
+    // The pill's whole words under the bar when they are cut short there (a message to read: done or a warning).
+    Rectangle {
+        id: pillFull
+        visible: pill.visible && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok")
+        anchors.top: bar.bottom; anchors.topMargin: nb.ui.px(4)
+        anchors.right: parent.right; anchors.rightMargin: nb.ui.px(10)
+        width: Math.min(bar.pillWant, nb.width - nb.ui.px(20)); height: fullText.implicitHeight + nb.ui.px(12)
+        radius: nb.ui.px(6)
+        color: nb.ui.c.panel
+        border.color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.ok
+        border.width: Math.max(1, nb.ui.px(1.5))
+        z: 3
+        Text {
+            id: fullText
+            x: nb.ui.px(12); y: nb.ui.px(6); width: parent.width - nb.ui.px(24)
+            text: nb.pillText
+            wrapMode: Text.WordWrap
+            color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.text
+            font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13)
         }
     }
 
