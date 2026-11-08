@@ -66,6 +66,8 @@ pub mod qobject {
         #[qproperty(i32, browser_press_count, cxx_name = "browserPressCount")]
         /// A file Turbine's browser downloaded was added or not: {"n","path","ok","ask","name","game","text"}.
         #[qproperty(QString, add_result_json, cxx_name = "addResultJson")]
+        /// A Mod Manager Download link's mod name, for the question before it downloads: {"link","name"}.
+        #[qproperty(QString, nxm_name_json, cxx_name = "nxmNameJson")]
         type Turbine = super::TurbineRust;
 
         /// Looks for games again (Steam and Heroic).
@@ -498,6 +500,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "browserMainFrame"]
         fn browser_main_frame(self: &Self, url: &QString);
+        /// Must Turbine ask before this link downloads (not for the pressed Nexus page's own mod)?
+        #[qinvokable]
+        #[cxx_name = "nxmMustAsk"]
+        fn nxm_must_ask(self: &Self, link: &QString) -> bool;
+        /// Looks up the link's mod name (lands in nxmNameJson).
+        #[qinvokable]
+        #[cxx_name = "nxmAskName"]
+        fn nxm_ask_name(self: Pin<&mut Self>, link: &QString);
         /// An address for the activity log: host and path only.
         #[qinvokable]
         #[cxx_name = "browserLogUrl"]
@@ -775,6 +785,7 @@ pub struct TurbineRust {
     pub(crate) browser_key_nav: bool,
     pub(crate) browser_press_count: i32,
     pub(crate) add_result_json: QString,
+    pub(crate) nxm_name_json: QString,
     /// A is Enter only after the D-pad (pointer.rs).
     pub(crate) key_nav: crate::pointer::KeyNav,
     pub(crate) add_results: i32,
@@ -855,6 +866,7 @@ impl Default for TurbineRust {
             browser_key_nav: false,
             browser_press_count: 0,
             add_result_json: QString::from("{}"),
+            nxm_name_json: QString::from("{}"),
             key_nav: crate::pointer::KeyNav::default(),
             add_results: 0,
             browser_presses: 0,

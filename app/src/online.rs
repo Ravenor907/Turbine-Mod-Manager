@@ -701,6 +701,15 @@ impl Net {
         })
     }
 
+    /// A Nexus mod's name (no key needed). The build's test runs have no internet: "" there.
+    pub fn mod_name(&mut self, domain: &str, mod_id: u64) -> Result<String, String> {
+        if self.sample.is_some() {
+            return Ok(String::new());
+        }
+        let (d, _) = self.nexus_any().details(domain, mod_id).map_err(err)?;
+        Ok(d.info.name)
+    }
+
     pub fn details_nexus(&mut self, game: &GameInfo, mod_id: u64) -> Result<String, String> {
         let domain = game.domain.clone().ok_or("This game isn't on Nexus Mods.")?;
         // The page's facts through GraphQL (no key needed); the v1 sample for the older screenshot checks.

@@ -46,39 +46,58 @@ pub const STEM_MAX: usize = 180;
 
 // ------------------------------------------------------------------------------------------------ presses
 
-/// How long after the view left Nexus (and came back) a Mod Manager Download link still asks before anything is
-/// turned on.
-pub const CAME_BACK: Duration = Duration::from_secs(120);
-
-/// The player's presses in the page, tied to the page they were made on. A press counts for a download (60 seconds)
-/// and for at most one Mod Manager Download link (30 seconds). The moment the main frame goes to a page that isn't on
-/// Nexus (a link, a redirect, a pop-up opened in the view), the press is gone: a page reached that way can't bounce
-/// back to Nexus and spend it. A link that comes soon after such a trip asks before anything is turned on.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The player's presses in the page, tied to the page they were made on. One strict rule: a press counts only when
+/// the main frame was on nexusmods.com as it was made, and a Mod Manager Download link goes on without a question only
+/// for the very mod (game domain and mod id) of that page, the way Nexus's own button is always on its own mod's page.
+/// Anything else (another mod, another game, a press made off Nexus) asks first: "Get <mod> for <game>?". A press
+/// counts for a download (60 seconds) and for at most one link (30 seconds), and is gone once the main frame shows a
+/// page off Nexus.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Presses {
     at: Option<Instant>,
+    /// The main frame was on Nexus when the press was made, and that page's (game domain, mod id) if it is a mod's.
+    on_nexus: bool,
+    page: Option<(String, u64)>,
     nxm_used: bool,
-    left_nexus: Option<Instant>,
+    /// The main frame's address now.
+    frame: String,
+}
+
+/// What a Mod Manager Download link may do with the player's press.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NxmPress {
+    /// Pressed on this very mod's Nexus page: it goes on.
+    Same,
+    /// Another mod, another game, or a press made off Nexus: Turbine asks first.
+    Ask,
 }
 
 impl Presses {
-    /// A tap, click or button press in the page.
+    /// The main frame shows this address: off Nexus, the press is gone.
+    pub fn frame(&mut self, url: &str) -> bool {
+        self.frame = url.trim().to_string();
+        if on_nexus(&self.frame) {
+            return false;
+        }
+        self.at = None;
+        self.page = None;
+        self.on_nexus = false;
+        self.nxm_used = false;
+        true
+    }
+    /// A tap, click or button press in the page, on the page the main frame shows now.
     pub fn press(&mut self, now: Instant) {
         self.at = Some(now);
         self.nxm_used = false;
+        self.on_nexus = is_nexus_page(&self.frame);
+        self.page = if self.on_nexus { page_ids(&self.frame).map(|(d, m, _)| (d, m)) } else { None };
     }
-    /// The main frame went to (or loaded) a page that isn't on Nexus.
-    pub fn left_nexus(&mut self, now: Instant) {
-        self.at = None;
-        self.nxm_used = false;
-        self.left_nexus = Some(now);
-    }
-    /// The press a download may count on.
+    /// The press a download may count on: only one made on Nexus.
     pub fn for_download(&self) -> Option<Instant> {
-        self.at
+        self.at.filter(|_| self.on_nexus)
     }
-    /// One press, one Mod Manager Download link: Ok uses it up.
-    pub fn take_for_nxm(&mut self, now: Instant) -> Result<(), String> {
+    /// One press, one Mod Manager Download link (Ok uses it up): Same for the pressed page's own mod, else Ask.
+    pub fn take_for_nxm(&mut self, link: &turbine_engine::nxm::NxmLink, now: Instant) -> Result<NxmPress, String> {
         if !within(self.at, now, NXM_PRESS) {
             return Err("came with no press of yours in the last 30 seconds".into());
         }
@@ -86,15 +105,17 @@ impl Presses {
             return Err("came after the one link your last press allows".into());
         }
         self.nxm_used = true;
-        Ok(())
-    }
-    /// Did the view leave Nexus a short while ago (and come back)?
-    pub fn came_back(&self, now: Instant) -> bool {
-        within(self.left_nexus, now, CAME_BACK)
+        let same = self.on_nexus && self.page.as_ref().is_some_and(|(d, m)| d.eq_ignore_ascii_case(&link.domain) && *m == link.mod_id);
+        Ok(if same { NxmPress::Same } else { NxmPress::Ask })
     }
 }
 
-static PRESSES: Mutex<Presses> = Mutex::new(Presses { at: None, nxm_used: false, left_nexus: None });
+/// Nexus's own pages, and its file host (a Slow download's address never commits, but counts as Nexus all the same).
+fn on_nexus(url: &str) -> bool {
+    is_nexus_page(url) || host_of(url).is_some_and(|(h, https)| https && is_nexus_file_host(&h))
+}
+
+static PRESSES: Mutex<Presses> = Mutex::new(Presses { at: None, on_nexus: false, page: None, nxm_used: false, frame: String::new() });
 
 fn presses() -> std::sync::MutexGuard<'static, Presses> {
     PRESSES.lock().unwrap_or_else(|e| e.into_inner())
@@ -105,14 +126,13 @@ pub fn note_press(now: Instant) {
     presses().press(now);
 }
 
-/// The main frame is going to (or loaded) this address: off Nexus, the press is gone. True when it left Nexus.
-pub fn note_main_frame(url: &str, now: Instant) -> bool {
+/// The main frame shows this address now (QML's urlChanged). True when it is off Nexus (the press is gone).
+pub fn note_main_frame(url: &str, _now: Instant) -> bool {
     let u = url.trim();
-    if u.is_empty() || u.to_ascii_lowercase().starts_with("about:") || is_nexus_page(u) {
+    if u.is_empty() || u.to_ascii_lowercase().starts_with("about:") {
         return false;
     }
-    presses().left_nexus(now);
-    true
+    presses().frame(u)
 }
 
 /// When the player last pressed something in the page (for a download).
@@ -191,7 +211,9 @@ pub fn log_url(url: &str) -> String {
         // data:, blob:, about: and the like: the scheme only.
         return url.split(':').next().map(|s| format!("{}:", s.chars().take(16).collect::<String>())).unwrap_or_default();
     };
-    let cut = rest.find(['?', '#', ';']).unwrap_or(rest.len());
+    let lower = rest.to_ascii_lowercase();
+    let enc = ["%3b", "%3f", "%23"].iter().filter_map(|e| lower.find(e)).min();
+    let cut = rest.find(['?', '#', ';']).into_iter().chain(enc).min().unwrap_or(rest.len());
     let rest = &rest[..cut];
     let (authority, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
@@ -567,6 +589,8 @@ static USED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 pub enum NxmFromPage {
     /// Checked and queued; the redacted link for the log.
     Queued(String),
+    /// Queued, but Turbine asks first (another mod than the pressed page's, or a press made off Nexus).
+    Ask(String),
     /// Not taken; why, for the log.
     Refused(String),
 }
@@ -616,9 +640,9 @@ fn key_of(url: &str) -> String {
 /// A Mod Manager Download link from the page, after webglue.cpp's scheme handler checked its initiator. Queued
 /// (`push`, single::push in the app) only with all of: its key, expiry and account number; an initiator on Nexus; the
 /// navigation guard's permit for this very link; a press of the player's within 30 seconds that no other link used
-/// and that wasn't followed by a trip off Nexus (`presses`); and never used before (in any order of its parts).
-/// Queued links that came soon after the view left Nexus and came back are remembered: they ask before anything is
-/// turned on (`must_ask`).
+/// and that wasn't followed by a page off Nexus (`presses`); and never used before (in any order of its parts). It goes
+/// on by itself only for the pressed Nexus page's own mod; anything else is queued as `Ask` (`must_ask`): Turbine asks
+/// before it downloads.
 pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Instant, push: &mut dyn FnMut(String)) -> NxmFromPage {
     let url = url.trim();
     if url.len() > 2048 {
@@ -647,9 +671,10 @@ pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Ins
     if USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == key) {
         return NxmFromPage::Refused(format!("{r} was used already"));
     }
-    if let Err(e) = presses.take_for_nxm(now) {
-        return NxmFromPage::Refused(format!("{r} {e}"));
-    }
+    let how = match presses.take_for_nxm(&link, now) {
+        Ok(h) => h,
+        Err(e) => return NxmFromPage::Refused(format!("{r} {e}")),
+    };
     {
         let mut used = USED.lock().unwrap_or_else(|e| e.into_inner());
         used.push(key.clone());
@@ -657,14 +682,15 @@ pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Ins
             used.remove(0);
         }
     }
-    if presses.came_back(now) {
+    push(url.to_string());
+    if how == NxmPress::Ask {
         let mut a = ASK.lock().unwrap_or_else(|e| e.into_inner());
         a.push(key);
         if a.len() > 200 {
             a.remove(0);
         }
+        return NxmFromPage::Ask(r);
     }
-    push(url.to_string());
     NxmFromPage::Queued(r)
 }
 
@@ -674,7 +700,7 @@ pub fn nxm_from_page_now(url: &str, initiator: &str, now: Instant, push: &mut dy
     nxm_from_page(url, initiator, &mut p, now, push)
 }
 
-/// Links that came soon after the view left Nexus and came back: Turbine asks before turning their file on.
+/// Links that weren't for the pressed page's own mod: Turbine asks "Get <mod> for <game>?" before downloading.
 static ASK: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub fn must_ask(url: &str) -> bool {
@@ -896,11 +922,16 @@ mod tests {
     const PAGE: &str = "https://www.nexusmods.com/skyrimspecialedition/mods/1?tab=files&file_id=2";
     const NEXUS: &str = "https://www.nexusmods.com";
 
-    /// A press made `ago` before `now`.
-    fn pressed(now: Instant, ago: u64) -> Presses {
+    /// A press made `ago` before `now` on `page`.
+    fn pressed_on(page: &str, now: Instant, ago: u64) -> Presses {
         let mut p = Presses::default();
+        p.frame(page);
         p.press(now - Duration::from_secs(ago));
         p
+    }
+    /// A press on mod 1's file page (the links below are mod 1's unless they say otherwise).
+    fn pressed(now: Instant, ago: u64) -> Presses {
+        pressed_on(PAGE, now, ago)
     }
 
     #[test]
@@ -919,12 +950,12 @@ mod tests {
         // The scheme handler's initiator must be Nexus too.
         assert!(matches!(nxm_from_page(l, "https://ads.example", &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("not nexusmods.com")));
         assert!(matches!(nxm_from_page(l, "null", &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
+        // Pressed on mod 1's own page: it goes on with no question.
         let r = nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u));
         assert!(matches!(r, NxmFromPage::Queued(ref s) if !s.contains("abc") && !s.contains("user_id")), "{r:?}");
         assert_eq!(got.len(), 1);
         assert!(from_page(l) && !must_ask(l));
-        // The same link again (a page repeating it, or the other route), even with a fresh press: never a second
-        // download, and not with its parts in another order either.
+        // The same link again, even with a fresh press, and not with its parts in another order either.
         let mut p = pressed(now, 1);
         nxm_permit(l, true, PAGE, now).unwrap();
         assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("used already")));
@@ -941,6 +972,7 @@ mod tests {
         let now = Instant::now();
         let l = "nxm://skyrimspecialedition/mods/1/files/6?key=abc&expires=4102444800&user_id=1";
         let mut future = Presses::default();
+        future.frame(PAGE);
         future.press(now + Duration::from_secs(3));
         for mut press in [Presses::default(), pressed(now, 31), future] {
             nxm_permit(l, true, PAGE, now).unwrap();
@@ -950,8 +982,7 @@ mod tests {
         // The permit is only good for a moment.
         nxm_permit(l, true, PAGE, now).unwrap();
         let later = now + NXM_PERMIT + Duration::from_secs(1);
-        let mut p = Presses::default();
-        p.press(later);
+        let mut p = pressed(later, 0);
         assert!(matches!(nxm_from_page(l, NEXUS, &mut p, later, &mut |u| got.push(u)), NxmFromPage::Refused(_)));
         nxm_permit(l, true, PAGE, now).unwrap();
         assert!(matches!(nxm_from_page(l, NEXUS, &mut pressed(now, 29), now, &mut |u| got.push(u)), NxmFromPage::Queued(_)));
@@ -975,59 +1006,101 @@ mod tests {
         let _ = L;
     }
 
-    /// The second break test's H1b: the player presses on an outside link from a mod page; the outside page at once
-    /// sends the view to Nexus's Mod Manager Download address (&nmm=1), and Nexus's page goes to the nxm link.
+    /// The second break test's H1b: A on an outside link from a mod page; the outside page at once sends the view to
+    /// Nexus's Mod Manager Download address (&nmm=1), and Nexus's page goes to the nxm link by itself.
     #[test]
     fn a_bounce_off_nexus_and_back_never_spends_the_press() {
         let mut got = Vec::new();
         let t0 = Instant::now();
-        let mut p = Presses::default();
-        p.press(t0); // A on the outside link, on a Nexus page
+        let mut p = pressed_on("https://www.nexusmods.com/skyrimspecialedition/mods/4?tab=description", t0, 0);
         let bounce = "https://www.nexusmods.com/skyrimspecialedition/mods/999?tab=files&file_id=5&nmm=1";
         let l = "nxm://skyrimspecialedition/mods/999/files/5?key=k&expires=4102444800&user_id=7";
-        // The view goes to the outside page (its navigation, or a redirect through it): the press is gone.
-        p.left_nexus(t0 + Duration::from_millis(300));
-        // Back on Nexus's nmm=1 page, which goes to the nxm link by itself 6 seconds after the press.
+        // The outside page shows: the press is gone.
+        assert!(p.frame("https://evil.example/bounce"));
+        p.frame(bounce);
         let now = t0 + Duration::from_secs(6);
         nxm_permit(l, true, bounce, now).unwrap();
         let r = nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u));
         assert!(matches!(r, NxmFromPage::Refused(ref e) if e.contains("no press")), "{r:?}");
         assert!(got.is_empty());
-        // A press on Nexus after coming back works, but the file asks before anything is turned on.
-        p.press(now + Duration::from_secs(1));
-        nxm_permit(l, true, bounce, now + Duration::from_secs(2)).unwrap();
-        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now + Duration::from_secs(2), &mut |u| got.push(u)), NxmFromPage::Queued(_)));
+        // A redirect that never shows the outside page: the press is still mod 4's, so mod 999's link asks.
+        let mut p = pressed_on("https://www.nexusmods.com/skyrimspecialedition/mods/4?tab=description", t0, 0);
+        p.frame(bounce);
+        nxm_permit(l, true, bounce, now).unwrap();
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)));
         assert!(must_ask(l));
         // One press, one link: a second, different link on the same press is refused.
         let l2 = "nxm://skyrimspecialedition/mods/998/files/6?key=k&expires=4102444800&user_id=7";
-        nxm_permit(l2, true, bounce, now + Duration::from_secs(3)).unwrap();
-        let r2 = nxm_from_page(l2, NEXUS, &mut p, now + Duration::from_secs(3), &mut |u| got.push(u));
+        nxm_permit(l2, true, bounce, now).unwrap();
+        let r2 = nxm_from_page(l2, NEXUS, &mut p, now + Duration::from_secs(1), &mut |u| got.push(u));
         assert!(matches!(r2, NxmFromPage::Refused(ref e) if e.contains("one link")), "{r2:?}");
         assert_eq!(got.len(), 1);
-        // Long after the trip, a press and a link no longer ask.
-        let late = t0 + CAME_BACK + Duration::from_secs(10);
-        let l3 = "nxm://skyrimspecialedition/mods/997/files/8?key=k&expires=4102444800&user_id=7";
-        p.press(late);
-        nxm_permit(l3, true, PAGE, late).unwrap();
-        assert!(matches!(nxm_from_page(l3, NEXUS, &mut p, late, &mut |u| got.push(u)), NxmFromPage::Queued(_)));
-        assert!(!must_ask(l3));
+    }
+
+    /// The third break test's H1c: the player reads an outside page for over 2 minutes and taps anything there; its
+    /// script sends the view to Nexus's nmm=1 page. A press made off Nexus never downloads by itself: it asks.
+    #[test]
+    fn a_tap_on_an_outside_page_asks_however_long_after() {
+        let mut got = Vec::new();
+        let t0 = Instant::now();
+        let mut p = pressed(t0, 0);
+        p.frame("https://modder.example/guide");
+        let tap = t0 + Duration::from_secs(150);
+        p.press(tap);
+        assert_eq!(p.for_download(), None, "a press off Nexus never counts for a download");
+        let bounce = "https://www.nexusmods.com/skyrimspecialedition/mods/1?tab=files&file_id=80&nmm=1";
+        p.frame(bounce);
+        let l = "nxm://skyrimspecialedition/mods/1/files/80?key=k&expires=4102444800&user_id=7";
+        let now = tap + Duration::from_secs(2);
+        nxm_permit(l, true, bounce, now).unwrap();
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)));
+        assert!(must_ask(l));
+    }
+
+    /// The third break test's M5: a tap on a frame (or a link in a mod's description) inside mod 1's Nexus page sends
+    /// the whole view to another mod's nmm=1 page, or another game's: it asks.
+    #[test]
+    fn another_mod_or_game_than_the_pressed_page_asks() {
+        let mut got = Vec::new();
+        let now = Instant::now();
+        for (page, l) in [
+            ("https://www.nexusmods.com/skyrimspecialedition/mods/2?tab=files&file_id=81&nmm=1", "nxm://skyrimspecialedition/mods/2/files/81?key=k&expires=4102444800&user_id=7"),
+            ("https://www.nexusmods.com/fallout4/mods/1?tab=files&file_id=82&nmm=1", "nxm://fallout4/mods/1/files/82?key=k&expires=4102444800&user_id=7"),
+        ] {
+            let mut p = pressed(now, 1);
+            p.frame(page); // still Nexus: the press stays, but it was made on mod 1 of Skyrim's page
+            nxm_permit(l, true, page, now).unwrap();
+            assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)), "{l}");
+            assert!(must_ask(l));
+        }
+        // A press on Nexus's front page (no mod) asks too.
+        let mut p = pressed_on("https://www.nexusmods.com/", now, 1);
+        let l = "nxm://skyrimspecialedition/mods/1/files/83?key=k&expires=4102444800&user_id=7";
+        nxm_permit(l, true, PAGE, now).unwrap();
+        assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)));
     }
 
     #[test]
     fn going_off_nexus_drops_the_press_and_nexus_pages_keep_it() {
         let now = Instant::now();
-        let mut p = Presses::default();
-        p.press(now);
+        let mut p = pressed(now, 0);
         assert!(p.for_download().is_some());
-        p.left_nexus(now);
-        assert!(p.for_download().is_none() && p.came_back(now));
+        // Slow download's own file host keeps it (its address never shows as a page).
+        assert!(!p.frame("https://cf-files.nexus-cdn.com/files/1/Mod.zip?md5=x"));
+        assert!(p.for_download().is_some());
+        assert!(p.frame("https://evil.example/x"));
+        assert!(p.for_download().is_none());
         // The app's record: Nexus pages and about:blank keep the press, anything else drops it.
+        note_main_frame(PAGE, now);
         note_press(now);
         assert!(!note_main_frame("https://www.nexusmods.com/skyrimspecialedition/mods/1", now));
         assert!(!note_main_frame("about:blank", now));
         assert!(last_press().is_some());
         assert!(note_main_frame("https://evil.example/bounce", now));
         assert!(last_press().is_none());
+        note_press(now);
+        assert!(last_press().is_none(), "a press made off Nexus never counts for a download");
+        note_main_frame(PAGE, now);
         note_press(now);
         assert!(note_main_frame("data:text/html,x", now));
         assert!(last_press().is_none());
@@ -1067,6 +1140,10 @@ mod tests {
         assert!(!log_url(L).contains("user_id") && !log_url(L).contains("abc"));
         // Path parameters (";code=") are cut too.
         assert_eq!(log_url("https://users.nexusmods.com/auth/callback;code=SECRET"), "https://users.nexusmods.com/auth/callback");
+        // ... and their percent-encoded forms (%3B, %3F, %23).
+        for u in ["https://x.example/a%3Bcode=SECRET", "https://x.example/a%3fcode=SECRET", "https://x.example/a%23SECRET"] {
+            assert_eq!(log_url(u), "https://x.example/a", "{u}");
+        }
     }
 
     #[test]

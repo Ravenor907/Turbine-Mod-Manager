@@ -597,7 +597,14 @@ PY
   pneed "1b: going to an outside site drops the press" "The page left Nexus \(http://127.0.0.1:47801/bounce\)"
   pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
   pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
-  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
+  pneed "1c (M5): another mod's link asks first" "Browser check: another mod's link asks: Get .* for .*, A Get it, B Not now"
+  pneed "1c (M5): ... logged as asking" "not for the pressed page's own mod: Turbine asks first: nxm://skyrimspecialedition/mods/2/files/57"
+  pneed "1c (H1c): a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* for .*, A Get it, B Not now"
+  pneed "1c (H1c): ... logged as asking" "not for the pressed page's own mod: Turbine asks first: nxm://skyrimspecialedition/mods/1/files/56"
+  pneed "1c: Not now downloads nothing" "Browser check: after Not now, nothing downloaded: yes"
+  asked=$(printf '%s\n' "$after" | grep -E "pretending to download nxm://skyrimspecialedition/mods/(1/files/56|2/files/57)" || true)
+  if [ -n "$asked" ]; then echo "::error title=1c: a link that asked downloaded anyway::"; fail=1; fi
+  got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler, from [^)]*\): nxm://.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
   if [ -n "$got" ]; then
     echo "::error title=1: a link with no press got through::"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)

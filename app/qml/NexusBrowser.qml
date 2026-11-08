@@ -429,7 +429,8 @@ Item {
             settings.localContentCanAccessRemoteUrls: false
             settings.localContentCanAccessFileUrls: false
             onZoomFactorChanged: if (Math.abs(zoomFactor - nb.zoom) > 0.001) zoomFactor = nb.zoom
-            // The main frame's address: off Nexus, the player's last press no longer counts (Rust).
+            // The main frame's address: off Nexus, the player's last press no longer counts, and a press made there
+            // never lets a download or a Mod Manager Download link through without a question (Rust).
             onUrlChanged: { Turbine.browserMainFrame(url.toString()); nb.pageEvent("url", url.toString()) }
             onLoadingChanged: (info) => nb.pageEvent(info.status === WebEngineView.LoadSucceededStatus ? "loaded" : info.status === WebEngineView.LoadFailedStatus ? "failed" : "loading", info.url.toString() + (info.errorString ? " (" + info.errorString + ")" : ""))
             // Chromium's own right-click menu never shows: LT (a right click) opens Turbine's quick menu instead.
@@ -445,12 +446,7 @@ Item {
             // Every other kind of link is refused.
             onNavigationRequested: (request) => {
                 const u = request.url.toString()
-                if (/^(https?|about|data|blob):/i.test(u)) {
-                    // Going off Nexus (a link, a redirect, a pop-up in this view): the press is gone before the
-                    // page there can send the view back to Nexus.
-                    if (request.isMainFrame) Turbine.browserMainFrame(u)
-                    return
-                }
+                if (/^(https?|about|data|blob):/i.test(u)) return
                 if (/^nxm:/i.test(u)) {
                     if (Turbine.browserNxm(u, request.isMainFrame, web.url.toString())) return
                     request.reject()

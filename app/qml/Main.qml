@@ -295,7 +295,7 @@ Window {
     }
     Timer {
         running: shot.on
-        interval: shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 75000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -589,7 +589,8 @@ Window {
     property string pickTitle: ""
     property string pickSub: ""
     property string pickBack: ""
-    function openPick(title, sub, items, back) { pickTitle = title; pickSub = sub; pickItems = items; pickBack = back || ""; menuIndex = 0; sheet = "pick" }
+    function openPick(title, sub, items, back) { pickTitle = title; pickSub = sub; pickItems = items; pickBack = back || ""; pickBLabel = ""; menuIndex = 0; sheet = "pick" }
+    property string pickBLabel: ""          // what B says on this menu ("Not now"), when not Back or Close
     function pickRun(i) {
         const it = pickItems[i]
         if (!it) return
@@ -1942,7 +1943,8 @@ Window {
         const s = sheet
         const k = key => () => sheetAct(key)
         if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
-        if (s === "pick") return Object.assign({ a: bind("Choose", k("a")), b: bind(pickBack !== "" ? "Back" : "Close", k("b")) },
+        if (s === "pick") return Object.assign({ a: bind(pickItems[menuIndex] && pickItems[menuIndex].aLabel ? pickItems[menuIndex].aLabel : "Choose", k("a")),
+                                                 b: bind(pickBLabel !== "" ? pickBLabel : pickBack !== "" ? "Back" : "Close", k("b")) },
                                                page === "game" && game ? { start: bind("Play", k("start")) } : {})
         if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
         if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
@@ -1981,7 +1983,7 @@ Window {
                 if (pickTitle === "Nexus") openBrowserMenu(i)
             }
             else if (b === "a") pickRun(menuIndex)
-            else if (b === "b" || b === "x") sheet = pickBack
+            else if (b === "b" || b === "x") { if (pickBLabel === "Not now") nxmAskNo(); sheet = pickBack }
         } else if (sheet === "modmenu") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
             else if (b === "down") menuIndex = Math.min(modMenuItems.length - 1, menuIndex + 1)
@@ -2932,8 +2934,18 @@ Window {
                                                          // that goes to its Mod Manager Download link by itself.
                                                          btClick(700, 452) } },
             { name: "bounced", max: 20000, wait: () => pageIs(/file_id=55/), after: 6000,
-              act: () => check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")) },
-            { name: "slow", act: () => { bt.pressAt = Date.now(); btClick(160, 188) } },
+              act: () => { check("Browser check: after a bounce off Nexus and back, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no"))
+                           // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
+                           btClick(700, 452) } },
+            { name: "another mod asks", max: 15000, wait: () => sheet === "pick" && pickTitle.indexOf("Get ") === 0,
+              act: () => { const o = binds(); check("Browser check: another mod's link asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
+            // H1c: an outside page read for a while; a tap on it sends the view to mod 1's page that does the same.
+            { name: "outside page", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load("http://127.0.0.1:47801/tapme") } },
+            { name: "tap outside", max: 15000, wait: () => pageIs(/tapme/), after: 800, act: () => btClick(190, 80) },
+            { name: "tap off nexus asks", max: 15000, wait: () => sheet === "pick" && pickTitle.indexOf("Get ") === 0,
+              act: () => { const o = binds(); check("Browser check: a tap off Nexus asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
+            { name: "slow", max: 15000, wait: () => sheet === "" && pageIs(/file_id=56/), after: 600,
+              act: () => { check("Browser check: after Not now, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")); bt.pressAt = Date.now(); btClick(160, 188) } },
             // The page closes while the download runs (the bounce left pages to go back to, so it closes outright).
             { name: "running", max: 20000, wait: () => webDlsRunning > 0, act: () => closeBrowser("back") },
             { name: "closed", max: 5000, wait: () => page !== "browser",
@@ -4257,6 +4269,9 @@ Window {
             return
         }
         if (r.error) { note("nxm", "Link refused: " + r.error); say(r.error, "error"); if (browserOpen) browserSay(r.error, "warn"); return }
+        // Not for the mod of the Nexus page the player pressed on (another mod, another game, a press made off
+        // Nexus): nothing downloads until he says so.
+        if (Turbine.nxmMustAsk(link)) { nxmAsk(link, r); return }
         // From Turbine's own Nexus page: it stays on screen, and the pill shows the download.
         if (browserOpen && page === "browser") {
             note("nxm", "Link for " + r.name + " (from Turbine's Nexus page)")
@@ -4271,6 +4286,46 @@ Window {
         note("nxm", "Link for " + r.name)
         Turbine.nxmDownload(link, r.game)
         edited()
+    }
+
+    // "Get <mod> for <game>?": A Get it, B Not now. The mod's name comes from Nexus a moment later.
+    property string nxmAskLink: ""
+    property var nxmAskInfo: null
+    function nxmAskTitle(name) {
+        const m = /^nxm:\/\/[a-z0-9_-]+\/mods\/([0-9]+)/i.exec(nxmAskLink)
+        return "Get " + (name !== "" ? name : "mod " + (m ? m[1] : "")) + " for " + (nxmAskInfo && nxmAskInfo.name ? nxmAskInfo.name : "this game") + "?"
+    }
+    function nxmAsk(link, r) {
+        note("nxm", "Asking first: the link isn't for the mod of the Nexus page you pressed on")
+        nxmAskLink = link; nxmAskInfo = r
+        Turbine.nxmAskName(link)
+        openPick(nxmAskTitle(""), "You didn't press this mod's own download button, so Turbine asks first.", [
+            { icon: "play", title: "Get it", detail: "Downloads it and adds it to " + (r.name || "the game"), aLabel: "Get it", run: () => nxmAskGet() },
+            { icon: "remove", title: "Not now", detail: "Nothing is downloaded", aLabel: "Not now", run: () => nxmAskNo() }
+        ], "")
+        pickBLabel = "Not now"
+    }
+    function nxmAskGet() {
+        const link = nxmAskLink, r = nxmAskInfo
+        nxmAskLink = ""; nxmAskInfo = null
+        if (link === "" || !r) return
+        note("nxm", "Get it: " + r.name)
+        if (browserOpen && page === "browser") { Turbine.nxmDownload(link, r.game); edited(); return }
+        const i = games.findIndex(g => g.id === r.game)
+        if (i >= 0 && i !== current) current = i
+        Turbine.nxmDownload(link, r.game)
+        edited()
+    }
+    function nxmAskNo() {
+        if (nxmAskLink !== "") note("nxm", "Not now: nothing downloaded")
+        nxmAskLink = ""; nxmAskInfo = null
+    }
+    Connections {
+        target: Turbine
+        function onNxmNameJsonChanged() {
+            const j = app.parse(Turbine.nxmNameJson, {})
+            if (j.link === app.nxmAskLink && app.sheet === "pick" && app.pickTitle.indexOf("Get ") === 0) app.pickTitle = app.nxmAskTitle(j.name || "")
+        }
     }
 
     // Other versions of the mod on the details page (X).

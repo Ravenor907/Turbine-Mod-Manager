@@ -60,6 +60,10 @@ pub struct WebDownload {
 pub fn nxm_link_from_page(url: &str, initiator: &str) {
     match browse::nxm_from_page_now(url, initiator, Instant::now(), &mut |l| crate::single::push(l)) {
         browse::NxmFromPage::Queued(r) => crate::log::line("web", &format!("Mod Manager Download link from the browser (scheme handler, from {}): {r}", browse::log_url(initiator))),
+        browse::NxmFromPage::Ask(r) => crate::log::line(
+            "web",
+            &format!("Mod Manager Download link from the browser (scheme handler, from {}), not for the pressed page's own mod: Turbine asks first: {r}", browse::log_url(initiator)),
+        ),
         browse::NxmFromPage::Refused(e) => crate::log::line("web", &format!("Mod Manager Download link refused: {e}")),
     }
 }
@@ -250,13 +254,19 @@ impl qobject::Turbine {
         }
     }
 
-    /// The main frame is going to (or loaded) an address: off Nexus, the player's press is gone (a page reached
-    /// that way can't send the view back to Nexus and spend it).
+    /// The main frame shows an address now: off Nexus, the player's press is gone, and a press made there never counts
+    /// for a download nor lets a Mod Manager Download link through without a question.
     pub fn browser_main_frame(&self, url: &QString) {
         let u = url.to_string();
         if browse::note_main_frame(&u, Instant::now()) {
             crate::log::line("web", &format!("The page left Nexus ({}): your last press no longer counts for a download", browse::log_url(&u)));
         }
+    }
+
+    /// Must Turbine ask before this Mod Manager Download link downloads ("Get <mod> for <game>?")? True when it
+    /// wasn't for the pressed Nexus page's own mod.
+    pub fn nxm_must_ask(&self, link: &QString) -> bool {
+        browse::must_ask(&link.to_string())
     }
 
     pub fn browser_log_url(&self, url: &QString) -> QString {
@@ -409,18 +419,11 @@ impl qobject::Turbine {
 
     /// A Mod Manager Download from the browser landed in the temporary folder: it goes into Game Mods/<Game>
     /// (marked as handled first, so the watcher leaves it to this), then is added like a Slow download.
-    /// A fetched file that must not be turned on without the player: Turbine asks about it where it is.
-    fn ask_fetched(self: Pin<&mut Self>, f: crate::online::Fetched) {
-        let size = std::fs::metadata(&f.path).map(|m| m.len()).unwrap_or(0);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
-        self.catch_ask(Arrival { path: f.path, size, arrived: now, catch_up: false }, "the page left Nexus and came back just before this Mod Manager Download")
-    }
-
-    pub(crate) fn web_place_fetched(mut self: Pin<&mut Self>, game: Game, f: crate::online::Fetched, dir: PathBuf, ask: bool) {
+    pub(crate) fn web_place_fetched(mut self: Pin<&mut Self>, game: Game, f: crate::online::Fetched, dir: PathBuf) {
         let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| format!("{}.zip", f.label));
         if let Err(e) = std::fs::create_dir_all(&dir) {
             crate::log::line("nxm", &format!("Couldn't make {} ({e}); adding from the temporary folder", dir.display()));
-            return if ask { self.ask_fetched(f) } else { self.add_fetched(game, f) };
+            return self.add_fetched(game, f);
         }
         let dir = dir.canonicalize().unwrap_or(dir);
         let dest = dir.join(browse::unique_name(&dir, &name, &[]));
@@ -439,16 +442,10 @@ impl qobject::Turbine {
         if !moved {
             crate::log::line("nxm", &format!("Couldn't put {name} into {}; adding it from the temporary folder", dir.display()));
             self.as_mut().unmark_handled(&dest);
-            return if ask { self.ask_fetched(f) } else { self.add_fetched(game, f) };
+            return self.add_fetched(game, f);
         }
         crate::log::line("nxm", &format!("Saved {} into Game Mods/{}", dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
         self.as_mut().unmark_handled(&dest);
-        if ask {
-            // The link came soon after the view left Nexus and came back: nothing is turned on without the player.
-            let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
-            return self.catch_ask(Arrival { path: dest, size, arrived: now, catch_up: false }, "the page left Nexus and came back just before this Mod Manager Download");
-        }
         self.catch_add(game, dest, None, Some(f.source));
     }
 

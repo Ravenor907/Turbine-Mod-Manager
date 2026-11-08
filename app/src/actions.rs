@@ -1411,8 +1411,6 @@ impl qobject::Turbine {
         };
         // Pressed in Turbine's browser: the file goes into Game Mods/<Game>, like a Slow download.
         let into = crate::browse::from_page(&link_text).then(|| crate::web::game_mods_dir(&game));
-        // Soon after the view left Nexus and came back: Turbine asks before turning the file on.
-        let ask = crate::browse::must_ask(&link_text);
         if let Some(d) = &into {
             crate::log::line("nxm", &format!("From Turbine's browser: the file goes into {}", d.display()));
         }
@@ -1425,12 +1423,27 @@ impl qobject::Turbine {
                     Ok(f) => match into {
                         Some(dir) => {
                             let g = game.clone();
-                            post(qt, move |t| t.web_place_fetched(g, f, dir, ask));
+                            post(qt, move |t| t.web_place_fetched(g, f, dir));
                         }
                         None => hand_over(qt, &game)(f),
                     },
                     Err(e) => say(qt, e, "error"),
                 }
+            }),
+        );
+    }
+
+    /// The name of a Mod Manager Download link's mod, for "Get <mod> for <game>?": lands in nxmNameJson
+    /// {"link","name"} ("" when Nexus can't say).
+    pub fn nxm_ask_name(self: Pin<&mut Self>, link: &QString) {
+        let text = link.to_string();
+        let Ok(l) = turbine_engine::nxm::parse(&text) else { return };
+        self.net_send(
+            "The name of a Mod Manager Download link's mod",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let name = net.mod_name(&l.domain, l.mod_id).unwrap_or_default();
+                let j = format!("{{\"link\":{},\"name\":{}}}", quote(&text), quote(&name));
+                set(qt, move |t| t.set_nxm_name_json(QString::from(j.as_str())));
             }),
         );
     }

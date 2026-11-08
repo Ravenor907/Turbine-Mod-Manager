@@ -15,7 +15,9 @@ Serves on 127.0.0.1 only:
       opens a pop-up and it starts a download. Turbine must take none of them.
   /frame  that frame. The auto page also links to an outside site (a second stand-in on --outside-port) whose /bounce
       at once sends the view back to a file page with &go=nxm, which goes to its nxm:// link as soon as it loads (the
-      way Nexus's Mod Manager Download address does for Premium): Turbine must not count the press on the link.
+      way Nexus's Mod Manager Download address does for Premium): Turbine must not count the press on the link. That
+      page (mod 1) links to another mod's such page ("Another mod"), and the outside site's /tapme has a button that,
+      tapped, sends the view to mod 1's: both must ask first ("Get <mod> for <game>?").
   /<domain>/mods/<id>?tab=description  a second page with a link back.
   /files/<name>  the files above.
   /log?event=<what>  the page's own report of a press; /mark?name=<what>  a mark from the check.
@@ -59,6 +61,9 @@ def page(domain, mod_id, file_id, auto=False, go_nxm=False):
     go = ""
     if go_nxm:
         go = "<script>location.assign(\"" + nxm.replace("EXPIRES", "4102444800") + "\");</script>"
+        if mod_id == 1:
+            go += f'<a id="other" class="at" style="left:640px; top:440px;" href="/{domain}/mods/2?tab=files&file_id=57&go=nxm">Another mod</a>'
+
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Stand-in file page {mod_id}</title>
 <style>
@@ -145,6 +150,15 @@ class Handler(BaseHTTPRequestHandler):
             # The outside site: straight back to a Nexus file page that goes to its nxm link by itself.
             to = f"http://127.0.0.1:{self.server.home_port}/skyrimspecialedition/mods/1?tab=files&file_id=55&go=nxm"
             self.wfile.write(self.send_body(200, f"<!doctype html><title>Outside</title><script>location.replace({to!r});</script>"))
+            return
+        if url.path == "/tapme":
+            # The outside site, read for a while: a tap on its button sends the view to mod 1's page that goes to its
+            # nxm link by itself.
+            to = f"http://127.0.0.1:{self.server.home_port}/skyrimspecialedition/mods/1?tab=files&file_id=56&go=nxm"
+            body = ("<!doctype html><title>Outside guide</title><body style=\"margin:0\">"
+                    "<button id=\"go\" style=\"position:absolute; left:40px; top:40px; width:300px; height:80px;\">Continue</button>"
+                    f"<script>document.getElementById('go').onclick = () => location.replace({to!r});</script></body>")
+            self.wfile.write(self.send_body(200, body))
             return
         if url.path == "/frame":
             self.wfile.write(self.send_body(200, FRAME))
