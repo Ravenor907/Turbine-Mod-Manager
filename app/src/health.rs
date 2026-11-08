@@ -4,6 +4,7 @@
 
 use crate::backend::{data_home, qobject, Worker};
 use core::pin::Pin;
+use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::path::PathBuf;
 use turbine_engine::json::quote;
