@@ -628,6 +628,8 @@ Window {
             if (Turbine.modsJson === "") { app.modsLoaded = false; app.mods = []; app.removedMods = []; app.setups = []; return }
             if (app.moving) return
             const v = app.parse(Turbine.modsJson, {})
+            // The list can come back in a new order (a mod turned on, put back, updated): the focus stays on its mod.
+            const keep = app.modsLoaded && !app.landFocus && app.focusedItem && app.focusedItem.kind === "mod" ? app.focusedItem.m.id : ""
             app.mods = v.mods || []
             app.removedMods = v.removed || []
             app.setups = v.setups || []
@@ -637,6 +639,10 @@ Window {
             app.kcdRestore = v.kcdRestore === true
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
+            if (keep !== "") {
+                const k = app.listItems.findIndex(x => x.kind === "mod" && x.m.id === keep)
+                if (k >= 0) app.modIndex = k
+            }
             if (app.landFocus && app.game) {
                 app.landFocus = false
                 const want = app.lastFocusId[app.game.id]
