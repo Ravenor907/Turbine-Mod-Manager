@@ -341,8 +341,13 @@ impl Zip {
                 }
                 let mut f = File::create(&target)?;
                 self.unpack(e, limits, &mut f)?;
-                f.sync_all()?;
                 written.push(rel);
+            }
+            // Every file reaches the disk before the folder gets its name, flushed in one pass after all the writes:
+            // a flush between writes made each file wait for the disk (thousands of waits for a big mod, each as
+            // slow as the disk is busy).
+            for rel in &written {
+                File::open(tmp.join(rel))?.sync_all()?;
             }
             fs::rename(&tmp, dest)?;
             Ok(written)

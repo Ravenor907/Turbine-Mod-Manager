@@ -200,34 +200,86 @@ fn mutate(rng: &mut Rng, seed: &[u8], zip_aware: bool) -> Vec<u8> {
 }
 
 // ------------------------------------------------------------------------------------------------------------------
-// Harness: every campaign runs on its own thread with a deadline (a hang fails the test instead of stalling it),
-// and every iteration is wrapped so a panic names the seed and iteration.
+// Harness: every campaign runs on its own thread with a budget of CPU time (a hang fails the test instead of stalling
+// it), and every iteration is wrapped so a panic names the seed and iteration.
+//
+// Budgets count the thread's own time on the CPU, not the clock: on a shared build machine the clock also counts
+// time spent waiting for a busy disk or for other tests' turns on the CPU, which once failed a campaign that wasn't
+// slow at all. A thread that waits forever without using the CPU is caught by the clock at ten times the budget.
+
+/// Time this thread has spent on the CPU, from /proc/thread-self/schedstat (Linux). None where it can't be read.
+fn thread_cpu() -> Option<Duration> {
+    let s = fs::read_to_string("/proc/thread-self/schedstat").ok()?;
+    s.split_whitespace().next()?.parse::<u64>().ok().map(Duration::from_nanos)
+}
+
+/// CPU time of another thread of this process, by its /proc/self/task/<tid> folder.
+fn task_cpu(task: &Path) -> Option<Duration> {
+    let s = fs::read_to_string(task.join("schedstat")).ok()?;
+    s.split_whitespace().next()?.parse::<u64>().ok().map(Duration::from_nanos)
+}
+
+/// A stopwatch of this thread's CPU time (the clock where /proc can't be read).
+struct CpuWatch {
+    cpu: Option<Duration>,
+    wall: Instant,
+}
+
+impl CpuWatch {
+    fn start() -> Self {
+        CpuWatch { cpu: thread_cpu(), wall: Instant::now() }
+    }
+    fn elapsed(&self) -> Duration {
+        match (self.cpu, thread_cpu()) {
+            (Some(a), Some(b)) => b.saturating_sub(a),
+            _ => self.wall.elapsed(),
+        }
+    }
+}
 
 fn guarded<T: Send + 'static>(what: &'static str, budget: Duration, f: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = mpsc::channel();
+    let (task_tx, task_rx) = mpsc::channel();
     let h = std::thread::Builder::new()
         .name(what.into())
         .spawn(move || {
+            let _ = task_tx.send(fs::read_link("/proc/thread-self").ok());
             let _ = tx.send(f());
         })
         .unwrap();
-    match rx.recv_timeout(budget) {
-        Ok(v) => {
-            let _ = h.join();
-            v
+    // "/proc/<pid>/task/<tid>" for the campaign's thread, so its CPU time can be read from here.
+    let task = task_rx.recv().ok().flatten().map(|p| Path::new("/proc").join(p.strip_prefix("/proc").unwrap_or(&p)));
+    let wall = Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(v) => {
+                let _ = h.join();
+                return v;
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                let cpu = task.as_deref().and_then(task_cpu);
+                if let Some(c) = cpu {
+                    if c > budget {
+                        panic!("{what}: used {c:?} of CPU time, over its {budget:?}, so something hangs");
+                    }
+                }
+                let backstop = if cpu.is_some() { budget * 10 } else { budget };
+                if wall.elapsed() > backstop {
+                    panic!("{what}: still running after {:?} ({cpu:?} of CPU time), so something hangs", wall.elapsed());
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => match h.join() {
+                Err(p) => std::panic::resume_unwind(p),
+                Ok(()) => unreachable!(),
+            },
         }
-        Err(RecvTimeoutError::Timeout) => panic!("{what}: still running after {budget:?}, so something hangs"),
-        Err(RecvTimeoutError::Disconnected) => match h.join() {
-            Err(p) => std::panic::resume_unwind(p),
-            Ok(()) => unreachable!(),
-        },
     }
 }
 
 /// Runs one fuzz case: fails on a panic, a call slower than `slow`, or an absurd allocation.
 fn case<T>(what: &str, seed: u64, i: usize, input: &[u8], slow: Duration, f: impl FnOnce() -> T) -> T {
     reset_peak();
-    let t = Instant::now();
+    let t = CpuWatch::start();
     let r = catch_unwind(AssertUnwindSafe(f));
     let took = t.elapsed();
     let big = peak();
@@ -790,7 +842,7 @@ fn inflate_hand_made() {
     fixed_lit(&mut w, 256);
     let enc = w.finish();
     reset_peak();
-    let t = Instant::now();
+    let t = CpuWatch::start();
     assert_eq!(inflate(&enc, 1 << 20), Err(InflateError::TooLarge));
     assert!(t.elapsed() < Duration::from_secs(2));
     assert!(peak() <= 16 << 20, "asked for {} bytes", peak());
@@ -1734,7 +1786,7 @@ fn vdf_hostile_shapes() {
     assert!(vdf::parse(&deep(129)).is_err());
     // Long flat files stay fast.
     let wide = "\"k\" \"v\"\n".repeat(500_000);
-    let t = Instant::now();
+    let t = CpuWatch::start();
     assert_eq!(vdf::parse(&wide).unwrap().entries().len(), 500_000);
     assert!(t.elapsed() < Duration::from_secs(3));
 }

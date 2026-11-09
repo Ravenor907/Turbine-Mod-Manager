@@ -570,9 +570,21 @@ fn qa_zip_many_entries_ok() {
     let names: Vec<String> = (0..20_000).map(|i| format!("BepInEx/plugins/p{}/f{i}.txt", i % 50)).collect();
     let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"x" as &[u8])).collect();
     let z = zip_bytes(&entries);
-    let t = std::time::Instant::now();
+    // Counted in this thread's CPU time: the clock also counts waits for a disk other tests keep busy, which made
+    // this check fail on the build machine now and then while the unpacking itself was quick.
+    let cpu = || {
+        fs::read_to_string("/proc/thread-self/schedstat")
+            .ok()
+            .and_then(|s| s.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()))
+            .map(std::time::Duration::from_nanos)
+    };
+    let (c0, t) = (cpu(), std::time::Instant::now());
     assert_eq!(try_zip(&z, &dir), Ok(true));
-    assert!(t.elapsed().as_secs() < 60, "{:?}", t.elapsed());
+    let took = match (c0, cpu()) {
+        (Some(a), Some(b)) => b.saturating_sub(a),
+        _ => t.elapsed(),
+    };
+    assert!(took.as_secs() < 60, "{took:?} of CPU time");
     let _ = fs::remove_dir_all(&dir);
 }
 
