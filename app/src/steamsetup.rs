@@ -211,21 +211,25 @@ impl qobject::Turbine {
             "coop" => format!("play {} coop", g.id()),
             _ => String::new(),
         };
+        let data = crate::backend::data_home();
         let r = job_for(&g, &kind, &resume).and_then(|job| {
             if kind == "undo" {
-                let data = crate::backend::data_home();
-                let back = ac::original_options(&data, &g.store_id);
-                if let Err(e) = ac::mark_undone(&data, &g.store_id, &back) {
-                    crate::log::line("launch", &format!("{}: couldn't mark the launch options change undone: {e}", g.name));
-                    let _ = ac::arm(&data, &g.store_id, None);
-                }
+                // 0.6 (break L8): marked undone only once the change is really made (now, or when the restart says done).
+                let _ = std::fs::create_dir_all(data.join("steam-setup"));
+                let _ = std::fs::write(undo_file(&data), &g.store_id);
             }
             if kind == "options" {
-                let data = crate::backend::data_home();
                 let _ = ac::still_undone(&data, &g.store_id, None, true);
             }
             start(&self.rust().found, *self.gamemode(), job)
         });
+        match (&r, kind.as_str()) {
+            (Ok(state), "undo") if *state == "done" => undo_made(&data),
+            (Err(_), "undo") => {
+                let _ = std::fs::remove_file(undo_file(&data));
+            }
+            _ => {}
+        }
         let json = match r {
             Ok(state) => format!("{{\"ok\":true,\"state\":\"{state}\",\"words\":\"\"}}"),
             Err(e) => format!("{{\"ok\":false,\"state\":\"\",\"words\":{}}}", quote(&e)),
@@ -250,6 +254,12 @@ impl qobject::Turbine {
     /// The restart is over and Turbine went on (or the player closed its message): its files go.
     pub fn steam_setup_finish(&self) {
         let data = crate::backend::data_home();
+        match sr::read_result(&data) {
+            Some((state, _)) if state == "done" => undo_made(&data),
+            _ => {
+                let _ = std::fs::remove_file(undo_file(&data));
+            }
+        }
         if let Ok(t) = std::fs::read_to_string(sr::log_file(&data)) {
             let tail: Vec<&str> = t.lines().rev().take(12).collect();
             for l in tail.into_iter().rev() {
@@ -350,4 +360,23 @@ fn steam_started() -> Option<std::time::SystemTime> {
     }
     let secs: u64 = host(&["ps", "-o", "etimes=", "-p", &pid])?.trim().parse().ok()?;
     std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(secs + 1))
+}
+
+/// 0.6 (break L8): the game whose Launch Options an Undo is putting back, until the restart says it's done.
+fn undo_file(data: &Path) -> PathBuf {
+    data.join("steam-setup").join("undo-for.txt")
+}
+
+/// The Undo is made: Turbine's line is out of the Launch Options, so the game is marked undone (and not before).
+fn undo_made(data: &Path) {
+    let Ok(app_id) = std::fs::read_to_string(undo_file(data)) else { return };
+    let _ = std::fs::remove_file(undo_file(data));
+    let app_id = app_id.trim().to_string();
+    let back = ac::original_options(data, &app_id);
+    if let Err(e) = ac::mark_undone(data, &app_id, &back) {
+        crate::log::line("launch", &format!("{app_id}: couldn't mark the launch options change undone: {e}"));
+        let _ = ac::arm(data, &app_id, None);
+    } else {
+        crate::log::line("launch", &format!("{app_id}: the launch options change is undone"));
+    }
 }

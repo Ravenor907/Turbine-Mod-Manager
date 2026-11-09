@@ -549,6 +549,12 @@ pub fn quick_running(folder: &Path) -> bool {
     matches!(lock_instance(&folder.join(QUICK_MARK)), Lock::Taken)
 }
 
+/// 0.61 (break L3): for a request from Steam's menu, which of the two locks it got. The quick mark taken by someone
+/// else while the main lock is taken means another request from the menu holds them, not Turbine's window.
+pub fn another_request_holds(mark: &Lock, main: &Lock) -> bool {
+    matches!(mark, Lock::Taken) && matches!(main, Lock::Taken)
+}
+
 /// Takes the one-Turbine lock, waiting up to `max` for the one holding it to finish.
 pub fn lock_wait(path: &Path, max: Duration) -> Lock {
     let t = Instant::now();
@@ -1180,6 +1186,27 @@ mod tests {
         assert!(!quick_running(&d));
         assert!(matches!(lock_wait(&d.join(LOCK_FILE), Duration::from_millis(300)), Lock::Taken));
         drop(window);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_second_steam_menu_request_is_not_read_as_turbine_open() {
+        let d = std::env::temp_dir().join(format!("turbine-quicktwo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        // The first request holds both.
+        let mark = lock_instance(&d.join(QUICK_MARK));
+        let main = lock_instance(&d.join(LOCK_FILE));
+        // The second sees both taken: another request, not the window.
+        let (m2, l2) = (lock_instance(&d.join(QUICK_MARK)), lock_instance(&d.join(LOCK_FILE)));
+        assert!(another_request_holds(&m2, &l2));
+        drop((m2, l2, main, mark));
+        // Turbine's window holds only the main lock: that is "Turbine is open".
+        let window = lock_instance(&d.join(LOCK_FILE));
+        let (m3, l3) = (lock_instance(&d.join(QUICK_MARK)), lock_instance(&d.join(LOCK_FILE)));
+        assert!(!another_request_holds(&m3, &l3));
+        assert!(matches!(l3, Lock::Taken));
+        drop((m3, l3, window));
         let _ = std::fs::remove_dir_all(&d);
     }
 

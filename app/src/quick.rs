@@ -102,10 +102,17 @@ fn answer(r: &Request) -> String {
     };
     // Held from before the main lock until after it: a Turbine started meanwhile waits for this request instead of
     // closing as a second copy (browse.rs, QUICK_MARK).
-    let _quick_mark = crate::browse::lock_instance(&folder.join(crate::browse::QUICK_MARK));
+    let quick_mark = crate::browse::lock_instance(&folder.join(crate::browse::QUICK_MARK));
     // Turbine's window holds this lock while it is open (browse.rs).
     let lock = crate::browse::lock_instance(&folder.join(crate::browse::LOCK_FILE));
-    let open = matches!(lock, crate::browse::Lock::Taken);
+    // 0.61 (break L3): both taken by someone else is another request from the menu, not Turbine's window.
+    let busy = crate::browse::another_request_holds(&quick_mark, &lock);
+    let open = matches!(lock, crate::browse::Lock::Taken) && !busy;
+    if busy && r.action != Action::Status {
+        drop(lock);
+        crate::log::line("quick", "Steam's menu: another request from the menu is still running");
+        return q::answer_json(false, "Turbine is busy with another request from this menu. Try again in a moment.", "");
+    }
     let turbine_url = turbine_engine::shortcuts::find_turbine(&home).map(|(id, _)| turbine_engine::shortcuts::rungameid_url(id)).unwrap_or_default();
     let out = match r.action {
         Action::Status => {

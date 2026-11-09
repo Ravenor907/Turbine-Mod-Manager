@@ -176,7 +176,8 @@ fn main() {
     let mut waited_for_quick = false;
     if matches!(lock, browse::Lock::Taken) && browse::quick_running(&lock_folder) {
         eprintln!("A request from Steam's menu is running; Turbine opens when it is done.");
-        lock = browse::lock_wait(&lock_folder.join(browse::LOCK_FILE), std::time::Duration::from_secs(120));
+        // As long as the plugin waits for a change (decky/main.py CHANGE_TIMEOUT, break L3).
+        lock = browse::lock_wait(&lock_folder.join(browse::LOCK_FILE), std::time::Duration::from_secs(300));
         waited_for_quick = true;
     }
     if matches!(lock, browse::Lock::Taken) {

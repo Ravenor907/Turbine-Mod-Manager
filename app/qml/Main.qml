@@ -829,7 +829,9 @@ Window {
         // 0.6 (I1): Turbine sets the line itself with one Steam restart; pasting it is the fallback.
         askSteamRestart({ game: o.game, kind: "options", resume: o.coop === true ? "coop" : "play", name: o.name,
                           title: o.outdated === true ? "Update " + o.name + "'s launch setting" : "One step before " + o.name + " plays with mods",
-                          intro: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs one setting for that, and Turbine can set it for you.",
+                          intro: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs one setting for that, and Turbine can set it for you."
+                                 // 0.6 (break L9): the player's own Launch Options step aside while mods are on; say which, and how they come back.
+                                 + (o.set && o.outdated !== true ? " Your Launch Options now (" + o.set + ") step aside while mods are on; Settings, Help, Undo the launch options change brings them back." : ""),
                           aLabel: "Restart Steam and set it up", manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) })
     }
     // The paste steps (Set it up myself): the exact text to copy into Steam's Launch Options.

@@ -77,10 +77,13 @@ fn send(path: &Path, link: &str) -> std::io::Result<()> {
     s.write_all(link.trim().as_bytes())?;
     s.write_all(b"\n")?;
     s.flush()?;
-    // Wait for the running Turbine to say it read the line.
+    // Wait for the running Turbine to say it took the line ("ok"; "no" when it was refused).
     s.set_read_timeout(Some(Duration::from_secs(3)))?;
     let mut ok = [0u8; 2];
-    let _ = s.read(&mut ok);
+    let n = s.read(&mut ok).unwrap_or(0);
+    if n == 2 && &ok == b"no" {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Turbine didn't take that request"));
+    }
     Ok(())
 }
 
@@ -126,6 +129,11 @@ pub fn start(link: Option<&str>) -> Start {
     }
 }
 
+/// A line Turbine takes on its socket: bring it to the front, a Nexus link, or a request from Steam's menu.
+fn accepted(line: &str) -> bool {
+    line == SHOW || plausible_link(line) || turbine_engine::quick::parse_socket_line(line).is_some()
+}
+
 /// Reads one line from a connection: an nxm:// link that parses, or nothing.
 fn read_link(stream: UnixStream) -> Option<String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
@@ -133,12 +141,14 @@ fn read_link(stream: UnixStream) -> Option<String> {
     let mut line = String::new();
     let mut r = BufReader::new(stream.take(MAX_LINE + 1));
     r.read_line(&mut line).ok()?;
-    if let Some(w) = writer.as_mut() {
-        let _ = w.write_all(b"ok");
-    }
     let line = line.trim().to_string();
-    // 0.6: a request from Steam's menu (quick.rs) for the game Turbine has open.
-    if line == SHOW || plausible_link(&line) || turbine_engine::quick::parse_socket_line(&line).is_some() {
+    // 0.6: a request from Steam's menu (quick.rs) for the game Turbine has open. The answer says whether the line
+    // was taken, after it is checked (break L2): "ok" or "no".
+    let taken = accepted(&line);
+    if let Some(w) = writer.as_mut() {
+        let _ = w.write_all(if taken { b"ok" } else { b"no" });
+    }
+    if taken {
         Some(line)
     } else {
         crate::log::line("nxm", &format!("Dropped a line from the socket that isn't a Nexus download link ({} bytes)", line.len()));
@@ -182,5 +192,13 @@ mod tests {
         assert!(super::plausible_link("nxm://skyrimspecialedition/mods/266/files/12345?key=abc&expires=1700000000&user_id=1"));
         assert!(!super::plausible_link("https://example.com"));
         assert!(!super::plausible_link("nxm://bad link with spaces"));
+    }
+
+    #[test]
+    fn only_lines_it_takes_are_answered_ok() {
+        assert!(super::accepted(super::SHOW));
+        assert!(super::accepted("nxm://skyrimspecialedition/mods/266/files/12345?key=abc&expires=1700000000&user_id=1"));
+        assert!(!super::accepted("hello"));
+        assert!(!super::accepted(""));
     }
 }
