@@ -40,6 +40,7 @@ fn state() -> MutexGuard<'static, State> {
 pub fn start(dir: PathBuf) {
     let _ = fs::create_dir_all(&dir);
     let mark = dir.join("running.mark");
+    let gone = dir.join("display-gone.mark");
     let unclean = mark.exists();
     let _ = fs::write(&mark, b"");
     {
@@ -52,6 +53,9 @@ pub fn start(dir: PathBuf) {
     trim_crash_log();
     if unclean {
         crash("The last run ended without closing (a crash, or it was stopped).");
+    }
+    if fs::remove_file(&gone).is_ok() {
+        line("app", "The last run closed with the display (Game Mode ended), not a crash; waiting changes go into the game at the next Play");
     }
     install_panic_hook();
 }
@@ -242,6 +246,16 @@ pub extern "C" fn qt_message(kind: i32, place: *const std::os::raw::c_char, text
         _ => return, // Qt's own chatter stays out of the log
     };
     let msg = if place.is_empty() { format!("{label}: {text}") } else { format!("{label}: {text} ({place})") };
+    // 0.6 (integration I10): leaving Game Mode takes the display away and Qt ends the run right after this message. It
+    // isn't a crash: the next start says so plainly (changes not yet in the game go in at the next Play).
+    if kind == 1 && text.contains("X11 connection broke") {
+        line("app", "The display went away (Game Mode ended or Steam restarted): Turbine closes with it");
+        if let Some(dir) = state().dir.clone() {
+            let _ = fs::remove_file(dir.join("running.mark"));
+            let _ = fs::write(dir.join("display-gone.mark"), b"");
+        }
+        return;
+    }
     if kind == 3 {
         crash(&format!("Qt {msg}"));
     } else {
