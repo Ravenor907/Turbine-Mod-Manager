@@ -511,6 +511,38 @@ impl Options {
     }
 }
 
+/// 0.61 (break L4): one sign-in session at a time. A second press of Sign in while one waits gets its approval page
+/// again instead of starting another session. Holds the page once it is known ("" before that).
+static SESSION: Mutex<Option<String>> = Mutex::new(None);
+
+/// The one running session: let go when it ends (dropped), however it ends.
+pub struct Session(());
+
+impl Session {
+    /// Starts the session, or None with the page of the one already running (None if it isn't known yet).
+    pub fn begin() -> Result<Session, Option<String>> {
+        let mut s = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+        match s.as_ref() {
+            Some(page) => Err(Some(page.clone()).filter(|p| !p.is_empty())),
+            None => {
+                *s = Some(String::new());
+                Ok(Session(()))
+            }
+        }
+    }
+
+    /// The approval page of this session, for a second press.
+    pub fn page(&self, page: &str) {
+        *SESSION.lock().unwrap_or_else(|e| e.into_inner()) = Some(page.to_string());
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        *SESSION.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+}
+
 /// Signs in through Nexus's SSO with the slug in effect. Blocks until the player approves Turbine, it fails, or
 /// `cancel` is set; run it off the UI thread. `progress` gets OpenPage first (open it in the player's browser),
 /// then Waiting. Ok is the player's API key: hand it to the usual key check (online's set_key), which saves it.
@@ -729,6 +761,16 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     const KEY: &str = "VX2PMnc4T5Q3dUFmjE45WyRyZ3VkKzIvYVJiMUdick5XQU9QWHdUbFo4";
+
+    #[test]
+    fn a_second_press_reuses_the_running_session() {
+        let first = Session::begin().ok().expect("the first press starts a session");
+        assert_eq!(Session::begin().err(), Some(None), "page not known yet: no second session");
+        first.page("https://www.nexusmods.com/sso?id=1");
+        assert_eq!(Session::begin().err(), Some(Some("https://www.nexusmods.com/sso?id=1".to_string())));
+        drop(first);
+        assert!(Session::begin().is_ok(), "after it ends, a press starts a new one");
+    }
 
     #[test]
     fn sha1_and_base64_match_the_standards() {

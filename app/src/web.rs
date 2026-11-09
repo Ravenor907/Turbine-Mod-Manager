@@ -506,23 +506,40 @@ impl qobject::Turbine {
         // 0.6: Nexus's own sign-in (single sign-on) when Turbine has its slug: Nexus's approval page opens in Turbine's
         // page from the list it gives, and the key comes back by itself. Otherwise the browser helper, as before.
         if let crate::nexus_sso::Method::Sso { .. } = crate::nexus_sso::method() {
-            crate::log::line("web", "Sign in: through Nexus's own approval page (single sign-on)");
             let qt = self.qt_thread();
+            let show = |qt: &cxx_qt::CxxQtThread<qobject::Turbine>, page: &str| {
+                let json = format!(
+                    "[{{\"name\":\"Nexus's approval page\",\"url\":{},\"note\":\"Press Authorise. Turbine signs in by itself.\"}}]",
+                    quote(page)
+                );
+                qt.queue(move |t| t.pages(QString::from("Sign in to Nexus Mods"), QString::from(json.as_str())))
+                    .map_err(|_| "Turbine couldn't show the page".to_string())
+            };
+            // 0.61 (break L4): one session per sign-in; a second press shows the waiting session's page again.
+            let session = match crate::nexus_sso::Session::begin() {
+                Ok(s) => s,
+                Err(page) => {
+                    crate::log::line("web", "Sign in: a sign-in already waits; showing its approval page again");
+                    if let Some(page) = page {
+                        let _ = show(&qt, &page);
+                    }
+                    return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine. Turbine signs in by itself.");
+                }
+            };
+            crate::log::line("web", "Sign in: through Nexus's own approval page (single sign-on)");
             std::thread::spawn(move || {
+                let session = session;
                 let cancel = AtomicBool::new(false);
                 let q = qt.clone();
                 let mut progress = |p: crate::nexus_sso::Progress| -> Result<(), String> {
                     if let crate::nexus_sso::Progress::OpenPage(page) = p {
-                        let json = format!(
-                            "[{{\"name\":\"Nexus's approval page\",\"url\":{},\"note\":\"Press Authorise. Turbine signs in by itself.\"}}]",
-                            quote(&page)
-                        );
-                        q.queue(move |t| t.pages(QString::from("Sign in to Nexus Mods"), QString::from(json.as_str())))
-                            .map_err(|_| "Turbine couldn't show the page".to_string())?;
+                        session.page(&page);
+                        return show(&q, &page);
                     }
                     Ok(())
                 };
                 let r = crate::nexus_sso::sign_in(&mut progress, &cancel);
+                drop(session);
                 let _ = qt.queue(move |t| match r {
                     Ok(key) => {
                         crate::log::line("web", "Sign in through Nexus: approved; checking the key");
