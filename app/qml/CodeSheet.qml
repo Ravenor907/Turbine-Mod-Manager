@@ -32,14 +32,14 @@ Item {
             Text {
                 text: "Thunderstore profile code"
                 color: cs.ui.c.text
-                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.px(18); font.bold: true
+                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.fpx(18); font.bold: true
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: cs.info ? "Loadout \"" + cs.info.profile + "\"" : ""
                 color: cs.ui.c.soft
-                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15)
+                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15)
             }
             Rectangle {
                 width: parent.width
@@ -61,7 +61,7 @@ Item {
                     text: cs.state_ === "ready" ? cs.info.code : cs.state_ === "working" ? "Uploading..." : "No code"
                     color: cs.state_ === "ready" ? cs.ui.c.accentText : cs.ui.c.muted
                     font.family: "monospace"
-                    font.pixelSize: cs.ui.px(cs.state_ === "ready" ? 30 : 22)
+                    font.pixelSize: cs.ui.fpx(cs.state_ === "ready" ? 30 : 22)
                     font.bold: true
                 }
             }
@@ -72,7 +72,7 @@ Item {
                       : cs.state_ === "error" ? (cs.info.message || "The code couldn't be made.")
                       : "Copied. Anyone can paste this code into Turbine (Loadouts, Import a Thunderstore profile code) or another Thunderstore mod tool to get the same mods."
                 color: cs.state_ === "error" ? cs.ui.c.warn : cs.ui.c.text
-                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15)
+                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15)
             }
             Text {
                 visible: !!cs.info && cs.state_ === "ready" && (cs.info.left > 0 || cs.info.files > 0)
@@ -83,7 +83,7 @@ Item {
                     cs.info.left > 0 ? cs.info.left + (cs.info.left === 1 ? " mod isn't" : " mods aren't") + " in the code: only Thunderstore mods can be." : ""
                 ].filter(s => s !== "").join(" ")
                 color: cs.ui.c.soft
-                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(14)
+                font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(14)
             }
             Row {
                 spacing: cs.ui.px(18)
@@ -93,9 +93,9 @@ Item {
                     Rectangle {
                         width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "A"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(13); font.bold: true }
+                        Text { anchors.centerIn: parent; text: "A"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(13); font.bold: true }
                     }
-                    Text { text: "Copy again"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Copy again"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: cs.copyClicked() }
                 }
@@ -104,9 +104,9 @@ Item {
                     Rectangle {
                         width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "B"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(13); font.bold: true }
+                        Text { anchors.centerIn: parent; text: "B"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(13); font.bold: true }
                     }
-                    Text { text: "Close"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Close"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: cs.closed() }
                 }

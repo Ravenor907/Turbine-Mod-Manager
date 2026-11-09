@@ -133,7 +133,7 @@ Item {
             text: srow.label
             color: report.ui.c.text
             font.family: report.ui.bodyFont
-            font.pixelSize: report.ui.px(15)
+            font.pixelSize: report.ui.fpx(15)
             font.bold: true
         }
         Switch { on: srow.on; anchors.right: parent.right; anchors.rightMargin: report.ui.px(12); anchors.verticalCenter: parent.verticalCenter }
@@ -165,9 +165,9 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 color: report.ui.c.raised
                 border.color: report.ui.c.accentLo
-                Text { anchors.centerIn: parent; text: btn.key.toUpperCase(); color: report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.px(13); font.bold: true }
+                Text { anchors.centerIn: parent; text: btn.key.toUpperCase(); color: report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.fpx(13); font.bold: true }
             }
-            Text { text: btn.label; color: btn.primary ? report.ui.c.onAccent : report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: btn.label; color: btn.primary ? report.ui.c.onAccent : report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
         }
         HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
         TapHandler { onTapped: btn.clicked() }
@@ -202,7 +202,7 @@ Item {
                     text: "Report a bug"
                     color: report.ui.c.text
                     font.family: report.ui.titleFont
-                    font.pixelSize: report.ui.px(18)
+                    font.pixelSize: report.ui.fpx(18)
                     font.bold: true
                 }
                 Text {
@@ -212,7 +212,7 @@ Item {
                     text: "About: " + report.item
                     color: report.ui.c.soft
                     font.family: report.ui.bodyFont
-                    font.pixelSize: report.ui.px(15)
+                    font.pixelSize: report.ui.fpx(15)
                 }
                 // The screenshot, as it will be saved (smaller here).
                 Rectangle {
@@ -259,7 +259,7 @@ Item {
                         text: report.text !== "" ? report.text : "What went wrong? (A to type)"
                         color: report.text !== "" ? report.ui.c.text : report.ui.c.muted
                         font.family: report.ui.bodyFont
-                        font.pixelSize: report.ui.px(15)
+                        font.pixelSize: report.ui.fpx(15)
                     }
                     TextEdit {
                         id: editor
@@ -272,7 +272,7 @@ Item {
                         selectionColor: report.ui.c.accent
                         selectedTextColor: report.ui.c.onAccent
                         font.family: report.ui.bodyFont
-                        font.pixelSize: report.ui.px(15)
+                        font.pixelSize: report.ui.fpx(15)
                         onTextChanged: if (length > 2000) remove(2000, length)
                         Keys.onEscapePressed: report.endEdit()
                     }
@@ -283,7 +283,7 @@ Item {
                         text: editor.length + " / 2000"
                         color: report.ui.c.muted
                         font.family: report.ui.bodyFont
-                        font.pixelSize: report.ui.px(13)
+                        font.pixelSize: report.ui.fpx(13)
                     }
                     HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
                     TapHandler { onTapped: if (!report.editing) report.beginEdit() }
@@ -315,7 +315,7 @@ Item {
                     text: report.aboutLine
                     color: report.ui.c.muted
                     font.family: report.ui.bodyFont
-                    font.pixelSize: report.ui.px(14)
+                    font.pixelSize: report.ui.fpx(14)
                 }
                 Row {
                     id: buttons

@@ -68,7 +68,7 @@ Window {
             text: win.status && win.status.text ? win.status.text : "Press Save in the browser"
             color: win.ui.c.text
             font.family: win.ui.bodyFont
-            font.pixelSize: win.ui.px(15)
+            font.pixelSize: win.ui.fpx(15)
             font.bold: true
         }
     }

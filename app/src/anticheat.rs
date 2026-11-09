@@ -124,16 +124,17 @@ pub(crate) fn json_fields(slot: &Slot, a: &AntiCheat) -> String {
     )
 }
 
-/// Play with mods for a game me3 starts: the profile for what is in the package folder now, then me3 on the host.
-/// Answers false (and says why) when it couldn't start.
-pub(crate) fn launch_me3(w: &Worker, slot: &Slot) -> bool {
+/// Play with mods for a game me3 starts, outside Steam: the profile for what is in the package folder now, then me3
+/// on the host. Desktop Mode only (Game Mode shows a game only when Steam started it). Answers false (and says why)
+/// when it couldn't start.
+pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     let Some(game) = slot.store.me3_game() else { return false };
     let me3 = ac::me3_dir(&w.data_home);
     if let Err(e) = ac::me3_ready(&me3) {
         w.say(format!("{e}. Press Play again: Turbine gets me3 first."), "warn");
         return false;
     }
-    let (profile, natives) = match ac::write_profile(slot.store.root(), &game) {
+    let (profile, natives) = match ac::write_profile_for(slot.store.root(), &game, coop) {
         Ok(p) => p,
         Err(e) => {
             w.say(format!("Couldn't write the me3 profile: {e}"), "error");
@@ -143,25 +144,137 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot) -> bool {
     let args = ac::launch_args(&me3, &profile);
     crate::log::line(
         "launch",
-        &format!("{} through me3 {} (offline, no anti-cheat): {} ({} natives)", slot.game.name, ac::ME3_VERSION, args.join(" "), natives.len()),
+        &format!("{} through me3 {} outside Steam (offline, no anti-cheat): {} ({} natives)", slot.game.name, ac::ME3_VERSION, args.join(" "), natives.len()),
     );
-    if Path::new("/.flatpak-info").exists() {
-        match std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()).spawn() {
-            Ok(_) => true,
-            Err(e) => {
-                w.say(format!("Couldn't start me3: {e}"), "error");
-                false
+    let (prog, rest) = if Path::new("/.flatpak-info").exists() { (&args[0], &args[1..]) } else { (&args[2], &args[3..]) };
+    match std::process::Command::new(prog).args(rest).stdin(std::process::Stdio::null()).spawn() {
+        Ok(_) => true,
+        Err(e) => {
+            w.say(format!("Couldn't start me3: {e}"), "error");
+            false
+        }
+    }
+}
+
+/// A Steam game me3 starts: Steam starts it through Turbine's launch helper.
+pub(crate) fn through_steam(slot: &Slot) -> bool {
+    slot.game.store == turbine_engine::games::Store::Steam && special(slot).is_some_and(|a| ac::mode(a) == Mode::Me3)
+}
+
+/// The helper in Turbine's data folder, written again when it changed. Logged.
+pub(crate) fn ensure_helper(data: &Path) {
+    match ac::write_helper(data) {
+        Ok(true) => crate::log::line("launch", &format!("Steam launch helper written: {}", ac::helper_path(data).display())),
+        Ok(false) => {}
+        Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam launch helper: {e}")),
+    }
+}
+
+/// The game's Launch Options in Steam as they are now: (set, the text Turbine needs, whether they run the helper).
+pub(crate) fn launch_option_state(slot: &Slot, data: &Path) -> (Option<String>, String, bool) {
+    let set = turbine_engine::steam::launch_options(&turbine_engine::home_dir(), &slot.game.store_id);
+    let need = ac::launch_option(data);
+    let ok = set.as_deref().is_some_and(|s| ac::launch_option_ok(s, data));
+    (set, need, ok)
+}
+
+/// Play with mods (or Seamless Co-op) through Steam: the profile, then the helper armed with me3's arguments. Answers
+/// Ok(true) when Steam can start it now, Ok(false) when the Launch Options aren't set yet (nothing armed, logged), and
+/// Err with why it couldn't.
+pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, String> {
+    let game = slot.store.me3_game().ok_or("not a game me3 starts")?;
+    let data = &w.data_home;
+    let me3 = ac::me3_dir(data);
+    ac::me3_ready(&me3)?;
+    ensure_helper(data);
+    let (set, need, ok) = launch_option_state(slot, data);
+    let words = match &set {
+        None => "not found (the game isn't in Steam's settings yet)".to_string(),
+        Some(s) if s.is_empty() => "empty".to_string(),
+        Some(s) => format!("\"{s}\"{}", if ok { " (they run Turbine's helper)" } else { " (they don't run Turbine's helper)" }),
+    };
+    crate::log::line("launch", &format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name));
+    if !ok {
+        return Ok(false);
+    }
+    let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {e}"))?;
+    let args = ac::helper_args(&me3, &profile);
+    ac::arm(data, &slot.game.store_id, Some(&args)).map_err(|e| format!("Couldn't get the launch helper ready: {e}"))?;
+    crate::log::line(
+        "launch",
+        &format!(
+            "{} {} through Steam and me3 {} (offline, no anti-cheat): helper armed with {} ({} natives)",
+            slot.game.name,
+            if coop == ac::Coop::Seamless { "Seamless Co-op" } else { "with mods" },
+            ac::ME3_VERSION,
+            args.join(" "),
+            natives.len()
+        ),
+    );
+    Ok(true)
+}
+
+/// The normal launch for a game me3 starts (no mods on, or Play without mods): the helper runs Steam's own command.
+/// `once`: Play without mods (the mods stay on for the next Play); otherwise mods are off, so the helper is disarmed.
+pub(crate) fn arm_plain(w: &Worker, slot: &Slot, once: bool) {
+    if !through_steam(slot) {
+        return;
+    }
+    let data = &w.data_home;
+    ensure_helper(data);
+    let id = &slot.game.store_id;
+    let r = if once && ac::armed_file(data, id).exists() { ac::arm_plain_once(data, id) } else { ac::arm(data, id, None) };
+    match r {
+        Ok(()) => crate::log::line(
+            "launch",
+            &format!("{}: the launch helper runs Steam's own command{}", slot.game.name, if once { " this once (Play without mods)" } else { " (no mods on)" }),
+        ),
+        Err(e) => crate::log::line("launch", &format!("{}: couldn't set the launch helper to Steam's own command: {e}", slot.game.name)),
+    }
+}
+
+/// Keeps the helper's file for a game in step with Turbine after the mods changed (Steam's own Play button uses it
+/// too): armed when mods are on and the player said yes, off otherwise. Logged when it changes.
+pub(crate) fn sync_helper(w: &Worker, slot: &Slot) {
+    if !through_steam(slot) {
+        return;
+    }
+    let data = &w.data_home;
+    let id = &slot.game.store_id;
+    let was = ac::armed_file(data, id).exists();
+    let on = slot.store.mods().iter().any(|m| m.enabled) && (turned_off(slot) || special(slot).is_some_and(|a| !ac::needs_ask(a)));
+    if on == was {
+        if on {
+            // The profile follows the package folder.
+            if let Some(game) = slot.store.me3_game() {
+                let _ = ac::write_profile_for(slot.store.root(), &game, ac::Coop::Solo);
             }
         }
-    } else {
-        // Outside the Flatpak there is no flatpak-spawn: the same program, the same fixed arguments.
-        match std::process::Command::new(&args[2]).args(&args[3..]).stdin(std::process::Stdio::null()).spawn() {
-            Ok(_) => true,
-            Err(e) => {
-                w.say(format!("Couldn't start me3: {e}"), "error");
-                false
-            }
+        return;
+    }
+    if !on {
+        if ac::arm(data, id, None).is_ok() {
+            crate::log::line("launch", &format!("{}: no mods on, so Steam's Play starts it normally", slot.game.name));
         }
+        return;
+    }
+    let (Some(game), Ok(())) = (slot.store.me3_game(), ac::me3_ready(&ac::me3_dir(data))) else { return };
+    if let Ok((profile, _)) = ac::write_profile_for(slot.store.root(), &game, ac::Coop::Solo) {
+        if ac::arm(data, id, Some(&ac::helper_args(&ac::me3_dir(data), &profile))).is_ok() {
+            crate::log::line("launch", &format!("{}: mods on, so Steam's Play starts it with them through me3", slot.game.name));
+        }
+    }
+}
+
+/// The size of the helper's log now (what it writes after this is the next launch's).
+pub(crate) fn helper_log_len(data: &Path) -> u64 {
+    std::fs::metadata(ac::helper_log(data)).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Copies the helper's log lines since `from` into the activity log.
+pub(crate) fn helper_log_to_activity(data: &Path, from: u64) {
+    for l in ac::helper_log_since(data, from) {
+        crate::log::line("launch", &format!("Steam launch helper: {l}"));
     }
 }
 

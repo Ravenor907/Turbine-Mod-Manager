@@ -86,9 +86,9 @@ Item {
                     Rectangle {
                         width: fs.ui.px(24); height: width; radius: width / 2; color: fs.ui.c.raised; border.color: fs.ui.c.accentLo
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "B"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13); font.bold: true }
+                        Text { anchors.centerIn: parent; text: "B"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13); font.bold: true }
                     }
-                    Text { text: fs.page > 0 || (fs.step && fs.step.canGoBack) ? "Back a step" : "Stop"; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: fs.page > 0 || (fs.step && fs.step.canGoBack) ? "Back a step" : "Stop"; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                 TapHandler { onTapped: fs.goBack() }
@@ -100,13 +100,13 @@ Item {
                 elide: Text.ElideRight
                 text: fs.info && fs.info.data ? (fs.info.data.name || fs.info.data.module) : ""
                 color: fs.ui.c.text
-                font.family: fs.ui.titleFont; font.pixelSize: fs.ui.px(17); font.bold: true
+                font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(17); font.bold: true
             }
             Text {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                 text: fs.step ? "Step " + fs.step.number + (fs.groups.length > 1 ? ", question " + (fs.page + 1) + " of " + fs.groups.length : "") : ""
                 color: fs.ui.c.soft
-                font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15)
+                font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15)
             }
         }
         StatusLine {
@@ -127,8 +127,8 @@ Item {
                 spacing: fs.ui.px(6)
                 Row {
                     spacing: fs.ui.px(10)
-                    Text { text: fs.group ? fs.group.name : (fs.step ? fs.step.name : ""); color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(19); font.bold: true }
-                    Text { text: fs.group ? fs.group.hint : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); topPadding: fs.ui.px(4) }
+                    Text { text: fs.group ? fs.group.name : (fs.step ? fs.step.name : ""); color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(19); font.bold: true }
+                    Text { text: fs.group ? fs.group.hint : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); topPadding: fs.ui.px(4) }
                 }
                 ListView {
                     id: optList
@@ -177,11 +177,11 @@ Item {
                             width: parent.width - fs.ui.px(110)
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: fs.ui.px(2)
-                            Text { width: parent.width; elide: Text.ElideRight; text: opt.o ? opt.o.name : ""; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(17); font.bold: true }
+                            Text { width: parent.width; elide: Text.ElideRight; text: opt.o ? opt.o.name : ""; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(17); font.bold: true }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: !opt.o ? "" : opt.o.type === "required" ? "Always installed" : opt.o.type === "recommended" ? "Recommended by the mod" : opt.o.type === "notUsable" ? "Can't be used with your setup" : (opt.o.description || "").split("\n")[0]
-                                color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(14)
+                                color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(14)
                             }
                         }
                         Text {
@@ -189,13 +189,13 @@ Item {
                             anchors.centerIn: parent
                             text: fs.lastPage ? "Install with these choices" : "Next question"
                             color: fs.ui.c.onAccent
-                            font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(16); font.bold: true
+                            font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(16); font.bold: true
                         }
                         Rectangle {
                             visible: opt.foc && !opt.isNext
                             anchors.right: parent.right; anchors.rightMargin: fs.ui.px(14); anchors.verticalCenter: parent.verticalCenter
                             width: fs.ui.px(26); height: width; radius: width / 2; color: fs.ui.c.raised; border.color: fs.ui.c.accentLo
-                            Text { anchors.centerIn: parent; text: "A"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13); font.bold: true }
+                            Text { anchors.centerIn: parent; text: "A"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13); font.bold: true }
                         }
                         HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                         TapHandler { onTapped: fs.activate(opt.index) }
@@ -229,10 +229,10 @@ Item {
                             anchors.centerIn: parent
                             text: "No picture"
                             color: fs.ui.c.muted
-                            font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(14)
+                            font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(14)
                         }
                     }
-                    Text { width: parent.width; elide: Text.ElideRight; text: fs.preview ? fs.preview.name : ""; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(17); font.bold: true }
+                    Text { width: parent.width; elide: Text.ElideRight; text: fs.preview ? fs.preview.name : ""; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(17); font.bold: true }
                     Text {
                         width: parent.width
                         wrapMode: Text.WordWrap
@@ -241,7 +241,7 @@ Item {
                         textFormat: Text.PlainText
                         text: fs.preview ? fs.preview.description : ""
                         color: fs.ui.c.soft
-                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15)
+                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15)
                     }
                 }
             }
@@ -261,9 +261,9 @@ Item {
             x: fs.ui.px(18); y: fs.ui.px(16)
             width: parent.width - fs.ui.px(36)
             spacing: fs.ui.px(10)
-            Text { text: "Stop installing?"; color: fs.ui.c.text; font.family: fs.ui.titleFont; font.pixelSize: fs.ui.px(18); font.bold: true }
-            Text { width: parent.width; wrapMode: Text.WordWrap; text: "The mod isn't added. Nothing in the game changes."; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15) }
-            Text { text: "A  Stop      B  Keep choosing"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); font.bold: true }
+            Text { text: "Stop installing?"; color: fs.ui.c.text; font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true }
+            Text { width: parent.width; wrapMode: Text.WordWrap; text: "The mod isn't added. Nothing in the game changes."; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15) }
+            Text { text: "A  Stop      B  Keep choosing"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: true }
         }
     }
 }

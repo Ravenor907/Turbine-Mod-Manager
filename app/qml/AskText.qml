@@ -54,7 +54,7 @@ Item {
             x: ask.ui.px(18); y: ask.ui.px(18)
             width: parent.width - ask.ui.px(36)
             spacing: ask.ui.px(10)
-            Text { text: ask.title; color: ask.ui.c.text; font.family: ask.ui.titleFont; font.pixelSize: ask.ui.px(18); font.bold: true }
+            Text { text: ask.title; color: ask.ui.c.text; font.family: ask.ui.titleFont; font.pixelSize: ask.ui.fpx(18); font.bold: true }
             Text {
                 visible: ask.note !== ""
                 width: parent.width
@@ -62,7 +62,7 @@ Item {
                 text: ask.note
                 color: ask.ui.c.soft
                 font.family: ask.ui.bodyFont
-                font.pixelSize: ask.ui.px(15)
+                font.pixelSize: ask.ui.fpx(15)
             }
             Rectangle {
                 width: parent.width
@@ -80,7 +80,7 @@ Item {
                     selectionColor: ask.ui.c.accent
                     selectedTextColor: ask.ui.c.onAccent
                     font.family: ask.ui.bodyFont
-                    font.pixelSize: ask.ui.px(16)
+                    font.pixelSize: ask.ui.fpx(16)
                     maximumLength: ask.maxLength
                     echoMode: ask.secret ? TextInput.Password : TextInput.Normal
                     clip: true

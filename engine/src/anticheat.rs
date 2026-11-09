@@ -392,6 +392,218 @@ pub fn launch_args(me3: &Path, profile: &Path) -> Vec<String> {
     ]
 }
 
+// ---- Starting through Steam (0.58) ----
+//
+// In Game Mode a game only shows when Steam itself started it. So a modded launch goes through Steam too: the player
+// sets the game's Launch Options once to `<helper> %command%` (the launch option doctor shows and copies the exact
+// text; Turbine never writes Steam's settings), and Turbine starts the game with steam://rungameid/<app id>. The
+// helper is a small script Turbine writes into its own data folder. When Turbine has mods on for the game (a
+// "<app id>.me3" file next to it, one argument per line), it runs me3 with Turbine's profile; me3 picks the same
+// Proton that Steam has set for the game. Otherwise (no file, or "<app id>.plain" for one Play without mods) it runs
+// Steam's own command unchanged. Steam's reaper and launch wrapper stay in front either way, so Steam sees the game
+// running. Every step goes to steam-launch.log next to it.
+
+/// The helper's folder in Turbine's data folder.
+pub fn launch_dir(data: &Path) -> PathBuf {
+    data.join("steam-launch")
+}
+
+/// The helper itself.
+pub fn helper_path(data: &Path) -> PathBuf {
+    launch_dir(data).join("turbine-launch.sh")
+}
+
+/// "With mods" for one game: me3's arguments, one per line.
+pub fn armed_file(data: &Path, app_id: &str) -> PathBuf {
+    launch_dir(data).join(format!("{app_id}.me3"))
+}
+
+/// One Play without mods: the helper runs Steam's own command once and removes this.
+pub fn plain_file(data: &Path, app_id: &str) -> PathBuf {
+    launch_dir(data).join(format!("{app_id}.plain"))
+}
+
+/// The helper's own log of every launch.
+pub fn helper_log(data: &Path) -> PathBuf {
+    launch_dir(data).join("steam-launch.log")
+}
+
+/// The exact text for the game's Steam Launch Options.
+pub fn launch_option(data: &Path) -> String {
+    let p = helper_path(data).to_string_lossy().to_string();
+    if p.contains(' ') {
+        format!("\"{p}\" %command%")
+    } else {
+        format!("{p} %command%")
+    }
+}
+
+/// Do the Launch Options as set in Steam run the helper with Steam's command after it?
+pub fn launch_option_ok(set: &str, data: &Path) -> bool {
+    let p = helper_path(data).to_string_lossy().to_string();
+    match set.find(&p) {
+        Some(i) => set[i + p.len()..].contains("%command%"),
+        None => false,
+    }
+}
+
+/// The helper's text. It runs only me3 from the file Turbine wrote, or Steam's own command.
+pub fn helper_text() -> String {
+    r#"#!/bin/bash
+# Turbine Mod Manager's Steam launch helper. Steam runs it from a game's Launch Options as
+#   <this file> %command%
+# With mods on in Turbine (a "<app id>.me3" file next to it, one argument per line) it starts the game through me3
+# with Turbine's profile; otherwise it runs Steam's own command unchanged. It runs nothing else.
+# Turbine writes this file again when it changes; every step goes to steam-launch.log next to it.
+here=$(cd "$(dirname "$0")" && pwd)
+log="$here/steam-launch.log"
+say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log" 2>/dev/null; }
+app="${SteamAppId:-${STEAM_COMPAT_APP_ID:-}}"
+if [ -z "$app" ]; then
+  for a in "$@"; do case "$a" in AppId=*) app="${a#AppId=}" ;; esac; done
+fi
+say "Steam started app ${app:-unknown} in $(pwd): $*"
+if [ "$#" -eq 0 ]; then
+  say "No command from Steam: the Launch Options need %command% after this file"
+  exit 1
+fi
+case "$app" in
+  ''|*[!0-9]*) say "No app id: Steam's own command"; exec "$@" ;;
+esac
+if [ -f "$here/$app.plain" ]; then
+  rm -f "$here/$app.plain"
+  say "Play without mods (once): Steam's own command"
+  exec "$@"
+fi
+if [ ! -f "$here/$app.me3" ]; then
+  say "No mods on in Turbine: Steam's own command"
+  exec "$@"
+fi
+mapfile -t me3 < "$here/$app.me3"
+if [ "${#me3[@]}" -lt 2 ] || [ ! -x "${me3[0]}" ]; then
+  say "me3 isn't where Turbine put it (${me3[0]}): Steam's own command, without mods"
+  exec "$@"
+fi
+# Steam's reaper and launch wrapper stay in front (they tell Steam the game is running); the Proton part is me3's.
+args=("$@")
+prefix=()
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    */steam-launch-wrapper)
+      if [ "${args[$((i + 1))]}" = "--" ]; then prefix=("${args[@]:0:$((i + 2))}"); else prefix=("${args[@]:0:$((i + 1))}"); fi ;;
+    */proton) say "Steam's Proton for this game: ${args[$i]} (me3 uses the same one from Steam's settings)" ;;
+  esac
+done
+say "Mods on: ${prefix[*]} ${me3[*]}"
+exec "${prefix[@]}" "${me3[@]}" >> "$here/me3-$app.log" 2>&1
+"#
+    .to_string()
+}
+
+/// Writes the helper (executable) when it is missing or different. Answers true when it wrote it.
+pub fn write_helper(data: &Path) -> io::Result<bool> {
+    let path = helper_path(data);
+    let text = helper_text();
+    if fs::read_to_string(&path).is_ok_and(|t| t == text) {
+        return Ok(false);
+    }
+    fs::create_dir_all(launch_dir(data))?;
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, &text)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755))?;
+    }
+    fs::rename(&tmp, &path)?;
+    Ok(true)
+}
+
+/// me3's arguments for the helper (the program first), without flatpak-spawn: the helper already runs on the host.
+pub fn helper_args(me3: &Path, profile: &Path) -> Vec<String> {
+    launch_args(me3, profile).into_iter().skip(2).collect()
+}
+
+/// Mods on (Some: me3's arguments) or off (None) for the game's next Steam launch. A line break in an argument
+/// would split it, so such an argument is refused.
+pub fn arm(data: &Path, app_id: &str, args: Option<&[String]>) -> io::Result<()> {
+    if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id"));
+    }
+    let file = armed_file(data, app_id);
+    match args {
+        None => match fs::remove_file(&file) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        },
+        Some(a) => {
+            if a.iter().any(|x| x.contains('\n') || x.contains('\r') || x.is_empty()) {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "an argument holds a line break"));
+            }
+            fs::create_dir_all(launch_dir(data))?;
+            let tmp = file.with_extension("tmp");
+            fs::write(&tmp, a.join("\n") + "\n")?;
+            fs::rename(&tmp, &file)
+        }
+    }
+}
+
+/// One Play without mods through Steam (the helper removes the file when it runs).
+pub fn arm_plain_once(data: &Path, app_id: &str) -> io::Result<()> {
+    fs::create_dir_all(launch_dir(data))?;
+    fs::write(plain_file(data, app_id), b"once\n")
+}
+
+/// The helper's log lines since `since_len` bytes (what the helper did for the last launch), at most 40 lines.
+pub fn helper_log_since(data: &Path, since_len: u64) -> Vec<String> {
+    let Ok(text) = fs::read(helper_log(data)) else { return Vec::new() };
+    let from = (since_len as usize).min(text.len());
+    let tail = String::from_utf8_lossy(&text[from..]).to_string();
+    let lines: Vec<String> = tail.lines().map(str::to_string).collect();
+    let skip = lines.len().saturating_sub(40);
+    lines.into_iter().skip(skip).collect()
+}
+
+/// Which profile: Play with mods (solo, Turbine's own save) or Play Seamless Co-op (its .co2 saves).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Coop {
+    Solo,
+    Seamless,
+}
+
+/// Is this a Seamless Co-op native?
+pub fn is_seamless_native(n: &str) -> bool {
+    let l = n.to_ascii_lowercase();
+    l.ends_with("/ersc.dll") || l == "ersc.dll"
+}
+
+/// The profile file for each way.
+pub fn profile_file_for(store_root: &Path, coop: Coop) -> PathBuf {
+    match coop {
+        Coop::Solo => profile_file(store_root),
+        Coop::Seamless => profile_dir(store_root).join("turbine-coop.me3"),
+    }
+}
+
+/// Writes the profile for one way: Solo leaves Seamless Co-op out and uses Turbine's own save; Seamless takes it in
+/// and keeps its .co2 saves. Seamless without Seamless Co-op in the package folder is an error.
+pub fn write_profile_for(store_root: &Path, game: &str, coop: Coop) -> io::Result<(PathBuf, Vec<String>)> {
+    let mods = profile_mods(store_root);
+    fs::create_dir_all(&mods)?;
+    let all = natives(&mods);
+    let has = all.iter().any(|n| is_seamless_native(n));
+    let (nat, save): (Vec<String>, Option<&str>) = match coop {
+        Coop::Solo => (all.into_iter().filter(|n| !is_seamless_native(n)).collect(), Some(ME3_SAVEFILE)),
+        Coop::Seamless if has => (all, None),
+        Coop::Seamless => return Err(io::Error::new(io::ErrorKind::NotFound, "Seamless Co-op isn't on in My mods")),
+    };
+    let file = profile_file_for(store_root, coop);
+    let tmp = file.with_extension("tmp");
+    fs::write(&tmp, profile_text(game, &nat, save))?;
+    fs::rename(&tmp, &file)?;
+    Ok((file, nat))
+}
+
 /// Is me3 there and unchanged (each file's SHA-256 as recorded when it was unpacked)?
 pub fn me3_ready(dir: &Path) -> Result<(), String> {
     let manifest = fs::read_to_string(dir.join("turbine-files.json")).map_err(|_| "me3 isn't installed yet".to_string())?;

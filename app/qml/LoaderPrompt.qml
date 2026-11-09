@@ -93,7 +93,7 @@ Item {
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.px(18)
+                font.pixelSize: root.ui.fpx(18)
                 font.bold: true
             }
             Text {
@@ -102,7 +102,7 @@ Item {
                 wrapMode: Text.WordWrap
                 color: root.ui.c.text
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(16)
+                font.pixelSize: root.ui.fpx(16)
             }
             Text {
                 visible: text !== ""
@@ -111,7 +111,7 @@ Item {
                 wrapMode: Text.WordWrap
                 color: root.ui.c.soft
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
             }
             Row {
                 visible: (root.neededBy || []).length > 0
@@ -122,7 +122,7 @@ Item {
                     text: "Needed by:"
                     color: root.ui.c.soft
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(14)
+                    font.pixelSize: root.ui.fpx(14)
                 }
                 Text {
                     width: parent.width - neededLabel.width - parent.spacing
@@ -130,7 +130,7 @@ Item {
                     wrapMode: Text.WordWrap
                     color: root.ui.c.text
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(14)
+                    font.pixelSize: root.ui.fpx(14)
                     font.weight: Font.DemiBold
                 }
             }
@@ -161,7 +161,7 @@ Item {
                             text: "i"
                             color: root.readable(root.ui.c.accentHi, root.ui.c.raised)
                             font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.px(14)
+                            font.pixelSize: root.ui.fpx(14)
                             font.bold: true
                         }
                     }
@@ -171,7 +171,7 @@ Item {
                         wrapMode: Text.WordWrap
                         color: root.ui.c.soft
                         font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.px(14)
+                        font.pixelSize: root.ui.fpx(14)
                     }
                 }
             }
@@ -195,7 +195,7 @@ Item {
                         text: "Official source"
                         color: root.ui.c.muted
                         font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.px(14)
+                        font.pixelSize: root.ui.fpx(14)
                     }
                     Text {
                         width: parent.width
@@ -203,7 +203,7 @@ Item {
                         wrapMode: Text.WrapAnywhere
                         color: root.readable(root.ui.c.accentHi, root.ui.c.card)
                         font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.px(17)
+                        font.pixelSize: root.ui.fpx(17)
                         font.weight: Font.DemiBold
                     }
                 }
@@ -279,7 +279,7 @@ Item {
                     text: btn.k.toUpperCase()
                     color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
                     font.family: btn.ui.bodyFont
-                    font.pixelSize: btn.ui.px(14)
+                    font.pixelSize: btn.ui.fpx(14)
                     font.bold: true
                 }
             }
@@ -288,7 +288,7 @@ Item {
                 text: btn.label
                 color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
                 font.family: btn.ui.bodyFont
-                font.pixelSize: btn.ui.px(16)
+                font.pixelSize: btn.ui.fpx(16)
                 font.weight: Font.DemiBold
             }
         }

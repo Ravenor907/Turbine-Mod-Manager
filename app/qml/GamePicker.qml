@@ -37,14 +37,14 @@ Item {
                 width: parent.width
                 text: "WHICH GAME IS IT FOR?"
                 color: gp.ui.c.text
-                font.family: gp.ui.titleFont; font.pixelSize: gp.ui.px(18); font.bold: true
+                font.family: gp.ui.titleFont; font.pixelSize: gp.ui.fpx(18); font.bold: true
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: gp.fileName + " goes into the game you pick."
                 color: gp.ui.c.soft
-                font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(15)
+                font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.fpx(15)
             }
         }
         ListView {
@@ -76,12 +76,12 @@ Item {
                     width: parent.width - gp.ui.px(140)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: gp.ui.px(1)
-                    Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: gp.ui.c.text; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(16); font.bold: true }
+                    Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: gp.ui.c.text; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.fpx(16); font.bold: true }
                     Text {
                         width: parent.width; elide: Text.ElideRight
                         text: (row.modelData.launcher === "Steam" ? "Steam" : "Heroic" + (row.modelData.storeLabel ? " (" + row.modelData.storeLabel + ")" : ""))
                               + (row.modelData.support === "basic" ? " · Basic support" : row.modelData.support === "custom" ? " · Added by you" : "")
-                        color: gp.ui.c.soft; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(13)
+                        color: gp.ui.c.soft; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.fpx(13)
                     }
                 }
                 Row {
@@ -91,9 +91,9 @@ Item {
                     Rectangle {
                         width: gp.ui.px(24); height: width; radius: width / 2; color: gp.ui.c.raised; border.color: gp.ui.c.accentLo
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "A"; color: gp.ui.c.text; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(13); font.bold: true }
+                        Text { anchors.centerIn: parent; text: "A"; color: gp.ui.c.text; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.fpx(13); font.bold: true }
                     }
-                    Text { text: "Add here"; color: gp.ui.c.accentText; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Add here"; color: gp.ui.c.accentText; font.family: gp.ui.bodyFont; font.pixelSize: gp.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: gp.ui.hover(parent, hovered) }
                 TapHandler { onTapped: gp.activated(row.index) }

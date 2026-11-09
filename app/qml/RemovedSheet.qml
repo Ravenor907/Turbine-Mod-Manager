@@ -38,8 +38,8 @@ Item {
             x: rs.ui.px(22); y: rs.ui.px(20)
             width: parent.width - rs.ui.px(44)
             spacing: rs.ui.px(8)
-            Text { text: "Removed mods"; color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(19); font.weight: Font.DemiBold }
-            Text { width: parent.width; wrapMode: Text.WordWrap; text: "Kept for 7 days, then deleted by themselves."; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(14) }
+            Text { text: "Removed mods"; color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(19); font.weight: Font.DemiBold }
+            Text { width: parent.width; wrapMode: Text.WordWrap; text: "Kept for 7 days, then deleted by themselves."; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14) }
             Repeater {
                 model: [{ empty: true }].concat(rs.mods)
                 Rectangle {
@@ -62,13 +62,13 @@ Item {
                             elide: Text.ElideRight
                             text: row.modelData.empty ? "Empty (delete all " + rs.mods.length + " for good)" : row.modelData.name
                             color: row.modelData.empty ? rs.ui.c.warn : rs.ui.c.text
-                            font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(16); font.weight: Font.DemiBold
+                            font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(16); font.weight: Font.DemiBold
                         }
                         Text {
                             visible: !row.modelData.empty
                             text: row.modelData.empty ? "" : "removed " + rs.rowWords(row.modelData)
                             color: rs.ui.c.muted
-                            font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(13)
+                            font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13)
                         }
                     }
                     Row {
@@ -95,8 +95,8 @@ Item {
             width: rs.ui.px(24); height: width; radius: width / 2
             anchors.verticalCenter: parent.verticalCenter
             color: rs.ui.c.raised; border.color: rs.ui.c.accentLo; border.width: Math.max(1, rs.ui.px(1))
-            Text { anchors.centerIn: parent; text: parent.parent.k.toUpperCase(); color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(13); font.bold: true }
+            Text { anchors.centerIn: parent; text: parent.parent.k.toUpperCase(); color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13); font.bold: true }
         }
-        Text { text: parent.label; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.px(14); anchors.verticalCenter: parent.verticalCenter }
+        Text { text: parent.label; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14); anchors.verticalCenter: parent.verticalCenter }
     }
 }

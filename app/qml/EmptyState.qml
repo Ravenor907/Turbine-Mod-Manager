@@ -41,7 +41,7 @@ Item {
             wrapMode: Text.WordWrap
             color: root.ui.c.text
             font.family: root.ui.titleFont
-            font.pixelSize: root.ui.px(19)
+            font.pixelSize: root.ui.fpx(19)
             font.bold: true
         }
         Text {
@@ -52,7 +52,7 @@ Item {
             wrapMode: Text.WordWrap
             color: root.ui.c.soft
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(15)
+            font.pixelSize: root.ui.fpx(15)
             lineHeight: 1.15
         }
         Item { visible: button.visible; width: 1; height: root.ui.px(2) }
@@ -85,7 +85,7 @@ Item {
                         text: root.buttonKey.toUpperCase()
                         color: root.ui.c.text
                         font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.px(14)
+                        font.pixelSize: root.ui.fpx(14)
                         font.bold: true
                     }
                 }
@@ -94,7 +94,7 @@ Item {
                     text: root.buttonLabel || ""
                     color: root.ui.c.text
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(16)
+                    font.pixelSize: root.ui.fpx(16)
                     font.weight: Font.DemiBold
                 }
             }
@@ -109,7 +109,7 @@ Item {
             wrapMode: Text.WordWrap
             color: root.ui.c.muted
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(14)
+            font.pixelSize: root.ui.fpx(14)
         }
     }
 }

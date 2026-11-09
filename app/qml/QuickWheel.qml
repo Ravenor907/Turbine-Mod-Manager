@@ -108,7 +108,7 @@ Item {
                 text: modelData.label || ""
                 opacity: modelData.ok ? 1 : 0.45
                 color: foc ? qw.ui.c.onAccent : qw.ui.c.text
-                font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(17); font.weight: Font.DemiBold
+                font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(17); font.weight: Font.DemiBold
                 Accessible.role: Accessible.MenuItem
                 Accessible.name: (modelData.label || "") + (modelData.ok ? "" : ", not available here")
             }
@@ -127,12 +127,12 @@ Item {
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     text: parent.parent.s ? parent.parent.s.label : qw.viewGlyph
-                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(16); font.bold: true
+                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(16); font.bold: true
                 }
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
                     text: parent.parent.s ? (parent.parent.s.ok ? (parent.parent.s.desc || "") : "Not available here") : (qw.labs ? "A: Report" : "Point at a wedge")
-                    color: qw.ui.c.soft; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.px(12)
+                    color: qw.ui.c.soft; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(12)
                 }
             }
         }

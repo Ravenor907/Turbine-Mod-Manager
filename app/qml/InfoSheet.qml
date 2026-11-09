@@ -68,7 +68,7 @@ Item {
                 wrapMode: Text.WordWrap
                 text: sh.title
                 color: sh.ui.c.text
-                font.family: sh.ui.titleFont; font.pixelSize: sh.ui.px(18); font.bold: true
+                font.family: sh.ui.titleFont; font.pixelSize: sh.ui.fpx(18); font.bold: true
             }
             Text {
                 visible: sh.text !== ""
@@ -76,7 +76,7 @@ Item {
                 wrapMode: Text.WordWrap
                 text: sh.text
                 color: sh.ui.c.soft
-                font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15)
+                font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.fpx(15)
             }
             Repeater {
                 model: sh.steps
@@ -88,7 +88,7 @@ Item {
                     Rectangle {
                         width: sh.ui.px(28); height: width; radius: width / 2
                         color: sh.ui.c.raised; border.color: sh.ui.c.accent; border.width: Math.max(1, sh.ui.px(1))
-                        Text { anchors.centerIn: parent; text: index + 1; color: sh.ui.c.accentText; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15); font.bold: true }
+                        Text { anchors.centerIn: parent; text: index + 1; color: sh.ui.c.accentText; font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.fpx(15); font.bold: true }
                     }
                     Text {
                         width: parent.width - sh.ui.px(40)
@@ -96,7 +96,7 @@ Item {
                         wrapMode: Text.WordWrap
                         text: modelData
                         color: sh.ui.c.text
-                        font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15)
+                        font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.fpx(15)
                     }
                 }
             }
@@ -112,7 +112,7 @@ Item {
                         wrapMode: Text.WordWrap
                         text: modelData
                         color: sh.ui.c.text
-                        font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(15)
+                        font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.fpx(15)
                     }
                 }
             }
@@ -123,7 +123,7 @@ Item {
                 wrapMode: Text.Wrap
                 text: sh.footnote
                 color: sh.ui.c.muted
-                font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.px(14)
+                font.family: sh.ui.bodyFont; font.pixelSize: sh.ui.fpx(14)
             }
         }
         }

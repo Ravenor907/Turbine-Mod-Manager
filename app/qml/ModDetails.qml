@@ -93,7 +93,7 @@ Item {
         text: md.loading ? "Reading the mod's page..." : (md.info.error || "")
         color: md.ui.c.soft
         font.family: md.ui.bodyFont
-        font.pixelSize: md.ui.px(16)
+        font.pixelSize: md.ui.fpx(16)
     }
 
     Flickable {
@@ -125,14 +125,14 @@ Item {
                     anchors.centerIn: parent
                     text: md.info && md.info.name ? md.info.name.substring(0, 1).toUpperCase() : ""
                     color: md.ui.c.muted
-                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(48); font.bold: true
+                    font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(48); font.bold: true
                 }
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: md.info && md.info.name ? md.info.name : ""
-                color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(22); font.weight: Font.DemiBold
+                color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(22); font.weight: Font.DemiBold
             }
             Text {
                 width: parent.width
@@ -143,11 +143,11 @@ Item {
                     md.info.size ? md.size(md.info.size) : "",
                     (md.info.updatedText || md.info.updated) ? "Updated " + md.niceDate(md.info.updatedText || md.info.updated) : ""
                 ].filter(x => x !== "").join(" · ")
-                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
                 text: !md.info || md.loading ? "" : md.count(md.info.rating) + (md.info.source === "nexus" ? " likes" : " ratings") + " · " + md.count(md.info.downloads) + " downloads"
-                color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
                 width: parent.width
@@ -156,7 +156,7 @@ Item {
                 text: md.info && md.info.summary ? md.info.summary : ""
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(15)
+                font.pixelSize: md.ui.fpx(15)
             }
         }
         Column {
@@ -195,7 +195,7 @@ Item {
                     color: md.ui.c.onAccent
                     opacity: 0.5
                 }
-                Text { anchors.centerIn: parent; text: md.mainLabel; color: mainBtn.foc ? md.ui.c.onAccent : md.ui.c.accentText; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(18); font.bold: true }
+                Text { anchors.centerIn: parent; text: md.mainLabel; color: mainBtn.foc ? md.ui.c.onAccent : md.ui.c.accentText; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(18); font.bold: true }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.installClicked() }
             }
@@ -206,7 +206,7 @@ Item {
                 text: md.mainLine
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(14)
+                font.pixelSize: md.ui.fpx(14)
             }
             Text {
                 visible: md.helpLabels.length > 0
@@ -215,7 +215,7 @@ Item {
                 text: "Didn't see Nexus open?"
                 color: md.ui.c.text
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(14)
+                font.pixelSize: md.ui.fpx(14)
                 font.weight: Font.DemiBold
             }
             Repeater {
@@ -229,7 +229,7 @@ Item {
                     color: foc ? md.ui.c.focusFill : md.ui.c.card
                     border.color: foc ? md.ui.c.accent : md.ui.c.line
                     border.width: foc ? md.ui.px(2) : Math.max(1, md.ui.px(1))
-                    Text { x: md.ui.px(12); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold }
+                    Text { x: md.ui.px(12); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold }
                     HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                     TapHandler { onTapped: md.helpClicked(parent.index) }
                 }
@@ -242,7 +242,7 @@ Item {
                 text: md.info && md.info.mainLine ? md.keepTogether(md.info.mainLine) : ""
                 color: md.ui.c.text
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(14)
+                font.pixelSize: md.ui.fpx(14)
             }
             Text {
                 visible: !!md.info && !!md.info.filesNote
@@ -251,7 +251,7 @@ Item {
                 text: md.info && md.info.filesNote ? md.info.filesNote : ""
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.px(14)
+                font.pixelSize: md.ui.fpx(14)
             }
             Rectangle {
                 id: otherRow
@@ -264,7 +264,7 @@ Item {
                     x: md.ui.px(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: md.ui.px(8)
-                    Text { text: "Other files (" + md.otherCount + ")"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: "Other files (" + md.otherCount + ")"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                 TapHandler { onTapped: md.versionsClicked() }
@@ -275,19 +275,19 @@ Item {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Also installs: " + md.extra.map(x => x.name + " " + x.version).join(", ")
-                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
                 visible: md.needRows.length > 0 || (!!md.info && !!md.info.needsNote)
                 text: "Also needs"
                 color: md.ui.c.accentText
-                font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(16); font.weight: Font.DemiBold
+                font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(16); font.weight: Font.DemiBold
             }
             Text {
                 visible: !!md.info && !!md.info.needsNote
                 width: parent.width; wrapMode: Text.WordWrap
                 text: md.info && md.info.needsNote ? md.info.needsNote : ""
-                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(14)
+                color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Repeater {
                 id: needRep
@@ -307,7 +307,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         elide: Text.ElideRight
                         text: nr.modelData.r.name
-                        color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(15); font.weight: Font.DemiBold
+                        color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold
                     }
                     Rectangle {
                         id: tag
@@ -315,7 +315,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: tt.implicitWidth + md.ui.px(14); height: md.ui.px(26); radius: md.ui.px(5)
                         color: md.ui.c.raised
-                        Text { id: tt; anchors.centerIn: parent; text: nr.modelData.tag; color: nr.modelData.lvl === "ok" ? md.ui.c.ok : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13); font.bold: true }
+                        Text { id: tt; anchors.centerIn: parent; text: nr.modelData.tag; color: nr.modelData.lvl === "ok" ? md.ui.c.ok : md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(13); font.bold: true }
                     }
                     HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
                     TapHandler { onTapped: md.needClicked(nr.index) }
@@ -336,7 +336,7 @@ Item {
         Text {
             anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: md.ui.px(4)
             text: "Left stick: scroll"
-            color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.px(13)
+            color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(13)
         }
     }
 }

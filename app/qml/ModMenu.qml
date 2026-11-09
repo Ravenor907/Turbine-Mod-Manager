@@ -118,7 +118,7 @@ Item {
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.px(17)
+                font.pixelSize: root.ui.fpx(17)
                 font.bold: true
             }
             Text {
@@ -128,7 +128,7 @@ Item {
                 wrapMode: Text.WordWrap
                 color: root.ui.c.muted
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
             }
             Item { width: 1; height: root.ui.px(7) }
             Rectangle { width: parent.width; height: Math.max(1, root.ui.px(1)); color: root.ui.c.line }
@@ -195,7 +195,7 @@ Item {
                             text: root.overlapTitle || ""
                             color: root.readable(root.ui.c.accentHi, root.ui.c.card)
                             font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.px(15)
+                            font.pixelSize: root.ui.fpx(15)
                             font.weight: Font.DemiBold
                         }
                         Text {
@@ -205,7 +205,7 @@ Item {
                             wrapMode: Text.WordWrap
                             color: root.ui.c.soft
                             font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.px(14)
+                            font.pixelSize: root.ui.fpx(14)
                         }
                         Repeater {
                             model: (root.overlapWins || []).map(t => ({ win: true, text: t }))
@@ -228,7 +228,7 @@ Item {
                                         text: overlapLine.modelData.win ? "Wins" : "Loses"
                                         color: root.readable(tone, overlapTag.color)
                                         font.family: root.ui.bodyFont
-                                        font.pixelSize: root.ui.px(14)
+                                        font.pixelSize: root.ui.fpx(14)
                                         font.weight: Font.DemiBold
                                     }
                                 }
@@ -239,7 +239,7 @@ Item {
                                     wrapMode: Text.WordWrap
                                     color: root.ui.c.soft
                                     font.family: root.ui.bodyFont
-                                    font.pixelSize: root.ui.px(14)
+                                    font.pixelSize: root.ui.fpx(14)
                                 }
                             }
                         }
@@ -339,7 +339,7 @@ Item {
                 text: "›"
                 color: entry.ui.c.muted
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(18)
+                font.pixelSize: entry.ui.fpx(18)
             }
         }
 
@@ -357,7 +357,7 @@ Item {
                 elide: Text.ElideRight
                 color: !entry.available ? (entry.focused ? entry.ui.c.soft : entry.ui.c.muted) : entry.danger ? entry.dangerColor : entry.ui.c.text
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(16)
+                font.pixelSize: entry.ui.fpx(16)
                 font.weight: Font.DemiBold
             }
             Text {
@@ -368,7 +368,7 @@ Item {
                 lineHeight: 1.1
                 color: entry.focused ? entry.ui.c.soft : entry.ui.c.muted
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(14)
+                font.pixelSize: entry.ui.fpx(14)
             }
         }
     }
@@ -391,7 +391,7 @@ Item {
             text: parent.k.toUpperCase()
             color: parent.ui.c.text
             font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.px(14)
+            font.pixelSize: parent.ui.fpx(14)
             font.bold: true
         }
     }

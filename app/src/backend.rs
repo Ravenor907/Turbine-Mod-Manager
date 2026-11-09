@@ -251,6 +251,16 @@ pub mod qobject {
         #[qinvokable]
         fn play(self: Pin<&mut Self>, game_id: &QString);
 
+        /// 0.58: Play Seamless Co-op for the current game (through Steam and me3).
+        #[qinvokable]
+        #[cxx_name = "playCoop"]
+        fn play_coop(self: Pin<&mut Self>);
+
+        /// 0.58: a me3 game started outside Steam (Desktop Mode only).
+        #[qinvokable]
+        #[cxx_name = "playOutsideSteam"]
+        fn play_outside_steam(self: Pin<&mut Self>, coop: bool);
+
         /// Reads the zip files in Downloads into `downloadsJson`.
         #[qinvokable]
         #[cxx_name = "listDownloads"]
@@ -274,6 +284,13 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "saveActivityLog"]
         fn save_activity_log(self: &Self) -> QString;
+
+        /// 0.58, Settings > Report a problem: saves Turbine-report-<stamp>.txt into Downloads with the recent log,
+        /// the version, the settings QML sends (one "name: value" per line), the screen and every game with how
+        /// Turbine plays it. Keys, tokens and cookies are hidden. Answers {"file","folder","error"}.
+        #[qinvokable]
+        #[cxx_name = "saveProblemReport"]
+        fn save_problem_report(self: &Self, screen: &QString, settings: &QString) -> QString;
 
         /// The text on the clipboard ("" when there is none). Never logged.
         #[qinvokable]
@@ -767,6 +784,17 @@ pub mod qobject {
         /// Open this link to start the game (steam://... or Heroic's link).
         #[qsignal]
         fn launch(self: Pin<&mut Self>, url: QString);
+
+        /// 0.58: a me3 game's Steam Launch Options don't run Turbine's helper yet, so Play didn't start it:
+        /// {"game","name","option","set","listed","coop"} for the one-time step.
+        #[qsignal]
+        #[cxx_name = "launchSetup"]
+        fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
+
+        /// 0.58: the game wasn't seen running about 20 seconds after Play.
+        #[qsignal]
+        #[cxx_name = "notStarted"]
+        fn not_started(self: Pin<&mut Self>, game: QString);
     }
 
     impl cxx_qt::Threading for Turbine {}
@@ -2148,7 +2176,12 @@ impl qobject::Turbine {
                             Some(why) => w.say(why, "error"),
                             None => {
                                 w.say("Starting the game with no mods. Your mods are kept.", "ok");
+                                let wr: &Worker = w;
+                                if let Some(s) = wr.slots.get(&game.id()) {
+                                    crate::anticheat::arm_plain(wr, s, true);
+                                }
                                 launch(w, &game);
+                                watch_game_as(w, &game, false);
                             }
                         }
                     }
@@ -2302,7 +2335,26 @@ impl qobject::Turbine {
         );
     }
 
-    pub fn play(mut self: Pin<&mut Self>, game_id: &QString) {
+    pub fn play(self: Pin<&mut Self>, game_id: &QString) {
+        self.play_how(game_id, turbine_engine::anticheat::Coop::Solo, false);
+    }
+
+    /// 0.58: Play Seamless Co-op (Elden Ring through me3 with Seamless Co-op's own .co2 saves).
+    pub fn play_coop(self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        crate::log::line("action", &format!("Play Seamless Co-op: {}", game.name));
+        self.play_how(&QString::from(game.id().as_str()), turbine_engine::anticheat::Coop::Seamless, false);
+    }
+
+    /// 0.58: a me3 game started outside Steam (Desktop Mode only; Game Mode won't show it).
+    pub fn play_outside_steam(self: Pin<&mut Self>, coop: bool) {
+        let Some(game) = self.current_game() else { return };
+        crate::log::line("action", &format!("Play outside Steam (Desktop Mode): {}", game.name));
+        let c = if coop { turbine_engine::anticheat::Coop::Seamless } else { turbine_engine::anticheat::Coop::Solo };
+        self.play_how(&QString::from(game.id().as_str()), c, true);
+    }
+
+    fn play_how(mut self: Pin<&mut Self>, game_id: &QString, coop: turbine_engine::anticheat::Coop, direct: bool) {
         let Some(game) = self.find(&game_id.to_string()) else { return };
         let (_, n) = self.as_mut().take_pending();
         self.as_mut().say("Getting the game ready...", "work");
@@ -2393,12 +2445,44 @@ impl qobject::Turbine {
                         if let Some(why) = blocked {
                             w.say(why, "error");
                         } else if me3_play.is_some() {
+                            // 0.58: through Steam (Game Mode shows a game only when Steam started it): Turbine's
+                            // launch helper runs me3 from the game's Launch Options; outside Steam only when asked.
                             let wr: &Worker = w;
-                            let ok = wr.slots.get(&game.id()).is_some_and(|s| crate::anticheat::launch_me3(wr, s));
-                            if ok {
-                                watch_game(w, &game);
+                            let Some(s) = wr.slots.get(&game.id()) else { return };
+                            if direct {
+                                if crate::anticheat::launch_me3(wr, s, coop) {
+                                    watch_game(w, &game);
+                                }
+                            } else {
+                                match crate::anticheat::arm_me3(wr, s, coop) {
+                                    Ok(true) => {
+                                        launch(w, &game);
+                                        watch_game(w, &game);
+                                    }
+                                    Ok(false) => {
+                                        let (set, need, _) = crate::anticheat::launch_option_state(s, &wr.data_home);
+                                        crate::log::line("launch", &format!("{}: not started; the one-time Launch Options step comes first", game.name));
+                                        let json = format!(
+                                            "{{\"game\":{},\"name\":{},\"option\":{},\"set\":{},\"listed\":{},\"coop\":{}}}",
+                                            quote(&game.id()),
+                                            quote(&crate::anticheat::title(s)),
+                                            quote(&need),
+                                            quote(set.as_deref().unwrap_or("")),
+                                            set.is_some(),
+                                            coop == turbine_engine::anticheat::Coop::Seamless
+                                        );
+                                        let id = game.id();
+                                        w.post(move |t| t.launch_setup(QString::from(id.as_str()), QString::from(json.as_str())));
+                                    }
+                                    Err(e) => w.say(format!("Couldn't start {} with mods: {e}", game.name), "error"),
+                                }
                             }
                         } else {
+                            // A me3 game with no mods on: Steam's own command through the helper.
+                            let wr: &Worker = w;
+                            if let Some(s) = wr.slots.get(&game.id()) {
+                                crate::anticheat::arm_plain(wr, s, false);
+                            }
                             launch(w, &game);
                             watch_game(w, &game);
                         }
@@ -2443,6 +2527,10 @@ impl qobject::Turbine {
                             Some(why) => w.say(why, "error"),
                             None => {
                                 w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
+                                let wr: &Worker = w;
+                                if let Some(s) = wr.slots.get(&game.id()) {
+                                    crate::anticheat::arm_plain(wr, s, true);
+                                }
                                 launch(w, &game);
                             }
                         }
@@ -2525,6 +2613,54 @@ impl qobject::Turbine {
 
     pub fn activity_log(&self, lines: i32) -> QString {
         QString::from(crate::log::last_lines(lines.clamp(1, 2000) as usize).join("\n").as_str())
+    }
+
+    pub fn save_problem_report(&self, screen: &QString, settings: &QString) -> QString {
+        use turbine_engine::anticheat as ac;
+        use turbine_engine::report;
+        let games: Vec<String> = self
+            .rust()
+            .found
+            .iter()
+            .map(|g| {
+                let rules = rules::GameRules::for_game(g);
+                let how = match rules.anti_cheat.as_ref().map(ac::mode) {
+                    Some(ac::Mode::Me3) => "me3 with mods (offline), through Steam's Launch Options",
+                    Some(ac::Mode::Official) => "the game's own anti-cheat switch",
+                    Some(ac::Mode::Offline) => "offline with mods",
+                    Some(ac::Mode::Refuse) => "no mods (online-only anti-cheat)",
+                    _ => "mods placed in the game folder",
+                };
+                format!("{} ({}): {}, {}, {}", g.name, g.id(), rules.support, how, if g.build.is_some() { format!("build {}", g.build.as_deref().unwrap_or("")) } else { "build unknown".into() })
+            })
+            .collect();
+        let r = report::ProblemReport {
+            version: format!("{} (build {})", crate::VERSION, crate::labs::COMMIT),
+            when: crate::log::file_stamp(),
+            device: vec![
+                format!("Device: {}", crate::labs::device()),
+                format!("System: {}", crate::labs::system()),
+                format!("Mode: {}", if *self.gamemode() { "Game Mode" } else { "Desktop Mode" }),
+            ],
+            screen: screen.to_string(),
+            settings: settings.to_string().lines().map(str::to_string).collect(),
+            games,
+            log: crate::log::last_lines(300),
+        };
+        let name = report::file_name(&crate::log::file_stamp());
+        let dir = crate::labs::downloads();
+        let res = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(dir.join(&name), report::build(&r)));
+        let (file, error) = match res {
+            Ok(()) => {
+                crate::log::line("action", &format!("Report a problem: saved {} in {}", name, dir.display()));
+                (name, String::new())
+            }
+            Err(e) => {
+                crate::log::line("action", &format!("Report a problem: couldn't save it in {}: {e}", dir.display()));
+                (String::new(), format!("Couldn't save it in Downloads ({e})."))
+            }
+        };
+        QString::from(format!("{{\"file\":{},\"folder\":{},\"error\":{}}}", quote(&file), quote(&dir.display().to_string()), quote(&error)).as_str())
     }
 
     pub fn save_activity_log(&self) -> QString {
@@ -2666,6 +2802,11 @@ fn apply_job(game: Game, n: i32) -> Job {
         match result {
             Ok(r) => {
                 w.note(&game, &r);
+                // 0.58: Steam's own Play button starts a me3 game the way Turbine's mods are now.
+                let wr: &Worker = w;
+                if let Some(s) = wr.slots.get(&game.id()) {
+                    crate::anticheat::sync_helper(wr, s);
+                }
                 w.say(applied_words(&r, &game), "ok")
             }
             Err(e) => {
@@ -2684,22 +2825,46 @@ fn apply_job(game: Game, n: i32) -> Job {
 /// how long it ran. A game that closes within a minute is likely broken by a mod; the interface offers a way back.
 /// When the process can't be seen at all, `known` is false and the interface measures the time Turbine was away.
 fn watch_game(w: &Worker, game: &Game) {
+    watch_game_as(w, game, true)
+}
+
+/// 0.58: how long Play waits for the game to show before the "didn't start" sheet.
+const START_WAIT_SECS: u64 = 20;
+
+/// `modded`: a modded Play (a quick close offers a way back). Every Play also gets the launch check: when the game
+/// isn't seen running about 20 seconds after Play, the interface says so with the likely fixes (`not_started`). The
+/// Steam launch helper's own lines for this launch go into the activity log then too.
+fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
     if crate::online::using_samples() {
         return;
     }
     let qt = w.qt.clone();
     let (id, name, dir) = (game.id(), game.name.clone(), game.install_dir.clone());
+    let data = w.data_home.clone();
+    let helper_from = crate::anticheat::helper_log_len(&data);
     let _ = std::thread::Builder::new().name("turbine-game-watch".into()).spawn(move || {
         let tick = Duration::from_secs(2);
+        let started = std::time::Instant::now();
         let mut seen: Option<std::time::Instant> = None;
         let mut unknown = 0;
+        let mut told = false;
         // Up to 3 minutes for the game to start, then until it closes (at most 10 minutes of watching).
         for i in 0..300 {
             std::thread::sleep(tick);
+            if !told && (seen.is_some() || started.elapsed() >= Duration::from_secs(START_WAIT_SECS)) {
+                told = true;
+                crate::anticheat::helper_log_to_activity(&data, helper_from);
+                if seen.is_none() {
+                    crate::log::line("launch", &format!("{name} wasn't seen running {START_WAIT_SECS} seconds after Play: the launch check opens"));
+                    let gid = id.clone();
+                    let _ = qt.queue(move |t| t.not_started(QString::from(gid.as_str())));
+                }
+            }
             match crate::system::game_running(&dir) {
                 Some(true) => {
                     if seen.is_none() {
                         seen = Some(std::time::Instant::now());
+                        crate::log::line("launch", &format!("{name} is running ({} seconds after Play)", started.elapsed().as_secs()));
                     }
                     if seen.is_some_and(|t| t.elapsed() > Duration::from_secs(90)) {
                         crate::log::line("launch", &format!("{name} is still running after 90 seconds"));
@@ -2710,7 +2875,9 @@ fn watch_game(w: &Worker, game: &Game) {
                     if let Some(t) = seen {
                         let secs = t.elapsed().as_secs() as i32;
                         crate::log::line("launch", &format!("{name} closed after {secs} seconds"));
-                        let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), secs, true));
+                        if modded {
+                            let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), secs, true));
+                        }
                         return;
                     }
                     if i >= 90 {
@@ -2722,7 +2889,9 @@ fn watch_game(w: &Worker, game: &Game) {
                     unknown += 1;
                     if unknown >= 3 {
                         crate::log::line("launch", "Can't see the game's process; the interface measures the time away instead");
-                        let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), -1, false));
+                        if modded {
+                            let _ = qt.queue(move |t| t.game_ended(QString::from(id.as_str()), -1, false));
+                        }
                         return;
                     }
                 }

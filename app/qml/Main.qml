@@ -124,9 +124,9 @@ Window {
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
-                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse"].indexOf(page) >= 0 || scripted
+                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -224,7 +224,16 @@ Window {
             }
             else if (page === "pointerscroll") { app.page = "perf"; app.zone = "perf" }
             else if (page === "perfcheck") app.openPerf()
-            else if (page === "activity") { app.openSection("Labs"); app.openActivity() }
+            // 0.58: the Activity log opened the way the player opens it: Settings, Labs, its row, A (in 0.57 that
+            // press did nothing). Every Settings action row has a handler, too.
+            else if (page === "activity") {
+                app.openSection("Labs"); app.zone = "settings"
+                app.setRow = Math.max(0, app.labsRows.findIndex(r => r.key === "activity"))
+                app.note("shot", "Settings row focused: " + (app.rowsNow[app.setRow] ? app.rowsNow[app.setRow].key : "none"))
+                app.act("a")
+                app.note("check", "Activity log sheet open after A on its Settings row: " + (app.sheet === "activity"))
+                app.settingsRowsCheck()
+            }
             else if (page === "slowhint") { Turbine.setSampleFree(); app.forceMyBrowser = true }
             // 0.54: the beginner tutorial's cards; pages for the new controls.
             else if (page.indexOf("tutorial") === 0) app.openTutorial(parseInt(page.substring(8)) - 1)
@@ -318,6 +327,9 @@ Window {
             else if (shot.page === "overwriteskip") { app.note("shot", "Overwrite sheet open: " + (app.sheet === "msg")); app.act("a"); Turbine.applyNow() }
             else if (shot.page === "nexuspick") app.openNexusPick()
             else if (shot.page === "why") app.openWhy()
+            // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
+            else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh %command%", set: "", listed: true, coop: false })
+            else if (shot.page === "notstarted") { app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; ")) }
             // 0.56: a mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
             else if (shot.page === "tucked" && app.mods.length > 1) {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0
@@ -341,7 +353,11 @@ Window {
         // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
         interval: ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
-        onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
+        onTriggered: {
+            // 0.58: every picture checks the bottom bar (nothing overlaps Play or goes past the edge).
+            legend.check(shot.page)
+            ;(shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
+        }
     }
     Timer { id: removedShot; interval: 900; onTriggered: app.openRemoved() }
     // checkfocus: the highlight moved to Not now, A pressed (the check must close without playing); then the check
@@ -433,20 +449,25 @@ Window {
     readonly property bool desktopLayout: layoutNow === "desktop"
     readonly property int sizeDefault: tv ? 120 : desktopLayout ? 80 : 100
     readonly property real fit: Math.max(0.5, Math.min(width / 883, height / 514))
-    // The largest Interface size that still fits this window (the interface never grows past 760 x 460 design units):
-    // about 116% at 1280 x 800 and 112% at 1920 x 1080. The slider ends there ("Largest that fits").
-    readonly property int sizeCap: Math.max(80, Math.min(150, Math.floor(Math.min(width / 760, height / 460) / fit * 100)))
-    readonly property int sizeNow: Math.min(sizeCap, sizeTrial > 0 ? sizeTrial : look.size > 0 ? look.size : sizeDefault)
-    // The sizes the slider steps through: every 10% up to the cap, then the cap itself.
-    readonly property var sizeSteps: { let l = []; for (let v = 80; v < sizeCap; v += 10) l.push(v); l.push(sizeCap); return l }
+    // 0.58: Interface size 50% to 150% in 10% steps, with no cap: at large sizes the layout reflows (fewer grid
+    // columns, rows and sheets scroll, the bottom bar drops hints, text wraps) instead of stopping at what fits.
+    readonly property int sizeMin: 50
+    readonly property int sizeMax: 150
+    readonly property var sizeSteps: { let l = []; for (let v = sizeMin; v <= sizeMax; v += 10) l.push(v); return l }
+    // --uisize=N: a picture at that Interface size.
+    readonly property int sizeNow: Math.max(sizeMin, Math.min(sizeMax, sizeTrial > 0 ? sizeTrial : parseInt(shot.arg("uisize")) > 0 ? parseInt(shot.arg("uisize")) : look.size > 0 ? look.size : sizeDefault))
     function sizeStep(d) {
         let i = sizeSteps.findIndex(v => v >= sizeNow)
         if (i < 0) i = sizeSteps.length - 1
         else if (sizeSteps[i] !== sizeNow && d < 0) i++   // between two steps: Left goes to the lower one
         return sizeSteps[Math.max(0, Math.min(sizeSteps.length - 1, i + d))]
     }
-    readonly property real s: Math.max(0.4, Math.min(fit * sizeNow / 100, width / 760, height / 460))
+    readonly property real s: Math.max(0.35, fit * sizeNow / 100)
     function px(v) { return Math.round(v * s) }
+    // Text: never under 12 pixels, so 50% stays readable.
+    function fpx(v) { return Math.max(12, Math.round(v * s)) }
+    // Something to press: at least 44 physical pixels where the design size allows it.
+    function tpx(v) { return Math.max(44, Math.round(v * s)) }
     // Design width: 3 grid columns on a handheld, 4 from 1100 (TV and Desktop layouts), 2 below 860.
     readonly property real designWidth: width / s
     readonly property int gridColumns: designWidth < 640 ? 2 : designWidth < 760 ? 3 : 4
@@ -467,11 +488,20 @@ Window {
     property int sizeTrial: 0
     // Size and Layout apply live: no "Keep this size?" sheet (the slider never goes past what fits).
     function sizePreview(v) {
-        v = Math.max(80, Math.min(sizeCap, v))
+        v = Math.max(sizeMin, Math.min(sizeMax, v))
         if (v === sizeNow) return
-        note("action", "Try size " + v + "% (largest that fits " + sizeCap + "%)")
+        note("action", "Interface size " + sizeNow + "% to " + v + "%")
         // Pictures never save settings.
         if (shot.on) sizeTrial = v; else { look.size = v; sizeTrial = 0 }
+    }
+    // Interface size: every size from 50% to 150%, the current one marked. A picks, B cancels.
+    function openSizePicker() {
+        note("action", "Interface size list open at " + sizeNow + "%")
+        openPick("Interface size", "Now " + sizeNow + "%. A picks a size, B keeps this one.", sizeSteps.map(v => ({
+            icon: "info", title: v + "%" + (v === sizeDefault ? " (normal)" : ""), detail: v === sizeNow ? "Current size" : v < sizeNow ? "Smaller" : "Bigger",
+            aLabel: v === sizeNow ? "Keep" : "Pick", run: () => sizePreview(v) })), "")
+        pickBLabel = "Cancel"
+        menuIndex = Math.max(0, sizeSteps.indexOf(sizeNow))
     }
     function layoutPreview(v) {
         note("action", "Layout " + v)
@@ -599,6 +629,8 @@ Window {
         readonly property string titleFont: app.bodyFont
         readonly property string bodyFont: app.bodyFont
         function px(v) { return app.px(v) }
+        function fpx(v) { return app.fpx(v) }
+        function tpx(v) { return app.tpx(v) }
         function hover(item, on) { app.hover(item, on) }
     }
 
@@ -654,6 +686,61 @@ Window {
         openMsg({ title: "Play " + gameTitle + " with mods", text: gameTitle + " has its own switch for this, in Steam's Play menu.", steps: acInfo.guide || [], buttons: [{ key: "b", label: "Close", run: () => {} }] })
     }
     readonly property bool seamlessIn: mods.some(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless")
+    readonly property var seamlessMod: mods.find(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless") || null
+    // 0.58: Play Seamless Co-op (Elden Ring through Steam and me3, its own .co2 saves). Turns it on first if it's off.
+    function startCoop() {
+        if (!game || !seamlessMod) return
+        note("action", "Play Seamless Co-op")
+        if (!seamlessMod.enabled) { Turbine.setEnabled(seamlessMod.id, true); mods = mods.map(x => x.id === seamlessMod.id ? Object.assign({}, x, { enabled: true }) : x) }
+        startPlay(true)
+    }
+    property bool playCoopNext: false
+    // Play after the check: with mods, or Seamless Co-op when that was asked.
+    function playNow() {
+        if (!game) return
+        if (playCoopNext) { playCoopNext = false; Turbine.playCoop() }
+        else Turbine.play(game.id)
+    }
+    // 0.58: a me3 game's Steam Launch Options don't run Turbine's helper yet. In Game Mode Steam shows a game only when
+    // Steam started it, so the modded launch goes through Steam: the one-time step, with the exact text to copy.
+    property var launchSetupData: null
+    function openLaunchSetup(o) {
+        launchSetupData = o
+        note("action", "Launch Options step for " + o.name + ": needs \"" + o.option + "\", set \"" + o.set + "\"")
+        const steps = ["A copies the text below.",
+                       "In Steam: " + o.name + ", the gear, Properties, General, Launch Options.",
+                       o.set !== "" ? "Replace what is there now (" + o.set + ") with it: paste, or type it." : "Paste it there, or type it.",
+                       "Close Properties, come back to Turbine and press Play.",
+                       "Steam's own Play button then starts " + o.name + " with your mods too. With every mod off it starts normally."]
+        openMsg({ title: "One step before " + o.name + " plays with mods",
+                  text: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs this in the game's Launch Options, once:\n\n" + o.option,
+                  steps: steps,
+                  buttons: [
+            { key: "a", label: "Copy it", run: () => { Turbine.copyText(o.option); note("action", "Launch option copied: " + o.option); toast.done("Copied. Paste it in Steam: " + o.name + ", Properties, Launch Options.") } },
+            { key: "x", label: "Play without mods", run: () => { note("action", "Launch Options step: played without mods"); Turbine.playOriginal() } },
+            { key: "y", label: Turbine.gamemode ? "Activity log" : "Start outside Steam", run: () => {
+                if (Turbine.gamemode) openActivity()
+                else { note("action", "Launch Options step: started outside Steam (Desktop Mode)"); Turbine.playOutsideSteam(o.coop === true) } } },
+            { key: "b", label: "Not now", run: () => note("action", "Launch Options step: not now") }] })
+    }
+    // 0.58, the launch check: the game didn't show about 20 seconds after Play.
+    function openNotStarted(gameId) {
+        const g = games.find(x => x.id === gameId)
+        const name = g ? shortGame(g.name) : gameTitle
+        note("action", "Launch check: " + name + " didn't start")
+        if (sheet !== "" && sheet !== "pick") return
+        const me3 = acMode === "me3" && game && game.id === gameId
+        let rows = []
+        if (me3) {
+            const h = healthNow(), lf = launchFinding(h)
+            rows.push(lf ? lf : { icon: "power", title: "Steam launch option: set", detail: "Steam has what " + name + " needs", info: true, run: () => {} })
+        }
+        rows.push({ icon: "play", title: "Play without mods", detail: "If it starts this way, a mod is the cause", run: () => Turbine.playOriginal() })
+        rows.push({ icon: "info", title: "Activity log", detail: "What Turbine and Steam did for this launch", run: () => openActivity() })
+        rows.push({ icon: "info", title: "Why won't it start?", detail: "Checks the usual reasons", run: () => openWhy() })
+        openPick(name + " didn't start", "It wasn't running about 20 seconds after Play. The likely fixes:", rows, "")
+        pickNoStart = true
+    }
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
     readonly property var listItems: {
         let l = shownMods.map(m => ({ kind: "mod", m: m }))
@@ -866,7 +953,9 @@ Window {
         openPick("Play options", gameTitle, [
             { icon: "play", title: "Play with mods", detail: plural(mods.filter(m => m.enabled).length, "mod", "mods") + " on", run: () => startPlay() },
             { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", run: () => Turbine.playOriginal() }
-        ].concat(canSkipLoader ? [
+        ].concat(seamlessIn ? [
+            { icon: "play", title: "Play Seamless Co-op", detail: "With your mods and Seamless Co-op; its own .co2 saves", run: () => startCoop() }
+        ] : []).concat(canSkipLoader ? [
             { icon: "play", title: rules.kind === "bethesda" ? "Play without the script extender" : "Play without " + loaderShort,
               detail: "Leaves out " + loaderShort + " and the mods that need it, this time only", run: () => { autoApply.stop(); Turbine.playWithoutLoader() } }
         ] : []).concat(others.map(p => ({ icon: "play", title: "Play with loadout " + p.name, detail: "Switches to it, then plays", run: () => { Turbine.profileSwitch(p.name); startPlay() } }))), "")
@@ -962,6 +1051,8 @@ Window {
         }
         function onChecked(json) { app.checked(app.parse(json, [])) }
         function onLaunch(url) { app.playAt = Date.now(); app.playGame = app.game ? app.game.id : ""; if (!shot.on) Qt.openUrlExternally(url) }
+        function onLaunchSetup(gameId, json) { const o = app.parse(json, null); if (o) app.openLaunchSetup(o) }
+        function onNotStarted(gameId) { app.openNotStarted(gameId) }
         function onGameEnded(gameId, seconds, known) {
             if (known) { if (seconds < 60) app.quickExit(gameId, seconds) }
             else app.measureAway = gameId
@@ -1454,10 +1545,11 @@ Window {
     }
 
     // ---------------------------------------------------------------- Play
-    function startPlay() {
+    function startPlay(coop) {
         if (!game) return
+        playCoopNext = coop === true
         // 0.57: an anti-cheat game me3 starts: asked once before the first Play with mods.
-        if (acAskNeeded()) { openAcAsk(startPlay); return }
+        if (acAskNeeded()) { openAcAsk(() => startPlay(coop === true)); return }
         if (acRefused && mods.some(m => m.enabled)) { toast.problem(acInfo.refuseWords); return }
         note("action", "Play " + game.name)
         if (!shot.on) { let p = parse(seen.played, []).filter(x => x !== game.id); p.unshift(game.id); seen.played = JSON.stringify(p.slice(0, 50)) }
@@ -1494,7 +1586,7 @@ Window {
         const known = !list.some(x => x.level === "stop") && parse(seen.playedWarn, []).indexOf(warnKey) >= 0
         if (trouble && known && shot.page.indexOf("check") !== 0) {
             note("engine", "Check before Play: the same warnings were played through with these mods: playing, then a note")
-            Turbine.play(game.id)
+            playNow()
             toast.info("Played with the same warnings as last time: " + list.filter(x => x.level === "warn").map(x => x.title).join("; "))
             return
         }
@@ -1503,7 +1595,7 @@ Window {
             checkIndex = checkOffer ? 0 : checkStops ? checkChoices.indexOf("Not now") : Math.max(0, checkChoices.indexOf("Play anyway"))
             sheet = "check"
         }
-        else Turbine.play(game.id)
+        else playNow()
     }
     function playKey(list) {
         return (game ? game.id : "") + "|" + mods.filter(m => m.enabled).map(m => m.id).sort().join(",") + "|" + list.filter(x => x.level === "warn").map(x => x.title).sort().join(",")
@@ -1536,10 +1628,11 @@ Window {
         }
         if (what === "Play anyway") {
             if (!shot.on) { let k = parse(seen.playedWarn, []).filter(x => x.indexOf(game.id + "|") !== 0); k.push(playKey(checks)); seen.playedWarn = JSON.stringify(k.slice(-50)) }
-            Turbine.play(game.id)
+            playNow()
         }
-        else if (what === "Play without mods") Turbine.playOriginal()
+        else if (what === "Play without mods") { playCoopNext = false; Turbine.playOriginal() }
         else if (checkOffer && what === checkOffer.label) runOffer(checkOffer)
+        else playCoopNext = false
     }
     function runOffer(o) {
         if (o.mod) {
@@ -2531,6 +2624,11 @@ Window {
     }
     // The first visit to a Basic game with no mods: what Basic support means (once per game).
     property var introSeen: null          // the games seen before this run (read once, so the card stays this run)
+    // 0.58: this game has somewhere to get mods (Nexus or Thunderstore).
+    readonly property bool canGetMods: !!rules && (!!rules.domain || sources.length > 0)
+    // An empty My mods: the centered card (any game, after a Basic game's first-visit card).
+    readonly property bool emptyMods: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && !acRefused && !basicIntro && !modPage
+    onEmptyModsChanged: if (emptyMods) note("page", "No mods card: No mods for " + gameTitle + " yet")
     readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame && !acRefused
                                        && (introSeen || []).indexOf(game.id) < 0
     onBasicIntroChanged: {
@@ -3097,7 +3195,7 @@ Window {
             o.rt = bind("", () => { perfIndex = Math.min(1999, perfIndex + pageJump) })
             return o
         }
-        if (!game) { o.a = railExtra > 0 ? bind("Show hidden games", showHiddenGames) : bind("Look again", load); return o }
+        if (!game) { o.a = railExtra > 0 ? bind("Show games", showHiddenGames) : bind("Look again", load); return o }
         if (modPage) {
             o.a = bind(pageALabel, () => modPageAct("a"))
             o.b = bind("Back", getBack)
@@ -3123,9 +3221,10 @@ Window {
                 o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
-            if (mods.length === 0 && modsLoaded && basicGame) {
-                o.a = rules && rules.domain ? bind("Get mods on Nexus", () => { tab = 1 }) : bind("Add from Downloads", openAdd)
-                if (rules && rules.domain) o.x = bind("Add from Downloads", openAdd)
+            // 0.58: no mods yet (any game): A Get mods, X Add a file (the centered card says the same).
+            if (mods.length === 0 && modsLoaded && !(focusedItem && (focusedItem.kind === "removed" || focusedItem.kind === "ghost"))) {
+                if (canGetMods) { o.a = bind("Get mods", () => { note("action", "No mods yet: Get mods"); tab = 1 }); o.x = bind("Add a file", openAdd) }
+                else o.a = bind("Add a file", openAdd)
                 o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
@@ -3151,8 +3250,8 @@ Window {
             return o
         }
         if (tab === 1 && sources.length === 0) {
-            if (nexusUnknown) { o.a = bind("Pick the Nexus game", openNexusPick); o.x = bind("Add from Downloads", openAdd) }
-            else o.a = bind("Add from Downloads", openAdd)
+            if (nexusUnknown) { o.a = bind("Pick game", openNexusPick); o.x = bind("Add a file", openAdd) }
+            else o.a = bind("Add a file", openAdd)
             o.b = bind("My mods", () => { tab = 0 })
             return o
         }
@@ -3635,6 +3734,33 @@ Window {
                 sheetDry = false; found = null; askView.close(); sheet = ""
                 check("Sheet rule: " + cases.length + " sheets, " + problems + " problems")
             }
+        ]
+        // 0.58: Interface size goes smaller by every input: D-pad Left, the - button clicked with the pointer, and A's
+        // list (B cancels it). Its buttons are at least 44 pixels.
+        else if (name === "sizeinputs") script = [
+            () => { openSection("Look"); zone = "settings"; setRow = Math.max(0, lookRows.findIndex(r => r.key === "size")); sizeTrial = 100 },
+            () => { m.row = lookList.itemAtIndex(setRow); if (!m.row || !m.row.minus) return false
+                    check("Size buttons: - " + Math.round(m.row.minus.width) + " x " + Math.round(m.row.minus.height) + ", + " + Math.round(m.row.plus.width) + " x " + Math.round(m.row.plus.height) + " pixels" + (m.row.minus.width >= 44 && m.row.plus.height >= 44 ? "" : "  PROBLEM: under 44"))
+                    m.was = sizeNow; pad("left"); check("Size by D-pad Left: " + m.was + "% to " + sizeNow + "%" + (sizeNow < m.was ? ", smaller" : "  PROBLEM: not smaller")) },
+            () => { m.row = lookList.itemAtIndex(setRow); if (!m.row) return false
+                    const p = m.row.minus.mapToItem(null, m.row.minus.width / 2, m.row.minus.height / 2)
+                    m.was = sizeNow; Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 400) return false
+                    check("Size by the - button (pointer click): " + m.was + "% to " + sizeNow + "%" + (sizeNow < m.was ? ", smaller" : "  PROBLEM: not smaller")); Turbine.pointerHide() },
+            () => { m.row = lookList.itemAtIndex(setRow); if (!m.row) return false
+                    const p = m.row.plus.mapToItem(null, m.row.plus.width / 2, m.row.plus.height / 2)
+                    m.was = sizeNow; Turbine.selftestPointer(p.x, p.y, true, 0); m.t = Date.now() },
+            () => { if (Date.now() - m.t < 400) return false
+                    check("Size by the + button (pointer click): " + m.was + "% to " + sizeNow + "%" + (sizeNow > m.was ? ", bigger" : "  PROBLEM: not bigger")); Turbine.pointerHide()
+                    m.was = sizeNow; pad("a") },
+            () => { check("Size A: " + (sheet === "pick" && pickTitle === "Interface size" ? "the list of sizes, on " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "?") + ", " + pickItems.length + " sizes" : "PROBLEM: no list (sheet \"" + sheet + "\")"))
+                    pad("up"); pad("b") },
+            () => { check("Size list B: " + m.was + "% to " + sizeNow + "%" + (sizeNow === m.was && sheet === "" ? ", unchanged" : "  PROBLEM: changed or still open")); pad("a") },
+            () => { pad("up"); pad("up"); pad("a") },
+            () => { check("Size by A's list: " + m.was + "% to " + sizeNow + "%" + (sizeNow < m.was ? ", smaller" : "  PROBLEM: not smaller"))
+                    m.was = sizeNow; pad("right"); check("Size by D-pad Right: " + m.was + "% to " + sizeNow + "%" + (sizeNow > m.was ? ", bigger" : "  PROBLEM: not bigger"))
+                    sizeTrial = 50; check("Size range: " + sizeSteps[0] + "% to " + sizeSteps[sizeSteps.length - 1] + "% in " + sizeSteps.length + " steps") },
+            () => { check("At 50%: text at least " + fpx(10) + " pixels, buttons " + tpx(36) + " pixels") }
         ]
         else if (name === "inputcheck") script = [
             () => { if (mods.length < 2) return false
@@ -5524,6 +5650,7 @@ Window {
     // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
     readonly property var helpRows: [
         { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
+        { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A does the highlighted thing. B goes back (hold it to go home). X: options for what's highlighted. Y: Find, with search, sort and show. LB and RB: tabs. LT and RT: a page up or down. View: the quick wheel. Start: Play (hold it for Play options). Right stick: the pointer; RT or R3 clicks, LT opens options." },
         { kind: "info", key: "touch", title: "Touch",
@@ -5635,30 +5762,63 @@ Window {
         else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
         note("action", "Setting " + r.key + " changed")
     }
+    // 0.58: every Settings action row's key has its handler here (the build checks that each row in every section has
+    // one, so a row can't silently do nothing again: Labs > Activity log did in 0.57).
+    readonly property var rowActions: ({
+        report: () => openReport(null, "", ""),
+        perf: () => openPerf(),
+        activity: () => openActivity(),
+        problem: () => saveProblemReport(),
+        steamBrowser: (r) => labsRun(r), keyless: (r) => labsRun(r), gmBrowser: (r) => labsRun(r),
+        nexusKey: () => openAsk("nexusKey", "Nexus Mods API key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it"),
+        pasteKey: () => pasteKey(),
+        keyFold: () => { keyRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "pasteKey") },
+        ownFold: () => { ownRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "helper") },
+        keyPage: () => { if (openNexus(keyPageUrl)) toast.showPlain("Opened API Keys. Copy the Personal API Key at the bottom, come back and press Paste.") },
+        signOut: () => Turbine.nexusSignOut(),
+        webSignOut: () => Turbine.browserSignOut(),
+        signinMine: () => signinStart(),
+        tutorial: () => openTutorial(0),
+        unhide: () => { if (!shot.on) railSet.hidden = "[]"; orderGames(); toast.done("Every game is back on the rail.") },
+        addChrome: () => showAddBrowser("noshortcut"),
+        nxmHandler: () => Turbine.handlerSet(),
+        browser: () => { if (browserFound) Turbine.browserCheck(); else noBrowser() },
+        helper: () => setupHelper(),
+        pair: () => pair(bridge.paired),
+        checkNow: () => Turbine.selfCheck(labsOn && updates.prerelease, false),
+        install: () => Turbine.selfInstall(),
+        restart: () => { Turbine.finish(); Turbine.restart(); Qt.quit() },
+        stable: () => { backToStable = true; Turbine.selfCheck(false, true); openSection("Updates") }
+    })
     function rowRun(r) {
         note("action", "Settings: " + r.title)
-        if (r.key === "report") openReport(null, "", "")
-        else if (r.key === "perf") openPerf()
-        else if (r.key === "steamBrowser" || r.key === "keyless" || r.key === "gmBrowser") labsRun(r)
-        else if (r.key === "nexusKey") openAsk("nexusKey", "Nexus Mods API key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it")
-        else if (r.key === "pasteKey") pasteKey()
-        else if (r.key === "keyFold") { keyRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "pasteKey") }
-        else if (r.key === "ownFold") { ownRowsOpen = true; setRow = accountRows.findIndex(x => x.key === "helper") }
-        else if (r.key === "keyPage") { if (openNexus(keyPageUrl)) toast.showPlain("Opened API Keys. Copy the Personal API Key at the bottom, come back and press Paste.") }
-        else if (r.key === "signOut") Turbine.nexusSignOut()
-        else if (r.key === "webSignOut") Turbine.browserSignOut()
-        else if (r.key === "signinMine") signinStart()
-        else if (r.key === "tutorial") openTutorial(0)
-        else if (r.key === "unhide") { if (!shot.on) railSet.hidden = "[]"; orderGames(); toast.done("Every game is back on the rail.") }
-        else if (r.key === "addChrome") showAddBrowser("noshortcut")
-        else if (r.key === "nxmHandler") Turbine.handlerSet()
-        else if (r.key === "browser") { if (browserFound) Turbine.browserCheck(); else noBrowser() }
-        else if (r.key === "helper") setupHelper()
-        else if (r.key === "pair") pair(bridge.paired)
-        else if (r.key === "checkNow") Turbine.selfCheck(labsOn && updates.prerelease, false)
-        else if (r.key === "install") Turbine.selfInstall()
-        else if (r.key === "restart") { Turbine.finish(); Turbine.restart(); Qt.quit() }
-        else if (r.key === "stable") { backToStable = true; Turbine.selfCheck(false, true); openSection("Updates") }
+        const f = rowActions[r.key]
+        if (f) f(r)
+        else { note("action", "Settings row with no action: " + r.key); toast.problem("This row has nothing to do yet.") }
+    }
+    // 0.58, Settings > Report a problem: one text file in Downloads; where it went is shown.
+    function saveProblemReport() {
+        const lines = [
+            "Interface size: " + sizeNow + "%", "Layout: " + layoutNow, "Theme: " + look.theme, "Accent: " + look.accent,
+            "Contrast: " + (look.highContrast ? "High" : "Standard"), "Color vision: " + look.vision, "Compact list: " + look.compactList,
+            "Reduce motion: " + look.reduceMotion, "Confirm by: " + look.confirmBy, "Seasonal: " + seasonPick,
+            "Open Nexus in: " + browserSet.openIn, "Status over other apps: " + browserSet.overlay,
+            "Check for updates at start: " + updates.auto, "Pre-release: " + (labsOn && updates.prerelease), "Labs: " + labsOn,
+            "Nexus account: " + (account.state || "unknown") + (account.hasKey ? ", a key is set" : ", no key") + (account.premium === true ? ", Premium" : ""),
+            "Last input: " + lastInput, "Controller connected: " + Turbine.pads ]
+        const screen = width + " x " + height + " (design " + Math.round(designWidth) + " wide, scale " + s.toFixed(2) + ")"
+        const r = parse(Turbine.saveProblemReport(screen, lines.join("\n")), { error: "Couldn't save it." })
+        note("action", "Report a problem: " + (r.error ? r.error : r.file))
+        if (r.error) { toast.problem(r.error); return }
+        openMsg({ title: "Report saved", text: "Saved as " + r.file + " in " + r.folder + ". Send that file with a few words about what happened. It has no keys, tokens or cookies.",
+                  buttons: [{ key: "a", label: "OK", run: () => {} }] })
+    }
+    // The build's check: every action row in every Settings section (Labs on) has a handler.
+    function settingsRowsCheck() {
+        const all = accountRows.concat(updateRows, labsRows, helpRows)
+        const acts = all.filter(r => r.kind === "action")
+        const missing = acts.filter(r => !rowActions[r.key]).map(r => r.key)
+        note("check", "Settings rows check: " + acts.length + " action rows, " + missing.length + " without an action" + (missing.length ? " (" + missing.join(", ") + ")" : ""))
     }
     // Ten presses on the icon in Settings > About, a few seconds apart at most, turn Labs mode on or off.
     property int labsTaps: 0
@@ -6034,11 +6194,11 @@ Window {
     // ---------------------------------------------------------------- Look settings rows
     readonly property var layoutOptions: externalShown ? ["handheld", "desktop", "tv"] : ["handheld", "desktop"]
     readonly property var lookRows: [
-        { label: "Interface size", key: "size", slider: true, min: 80, max: sizeCap, unit: "%", now: sizeNow,
-          words: sizeNow === sizeCap && sizeCap < 150 ? "Largest that fits" : "",
+        { label: "Interface size", key: "size", slider: true, min: sizeMin, max: sizeMax, unit: "%", now: sizeNow,
           step: (d) => sizePreview(sizeStep(d)),
-          // A: one size bigger, and from the largest back down to the normal size (so A alone can always change it).
-          a: () => sizePreview(sizeNow >= sizeCap ? Math.min(sizeCap, sizeDefault) : sizeStep(1)) },
+          // 0.58: A (and a tap or click on the row) opens the list of sizes; Left and Right, and the - and + buttons,
+          // step down and up.
+          a: () => openSizePicker() },
         { label: "Layout", options: layoutOptions, names: layoutOptions.map(o => o === "tv" ? "TV" : o.charAt(0).toUpperCase() + o.substring(1)), key: "layout", now: layoutNow,
           step: (d) => layoutPreview(layoutOptions[(layoutOptions.indexOf(layoutNow) + d + layoutOptions.length) % layoutOptions.length]) },
         { label: "Theme", options: ["brass", "black", "light"], names: ["Brass", "Black", "Light"], key: "theme",
@@ -6091,7 +6251,7 @@ Window {
     component Label: Text {
         color: c.text
         font.family: app.bodyFont
-        font.pixelSize: app.px(15)
+        font.pixelSize: app.fpx(15)
         elide: Text.ElideRight
         verticalAlignment: Text.AlignVCenter
     }
@@ -6110,7 +6270,7 @@ Window {
             text: app.glyph(parent.k)
             color: c.text
             font.family: app.bodyFont
-            font.pixelSize: app.px(14)
+            font.pixelSize: app.fpx(14)
             font.bold: true
         }
     }
@@ -6147,14 +6307,14 @@ Window {
         spacing: app.px(6)
         TapHandler { enabled: hint.clickable; onTapped: { app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
-        Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Repeater {
             model: hint.k.split("+")
             Key { required property string modelData; k: modelData; visible: modelData !== ""; anchors.verticalCenter: parent.verticalCenter }
         }
-        Label { visible: hint.label !== ""; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.label !== ""; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Key { visible: hint.k2 !== ""; k: hint.k2; anchors.verticalCenter: parent.verticalCenter }
-        Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.px(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
     }
     component Icon: Shape {
         property string d: ""
@@ -6247,7 +6407,7 @@ Window {
                         text: "T"
                         color: c.onAccent
                         font.family: app.titleFont
-                        font.pixelSize: app.px(24)
+                        font.pixelSize: app.fpx(24)
                         font.bold: true
                     }
                 }
@@ -6352,7 +6512,7 @@ Window {
                             text: tileItem.g ? tileItem.g.name : ""
                             color: c.soft
                             font.family: app.bodyFont
-                            font.pixelSize: app.px(10)
+                            font.pixelSize: app.fpx(10)
                             font.bold: true
                         }
                         Text {
@@ -6365,7 +6525,7 @@ Window {
                             text: tileItem.g ? (tileItem.g.launcher === "Steam" ? "Steam" : (tileItem.g.storeLabel || tileItem.g.launcher || "")) : ""
                             color: c.muted
                             font.family: app.bodyFont
-                            font.pixelSize: app.px(8)
+                            font.pixelSize: app.fpx(8)
                             fontSizeMode: Text.HorizontalFit
                             minimumPixelSize: Math.max(5, app.px(5))
                         }
@@ -6406,7 +6566,7 @@ Window {
                     text: "Show hidden games"
                     color: c.text
                     font.family: app.bodyFont
-                    font.pixelSize: app.px(11)
+                    font.pixelSize: app.fpx(11)
                     font.bold: true
                 }
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -6510,7 +6670,7 @@ Window {
                                   : app.game ? app.gameTitle : "Turbine Mod Manager"
                             color: c.text
                             font.family: app.page === "game" && app.game && !app.modPage ? app.titleFont : app.bodyFont
-                            font.pixelSize: app.px(20)
+                            font.pixelSize: app.fpx(20)
                             font.weight: Font.DemiBold
                             // Basic support: a small outlined chip after the name (never focusable).
                             rightPadding: supportChipBox.visible ? supportChipBox.width + app.px(10) : 0
@@ -6524,7 +6684,7 @@ Window {
                                 border.color: c.accentLo
                                 Accessible.role: Accessible.StaticText
                                 Accessible.name: app.supportChip
-                                Text { id: chipWords; anchors.centerIn: parent; text: app.supportChip; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(12); font.bold: true }
+                                Text { id: chipWords; anchors.centerIn: parent; text: app.supportChip; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(12); font.bold: true }
                             }
                         }
                         Row {
@@ -6543,7 +6703,7 @@ Window {
                                 text: app.statusNow.words + (app.statusNow.detail ? " · " + app.statusNow.detail : "")
                                 color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
                                 font.family: app.bodyFont
-                                font.pixelSize: app.px(14)
+                                font.pixelSize: app.fpx(14)
                             }
                             // While anything downloads: "Getting 2 mods · 64%"; otherwise updates ready.
                             Rectangle {
@@ -6556,7 +6716,7 @@ Window {
                                 width: pillText.implicitWidth + app.px(16); height: app.px(22); radius: height / 2
                                 color: c.raised
                                 border.color: c.accentLo
-                                Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(13); font.bold: true }
+                                Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(13); font.bold: true }
                                 // Updates ready: the list of them (a free account picks each one's page there).
                                 TapHandler { onTapped: if (!app.dl.active && !app.browserOpen && app.webDlsRunning > 0) app.openNexusDownloads(); else if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
                             }
@@ -6571,7 +6731,7 @@ Window {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(6)
                         Key { k: "lb"; anchors.verticalCenter: parent.verticalCenter }
-                        Label { text: "Mod " + (Math.max(0, app.getItems.findIndex(x => app.detailsItem && String(x.id) === String(app.detailsItem.id))) + 1) + " of " + app.getItems.length; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                        Label { text: "Mod " + (Math.max(0, app.getItems.findIndex(x => app.detailsItem && String(x.id) === String(app.detailsItem.id))) + 1) + " of " + app.getItems.length; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
                         Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
                     }
                     Rectangle {
@@ -6595,7 +6755,7 @@ Window {
                             spacing: app.px(8)
                             Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
                             // Play waits for changes being saved: it says so.
-                            Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                         TapHandler { onTapped: app.startPlay() }
@@ -6642,7 +6802,7 @@ Window {
                               : app.selecting ? app.plural(app.tickedCount, "mod", "mods") + " ticked. A ticks, X acts on them, B done."
                               : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + " · B Show all"
                         color: c.soft
-                        font.pixelSize: app.px(14)
+                        font.pixelSize: app.fpx(14)
                     }
                     // 0.56: the highlighted mod, on the right of My mods when there is room: its picture, name,
                     // version and maker, what it does, what it wins or loses, and what X offers.
@@ -6680,24 +6840,24 @@ Window {
                                     visible: !panelPic.visible
                                     anchors.centerIn: parent
                                     text: modPanel.m ? (modPanel.m.name || "?").substring(0, 1).toUpperCase() : ""
-                                    color: c.muted; font.family: app.bodyFont; font.pixelSize: app.px(40); font.bold: true
+                                    color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(40); font.bold: true
                                 }
                             }
                             Text {
                                 width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                                 text: modPanel.m ? modPanel.m.name : ""
-                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(19); font.bold: true
+                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(19); font.bold: true
                             }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: app.panelLine(modPanel.m)
-                                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(14)
+                                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
                             }
                             Text {
                                 visible: text !== ""
                                 width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
                                 text: modPanel.m ? (modPanel.m.summary || "") : ""
-                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(14)
+                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
                             }
                             Repeater {
                                 model: app.modPanelFacts
@@ -6706,7 +6866,7 @@ Window {
                                     width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                                     text: modelData.text
                                     color: modelData.level === "warn" ? c.warn : c.accentText
-                                    font.family: app.bodyFont; font.pixelSize: app.px(14); font.weight: Font.DemiBold
+                                    font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.weight: Font.DemiBold
                                 }
                             }
                         }
@@ -6715,7 +6875,7 @@ Window {
                             anchors.margins: app.px(14)
                             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                             text: modPanel.m ? app.glyph("x") + " Options: " + app.optionsLine() : ""
-                            color: c.muted; font.family: app.bodyFont; font.pixelSize: app.px(13)
+                            color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(13)
                         }
                     }
                     ListView {
@@ -6803,7 +6963,7 @@ Window {
                                     text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
                                           : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
                                     color: entry.kind === "ghost" ? c.soft : c.muted
-                                    font.pixelSize: app.px(15)
+                                    font.pixelSize: app.fpx(15)
                                     font.italic: entry.kind === "ghost"
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -6834,6 +6994,63 @@ Window {
                         body: app.acInfo ? app.acInfo.refuseWords : ""
                         buttonKey: ""
                         buttonLabel: ""
+                    }
+                    // 0.58: an empty My mods (any game): a centered card with a big Get mods (A) and Add a file (X).
+                    Rectangle {
+                        id: emptyCard
+                        visible: app.emptyMods
+                        anchors.centerIn: parent
+                        width: Math.min(parent.width - app.px(32), app.px(520))
+                        height: emptyCol.implicitHeight + app.px(48)
+                        radius: app.px(12)
+                        color: c.card
+                        border.color: c.line
+                        Column {
+                            id: emptyCol
+                            anchors.centerIn: parent
+                            width: parent.width - app.px(48)
+                            spacing: app.px(14)
+                            Text {
+                                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                                text: "No mods for " + app.gameTitle + " yet"
+                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(22); font.bold: true
+                            }
+                            Text {
+                                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
+                                text: app.canGetMods ? "Get mods finds them for you, or add a mod file you downloaded." : "Add a mod file you downloaded: zip, 7z or rar."
+                                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(15)
+                            }
+                            Flow {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                width: Math.min(parent.width, emptyGet.width + emptyAdd.width + spacing + 1)
+                                spacing: app.px(14)
+                                Rectangle {
+                                    id: emptyGet
+                                    visible: app.canGetMods
+                                    width: emptyGetRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
+                                    color: app.zone === "main" ? c.focusFill : c.raised
+                                    border.color: c.accent; border.width: app.px(app.zone === "main" ? 2 : 1)
+                                    Row { id: emptyGetRow; anchors.centerIn: parent; spacing: app.px(10)
+                                        Key { k: "a"; anchors.verticalCenter: parent.verticalCenter }
+                                        Text { text: "Get mods"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
+                                    Accessible.role: Accessible.Button; Accessible.name: "Get mods"
+                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                    TapHandler { onTapped: { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } }
+                                }
+                                Rectangle {
+                                    id: emptyAdd
+                                    width: emptyAddRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
+                                    color: !app.canGetMods && app.zone === "main" ? c.focusFill : c.raised
+                                    border.color: c.line; border.width: Math.max(1, app.px(1))
+                                    Row { id: emptyAddRow; anchors.centerIn: parent; spacing: app.px(10)
+                                        Key { k: app.canGetMods ? "x" : "a"; anchors.verticalCenter: parent.verticalCenter }
+                                        Text { text: "Add a file"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
+                                    Accessible.role: Accessible.Button; Accessible.name: "Add a file"
+                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                    TapHandler { onTapped: { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } }
+                                }
+                            }
+                        }
                     }
                     // A Basic game's first visit with no mods: what Basic support means.
                     EmptyState {
@@ -6968,7 +7185,7 @@ Window {
                                     width: parent.width; height: app.px(40); radius: app.px(6)
                                     color: app.setSection === index ? c.raised : "transparent"
                                     Rectangle { visible: app.setSection === parent.index; width: app.px(3); height: parent.height; color: c.accent; radius: app.px(2) }
-                                    Label { x: app.px(14); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; font.pixelSize: app.px(16); font.bold: app.setSection === parent.index; color: app.setSection === parent.index ? c.text : c.muted }
+                                    Label { x: app.px(14); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; font.pixelSize: app.fpx(16); font.bold: app.setSection === parent.index; color: app.setSection === parent.index ? c.text : c.muted }
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                     TapHandler { onTapped: { app.setSection = parent.index; app.setRow = 0 } }
                                 }
@@ -6993,12 +7210,17 @@ Window {
                                 required property var modelData
                                 readonly property bool foc: app.zone === "settings" && app.setRow === index
                                 readonly property var now: srow.modelData.now !== undefined ? srow.modelData.now : look[srow.modelData.key]
-                                width: lookList.width; height: app.px(srow.modelData.slider ? 62 : 50); radius: app.px(6)
+                                // For the build's size check.
+                                readonly property Item minus: minusBtn
+                                readonly property Item plus: plusBtn
+                                width: lookList.width
+                                height: srow.modelData.slider ? Math.max(app.px(62), app.tpx(36) + app.fpx(13) + app.px(16)) : app.px(50)
+                                radius: app.px(6)
                                 color: foc ? c.focusFill : c.card
                                 border.color: c.accent
                                 border.width: foc ? app.px(2) : 0
                                 opacity: srow.modelData.dim ? 0.6 : 1
-                                Label { x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.px(16); font.bold: true }
+                                Label { x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.fpx(16); font.bold: true }
                                 Item {
                                     x: app.px(160); width: parent.width - app.px(174); height: parent.height
                                     // Choices
@@ -7017,7 +7239,7 @@ Window {
                                                 height: app.px(32); radius: app.px(5)
                                                 color: on ? c.raised : c.ground
                                                 Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
-                                                Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.px(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
+                                                Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                                 TapHandler {
                                                     onTapped: {
@@ -7050,7 +7272,7 @@ Window {
                                                 TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } }
                                             }
                                         }
-                                        Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
+                                        Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
                                     }
                                     // Sliders: Interface size, Seasonal amount and size. Minus and plus at the ends, and a line
                                     // under it saying Left and Right change it (A steps up, then wraps back down).
@@ -7061,11 +7283,23 @@ Window {
                                         anchors.verticalCenterOffset: -app.px(8)
                                         width: parent.width
                                         spacing: app.px(8)
-                                        Label { text: "\u2212"; color: c.soft; font.pixelSize: app.px(20); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                        // 0.58: real buttons, at least 44 pixels, for a tap, a click or the pointer.
+                                        Rectangle {
+                                            id: minusBtn
+                                            objectName: "sizeMinus"
+                                            width: app.tpx(36); height: width; radius: app.px(6)
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: c.raised; border.color: c.line; border.width: Math.max(1, app.px(1))
+                                            Label { anchors.centerIn: parent; text: "\u2212"; color: c.text; font.pixelSize: app.fpx(22); font.bold: true }
+                                            Accessible.role: Accessible.Button
+                                            Accessible.name: srow.modelData.label + ": smaller"
+                                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                            TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": - tapped"); srow.modelData.step(-1) } }
+                                        }
                                         Rectangle {
                                             id: track
                                             readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
-                                            width: parent.width - app.px(srow.modelData.words ? 240 : 110); height: app.px(6); radius: height / 2
+                                            width: Math.max(app.px(40), parent.width - app.tpx(36) * 2 - app.px(90)); height: app.px(6); radius: height / 2
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: c.line
                                             Rectangle { width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent }
@@ -7075,8 +7309,19 @@ Window {
                                                 width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                                             }
                                         }
-                                        Label { text: "+"; color: c.soft; font.pixelSize: app.px(20); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                                        Label { text: srow.now + (srow.modelData.unit || "") + (srow.modelData.words ? " · " + srow.modelData.words : ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                        Rectangle {
+                                            id: plusBtn
+                                            objectName: "sizePlus"
+                                            width: app.tpx(36); height: width; radius: app.px(6)
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: c.raised; border.color: c.line; border.width: Math.max(1, app.px(1))
+                                            Label { anchors.centerIn: parent; text: "+"; color: c.text; font.pixelSize: app.fpx(22); font.bold: true }
+                                            Accessible.role: Accessible.Button
+                                            Accessible.name: srow.modelData.label + ": bigger"
+                                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                            TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": + tapped"); srow.modelData.step(1) } }
+                                        }
+                                        Label { text: srow.now + (srow.modelData.unit || ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                     }
                                     Label {
                                         visible: srow.modelData.slider === true
@@ -7084,7 +7329,7 @@ Window {
                                         anchors.topMargin: app.px(2)
                                         text: "Left smaller · Right bigger"
                                         color: c.muted
-                                        font.pixelSize: app.px(13)
+                                        font.pixelSize: app.fpx(13)
                                     }
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -7119,11 +7364,11 @@ Window {
                                 Column {
                                     anchors.verticalCenter: parent.verticalCenter
                                     spacing: app.px(4)
-                                    Label { text: "Turbine Mod Manager " + Turbine.version; font.pixelSize: app.px(19); font.weight: Font.DemiBold }
-                                    Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.px(15); font.bold: true }
+                                    Label { text: "Turbine Mod Manager " + Turbine.version; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
+                                    Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.fpx(15); font.bold: true }
                                 }
                             }
-                            Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.px(14); text: "Using Steam's controller settings (no controller seen directly)." }
+                            Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
                             Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
                             Rectangle {
                                 readonly property bool foc: app.zone === "settings" && app.setRow === 1
@@ -7174,7 +7419,7 @@ Window {
                                     bottomPadding: app.px(6)
                                     text: (lrow.modelData.head || "") + (lrow.modelData.head && lrow.isItem ? " · " + app.labsDone : "")
                                     color: c.muted
-                                    font.pixelSize: app.px(14)
+                                    font.pixelSize: app.fpx(14)
                                     font.bold: true
                                     font.letterSpacing: app.px(1)
                                 }
@@ -7193,8 +7438,8 @@ Window {
                                         anchors.verticalCenter: parent.verticalCenter
                                         width: parent.width - app.px(28) - (lrow.hasChips ? chips.width + app.px(10) : actionHint.width + app.px(10))
                                         spacing: app.px(2)
-                                        Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.px(16); font.bold: true }
-                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.px(14); wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
+                                        Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.fpx(16); font.bold: true }
+                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.fpx(14); wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
                                     }
                                     Hint {
                                         id: actionHint
@@ -7226,7 +7471,7 @@ Window {
                                                     id: chipText
                                                     anchors.centerIn: parent
                                                     text: parent.modelData[1]
-                                                    font.pixelSize: app.px(14)
+                                                    font.pixelSize: app.fpx(14)
                                                     font.bold: parent.on
                                                     color: !parent.on ? c.muted : !lrow.isItem ? c.text : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
                                                 }
@@ -7279,12 +7524,12 @@ Window {
                                     width: app.px(38); height: app.px(22); radius: app.px(5)
                                     anchors.verticalCenter: parent.verticalCenter
                                     color: prow.off ? c.ground : c.raised
-                                    Label { anchors.centerIn: parent; text: prow.off ? "OFF" : "ON"; font.pixelSize: app.px(14); font.bold: true; color: prow.off ? c.muted : c.accentText }
+                                    Label { anchors.centerIn: parent; text: prow.off ? "OFF" : "ON"; font.pixelSize: app.fpx(14); font.bold: true; color: prow.off ? c.muted : c.accentText }
                                 }
                                 Column {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    Label { text: "Test mod " + (prow.index + 1); font.pixelSize: app.px(16); font.bold: true; color: prow.off ? c.muted : c.text }
-                                    Label { text: "Row " + (prow.index + 1) + " of 2,000"; font.pixelSize: app.px(14); color: c.muted }
+                                    Label { text: "Test mod " + (prow.index + 1); font.pixelSize: app.fpx(16); font.bold: true; color: prow.off ? c.muted : c.text }
+                                    Label { text: "Row " + (prow.index + 1) + " of 2,000"; font.pixelSize: app.fpx(14); color: c.muted }
                                 }
                             }
                         }
@@ -7353,7 +7598,7 @@ Window {
                 x: app.px(18); y: app.px(16)
                 width: parent.width - app.px(36)
                 spacing: app.px(8)
-                Label { text: app.game ? app.game.name : ""; font.pixelSize: app.px(19); font.weight: Font.DemiBold; width: parent.width }
+                Label { text: app.game ? app.game.name : ""; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold; width: parent.width }
                 Repeater {
                     model: app.game ? [
                         ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
@@ -7381,8 +7626,8 @@ Window {
                         required property var modelData
                         width: detailCol.width
                         spacing: app.px(12)
-                        Label { width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.px(14) }
-                        Label { width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.px(15) }
+                        Label { width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
+                        Label { width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
                     }
                 }
                 Hint { k: "b"; label: "Close" }
@@ -7403,7 +7648,7 @@ Window {
                 x: app.px(20); y: app.px(18)
                 width: parent.width - app.px(40)
                 spacing: app.px(10)
-                Label { text: "Made for SteamOS"; font.pixelSize: app.px(19); font.weight: Font.DemiBold }
+                Label { text: "Made for SteamOS"; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
                 Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
                 Hint { k: "a"; label: "OK" }
             }
@@ -7719,8 +7964,8 @@ Window {
         Column {
             anchors.centerIn: parent
             spacing: app.px(2)
-            Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(15); font.weight: Font.DemiBold }
-            Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(13) }
+            Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.weight: Font.DemiBold }
+            Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
         }
     }
     // The status card over other apps (see showOverlay).
@@ -7835,14 +8080,16 @@ Window {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.leftMargin: rail.width
-        height: app.px(48)
+        // 0.58: a taller bar with room between its groups.
+        height: Math.max(app.px(60), barGameCol.implicitHeight + app.px(12))
         color: c.panel
         // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
         z: app.wheelOpen ? 80 : 40
         // The Nexus page has its legend in its own bar.
         visible: app.sheet !== "tutorial" && (app.barGame || (app.lastInput !== "touch" && (app.page !== "browser" || app.wheelOpen || app.sheet !== "")))
         Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
-        readonly property real gap: app.px(12)
+        readonly property real gap: app.px(18)
+        readonly property real edge: app.px(16)
         // Touch: a sideways swipe on the bar is LB or RB.
         DragHandler {
             enabled: app.barGame && app.sheet === "" && !app.wheelOpen
@@ -7851,33 +8098,38 @@ Window {
             acceptedDevices: PointerDevice.TouchScreen
             onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the bottom bar"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
         }
+        // ---- Left: the game (its whole name, wrapping to two lines before it is ever cut) and the tabs.
         Row {
             id: barRow
-            x: app.px(14)
+            x: legend.edge
             height: parent.height
             spacing: legend.gap
-            // The game: its name, and the tab and status under it.
             Column {
                 id: barGameCol
                 visible: app.barGame
                 // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
                 TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
                 TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
-                readonly property real want: Math.min(app.px(240), Math.ceil(Math.max(barNameMetrics.advanceWidth, barSubMetrics.advanceWidth)) + app.px(2))
+                // The name gets up to 34% of the bar; past that it wraps onto a second line.
+                readonly property real most: Math.max(app.px(150), legend.width * 0.34)
+                readonly property real want: Math.min(most, Math.ceil(Math.max(barNameMetrics.advanceWidth, Math.min(barSubMetrics.advanceWidth, most))) + app.px(2))
                 width: visible ? want : 0
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
                     id: barName
-                    width: barGameCol.want; elide: Text.ElideRight
+                    width: barGameCol.want
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
                     text: app.game ? app.shortGame(app.game.name) : ""
-                    color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(15); font.bold: true
+                    color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true
                 }
                 Text {
                     id: barSub
                     width: barGameCol.want; elide: Text.ElideRight
                     text: app.barStatus
                     color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
-                    font.family: app.bodyFont; font.pixelSize: app.px(12)
+                    font.family: app.bodyFont; font.pixelSize: app.fpx(12)
                     font.underline: app.barTappable && (app.statusNow.level === "warn" || app.statusNow.level === "stop")
                 }
                 Accessible.role: app.barTappable ? Accessible.Button : Accessible.StaticText
@@ -7885,7 +8137,7 @@ Window {
                 HoverHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
                 TapHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onTapped: app.statusTap() }
             }
-            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
             // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
             Row {
                 id: barTabs
@@ -7895,11 +8147,11 @@ Window {
                 // Dimmed where they do nothing (one tab, or a sheet open).
                 Key { k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
                 Key { k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-                // No room for every name: only the tab LB or RB goes to.
+                // No room for every name: only the tab LB or RB goes to (and nothing when even that doesn't fit).
                 Text {
-                    visible: !legend.tabWordsFit && app.barTarget >= 0
+                    visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0
                     text: app.barTarget >= 0 ? (app.barTarget < app.tab ? "back to " : "") + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : ""
-                    color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(14)
+                    color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
                     anchors.verticalCenter: parent.verticalCenter
                     TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { app.note("touch", "Tab tapped: " + app.tabs[app.barTarget]); app.modPage = false; app.tab = app.barTarget } }
                 }
@@ -7910,11 +8162,11 @@ Window {
                         required property string modelData
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(6)
-                        Text { visible: parent.index > 0; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
+                        Text { visible: parent.index > 0; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
                         Text {
                             text: parent.modelData.replace(/ \(\d+\)$/, "")
                             color: app.tab === parent.index ? c.text : c.muted
-                            font.family: app.bodyFont; font.pixelSize: app.px(14); font.bold: app.tab === parent.index
+                            font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: app.tab === parent.index
                             anchors.verticalCenter: parent.verticalCenter
                             Accessible.role: Accessible.PageTab
                             Accessible.name: text + (app.tab === parent.index ? ", selected" : "") + ", " + (parent.index + 1) + " of " + app.tabs.length
@@ -7924,14 +8176,91 @@ Window {
                     }
                 }
             }
-            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+        }
+        // ---- Right: Play (and Seamless Co-op where it is on), always whole; the wheel's button just before them.
+        Row {
+            id: playGroup
+            anchors.right: parent.right
+            anchors.rightMargin: legend.edge
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: app.px(10)
+            // 0.58: Play Seamless Co-op, next to Play, where Seamless Co-op is installed.
+            Rectangle {
+                id: coopBtn
+                visible: app.barGame && app.seamlessIn && app.sheet === "" && !app.wheelOpen
+                width: coopText.implicitWidth + app.px(24); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
+                color: c.raised; border.color: c.accent; border.width: Math.max(1, app.px(1.5))
+                opacity: Turbine.busy ? 0.55 : 1
+                Text { id: coopText; anchors.centerIn: parent; text: "Co-op"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Play Seamless Co-op"
+                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { onTapped: app.startCoop() }
+            }
+            Rectangle {
+                id: playBtn
+                // A sheet whose own Start button is in the legend ("START Play with mods, offline"): Play steps aside.
+                visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
+                width: playRow.implicitWidth + app.px(28); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
+                // Dimmed while a sheet or the wheel is open (Start means the sheet's own button then).
+                opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
+                // The focus ring when Play has the focus (a mod just arrived).
+                border.color: c.text
+                border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
+                gradient: Gradient {
+                    GradientStop { position: 0; color: c.accentHi }
+                    GradientStop { position: 1; color: c.accent }
+                }
+                Row {
+                    id: playRow
+                    anchors.centerIn: parent
+                    spacing: app.px(8)
+                    Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
+                    // Play waits for changes being saved: it says so.
+                    Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Play"
+                HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: app.startPlay() }
+            }
+        }
+        // The quick wheel's button: View's cap (a tap opens it too).
+        Rectangle {
+            id: wheelBtn
+            anchors.right: playGroup.left
+            anchors.rightMargin: playGroup.width > 0 ? legend.gap : 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: wheelRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
+            color: app.wheelOpen ? c.focusFill : c.raised
+            visible: app.sheet === "" || app.wheelOpen
+            Row {
+                id: wheelRow
+                anchors.centerIn: parent
+                spacing: app.px(6)
+                Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
+                Label { visible: legend.wheelWord || app.wheelOpen; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+            }
+            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+            TapHandler { onTapped: app.wheelPress() }
+        }
+        // ---- Middle: the hints, at most 4 (3 beside the wheel's button), in priority order (A, B, X, Y, then the
+        // rest); the ones that don't fit are left out, never squeezed under Play or past the edge.
+        Item {
+            id: hintsBox
+            readonly property real right: wheelBtn.visible ? wheelBtn.x - legend.gap : playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
+            x: barRow.x + barRow.width + (app.barGame ? 0 : 0)
+            width: Math.max(0, right - x)
+            height: parent.height
+            clip: true
             Row {
                 id: legendRow
                 visible: app.lastInput !== "touch" || !app.barGame
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: app.px(app.barGame ? 12 : 16)
+                spacing: app.px(16)
                 Repeater {
-                    model: app.legendHints
+                    model: app.legendHints.slice(0, legend.hintsFit)
                     Hint {
                         required property var modelData
                         k: modelData[0]
@@ -7942,66 +8271,79 @@ Window {
                     }
                 }
             }
-            // The quick wheel's button: View's cap (a tap opens it too).
-            Rectangle {
-                id: wheelBtn
-                anchors.verticalCenter: parent.verticalCenter
-                width: wheelRow.implicitWidth + app.px(16); height: app.px(30); radius: app.px(6)
-                color: app.wheelOpen ? c.focusFill : c.raised
-                visible: app.sheet === "" || app.wheelOpen
-                Row {
-                    id: wheelRow
-                    anchors.centerIn: parent
-                    spacing: app.px(6)
-                    Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                    Label { visible: legend.wheelWord || app.wheelOpen; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        }
+        // Every hint measured where nobody sees it, so the bar knows how many fit before showing them.
+        Row {
+            id: hintMeasure
+            x: -100000; y: 0
+            opacity: 0
+            enabled: false
+            spacing: legendRow.spacing
+            Repeater {
+                id: measureRep
+                model: app.legendHints
+                onItemAdded: legend.measureTick++
+                onItemRemoved: legend.measureTick++
+                Hint {
+                    required property var modelData
+                    k: modelData[0]
+                    label: modelData[1]
+                    pre: modelData[2] || ""
+                    k2: modelData[3] || ""
+                    label2: modelData[4] || ""
                 }
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: app.wheelPress() }
             }
         }
-        // The tab names show when everything fits; otherwise LB and RB alone (the status line names the tab).
-        TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
-        // Room first goes to the tab names, then to the word Wheel (its cap always shows).
-        TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); text: "Wheel" }
-        readonly property real barFree: width - app.px(28) - barGameCol.width - (legendRow.visible ? legendRow.implicitWidth : 0) - app.px(70)
-                                        - (playBtn.visible ? playBtn.width + app.px(14) : 0) - app.px(60) - legend.gap * 6
+        readonly property int hintsMost: wheelBtn.visible ? 3 : 4
+        property int measureTick: 0
+        function hintsWidth(n) {
+            let w = measureTick * 0
+            for (let i = 0; i < Math.min(n, measureRep.count); i++) { const it = measureRep.itemAt(i); if (it) w += it.implicitWidth + (i > 0 ? legendRow.spacing : 0) }
+            return w
+        }
+        readonly property int hintsFit: {
+            const most = Math.min(app.legendHints.length, hintsMost, measureRep.count)
+            let n = 0
+            for (let i = 1; i <= most; i++) if (hintsWidth(i) <= hintsBox.width) n = i
+            return n
+        }
+        // The tab names show when they fit beside two hints; otherwise LB and RB with the tab they go to; otherwise
+        // LB and RB alone (the status line names the tab).
+        TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
+        TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: "Wheel" }
+        TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
+        readonly property real capsW: app.px(70)
+        // Room for the tab words: the bar less the game, the caps, Play, the wheel's cap and two hints.
+        readonly property real barFree: width - edge * 2 - barGameCol.width - capsW - playGroup.width - app.px(50) - gap * 5 - hintsWidth(Math.min(2, app.legendHints.length))
         readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
         readonly property real wheelWordNeed: wheelMetrics.advanceWidth + app.px(6)
-        readonly property bool tabWordsFit: barFree >= tabWordsNeed
-        TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
         readonly property real tabShortNeed: tabShortMetrics.advanceWidth + app.px(6)
+        readonly property bool tabWordsFit: barFree >= tabWordsNeed
+        readonly property bool tabShortFits: barFree >= tabShortNeed
         // The tab LB or RB goes to comes before the word Wheel.
-        readonly property bool wheelWord: !app.barGame || barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
-        Rectangle {
-            id: playBtn
-            // A sheet whose own Start button is in the legend ("START Play with mods, offline"): Play steps aside.
-            visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
-            anchors.right: parent.right
-            anchors.rightMargin: app.px(14)
-            anchors.verticalCenter: parent.verticalCenter
-            width: playRow.implicitWidth + app.px(24); height: app.px(36); radius: app.px(6)
-            // Dimmed while a sheet or the wheel is open (Start means the sheet's own button then).
-            opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
-            // The focus ring when Play has the focus (a mod just arrived).
-            border.color: c.text
-            border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
-            gradient: Gradient {
-                GradientStop { position: 0; color: c.accentHi }
-                GradientStop { position: 1; color: c.accent }
+        readonly property bool wheelWord: !app.barGame ? barFreeNoGame >= wheelWordNeed : barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
+        readonly property real barFreeNoGame: width - edge * 2 - app.px(50) - gap * 2 - hintsWidth(Math.min(hintsMost, app.legendHints.length))
+        // 0.58, the build's check: nothing in the bar overlaps anything else, Play, or the edge, and the game's name is
+        // whole. Logged as "Bar check (<size>): <n> items, <p> problems".
+        function check(tag) {
+            if (!visible || !shown) return
+            let items = []
+            const add = (name, it) => { if (it && it.visible && it.width > 0) { const p = it.mapToItem(legend, 0, 0); items.push({ name: name, x: p.x, y: p.y, w: it.width, h: it.height }) } }
+            add("game", barGameCol); add("tabs", barTabs)
+            for (let i = 0; i < legendRow.children.length; i++) { const h = legendRow.children[i]; if (h.k !== undefined && h.visible) add("hint " + h.k.toUpperCase(), h) }
+            add("wheel", wheelBtn); add("co-op", coopBtn); add("Play", playBtn)
+            let bad = []
+            for (const a of items) {
+                if (a.x < -0.5 || a.x + a.w > legend.width + 0.5) bad.push(a.name + " past the edge (" + Math.round(a.x) + " to " + Math.round(a.x + a.w) + " of " + Math.round(legend.width) + ")")
+                if (a.y < -0.5 || a.y + a.h > legend.height + 0.5) bad.push(a.name + " taller than the bar")
             }
-            Row {
-                id: playRow
-                anchors.centerIn: parent
-                spacing: app.px(8)
-                Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
-                // Play waits for changes being saved: it says so.
-                Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+                const a = items[i], b = items[j]
+                if (a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5) bad.push(a.name + " overlaps " + b.name)
             }
-            Accessible.role: Accessible.Button
-            Accessible.name: "Play"
-            HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: app.startPlay() }
+            if (barGameCol.visible && barName.truncated) bad.push("the game's name is cut")
+            app.note("check", "Bar check (" + tag + ", " + app.width + "x" + app.height + ", size " + app.sizeNow + "%): " + items.length + " items, " + bad.length + " problems"
+                     + (bad.length ? ": " + bad.join("; ") : "") + " | " + items.map(a => a.name).join(", ") + " | hints " + hintsFit + " of " + app.legendHints.length)
         }
     }
     QuickWheel {

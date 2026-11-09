@@ -134,7 +134,7 @@ Rectangle {
                 text: root.order > 0 ? String(root.order) : ""
                 color: root.ui.c.soft
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
                 font.bold: true
             }
         }
@@ -154,7 +154,7 @@ Rectangle {
                 text: root.isOn ? "ON" : "OFF"
                 color: root.isOn ? root.readable(root.ui.c.accentHi, pill.color) : root.ui.c.muted
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
                 font.bold: true
                 font.letterSpacing: root.ui.px(0.4)
             }
@@ -181,7 +181,7 @@ Rectangle {
                 text: root.badge || ""
                 color: root.readable(root.levelColor(root.badgeLevel), parent.color)
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
                 font.weight: Font.DemiBold
             }
         }
@@ -199,7 +199,7 @@ Rectangle {
                     text: root.aLabel || ""
                     color: root.ui.c.soft
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(14)
+                    font.pixelSize: root.ui.fpx(14)
                 }
             }
             Row {
@@ -211,7 +211,7 @@ Rectangle {
                     text: root.xLabel || ""
                     color: root.ui.c.soft
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(14)
+                    font.pixelSize: root.ui.fpx(14)
                 }
             }
         }
@@ -231,7 +231,7 @@ Rectangle {
             // Off rows are dimmer but stay readable (muted keeps at least 4.5:1 on every theme).
             color: root.isOn ? root.ui.c.text : root.focused ? root.ui.c.soft : root.ui.c.muted
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(16)
+            font.pixelSize: root.ui.fpx(16)
             font.weight: root.isOn ? Font.DemiBold : Font.Medium
         }
         Text {
@@ -243,7 +243,7 @@ Rectangle {
                    : root.focused ? root.ui.c.soft : root.ui.c.muted
             font.weight: root.detailLevel !== "" ? Font.DemiBold : Font.Normal
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(14)
+            font.pixelSize: root.ui.fpx(14)
         }
     }
 
@@ -263,7 +263,7 @@ Rectangle {
             text: parent.k.toUpperCase()
             color: parent.ui.c.text
             font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.px(14)
+            font.pixelSize: parent.ui.fpx(14)
             font.bold: true
         }
     }

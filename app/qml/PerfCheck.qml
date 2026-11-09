@@ -186,7 +186,7 @@ Item {
                 text: "Performance check"
                 color: perf.ui.c.text
                 font.family: perf.ui.titleFont
-                font.pixelSize: perf.ui.px(18)
+                font.pixelSize: perf.ui.fpx(18)
                 font.bold: true
             }
             Text {
@@ -194,7 +194,7 @@ Item {
                 wrapMode: Text.WordWrap
                 color: perf.ui.c.soft
                 font.family: perf.ui.bodyFont
-                font.pixelSize: perf.ui.px(15)
+                font.pixelSize: perf.ui.fpx(15)
                 text: perf.running ? (perf.phase === "still" ? "Measuring: standing still..." : perf.phase === "scroll" ? "Measuring: scrolling a long list..." : "Measuring: nothing to draw...")
                       : perf.verdict !== "" ? "Verdict: " + perf.verdict
                       : "Run check measures for about 13 seconds. Leave the controller alone meanwhile."
@@ -221,7 +221,7 @@ Item {
                             text: btn.index === 0 && perf.running ? "Stop" : btn.modelData
                             color: perf.ui.c.text
                             font.family: perf.ui.bodyFont
-                            font.pixelSize: perf.ui.px(15)
+                            font.pixelSize: perf.ui.fpx(15)
                             font.bold: true
                         }
                         HoverHandler { onHoveredChanged: perf.ui.hover(parent, hovered) }
@@ -253,7 +253,7 @@ Item {
                         required property int index
                         width: scroller.width; height: perf.ui.px(30)
                         color: index % 2 ? perf.ui.c.card : perf.ui.c.raised
-                        Text { x: perf.ui.px(10); anchors.verticalCenter: parent.verticalCenter; text: "Row " + (parent.index + 1); color: perf.ui.c.soft; font.family: perf.ui.bodyFont; font.pixelSize: perf.ui.px(14) }
+                        Text { x: perf.ui.px(10); anchors.verticalCenter: parent.verticalCenter; text: "Row " + (parent.index + 1); color: perf.ui.c.soft; font.family: perf.ui.bodyFont; font.pixelSize: perf.ui.fpx(14) }
                     }
                     NumberAnimation on contentY {
                         running: perf.phase === "scroll"
@@ -270,7 +270,7 @@ Item {
                     text: perf.reportText
                     color: perf.ui.c.text
                     font.family: "monospace"
-                    font.pixelSize: perf.ui.px(13)
+                    font.pixelSize: perf.ui.fpx(13)
                 }
             }
 

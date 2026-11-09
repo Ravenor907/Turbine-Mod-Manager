@@ -58,7 +58,7 @@ Flow {
                 text: btn.modelData
                 color: btn.foc ? sb.ui.c.onAccent : sb.ui.c.text
                 font.family: sb.ui.bodyFont
-                font.pixelSize: sb.ui.px(16)
+                font.pixelSize: sb.ui.fpx(16)
                 font.weight: Font.DemiBold
             }
             HoverHandler { onHoveredChanged: sb.ui.hover(btn, hovered) }

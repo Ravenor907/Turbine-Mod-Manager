@@ -122,7 +122,7 @@ Item {
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.px(18)
+                font.pixelSize: root.ui.fpx(18)
                 font.bold: true
             }
             Text {
@@ -131,7 +131,7 @@ Item {
                 text: root.subtitle || ""
                 color: root.ui.c.soft
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
             }
         }
 
@@ -275,7 +275,7 @@ Item {
                 text: "›"
                 color: entry.ui.c.muted
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(18)
+                font.pixelSize: entry.ui.fpx(18)
             }
         }
 
@@ -293,7 +293,7 @@ Item {
                 elide: Text.ElideRight
                 color: !entry.available ? (entry.focused ? entry.ui.c.soft : entry.ui.c.muted) : entry.danger ? entry.dangerColor : entry.ui.c.text
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(16)
+                font.pixelSize: entry.ui.fpx(16)
                 font.weight: Font.DemiBold
             }
             Text {
@@ -304,7 +304,7 @@ Item {
                 lineHeight: 1.1
                 color: entry.focused ? entry.ui.c.soft : entry.ui.c.muted
                 font.family: entry.ui.bodyFont
-                font.pixelSize: entry.ui.px(14)
+                font.pixelSize: entry.ui.fpx(14)
             }
         }
     }
@@ -327,7 +327,7 @@ Item {
             text: parent.k.toUpperCase()
             color: parent.ui.c.text
             font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.px(14)
+            font.pixelSize: parent.ui.fpx(14)
             font.bold: true
         }
     }

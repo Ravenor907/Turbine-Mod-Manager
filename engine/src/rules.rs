@@ -304,6 +304,24 @@ pub fn find_def(store: Store, store_id: &str) -> Option<&'static GameDef> {
     games().iter().find(|d| has(d)).or_else(|| player_games().into_iter().find(|d| has(d)))
 }
 
+/// A name with only its letters and digits, lowercase ("Dead by Daylight" and "DEAD BY DAYLIGHT(R)" alike).
+pub fn name_key(name: &str) -> String {
+    name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
+
+/// 0.58: an online-only anti-cheat game owned somewhere else (Epic or GOG through Heroic) that the data files know
+/// by its Steam id only: matched by its name, so it is refused the same way.
+pub fn refused_by_name(game_name: &str) -> Option<&'static GameDef> {
+    let key = name_key(game_name);
+    if key.len() < 3 {
+        return None;
+    }
+    games().iter().find(|d| {
+        d.data.anti_cheat.as_ref().is_some_and(|a| a.mode == "refuse" || a.level == "refuse")
+            && (name_key(d.name) == key || d.short_name.is_some_and(|s| name_key(s) == key))
+    })
+}
+
 pub fn find_loader(key: &str) -> Option<&'static LoaderDef> {
     loaders().iter().find(|l| l.key == key)
 }
@@ -311,7 +329,8 @@ pub fn find_loader(key: &str) -> Option<&'static LoaderDef> {
 impl GameRules {
     /// Rules for a detected game (known games by store ID; everything else Generic).
     pub fn for_game(game: &Game) -> GameRules {
-        match find_def(game.store, &game.store_id) {
+        let def = find_def(game.store, &game.store_id).or_else(|| if game.store == Store::Steam { None } else { refused_by_name(&game.name) });
+        match def {
             Some(def) => {
                 let mut r = GameRules::from_def(def);
                 r.runtime = game.runtime;

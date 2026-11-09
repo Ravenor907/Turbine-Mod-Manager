@@ -380,3 +380,50 @@ fn a_first_deploy_cut_short_is_cleaned_for_a_me3_game() {
     assert_eq!(files_under(&w.game.install_dir), before);
     let _ = fs::remove_dir_all(&w.root);
 }
+
+/// 0.58: an online-only game owned on Epic or GOG (through Heroic) is refused like its Steam copy: by its store id
+/// where the data file has it, else by its name.
+#[test]
+fn heroic_copies_of_online_only_games_are_refused() {
+    let g = |store: Launcher, id: &str, name: &str| Game {
+        name: name.into(),
+        store,
+        store_id: id.into(),
+        install_dir: PathBuf::from("/nowhere"),
+        library: PathBuf::from("/"),
+        build: None,
+        runtime: Runtime::Windows,
+        cover: None,
+        header: None,
+        prefix: None,
+    };
+    for (store, id, name) in [
+        (Launcher::Epic, "Fortnite", "Fortnite"),
+        (Launcher::Epic, "0a2d9f6403244d12969e11da6713137b", "Fall Guys"),
+        (Launcher::Epic, "abc", "Dead by Daylight"),
+        (Launcher::Gog, "1234", "DEAD BY DAYLIGHT"),
+        (Launcher::Epic, "x", "Destiny 2"),
+    ] {
+        let r = GameRules::for_game(&g(store, id, name));
+        assert_eq!(r.anti_cheat.as_ref().map(anticheat::mode), Some(Mode::Refuse), "{name} on {store:?}");
+    }
+    // Other games stay as they were.
+    let r = GameRules::for_game(&g(Launcher::Epic, "y", "A Short Hike"));
+    assert!(r.anti_cheat.is_none());
+    let r = GameRules::for_game(&g(Launcher::Epic, "z", "Destiny"));
+    assert!(r.anti_cheat.is_none(), "only the whole name matches");
+}
+
+/// 0.58: a me3 game's own files (regulation.bin) never make the "game already has this file" question: the mod goes
+/// into Turbine's me3 profile, not the game folder.
+#[test]
+fn me3_games_ask_nothing_about_their_own_files() {
+    let w = world("ownfiles");
+    write(&w.game.install_dir.join("Game/regulation.bin"), "the game's own");
+    let files = vec!["regulation.bin".to_string(), "Game/regulation.bin".to_string()];
+    let (conflicts, _) = turbine_engine::store::conflicts_in(&w.game, &w.root.join("store"), &files, "", "").unwrap();
+    assert!(conflicts.is_empty(), "{conflicts:?}");
+    let (conflicts, _) = turbine_engine::store::conflicts_in(&w.game, &w.root.join("store"), &files, "", "Game").unwrap();
+    assert!(conflicts.is_empty(), "{conflicts:?}");
+    let _ = fs::remove_dir_all(&w.root);
+}

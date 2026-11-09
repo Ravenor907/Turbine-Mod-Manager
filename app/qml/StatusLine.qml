@@ -112,7 +112,7 @@ Rectangle {
                 text: "!"
                 color: root.ui.c.onAccent
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(15)
+                font.pixelSize: root.ui.fpx(15)
                 font.bold: true
             }
             Shape {
@@ -159,7 +159,7 @@ Rectangle {
             elide: Text.ElideRight
             color: root.level === "warn" || root.level === "stop" ? root.readable(root.levelColor(root.level), root.ui.c.panel) : root.ui.c.text
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(15)
+            font.pixelSize: root.ui.fpx(15)
             font.weight: Font.DemiBold
         }
         Text {
@@ -170,7 +170,7 @@ Rectangle {
             elide: Text.ElideRight
             color: root.ui.c.muted
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(14)
+            font.pixelSize: root.ui.fpx(14)
         }
     }
 
@@ -206,7 +206,7 @@ Rectangle {
             text: root.progressText || ""
             color: root.ui.c.soft
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(14)
+            font.pixelSize: root.ui.fpx(14)
         }
 
         Rectangle {
@@ -227,7 +227,7 @@ Rectangle {
                     text: root.pillText || ""
                     color: root.readable(root.ui.c.accentHi, pillRow.bg)
                     font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.px(14)
+                    font.pixelSize: root.ui.fpx(14)
                     font.weight: Font.DemiBold
                 }
             }
@@ -252,7 +252,7 @@ Rectangle {
             text: parent.k.toUpperCase()
             color: parent.ui.c.text
             font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.px(14)
+            font.pixelSize: parent.ui.fpx(14)
             font.bold: true
         }
     }

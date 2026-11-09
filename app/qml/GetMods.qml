@@ -72,8 +72,8 @@ Item {
                     x: gm.ui.px(20); y: gm.ui.px(18)
                     width: parent.width - gm.ui.px(40)
                     spacing: gm.ui.px(10)
-                    Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(20); font.weight: Font.DemiBold }
-                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15) }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(20); font.weight: Font.DemiBold }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15) }
                     Flow {
                         width: parent.width
                         spacing: gm.ui.px(14)
@@ -94,7 +94,7 @@ Item {
                 text: gm.loading ? "Looking..." : gm.result && gm.result.error ? gm.result.error : gm.result ? "Nothing matches. Try other words." : ""
                 color: gm.ui.c.soft
                 font.family: gm.ui.bodyFont
-                font.pixelSize: gm.ui.px(16)
+                font.pixelSize: gm.ui.fpx(16)
             }
             GridView {
                 id: grid
@@ -127,7 +127,7 @@ Item {
             width: grid.width
             height: visible ? implicitHeight + gm.ui.px(8) : 0
             spacing: gm.ui.px(4)
-            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); font.weight: Font.DemiBold }
+            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(14); font.weight: Font.DemiBold }
             ListView {
                 id: recentList
                 width: parent.width
@@ -155,13 +155,13 @@ Item {
                         Text {
                             width: parent.width; elide: Text.ElideRight
                             text: rc.modelData.name || ""
-                            color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
+                            color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.weight: Font.DemiBold
                         }
                         Text {
                             visible: text !== ""
                             width: parent.width; elide: Text.ElideRight
                             text: rc.modelData.what || ""
-                            color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(12)
+                            color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(12)
                         }
                     }
                     HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -172,7 +172,7 @@ Item {
                 footer: Item {
                     width: grid.width
                     height: gm.loadingMore ? gm.ui.px(36) : 0
-                    Text { visible: gm.loadingMore; anchors.centerIn: parent; text: "Loading more..."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15) }
+                    Text { visible: gm.loadingMore; anchors.centerIn: parent; text: "Loading more..."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15) }
                 }
                 delegate: Item {
                     id: cell
@@ -208,7 +208,7 @@ Item {
                             width: rib.implicitWidth + gm.ui.px(14); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
                             border.color: cell.modelData.update === true ? gm.ui.c.accent : gm.ui.c.ok
-                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "In your mods · Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "In your mods · Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
                         }
                         Rectangle {
                             visible: cell.modelData.code === true
@@ -216,7 +216,7 @@ Item {
                             anchors.margins: gm.ui.px(6)
                             width: codeText.implicitWidth + gm.ui.px(12); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
-                            Text { id: codeText; anchors.centerIn: parent; text: "Code mod"; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                            Text { id: codeText; anchors.centerIn: parent; text: "Code mod"; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
                         }
                         Column {
                             x: gm.ui.px(10)
@@ -227,16 +227,16 @@ Item {
                                 width: parent.width
                                 elide: Text.ElideRight
                                 text: cell.modelData.name
-                                color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15); font.weight: Font.DemiBold
+                                color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15); font.weight: Font.DemiBold
                             }
                             // What it does, in one line.
-                            Text { width: parent.width; elide: Text.ElideRight; text: cell.modelData.summary || cell.modelData.owner || ""; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13) }
+                            Text { width: parent.width; elide: Text.ElideRight; text: cell.modelData.summary || cell.modelData.owner || ""; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13) }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: (cell.modelData.source === "thunderstore" || gm.result && gm.result.source === "thunderstore"
                                        ? gm.count(cell.modelData.rating) + " ratings" : gm.count(cell.modelData.rating) + " likes")
                                       + " · " + gm.count(cell.modelData.downloads) + " downloads"
-                                color: gm.ui.c.muted; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13)
+                                color: gm.ui.c.muted; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13)
                             }
                         }
                         HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -277,7 +277,7 @@ Item {
     component InfoMark: Rectangle {
         width: gm.ui.px(20); height: width; radius: width / 2
         color: "transparent"; border.color: gm.ui.c.accentHi; border.width: Math.max(1, gm.ui.px(1.5))
-        Text { anchors.centerIn: parent; text: "i"; color: gm.ui.c.accentHi; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+        Text { anchors.centerIn: parent; text: "i"; color: gm.ui.c.accentHi; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
     }
     component ActionKey: Rectangle {
         id: ak
@@ -300,9 +300,9 @@ Item {
                 width: gm.ui.px(24); height: width; radius: width / 2
                 anchors.verticalCenter: parent.verticalCenter
                 color: ak.strong ? Qt.rgba(0, 0, 0, 0.18) : gm.ui.c.panel
-                Text { anchors.centerIn: parent; text: ak.k.toUpperCase(); color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                Text { anchors.centerIn: parent; text: ak.k.toUpperCase(); color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
             }
-            Text { text: ak.label; color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: ak.label; color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
         }
         HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
         TapHandler { onTapped: ak.clicked() }

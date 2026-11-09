@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "name": "PUBG: BATTLEGROUNDS",
+  "ids": {
+    "steam": [
+      "578080"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "antiCheat": {
+    "name": "BattlEye",
+    "level": "refuse",
+    "mode": "refuse",
+    "note": "Online only: the game needs its anti-cheat to play at all."
+  },
+  "notes": [
+    "Steam 578080. Online only with BattlEye: Turbine adds no mods. Copies on other stores are matched by name."
+  ]
+}

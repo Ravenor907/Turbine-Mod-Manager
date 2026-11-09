@@ -98,7 +98,7 @@ Item {
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.px(18)
+                font.pixelSize: root.ui.fpx(18)
                 font.bold: true
             }
 
@@ -153,7 +153,7 @@ Item {
                             wrapMode: Text.WordWrap
                             color: checkRow.flagged ? checkRow.tone : root.ui.c.text
                             font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.px(16)
+                            font.pixelSize: root.ui.fpx(16)
                             font.weight: Font.DemiBold
                         }
                         Text {
@@ -165,7 +165,7 @@ Item {
                             wrapMode: Text.WordWrap
                             color: checkRow.flagged ? root.ui.c.soft : root.ui.c.muted
                             font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.px(14)
+                            font.pixelSize: root.ui.fpx(14)
                         }
                     }
                 }
@@ -192,7 +192,7 @@ Item {
                 wrapMode: Text.WordWrap
                 color: root.ui.c.soft
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
             }
         }
     }
@@ -243,7 +243,7 @@ Item {
             text: "!"
             color: dot.ui.c.onAccent
             font.family: dot.ui.bodyFont
-            font.pixelSize: dot.ui.px(15)
+            font.pixelSize: dot.ui.fpx(15)
             font.bold: true
         }
     }
@@ -306,7 +306,7 @@ Item {
                     text: btn.k.toUpperCase()
                     color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
                     font.family: btn.ui.bodyFont
-                    font.pixelSize: btn.ui.px(14)
+                    font.pixelSize: btn.ui.fpx(14)
                     font.bold: true
                 }
             }
@@ -315,7 +315,7 @@ Item {
                 text: btn.label
                 color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
                 font.family: btn.ui.bodyFont
-                font.pixelSize: btn.ui.px(16)
+                font.pixelSize: btn.ui.fpx(16)
                 font.weight: Font.DemiBold
             }
         }

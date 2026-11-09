@@ -38,13 +38,13 @@ Item {
             x: ps.ui.px(18); y: ps.ui.px(18)
             width: parent.width - ps.ui.px(36)
             spacing: ps.ui.px(8)
-            Text { text: ps.plan ? "Import a loadout" : "Loadouts"; color: ps.ui.c.text; font.family: ps.ui.titleFont; font.pixelSize: ps.ui.px(18); font.bold: true }
+            Text { text: ps.plan ? "Import a loadout" : "Loadouts"; color: ps.ui.c.text; font.family: ps.ui.titleFont; font.pixelSize: ps.ui.fpx(18); font.bold: true }
             Text {
                 width: parent.width; wrapMode: Text.WordWrap
                 text: ps.plan ? (ps.plan.error ? ps.plan.error : "\"" + ps.plan.profile + "\" for " + ps.gameName)
                               : ps.gameName + ": which mods are on and their order, saved by name. Switching puts that setup in the game."
                 color: ps.plan && ps.plan.error ? ps.ui.c.warn : ps.ui.c.soft
-                font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(15)
+                font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(15)
             }
             // The plan of a share being imported
             Repeater {
@@ -58,8 +58,8 @@ Item {
                     required property var modelData
                     width: parent.width
                     spacing: ps.ui.px(2)
-                    Text { width: parent.width; wrapMode: Text.WordWrap; text: parent.modelData[0] + " (" + parent.modelData[1].length + ")"; color: parent.modelData[2] === "ok" ? ps.ui.c.ok : parent.modelData[2] === "warn" ? ps.ui.c.warn : ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(15); font.bold: true }
-                    Text { width: parent.width; elide: Text.ElideRight; text: parent.modelData[1].map(m => m.name).join(", "); color: ps.ui.c.soft; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(14) }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: parent.modelData[0] + " (" + parent.modelData[1].length + ")"; color: parent.modelData[2] === "ok" ? ps.ui.c.ok : parent.modelData[2] === "warn" ? ps.ui.c.warn : ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(15); font.bold: true }
+                    Text { width: parent.width; elide: Text.ElideRight; text: parent.modelData[1].map(m => m.name).join(", "); color: ps.ui.c.soft; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(14) }
                 }
             }
             Repeater {
@@ -92,14 +92,14 @@ Item {
                             width: parent.width - ps.ui.px(60)
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: ps.ui.px(2)
-                            Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.label; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(16); font.bold: true }
-                            Text { visible: !!row.modelData.detail; width: parent.width; elide: Text.ElideRight; text: row.modelData.detail || ""; color: ps.ui.c.soft; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(14) }
+                            Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.label; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(16); font.bold: true }
+                            Text { visible: !!row.modelData.detail; width: parent.width; elide: Text.ElideRight; text: row.modelData.detail || ""; color: ps.ui.c.soft; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(14) }
                         }
                         Rectangle {
                             visible: row.foc
                             anchors.right: parent.right; anchors.rightMargin: ps.ui.px(12); anchors.verticalCenter: parent.verticalCenter
                             width: ps.ui.px(24); height: width; radius: width / 2; color: ps.ui.c.raised; border.color: ps.ui.c.accentLo
-                            Text { anchors.centerIn: parent; text: "A"; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.px(13); font.bold: true }
+                            Text { anchors.centerIn: parent; text: "A"; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(13); font.bold: true }
                         }
                     }
                     HoverHandler { onHoveredChanged: ps.ui.hover(parent, hovered) }

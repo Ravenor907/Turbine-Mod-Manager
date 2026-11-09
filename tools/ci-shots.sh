@@ -79,6 +79,8 @@ for size in $SIZES; do
   for page in about labs perfcheck; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
   # 0.54: Labs > Activity log (after a game page's worth of lines).
   shoot "activity-$size" "$size" activity "$PWD/home" --game=$skyrim
+  need "activity-$size" "0.58: A on Settings, Labs, Activity log opens it ($size)" "Activity log sheet open after A on its Settings row: true"
+  need "activity-$size" "0.58: every Settings action row has an action ($size)" "Settings rows check: [0-9]+ action rows, 0 without an action"
   shoot "report-$size" "$size" report "$PWD/home" --game=$skyrim
   shoot "autumn-$size" "$size" mods "$PWD/home" --game=steam:892970 --season=autumn "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
   shoot "snow-$size" "$size" settings "$PWD/home" --season=snow
@@ -341,12 +343,50 @@ for size in $SIZES; do
   else echo "::error title=Opening a Nexus file page didn't say to press Slow download ($size)::"; (grep -h "catch\|browser" "$log" | tail -n 6 || true); fail=1; fi
 done
 # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
+# 0.58: Interface size 50% to 150% with no cap: each input makes it smaller (D-pad Left, the - button clicked with the
+# pointer, A's list; B cancels the list); the buttons are at least 44 pixels.
 if [ "$MODE" = 1280x800 ]; then
-shoot "size150-1280x800" 1280x800 size150 "$PWD/home"
-log="$PWD/data/size150-1280x800/turbine-mod-manager/activity.log"
-if grep -Eq "Try size 11[0-9]% \(largest that fits 11[0-9]%\)" "$log"; then echo "::notice title=Largest size that fits::$(grep -h 'Try size' "$log" | head -n1)"
-else echo "::error title=Interface size went past what fits::"; (grep -h "size" "$log" | tail -n 4 || true); fail=1; fi
+shoot "sizeinputs-1280x800" 1280x800 sizeinputs "$PWD/home"
+n=sizeinputs-1280x800
+need $n "Size: D-pad Left makes it smaller" "Size by D-pad Left: [0-9]+% to [0-9]+%, smaller"
+need $n "Size: the - button makes it smaller" "Size by the - button \(pointer click\): [0-9]+% to [0-9]+%, smaller"
+need $n "Size: the + button makes it bigger" "Size by the \+ button \(pointer click\): [0-9]+% to [0-9]+%, bigger"
+need $n "Size: A opens the list of sizes" "Size A: the list of sizes, on [0-9]+%.*, 11 sizes"
+need $n "Size: B cancels the list" "Size list B: [0-9]+% to [0-9]+%, unchanged"
+need $n "Size: A's list makes it smaller" "Size by A's list: [0-9]+% to [0-9]+%, smaller"
+need $n "Size: D-pad Right makes it bigger" "Size by D-pad Right: [0-9]+% to [0-9]+%, bigger"
+need $n "Size: 50% to 150% in 11 steps" "Size range: 50% to 150% in 11 steps"
+need $n "Size: buttons of 44 pixels or more" "Size buttons: - (4[4-9]|[5-9][0-9]|1[0-9][0-9]) x"
+if grep -q "PROBLEM" "$PWD/data/$n/turbine-mod-manager/activity.log"; then echo "::error title=Interface size check::$(grep -h PROBLEM "$PWD/data/$n/turbine-mod-manager/activity.log" | head -n3 | tr '\n' ' ' | cut -c1-300)"; fail=1; fi
+# 0.58: the bottom bar in a 1024 pixel wide window (the owner's Desktop Mode picture), both layouts.
+shoot "mods-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
+shoot "mods-desktop-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim --layout=desktop "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
+need mods-1024x700 "Bar at 1024 wide: nothing overlaps Play or the edge" "Bar check \(mods, 1024x700, size [0-9]+%\): [0-9]+ items, 0 problems"
+need mods-desktop-1024x700 "Bar at 1024 wide, Desktop layout" "Bar check \(mods, 1024x700, size [0-9]+%\): [0-9]+ items, 0 problems"
+fresh "modsempty-1024"; h="$PWD/fh/modsempty-1024"
+shoot "modsempty-1024x700" 1024x700 modsempty "$h" --game=$skyrim
+need modsempty-1024x700 "Empty My mods card at 1024 wide" "No mods card: No mods for Skyrim"
 fi
+# 0.58: every size reflows instead of clipping: pictures at 50% and 150%, each with the bar check.
+for size in $SIZES; do
+  for u in 50 150; do
+    shoot "mods-u$u-$size" "$size" mods "$PWD/home" --game=$skyrim --uisize=$u "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+    shoot "getmods-u$u-$size" "$size" getmods "$PWD/home" --game=$skyrim --uisize=$u
+    shoot "settings-u$u-$size" "$size" settings "$PWD/home" --uisize=$u
+    shoot "gamemenu-u$u-$size" "$size" gamemenu "$PWD/home" --game=$skyrim --uisize=$u
+    need "mods-u$u-$size" "Bar at $u% ($size): nothing overlaps" "Bar check \(mods, $size, size $u%\): [0-9]+ items, 0 problems"
+    need "getmods-u$u-$size" "Get mods bar at $u% ($size)" "Bar check \(getmods, $size, size $u%\): [0-9]+ items, 0 problems"
+  done
+  # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text), and the launch check's sheet.
+  shoot "launchsetup-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
+  need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"/home/deck/.*/steam-launch/turbine-launch.sh %command%\""
+  shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
+  need "notstarted-$size" "Launch check: didn't start, with the fixes ($size)" "Launch check sheet: .* didn't start \| Play without mods; Activity log; Why won't it start\?"
+  fresh "modsempty-$size"; h="$PWD/fh/modsempty-$size"
+  shoot "modsempty-$size" "$size" modsempty "$h" --game=$skyrim
+  need "modsempty-$size" "Empty My mods: the centered card ($size)" "No mods card: No mods for Skyrim"
+  need "modsempty-$size" "Empty My mods: A Get mods, X Add a file ($size)" "Bar check \(modsempty, .*0 problems.*hint A, hint B, hint X"
+done
 if [ "$MODE" = 1920x1080 ]; then
 shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
   "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
@@ -715,6 +755,14 @@ if [ "$MODE" = 1920x1080 ]; then
   hits=$(grep -h "opened with no press" "$PWD/data/opening8s-1920x1080/turbine-mod-manager/activity.log" 2>/dev/null || true)
   if [ -n "$hits" ]; then echo "::error title=5: a sheet opened with no press (opening8s-1920x1080)::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
 fi
+# 0.58: every picture's bottom bar: no hint under Play or another hint, nothing past the edge, the game's name whole.
+bars=$(grep -h "Bar check .* items, [1-9][0-9]* problems" "$PWD"/data/*/turbine-mod-manager/activity.log 2>/dev/null || true)
+nbars=$(cat "$PWD"/data/*/turbine-mod-manager/activity.log 2>/dev/null | grep -c "Bar check " || true)
+if [ -n "$bars" ]; then
+  echo "::error title=Bottom bar problems ($(echo "$bars" | wc -l) of $nbars pictures)::$(echo "$bars" | head -n 3 | cut -c1-400 | tr '\n' ' ')"
+  echo "$bars" | head -n 20
+  fail=1
+else echo "::notice title=Bottom bar::$nbars pictures checked, no overlaps"; fi
 ls -la shots
 # Also into the log, so the pictures can be checked where artifacts can't be downloaded.
 for f in shots/*.png; do echo "SHOT $(basename "$f") $(base64 -w0 "$f")"; done

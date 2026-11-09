@@ -42,7 +42,7 @@ Item {
                     wrapMode: Text.WrapAnywhere
                     text: sheet.plugin ? sheet.plugin.name : ""
                     color: sheet.ui.c.text
-                    font.family: sheet.ui.titleFont; font.pixelSize: sheet.ui.px(18); font.bold: true
+                    font.family: sheet.ui.titleFont; font.pixelSize: sheet.ui.fpx(18); font.bold: true
                 }
                 Text {
                     width: parent.width
@@ -55,7 +55,7 @@ Item {
                         sheet.plugin.light ? "light plugin" : ""
                     ].filter(s => s !== "").join(" · ")
                     color: sheet.ui.c.soft
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15)
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(15)
                 }
                 Text {
                     visible: !!sheet.plugin && (sheet.plugin.masters || []).length > 0
@@ -63,7 +63,7 @@ Item {
                     wrapMode: Text.WordWrap
                     text: sheet.plugin ? "Needs: " + (sheet.plugin.masters || []).join(", ") : ""
                     color: sheet.ui.c.soft
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15)
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(15)
                 }
                 Text {
                     visible: !!sheet.plugin && (sheet.plugin.missing || []).length > 0
@@ -71,13 +71,13 @@ Item {
                     wrapMode: Text.WordWrap
                     text: sheet.plugin ? "Missing or off: " + (sheet.plugin.missing || []).join(", ") : ""
                     color: sheet.ui.c.warn
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15); font.bold: true
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(15); font.bold: true
                 }
                 Text {
                     topPadding: sheet.ui.px(6)
                     text: "NOTES"
                     color: sheet.ui.c.muted
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(14); font.bold: true; font.letterSpacing: sheet.ui.px(1)
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(14); font.bold: true; font.letterSpacing: sheet.ui.px(1)
                 }
                 Text {
                     visible: sheet.notes.length === 0
@@ -85,7 +85,7 @@ Item {
                     wrapMode: Text.WordWrap
                     text: "No notes about this plugin."
                     color: sheet.ui.c.soft
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15)
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(15)
                 }
                 Repeater {
                     model: sheet.notes
@@ -107,7 +107,7 @@ Item {
                             Text {
                                 text: sheet.levelWord(parent.parent.modelData.level)
                                 color: parent.parent.modelData.level === "error" ? sheet.ui.c.stop : parent.parent.modelData.level === "warn" ? sheet.ui.c.warn : sheet.ui.c.muted
-                                font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(14); font.bold: true
+                                font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(14); font.bold: true
                             }
                             Text {
                                 width: parent.width
@@ -115,7 +115,7 @@ Item {
                                 textFormat: Text.PlainText
                                 text: parent.parent.modelData.text
                                 color: sheet.ui.c.text
-                                font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.px(15)
+                                font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(15)
                             }
                         }
                     }

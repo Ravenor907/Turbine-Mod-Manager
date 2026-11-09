@@ -38,7 +38,7 @@ Item {
             wrapMode: Text.WordWrap
             text: pf.topLine
             color: pf.ui.c.text
-            font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(16)
+            font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(16)
         }
         // One pane at a time: which one is on screen, LB and RB switch.
         Row {
@@ -52,7 +52,7 @@ Item {
                     width: tabText.implicitWidth + pf.ui.px(24); height: pf.ui.px(30); radius: pf.ui.px(5)
                     color: pf.pane === index ? pf.ui.c.raised : "transparent"
                     border.color: pf.pane === index ? pf.ui.c.accent : pf.ui.c.line
-                    Text { id: tabText; anchors.centerIn: parent; text: parent.modelData; color: pf.pane === parent.index ? pf.ui.c.text : pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(14); font.bold: true }
+                    Text { id: tabText; anchors.centerIn: parent; text: parent.modelData; color: pf.pane === parent.index ? pf.ui.c.text : pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(14); font.bold: true }
                     Accessible.role: Accessible.PageTab
                     Accessible.name: modelData
                     TapHandler { onTapped: pf.swiped(parent.index === 0 ? -1 : 1) }
@@ -90,13 +90,13 @@ Item {
                     x: pf.ui.px(12); y: pf.ui.px(10)
                     width: parent.width - pf.ui.px(24)
                     spacing: pf.ui.px(2)
-                    Text { text: paneBox.index === 0 ? "GAME FOLDER" : "MOD FILES"; color: pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(12); font.bold: true }
+                    Text { text: paneBox.index === 0 ? "GAME FOLDER" : "MOD FILES"; color: pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(12); font.bold: true }
                     Text {
                         width: parent.width
                         elide: Text.ElideLeft
                         text: paneBox.index === 0 ? pf.gamePath : pf.modPath
                         color: pf.ui.c.accentText
-                        font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(14); font.bold: true
+                        font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(14); font.bold: true
                     }
                 }
                 ListView {
@@ -136,14 +136,14 @@ Item {
                                 width: parent.width; elide: Text.ElideMiddle
                                 text: (row.modelData.kind === "folder" || row.modelData.kind === "suggest" || row.modelData.kind === "new" ? "▸ " : "") + row.modelData.label
                                 color: row.modelData.kind === "here" ? pf.ui.c.accentText : pf.ui.c.text
-                                font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(15); font.bold: row.modelData.kind === "here" || row.foc
+                                font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(15); font.bold: row.modelData.kind === "here" || row.foc
                             }
                             Text {
                                 visible: !!row.modelData.detail
                                 width: parent.width; elide: Text.ElideRight
                                 text: row.modelData.detail || ""
                                 color: pf.ui.c.soft
-                                font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(12)
+                                font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(12)
                             }
                         }
                         Rectangle {
@@ -153,7 +153,7 @@ Item {
                             width: badgeText.implicitWidth + pf.ui.px(14); height: pf.ui.px(20); radius: height / 2
                             color: "transparent"
                             border.color: pf.ui.c.accentLo
-                            Text { id: badgeText; anchors.centerIn: parent; text: row.modelData.badge || ""; color: pf.ui.c.accentText; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(11); font.bold: true }
+                            Text { id: badgeText; anchors.centerIn: parent; text: row.modelData.badge || ""; color: pf.ui.c.accentText; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(11); font.bold: true }
                         }
                         HoverHandler { onHoveredChanged: pf.ui.hover(parent, hovered) }
                         TapHandler {
@@ -190,7 +190,7 @@ Item {
             wrapMode: Text.WordWrap
             text: pf.preview
             color: pf.ui.c.text
-            font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.px(14)
+            font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(14)
         }
     }
 }

@@ -29,6 +29,7 @@ pub mod plugins;
 pub mod profiles;
 pub mod proton;
 pub mod rules;
+pub mod report;
 pub mod saves;
 pub mod selfupdate;
 pub mod shortcuts;

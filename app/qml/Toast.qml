@@ -91,7 +91,7 @@ Rectangle {
                 text: root.kind === "done" ? "\u2713" : root.kind === "problem" ? "!" : "i"
                 color: mark.tone
                 font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.px(14)
+                font.pixelSize: root.ui.fpx(14)
                 font.bold: true
             }
         }
@@ -105,7 +105,7 @@ Rectangle {
             elide: Text.ElideRight
             color: root.ui.c.text
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(15)
+            font.pixelSize: root.ui.fpx(15)
         }
         Text {
             id: detailText
@@ -114,7 +114,7 @@ Rectangle {
             text: root.detail || ""
             color: root.ui.c.muted
             font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.px(14)
+            font.pixelSize: root.ui.fpx(14)
         }
     }
 

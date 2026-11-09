@@ -121,12 +121,21 @@ impl qobject::Turbine {
             ),
             Err(_) => "null".into(),
         };
+        // 0.58: a game me3 starts with mods needs Turbine's Steam launch helper in its Launch Options.
+        use turbine_engine::anticheat as ac;
+        let me3 = game.store == turbine_engine::games::Store::Steam && rules.anti_cheat.as_ref().is_some_and(|a| ac::mode(a) == ac::Mode::Me3);
+        let needed = if me3 {
+            crate::anticheat::ensure_helper(&data_home());
+            ac::launch_option(&data_home())
+        } else {
+            rules.launch_option.clone().unwrap_or_default()
+        };
         let set = if game.store == turbine_engine::games::Store::Steam { steam::launch_options(&turbine_engine::home_dir(), &game.store_id) } else { None };
         let launch = format!(
             "{{\"listed\":{},\"set\":{},\"needed\":{}}}",
             set.is_some(),
             quote(set.as_deref().unwrap_or("")),
-            quote(rules.launch_option.as_deref().unwrap_or(""))
+            quote(&needed)
         );
         let copies: Vec<String> = self
             .rust()

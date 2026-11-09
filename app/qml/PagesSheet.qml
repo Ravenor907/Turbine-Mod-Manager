@@ -38,14 +38,14 @@ Item {
                 wrapMode: Text.WordWrap
                 text: pg.title
                 color: pg.ui.c.text
-                font.family: pg.ui.titleFont; font.pixelSize: pg.ui.px(18); font.bold: true
+                font.family: pg.ui.titleFont; font.pixelSize: pg.ui.fpx(18); font.bold: true
             }
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Download it on the page with Slow download (or Mod Manager Download): Turbine adds the file when it lands in Downloads."
                 color: pg.ui.c.text
-                font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(15)
+                font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15)
             }
             Text {
                 visible: !pg.handlerSet
@@ -53,7 +53,7 @@ Item {
                 wrapMode: Text.WordWrap
                 text: "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Getting mods. Slow download needs nothing."
                 color: pg.ui.c.soft
-                font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(14)
+                font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(14)
             }
             Repeater {
                 model: pg.pages
@@ -73,8 +73,8 @@ Item {
                         width: parent.width - pg.ui.px(180)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: pg.ui.px(2)
-                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(16); font.bold: true }
-                        Text { visible: !!row.modelData.note; width: parent.width; elide: Text.ElideRight; text: row.modelData.note || ""; color: pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(13) }
+                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(16); font.bold: true }
+                        Text { visible: !!row.modelData.note; width: parent.width; elide: Text.ElideRight; text: row.modelData.note || ""; color: pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(13) }
                     }
                     Row {
                         anchors.right: parent.right; anchors.rightMargin: pg.ui.px(12); anchors.verticalCenter: parent.verticalCenter
@@ -83,9 +83,9 @@ Item {
                             visible: row.foc
                             width: pg.ui.px(24); height: width; radius: width / 2; color: pg.ui.c.raised; border.color: pg.ui.c.accentLo
                             anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: "A"; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(13); font.bold: true }
+                            Text { anchors.centerIn: parent; text: "A"; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(13); font.bold: true }
                         }
-                        Text { text: "Open on Nexus"; color: row.foc ? pg.ui.c.accentText : pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.px(15); font.bold: row.foc; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: "Open on Nexus"; color: row.foc ? pg.ui.c.accentText : pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15); font.bold: row.foc; anchors.verticalCenter: parent.verticalCenter }
                     }
                     HoverHandler { onHoveredChanged: pg.ui.hover(parent, hovered) }
                     TapHandler { onTapped: pg.activated(row.index) }

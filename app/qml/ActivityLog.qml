@@ -77,7 +77,7 @@ Item {
             width: parent.width - al.ui.px(44)
             text: "Activity log"
             color: al.ui.c.text
-            font.family: al.ui.titleFont; font.pixelSize: al.ui.px(18); font.bold: true
+            font.family: al.ui.titleFont; font.pixelSize: al.ui.fpx(18); font.bold: true
         }
         Text {
             id: sub
@@ -87,7 +87,7 @@ Item {
             wrapMode: Text.WordWrap
             text: "The last " + al.lines.length + " lines, newest at the bottom. Scroll with Up and Down, the left stick or the wheel."
             color: al.ui.c.soft
-            font.family: al.ui.bodyFont; font.pixelSize: al.ui.px(14)
+            font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(14)
         }
         Rectangle {
             id: well
@@ -113,7 +113,7 @@ Item {
                     wrapMode: Text.WrapAnywhere
                     text: modelData
                     color: al.ui.c.text
-                    font.family: "monospace"; font.pixelSize: al.ui.px(12)
+                    font.family: "monospace"; font.pixelSize: al.ui.fpx(12)
                     lineHeight: 1.1
                 }
             }
@@ -158,9 +158,9 @@ Item {
                             visible: k !== ""
                             width: al.ui.px(24); height: width; radius: width / 2; color: al.ui.c.raised; border.color: al.ui.c.accentLo
                             anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: cap.k.toUpperCase(); color: al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.px(13); font.bold: true }
+                            Text { anchors.centerIn: parent; text: cap.k.toUpperCase(); color: al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(13); font.bold: true }
                         }
-                        Text { text: btn.modelData.label; color: btn.foc ? al.ui.c.accentText : al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.px(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                        Text { text: btn.modelData.label; color: btn.foc ? al.ui.c.accentText : al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }
                     HoverHandler { onHoveredChanged: al.ui.hover(parent, hovered) }
                     TapHandler { onTapped: al.activate(btn.index) }

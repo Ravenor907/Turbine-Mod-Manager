@@ -350,8 +350,11 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
     let ours: HashSet<String> = record.files.iter().filter(|p| p.backup.is_none()).map(|p| p.rel.to_lowercase()).collect();
     let mut conflicts = Vec::new();
     let mut refused = Vec::new();
+    // 0.58: a game me3 starts never gets files in its folder (they go into Turbine's me3 profile, which overrides the
+    // game's own at run time), so a file the game has too (regulation.bin) is no question.
+    let me3 = rules::GameRules::for_game(game).anti_cheat.as_ref().and_then(|a| a.me3_game()).is_some();
     for (_, dest) in map {
-        let exists = rules::find_ci(&game.install_dir, &dest).is_some();
+        let exists = !me3 && rules::find_ci(&game.install_dir, &dest).is_some();
         let not_ours = exists && !ours.contains(&dest.to_lowercase());
         if let Some(why) = basic::refused(&dest, not_ours) {
             if !refused.iter().any(|(r, _): &(String, &str)| r.eq_ignore_ascii_case(&dest)) {

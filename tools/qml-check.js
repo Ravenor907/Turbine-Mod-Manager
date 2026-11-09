@@ -234,9 +234,25 @@ function checkFile(file) {
   return errors;
 }
 
+// 0.58: every Settings action row (kind: "action", key: "x") must have its handler in Main.qml's rowActions, so a
+// row can never do nothing when pressed (Labs > Activity log did in 0.57).
+function settingsRows(file) {
+  const src = require("fs").readFileSync(file, "utf8");
+  const start = src.indexOf("readonly property var rowActions: ({");
+  if (start < 0) return [file + ": no rowActions table"];
+  const end = src.indexOf("\n    })", start);
+  const table = src.slice(start, end);
+  const handled = new Set([...table.matchAll(/(?:^|[\s,{])([A-Za-z]\w*):\s*(?:\(|\w+\s*=>)/gm)].map(m => m[1]));
+  const keys = [...src.matchAll(/kind:\s*"action",\s*key:\s*"(\w+)"/g)].map(m => m[1]);
+  const missing = [...new Set(keys.filter(k => !handled.has(k)))];
+  console.log("Settings rows: " + keys.length + " action rows, " + missing.length + " without an action");
+  return missing.map(k => file + ": the Settings row \"" + k + "\" has no handler in rowActions");
+}
+
 const files = process.argv.slice(2);
 let all = [];
 for (const f of files) all = all.concat(checkFile(f));
+for (const f of files) if (f.endsWith("Main.qml")) all = all.concat(settingsRows(f));
 for (const e of all) console.log(e);
 console.log("QML check: " + files.length + " files, " + all.length + " problems");
 process.exit(all.length ? 1 : 0);

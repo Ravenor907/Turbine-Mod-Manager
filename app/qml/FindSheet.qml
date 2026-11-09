@@ -54,7 +54,7 @@ Item {
                     elide: Text.ElideRight
                     text: fs.title
                     color: fs.ui.c.text
-                    font.family: fs.ui.titleFont; font.pixelSize: fs.ui.px(18); font.bold: true
+                    font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true
                 }
                 Text {
                     visible: fs.subtitle !== ""
@@ -62,9 +62,9 @@ Item {
                     elide: Text.ElideRight
                     text: fs.subtitle
                     color: fs.ui.c.soft
-                    font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13)
+                    font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13)
                 }
-                Text { text: fs.fieldLabel; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13) }
+                Text { text: fs.fieldLabel; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13) }
                 // The field: A or Y opens the keyboard.
                 Rectangle {
                     id: field
@@ -82,7 +82,7 @@ Item {
                         elide: Text.ElideRight
                         text: fs.text !== "" ? fs.text : fs.placeholder
                         color: fs.text !== "" ? fs.ui.c.text : fs.ui.c.muted
-                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(16)
+                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(16)
                     }
                     Accessible.role: Accessible.EditableText
                     Accessible.name: fs.fieldLabel + ": " + (fs.text !== "" ? fs.text : "empty")
@@ -96,7 +96,7 @@ Item {
                         required property var modelData
                         width: col.width
                         spacing: fs.ui.px(6)
-                        Text { text: secCol.modelData.title; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(13) }
+                        Text { text: secCol.modelData.title; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13) }
                         Flow {
                             width: parent.width
                             spacing: fs.ui.px(8)
@@ -119,7 +119,7 @@ Item {
                                         anchors.centerIn: parent
                                         text: opt.modelData
                                         color: opt.chosen ? fs.ui.c.onAccent : fs.ui.c.text
-                                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); font.bold: opt.chosen
+                                        font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: opt.chosen
                                     }
                                     Accessible.role: Accessible.RadioButton
                                     Accessible.name: secCol.modelData.title + ": " + opt.modelData + (opt.chosen ? ", chosen" : "")
@@ -149,7 +149,7 @@ Item {
                                 anchors.centerIn: parent
                                 text: parent.modelData
                                 color: parent.index === 0 ? fs.ui.c.onAccent : fs.ui.c.text
-                                font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.px(15); font.bold: true
+                                font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: true
                             }
                             Accessible.role: Accessible.Button
                             Accessible.name: modelData

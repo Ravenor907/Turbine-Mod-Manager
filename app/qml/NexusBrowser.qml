@@ -141,7 +141,7 @@ Item {
                 visible: bar.signinFit === 2 || (bar.signinFit === 0 && bar.tabsEnd + bar.nameW <= (signin.visible ? signin.x : pill.x) - nb.ui.px(10))
                 text: nb.gameName !== "" ? nb.gameName : "Nexus Mods"
                 color: nb.ui.c.accentText
-                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(15); font.weight: Font.DemiBold
+                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15); font.weight: Font.DemiBold
                 width: Math.min(implicitWidth, nb.width * 0.16); elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
             }
@@ -163,7 +163,7 @@ Item {
                     color: nb.tab === index ? nb.ui.c.focusFill : "transparent"
                     border.color: nb.tab === index ? nb.ui.c.accent : "transparent"
                     border.width: Math.max(1, nb.ui.px(1))
-                    Text { id: tbText; anchors.centerIn: parent; text: tb.modelData; color: nb.tab === tb.index ? nb.ui.c.accentText : nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(14) }
+                    Text { id: tbText; anchors.centerIn: parent; text: tb.modelData; color: nb.tab === tb.index ? nb.ui.c.accentText : nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14) }
                     anchors.verticalCenter: parent.verticalCenter
                     HoverHandler { onHoveredChanged: nb.ui.hover(tb, hovered) }
                     // A touch target of at least 44 design pixels around the 28 drawn.
@@ -194,12 +194,12 @@ Item {
                 border.color: nexus ? nb.ui.c.line : nb.ui.c.warn
                 border.width: Math.max(1, nb.ui.px(1))
                 anchors.verticalCenter: parent.verticalCenter
-                Text { id: hostText; anchors.centerIn: parent; text: hostChip.nexus ? "nexusmods.com" : hostChip.host; color: hostChip.nexus ? nb.ui.c.soft : nb.ui.c.warn; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+                Text { id: hostText; anchors.centerIn: parent; text: hostChip.nexus ? "nexusmods.com" : hostChip.host; color: hostChip.nexus ? nb.ui.c.soft : nb.ui.c.warn; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
             }
             Text {
                 text: nb.loading ? "Loading..." : nb.title
                 color: nb.ui.c.text
-                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(14)
+                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14)
                 width: Math.max(0, titleRow.width - (hostChip.visible ? hostChip.width + nb.ui.px(8) : 0)); elide: Text.ElideRight
                 anchors.verticalCenter: parent.verticalCenter
             }
@@ -213,7 +213,7 @@ Item {
             width: signinText.implicitWidth + nb.ui.px(16); height: nb.ui.px(28); radius: nb.ui.px(5)
             color: nb.ui.c.raised
             border.color: nb.ui.c.accentLo; border.width: Math.max(1, nb.ui.px(1))
-            Text { id: signinText; anchors.centerIn: parent; text: "Google sign-in"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+            Text { id: signinText; anchors.centerIn: parent; text: "Google sign-in"; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
             HoverHandler { onHoveredChanged: nb.ui.hover(signin, hovered) }
             Item { objectName: "tap:Google sign-in"; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.signinClicked() } }
         }
@@ -243,7 +243,7 @@ Item {
                 x: nb.ui.px(12); width: parent.width - nb.ui.px(24)
                 text: nb.pillText
                 color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.text
-                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13)
+                font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13)
                 elide: Text.ElideRight
             }
         }
@@ -259,11 +259,11 @@ Item {
                     id: lh
                     required property var modelData
                     spacing: nb.ui.px(4)
-                    Text { visible: (lh.modelData[2] || "") !== ""; text: lh.modelData[2] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13); anchors.verticalCenter: parent.verticalCenter }
+                    Text { visible: (lh.modelData[2] || "") !== ""; text: lh.modelData[2] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
                     Cap { k: lh.modelData[0]; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: lh.modelData[1] + ((lh.modelData[3] || "") !== "" ? "," : ""); color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: lh.modelData[1] + ((lh.modelData[3] || "") !== "" ? "," : ""); color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
                     Cap { visible: (lh.modelData[3] || "") !== ""; k: lh.modelData[3] || ""; anchors.verticalCenter: parent.verticalCenter }
-                    Text { visible: (lh.modelData[4] || "") !== ""; text: lh.modelData[4] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13); anchors.verticalCenter: parent.verticalCenter }
+                    Text { visible: (lh.modelData[4] || "") !== ""; text: lh.modelData[4] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
                 }
             }
         }
@@ -274,7 +274,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             width: nb.ui.px(32); height: nb.ui.px(28); radius: nb.ui.px(5)
             color: nb.ui.c.raised
-            Text { anchors.centerIn: parent; text: "×"; color: nb.ui.c.text; font.pixelSize: nb.ui.px(18); font.family: nb.ui.bodyFont }
+            Text { anchors.centerIn: parent; text: "×"; color: nb.ui.c.text; font.pixelSize: nb.ui.fpx(18); font.family: nb.ui.bodyFont }
             HoverHandler { onHoveredChanged: nb.ui.hover(closeBtn, hovered) }
             Item { objectName: "tap:Close"; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.closeClicked() } }
         }
@@ -302,7 +302,7 @@ Item {
             text: nb.pillText
             wrapMode: Text.WordWrap
             color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.text
-            font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13)
+            font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13)
         }
     }
 
@@ -313,7 +313,7 @@ Item {
         radius: k.length > 1 ? nb.ui.px(5) : height / 2
         color: nb.ui.c.raised
         border.color: nb.ui.c.accentLo; border.width: Math.max(1, nb.ui.px(1))
-        Text { id: capText; anchors.centerIn: parent; text: nb.glyph(parent.k); color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(12); font.bold: true }
+        Text { id: capText; anchors.centerIn: parent; text: nb.glyph(parent.k); color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(12); font.bold: true }
     }
 
     // ---------------------------------------------------------------- the page
@@ -337,7 +337,7 @@ Item {
             wrapMode: Text.WordWrap
             text: "The Nexus page shows here.\n" + nb.startUrl
             color: nb.ui.c.muted
-            font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16)
+            font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16)
         }
         // On Nexus's sign-in page: Turbine's own button (drawn by Turbine over its corner, not put into the page).
         Rectangle {
@@ -352,8 +352,8 @@ Item {
                 id: bigCol
                 anchors.centerIn: parent
                 spacing: nb.ui.px(4)
-                Text { visible: nb.signinShown; text: "Google sign-in (in Chrome)"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold }
-                Text { text: nb.signinShown ? "Email and password work right here too." : "Email and password work here."; color: nb.signinShown ? nb.ui.c.soft : nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(nb.signinShown ? 13 : 15) }
+                Text { visible: nb.signinShown; text: "Google sign-in (in Chrome)"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold }
+                Text { text: nb.signinShown ? "Email and password work right here too." : "Email and password work here."; color: nb.signinShown ? nb.ui.c.soft : nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(nb.signinShown ? 13 : 15) }
             }
             HoverHandler { enabled: nb.signinShown; onHoveredChanged: nb.ui.hover(signinBig, hovered) }
             TapHandler { enabled: nb.signinShown; onTapped: nb.signinClicked() }
@@ -374,7 +374,7 @@ Item {
                 id: googleCol
                 x: nb.ui.px(18); y: nb.ui.px(16); width: parent.width - nb.ui.px(36)
                 spacing: nb.ui.px(10)
-                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Google won't sign in inside apps"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(19); font.weight: Font.DemiBold }
+                Text { width: parent.width; wrapMode: Text.WordWrap; text: "Google won't sign in inside apps"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(19); font.weight: Font.DemiBold }
                 Repeater {
                     model: [["a", "Set a Nexus password (stays here)", nb.googlePasswordWords, 0], ["y", "Use Chrome instead", nb.googleChromeWords, 1]]
                     Rectangle {
@@ -389,8 +389,8 @@ Item {
                             anchors.right: parent.right; anchors.rightMargin: nb.ui.px(12)
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: nb.ui.px(2)
-                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[1]; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold }
-                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[2]; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[1]; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold }
+                            Text { width: parent.width; wrapMode: Text.WordWrap; text: gRow.modelData[2]; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
                         }
                         HoverHandler { onHoveredChanged: nb.ui.hover(gRow, hovered) }
                         TapHandler { onTapped: gRow.modelData[3] === 0 ? nb.googlePassword() : nb.googleChrome() }
@@ -502,7 +502,7 @@ Item {
             visible: nb.downloads.length === 0
             anchors.centerIn: parent
             text: "Nothing downloaded yet. Press Slow download on a mod's file page."
-            color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16)
+            color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16)
         }
         ListView {
             id: dlList
@@ -526,8 +526,8 @@ Item {
                     spacing: nb.ui.px(6)
                     Row {
                         spacing: nb.ui.px(10)
-                        Text { text: row.modelData.name; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(16); font.weight: Font.DemiBold; elide: Text.ElideRight; width: Math.min(implicitWidth, dlList.width * 0.5) }
-                        Text { text: row.modelData.game || "Other"; color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(14) }
+                        Text { text: row.modelData.name; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold; elide: Text.ElideRight; width: Math.min(implicitWidth, dlList.width * 0.5) }
+                        Text { text: row.modelData.game || "Other"; color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14) }
                     }
                     Rectangle {
                         width: parent.width; height: nb.ui.px(6); radius: height / 2
@@ -538,7 +538,7 @@ Item {
                             color: row.modelData.state === "interrupted" || row.modelData.state === "cancelled" ? nb.ui.c.warn : nb.ui.c.accent
                         }
                     }
-                    Text { text: row.modelData.words; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.px(13) }
+                    Text { text: row.modelData.words; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
                 }
                 HoverHandler { onHoveredChanged: nb.ui.hover(row, hovered) }
                 TapHandler { onTapped: nb.downloadClicked(row.index) }

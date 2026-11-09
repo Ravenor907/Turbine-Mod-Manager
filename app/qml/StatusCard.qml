@@ -52,7 +52,7 @@ Rectangle {
             Text {
                 text: "Turbine"
                 color: ui.c.accentText
-                font.family: ui.bodyFont; font.pixelSize: ui.px(14); font.bold: true
+                font.family: ui.bodyFont; font.pixelSize: ui.fpx(14); font.bold: true
                 anchors.verticalCenter: parent.verticalCenter
             }
             Text {
@@ -61,7 +61,7 @@ Rectangle {
                 elide: Text.ElideRight
                 text: card.status && card.status.game ? "· " + card.status.game : ""
                 color: ui.c.muted
-                font.family: ui.bodyFont; font.pixelSize: ui.px(14)
+                font.family: ui.bodyFont; font.pixelSize: ui.fpx(14)
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -72,7 +72,7 @@ Rectangle {
             elide: Text.ElideRight
             text: card.status && card.status.text ? card.status.text : ""
             color: ui.c.text
-            font.family: ui.bodyFont; font.pixelSize: ui.px(17); font.bold: true
+            font.family: ui.bodyFont; font.pixelSize: ui.fpx(17); font.bold: true
         }
         Text {
             visible: !!card.status && !!card.status.added
@@ -82,7 +82,7 @@ Rectangle {
             elide: Text.ElideRight
             text: card.status && card.status.added ? card.status.added + " is in your mods, turned on" : ""
             color: ui.c.soft
-            font.family: ui.bodyFont; font.pixelSize: ui.px(15)
+            font.family: ui.bodyFont; font.pixelSize: ui.fpx(15)
         }
         // Added: how to get back (Turbine is behind the browser).
         Text {
@@ -91,7 +91,7 @@ Rectangle {
             wrapMode: Text.WordWrap
             text: "Back to Turbine: Steam button, then Turbine"
             color: ui.c.accentText
-            font.family: ui.bodyFont; font.pixelSize: ui.px(15); font.bold: true
+            font.family: ui.bodyFont; font.pixelSize: ui.fpx(15); font.bold: true
         }
         // Progress
         Item {
@@ -109,7 +109,7 @@ Rectangle {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                 text: Math.round(Math.max(0, card.progress) * 100) + "%"
                 color: ui.c.soft
-                font.family: ui.bodyFont; font.pixelSize: ui.px(14)
+                font.family: ui.bodyFont; font.pixelSize: ui.fpx(14)
             }
         }
         // Where to answer, when this card can't take input.
@@ -120,7 +120,7 @@ Rectangle {
             text: card.asking ? "Switch to Turbine to answer (Steam button, then Turbine): A add it, X another game, B not a mod."
                   : "Pick the installer's choices on the Nexus page, or in Turbine."
             color: ui.c.warn
-            font.family: ui.bodyFont; font.pixelSize: ui.px(14)
+            font.family: ui.bodyFont; font.pixelSize: ui.fpx(14)
         }
         // "Add it?" (Desktop Mode panel)
         Row {
@@ -140,7 +140,7 @@ Rectangle {
                 elide: Text.ElideRight
                 text: card.step ? (card.fomod.data.name || "") + (card.step.name ? ": " + card.step.name : "") : ""
                 color: ui.c.soft
-                font.family: ui.bodyFont; font.pixelSize: ui.px(14); font.bold: true
+                font.family: ui.bodyFont; font.pixelSize: ui.fpx(14); font.bold: true
             }
             Repeater {
                 model: card.step ? card.step.groups : []
@@ -155,7 +155,7 @@ Rectangle {
                         elide: Text.ElideRight
                         text: (grp.modelData.name || "Options") + " · " + (grp.modelData.hint || "")
                         color: ui.c.muted
-                        font.family: ui.bodyFont; font.pixelSize: ui.px(13)
+                        font.family: ui.bodyFont; font.pixelSize: ui.fpx(13)
                     }
                     Repeater {
                         model: grp.modelData.options
@@ -173,7 +173,7 @@ Rectangle {
                                 elide: Text.ElideRight
                                 text: (modelData.selected ? "✓ " : "") + modelData.name
                                 color: ui.c.text
-                                font.family: ui.bodyFont; font.pixelSize: ui.px(14); font.bold: modelData.selected
+                                font.family: ui.bodyFont; font.pixelSize: ui.fpx(14); font.bold: modelData.selected
                             }
                             TapHandler { enabled: parent.modelData.canChange; onTapped: card.choose(grp.index, parent.index) }
                         }
@@ -208,7 +208,7 @@ Rectangle {
             anchors.centerIn: parent
             text: b.label
             color: b.strong ? card.ui.c.onAccent : card.ui.c.text
-            font.family: card.ui.bodyFont; font.pixelSize: card.ui.px(14); font.bold: true
+            font.family: card.ui.bodyFont; font.pixelSize: card.ui.fpx(14); font.bold: true
         }
         TapHandler { onTapped: b.clicked() }
     }

@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "name": "Fall Guys",
+  "ids": {
+    "steam": [
+      "1097150"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "antiCheat": {
+    "name": "Easy Anti-Cheat",
+    "level": "refuse",
+    "mode": "refuse",
+    "note": "Online only: the game needs its anti-cheat to play at all."
+  },
+  "notes": [
+    "Steam 1097150. Online only with Easy Anti-Cheat: Turbine adds no mods. Copies on other stores are matched by name."
+  ]
+}
