@@ -445,13 +445,42 @@ pub fn launch_option(data: &Path) -> String {
     format!("if [ -x \"{p}\" ]; then \"{p}\" %command%; else %command%; fi")
 }
 
-/// Do the Launch Options as set in Steam run the helper with Steam's command after it?
+/// Do the Launch Options as set in Steam run the helper with Steam's command after it, in the line that falls back
+/// to Steam's own command without the helper? The older line (the helper alone, before 0.58's release) is outdated:
+/// it counts as not set, so Play shows the one-time step again with the line that falls back.
 pub fn launch_option_ok(set: &str, data: &Path) -> bool {
     let p = helper_path(data).to_string_lossy().to_string();
-    match set.find(&p) {
-        Some(i) => set[i + p.len()..].contains("%command%"),
-        None => false,
+    let Some(i) = set.find(&p) else { return false };
+    let compact: String = set.split_whitespace().collect::<Vec<_>>().join(" ");
+    set[i + p.len()..].contains("%command%") && compact.contains("-x") && compact.contains("else %command%") && compact.trim_end().ends_with("fi")
+}
+
+/// Undo the launch options change: until the player sets the line again (the Launch Options text then differs from
+/// what it was at Undo), the helper starts nothing for the game.
+pub fn undone_file(data: &Path, app_id: &str) -> PathBuf {
+    launch_dir(data).join(format!("{app_id}.undone"))
+}
+
+/// Marks the game undone, with the Launch Options as they were then.
+pub fn mark_undone(data: &Path, app_id: &str, set_now: &str) -> io::Result<()> {
+    check_app_id(app_id)?;
+    fs::create_dir_all(launch_dir(data))?;
+    remove_if(&once_file(data, app_id))?;
+    remove_if(&armed_file(data, app_id))?;
+    fs::write(undone_file(data, app_id), set_now)
+}
+
+/// Is the game still undone? Not once the Launch Options were set again (changed since Undo, and set right); that
+/// clears the mark. `again`: the player chose "Use the line again" in Turbine.
+pub fn still_undone(data: &Path, app_id: &str, set_now: Option<&str>, again: bool) -> bool {
+    let f = undone_file(data, app_id);
+    let Ok(then) = fs::read_to_string(&f) else { return false };
+    let set_again = set_now.is_some_and(|s| s != then && launch_option_ok(s, data));
+    if again || set_again {
+        let _ = fs::remove_file(&f);
+        return false;
     }
+    true
 }
 
 /// Do the Launch Options mention Turbine's helper at all (the line to undo)?
@@ -461,7 +490,8 @@ pub fn launch_option_uses_helper(set: &str, data: &Path) -> bool {
 
 /// Keeps the player's Launch Options from before Turbine's line, the first time they are seen without it.
 pub fn remember_original(data: &Path, app_id: &str, set: &str) -> io::Result<()> {
-    if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() {
+    // The first one seen is the true original: a later empty or edited text never replaces it.
+    if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() || original_file(data, app_id).exists() {
         return Ok(());
     }
     fs::create_dir_all(launch_dir(data))?;
@@ -515,6 +545,10 @@ esac
   say "An old Play without mods (over ten minutes) was left: ignored"
 fi
 flag="$here/$app.me3"
+if [ -f "$here/$app.me3.once" ] && [ -z "$(find "$here/$app.me3.once" -mmin -10 2> /dev/null)" ]; then
+  rm -f "$here/$app.me3.once"
+  say "An old this-Play-only file (over ten minutes) was left: ignored"
+fi
 if [ -f "$here/$app.me3.once" ]; then
   flag="$here/$app.me3.once.run"
   mv -f "$here/$app.me3.once" "$flag"
@@ -660,6 +694,14 @@ pub fn helper_log_since(data: &Path, since_len: u64) -> Vec<String> {
 /// turned the anti-cheat off for them, nothing holds them back, the last apply worked, me3 is there); otherwise why
 /// not, and the helper is cleared. Every way of turning mods off ends here.
 pub fn helper_state(mods_on: usize, consent: bool, held: bool, apply_failed: bool, me3_ok: bool) -> Result<(), &'static str> {
+    helper_state_undone(mods_on, consent, held, apply_failed, me3_ok, false)
+}
+
+/// `helper_state`, also off after Undo the launch options change until the line is set again.
+pub fn helper_state_undone(mods_on: usize, consent: bool, held: bool, apply_failed: bool, me3_ok: bool, undone: bool) -> Result<(), &'static str> {
+    if undone {
+        return Err("the launch options change was undone");
+    }
     if mods_on == 0 {
         Err("no mods on")
     } else if !consent {

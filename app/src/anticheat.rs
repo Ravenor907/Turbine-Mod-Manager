@@ -202,7 +202,11 @@ pub(crate) fn set_doubt(slot: &Slot, doubt: bool) {
 pub(crate) fn not_armed_why(w: &Worker, slot: &Slot) -> Option<&'static str> {
     let on = slot.store.mods().iter().filter(|m| m.enabled).count();
     let consent = !special(slot).is_some_and(ac::needs_ask) || turned_off(slot);
-    ac::helper_state(on, consent, hold_file(slot.store.root()).exists(), doubt_file(slot).exists(), ac::me3_ready(&ac::me3_dir(&w.data_home)).is_ok()).err()
+    // Undo the launch options change sticks until the line is set again (read only when there is a mark).
+    let id = &slot.game.store_id;
+    let undone = ac::undone_file(&w.data_home, id).exists()
+        && ac::still_undone(&w.data_home, id, turbine_engine::steam::launch_options(&turbine_engine::home_dir(), id).as_deref(), false);
+    ac::helper_state_undone(on, consent, hold_file(slot.store.root()).exists(), doubt_file(slot).exists(), ac::me3_ready(&ac::me3_dir(&w.data_home)).is_ok(), undone).err()
 }
 
 /// Play with mods (or Seamless Co-op, for this Play only) through Steam. Answers Ok(true) when Steam can start it
@@ -220,7 +224,12 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
         Some(s) => format!("\"{s}\"{}", if ok { " (they run Turbine's helper)" } else { " (they don't run Turbine's helper)" }),
     };
     crate::log::line("launch", &format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name));
-    if !ok {
+    // Undone and not set again: the one-time step, with "Use the line again".
+    let undone = ac::undone_file(data, &slot.game.store_id).exists() && ac::still_undone(data, &slot.game.store_id, set.as_deref(), false);
+    if !ok || undone {
+        if undone {
+            crate::log::line("launch", &format!("{}: the launch options change was undone; not started with mods until it is set again", slot.game.name));
+        }
         if let Some(s) = &set {
             if let Err(e) = ac::remember_original(data, &slot.game.store_id, s) {
                 crate::log::line("launch", &format!("{}: couldn't keep the Launch Options as they were: {e}", slot.game.name));
@@ -397,6 +406,14 @@ impl qobject::Turbine {
         );
     }
 
+    /// "Use the line again" after Undo: the helper may start me3 again (Play then asks as usual).
+    pub fn launch_redo(self: Pin<&mut Self>, game: &QString) {
+        let Some(g) = self.find(&game.to_string()) else { return };
+        let data = crate::backend::data_home();
+        ac::still_undone(&data, &g.store_id, None, true);
+        crate::log::line("launch", &format!("{}: the launch options line is used again", g.name));
+    }
+
     /// The me3 games whose Steam Launch Options run Turbine's helper, and what to paste back.
     pub fn launch_undo_json(&self, current: bool) -> QString {
         let data = crate::backend::data_home();
@@ -431,7 +448,11 @@ impl qobject::Turbine {
     pub fn launch_undo(self: Pin<&mut Self>, game: &QString) {
         let Some(g) = self.find(&game.to_string()) else { return };
         let data = crate::backend::data_home();
-        let _ = ac::arm(&data, &g.store_id, None);
+        let set = turbine_engine::steam::launch_options(&turbine_engine::home_dir(), &g.store_id).unwrap_or_default();
+        if let Err(e) = ac::mark_undone(&data, &g.store_id, &set) {
+            crate::log::line("launch", &format!("{}: couldn't mark the launch options change undone: {e}", g.name));
+            let _ = ac::arm(&data, &g.store_id, None);
+        }
         let _ = ac::clear_plain(&data, &g.store_id);
         crate::log::line("launch", &format!("{}: Undo the launch options change: the helper starts nothing for it now; the player pastes back \"{}\"", g.name, ac::original_options(&data, &g.store_id)));
     }

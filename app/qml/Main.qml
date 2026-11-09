@@ -754,12 +754,19 @@ Window {
     function openLaunchSetup(o) {
         launchSetupData = o
         note("action", "Launch Options step for " + o.name + ": needs \"" + o.option + "\", set \"" + o.set + "\"")
+        if (o.undone === true) {
+            openMsg({ title: "Use the launch options line again?", text: "You undid the launch options change for " + o.name + ", so Turbine doesn't start it with mods through Steam. Use the line again to play with mods, or play without them.",
+                      buttons: [{ key: "a", label: "Use it again", run: () => { Turbine.launchRedo(o.game); note("action", "Launch Options: used again"); if (o.coop === true) startCoop(); else startPlay() } },
+                                { key: "x", label: "Play without mods", run: () => Turbine.playOriginal() },
+                                { key: "b", label: "Not now", run: () => {} }] })
+            return
+        }
         const steps = ["A copies the text above.",
                        "In Steam: " + o.name + ", the gear, Properties, General, Launch Options.",
-                       o.set !== "" ? "Replace what is there now (" + o.set + ") with it: paste, or type it." : "Paste it there, or type it.",
+                       o.outdated === true ? "Replace Turbine's older line there with this one (it starts the game normally if Turbine is ever removed)." : o.set !== "" ? "Replace what is there now (" + o.set + ") with it: paste, or type it." : "Paste it there, or type it.",
                        "Close Properties, come back to Turbine and press Play.",
                        "Steam's own Play button then starts " + o.name + " with your mods too. With every mod off it starts normally."]
-        openMsg({ title: "One step before " + o.name + " plays with mods",
+        openMsg({ title: o.outdated === true ? "Update " + o.name + "'s launch options line" : "One step before " + o.name + " plays with mods",
                   text: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs this in the game's Launch Options, once:\n\n" + o.option,
                   steps: steps,
                   buttons: [

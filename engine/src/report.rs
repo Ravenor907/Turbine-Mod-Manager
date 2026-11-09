@@ -51,9 +51,10 @@ pub fn redact(line: &str) -> String {
                 continue;
             }
         } else if secret_word(part) && !part.eq_ignore_ascii_case("key") {
+            // "AdminPass hunter2 to hunter3": the rest of the line could all be the secret.
             out.push(part.to_string());
-            hide_next = true;
-            continue;
+            out.push("(hidden)".into());
+            return out.join(" ");
         }
         if long_secret(part) {
             out.push("(hidden)".into());
@@ -117,14 +118,14 @@ mod tests {
         assert_eq!(redact("Cookie: sid=1"), "Cookie: (hidden)");
         assert_eq!(redact("Authorization: Bearer abc"), "Authorization: (hidden) (hidden)");
         assert_eq!(redact("token aGVsbG8gd29ybGQgaGVsbG8gd29ybGQ1"), "token (hidden)");
-        assert_eq!(redact("cooppassword = hunter2"), "cooppassword = (hidden)");
+        assert_eq!(redact("cooppassword = hunter2"), "cooppassword (hidden)");
         assert!(redact("sha 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08").contains("(hidden)"));
         // Ordinary lines stay as they are, paths too.
         let l = "2026-11-09 03:58:28.334 launch  ELDEN RING through me3 0.13.0: /home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/me3";
         assert_eq!(redact(l), l);
         assert_eq!(redact("Interface size: 100%"), "Interface size: 100%");
         assert_eq!(redact("Monkey: 3"), "Monkey: (hidden)", "on any doubt, hidden");
-        assert!(!redact("AdminPass hunter2").contains("hunter2"));
+        assert_eq!(redact("AdminPass hunter2 to hunter3"), "AdminPass (hidden)");
         assert_eq!(redact("rcon_pass=abc"), "rcon_pass=(hidden)");
         assert_eq!(redact("Press key a"), "Press key a");
     }

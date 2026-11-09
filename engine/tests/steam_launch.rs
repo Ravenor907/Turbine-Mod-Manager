@@ -238,3 +238,47 @@ fn every_off_path_clears_the_helper() {
     assert!(!anticheat::plain_file(&data, "1245620").exists());
     let _ = fs::remove_dir_all(&d);
 }
+
+/// 0.58 second break test N1: the older line (the helper alone) is outdated, so Play asks again for the line that
+/// falls back to Steam's own command.
+#[test]
+fn the_older_line_is_outdated() {
+    let data = Path::new("/home/deck/.var/app/x/data");
+    let h = "/home/deck/.var/app/x/data/steam-launch/turbine-launch.sh";
+    assert!(!anticheat::launch_option_ok(&format!("{h} %command%"), data), "the ae53371 line");
+    assert!(!anticheat::launch_option_ok(&format!("\"{h}\" %command%"), data));
+    assert!(anticheat::launch_option_ok(&anticheat::launch_option(data), data));
+    // Steam may keep it with other spacing.
+    let spaced = anticheat::launch_option(data).replace("; ", ";  ");
+    assert!(anticheat::launch_option_ok(&spaced, data));
+    // The older line still counts as Turbine's (Undo shows it), and is never kept as the player's original.
+    assert!(anticheat::launch_option_uses_helper(&format!("{h} %command%"), data));
+}
+
+/// 0.58 second break test N2: Undo sticks. Nothing arms again (Steam's Play stays normal) until the line is set
+/// again or the player says to use it again; the first original is never replaced.
+#[test]
+fn undo_sticks_until_the_line_is_set_again() {
+    let d = tmp("undo");
+    let data = d.join("data");
+    let line = anticheat::launch_option(&data);
+    anticheat::arm(&data, "1245620", Some(&["/x/me3".to_string(), "-p".into(), "solo".into()])).unwrap();
+    anticheat::mark_undone(&data, "1245620", &line).unwrap();
+    assert!(!anticheat::armed_file(&data, "1245620").exists());
+    // Opening the game, a toggle: still undone while the Launch Options are as they were at Undo.
+    assert!(anticheat::still_undone(&data, "1245620", Some(&line), false));
+    assert!(anticheat::helper_state_undone(2, true, false, false, true, true).is_err());
+    assert!(anticheat::still_undone(&data, "1245620", Some(""), false), "the old text pasted back: still undone");
+    assert!(anticheat::still_undone(&data, "1245620", None, false));
+    // The line set again (changed since Undo, and right): no longer undone.
+    assert!(!anticheat::still_undone(&data, "1245620", Some(&format!("{line} ")), false));
+    assert!(!anticheat::undone_file(&data, "1245620").exists());
+    // Or the player says so in Turbine.
+    anticheat::mark_undone(&data, "1245620", &line).unwrap();
+    assert!(!anticheat::still_undone(&data, "1245620", Some(&line), true));
+    // The first original is kept.
+    anticheat::remember_original(&data, "1245620", "PROTON_LOG=1 %command%").unwrap();
+    anticheat::remember_original(&data, "1245620", "").unwrap();
+    assert_eq!(anticheat::original_options(&data, "1245620"), "PROTON_LOG=1 %command%");
+    let _ = fs::remove_dir_all(&d);
+}

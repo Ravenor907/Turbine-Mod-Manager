@@ -838,6 +838,11 @@ pub mod qobject {
         #[cxx_name = "launchUndoJson"]
         fn launch_undo_json(self: &Self, current: bool) -> QString;
 
+        /// 0.58: after Undo, "Use the line again": the helper may start me3 for this game again.
+        #[qinvokable]
+        #[cxx_name = "launchRedo"]
+        fn launch_redo(self: Pin<&mut Self>, game: &QString);
+
         /// 0.58: Undo the launch options change: the helper stops starting me3 for this game (logged).
         #[qinvokable]
         #[cxx_name = "launchUndo"]
@@ -2544,13 +2549,15 @@ impl qobject::Turbine {
                                         let (set, need, _) = crate::anticheat::launch_option_state(s, &wr.data_home);
                                         crate::log::line("launch", &format!("{}: not started; the one-time Launch Options step comes first", game.name));
                                         let json = format!(
-                                            "{{\"game\":{},\"name\":{},\"option\":{},\"set\":{},\"listed\":{},\"coop\":{}}}",
+                                            "{{\"game\":{},\"name\":{},\"option\":{},\"set\":{},\"listed\":{},\"coop\":{},\"undone\":{},\"outdated\":{}}}",
                                             quote(&game.id()),
                                             quote(&crate::anticheat::title(s)),
                                             quote(&need),
                                             quote(set.as_deref().unwrap_or("")),
                                             set.is_some(),
-                                            coop == turbine_engine::anticheat::Coop::Seamless
+                                            coop == turbine_engine::anticheat::Coop::Seamless,
+                                            turbine_engine::anticheat::undone_file(&wr.data_home, &s.game.store_id).exists(),
+                                            set.as_deref().is_some_and(|x| turbine_engine::anticheat::launch_option_uses_helper(x, &wr.data_home))
                                         );
                                         let id = game.id();
                                         w.post(move |t| t.launch_setup(QString::from(id.as_str()), QString::from(json.as_str())));
