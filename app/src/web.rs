@@ -77,9 +77,10 @@ pub fn set_signed_in(on: bool) {
     }
 }
 
-/// The Downloads folder Turbine's browser saves into.
+/// The Downloads folder Turbine's browser saves into: the desktop's, the same one the watcher and the player's own
+/// browser use (0.61, integration I14).
 fn downloads_dir() -> PathBuf {
-    turbine_engine::home_dir().join("Downloads")
+    turbine_engine::watch::downloads_folder(&turbine_engine::home_dir())
 }
 
 /// Game Mods/<Game> for a game.

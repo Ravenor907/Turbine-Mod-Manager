@@ -317,14 +317,36 @@ pub fn parse_user_dirs(text: &str, home: &Path) -> Option<PathBuf> {
 /// The folders to watch: ~/Downloads, and the desktop's Downloads folder when it is somewhere else.
 pub fn default_folders(home: &Path) -> Vec<PathBuf> {
     let mut out = vec![home.join("Downloads")];
-    if let Ok(text) = fs::read_to_string(home.join(".config/user-dirs.dirs")) {
-        if let Some(p) = parse_user_dirs(&text, home) {
-            if !out.contains(&p) {
-                out.push(p);
-            }
-        }
+    let p = downloads_folder(home);
+    if !out.contains(&p) {
+        out.push(p);
     }
     out
+}
+
+/// 0.61 (integration I14): the desktop's Downloads folder as the sandbox sees it, for the watcher and Turbine's own
+/// browser alike: $XDG_DOWNLOAD_DIR when set, else user-dirs.dirs in $XDG_CONFIG_HOME (where Flatpak puts the
+/// host's copy) or ~/.config, else ~/Downloads.
+pub fn downloads_folder(home: &Path) -> PathBuf {
+    let env = std::env::var("XDG_DOWNLOAD_DIR").ok();
+    let mut configs: Vec<PathBuf> = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).into_iter().collect();
+    configs.push(home.join(".config"));
+    downloads_folder_from(home, env.as_deref(), &configs)
+}
+
+/// The same, from the given environment value and config folders (first one with a Downloads line wins).
+pub fn downloads_folder_from(home: &Path, env: Option<&str>, configs: &[PathBuf]) -> PathBuf {
+    if let Some(p) = env.map(str::trim).filter(|p| p.starts_with('/')).map(PathBuf::from) {
+        if p != home {
+            return p;
+        }
+    }
+    for dir in configs.iter().filter(|d| d.is_absolute()) {
+        if let Some(p) = fs::read_to_string(dir.join("user-dirs.dirs")).ok().and_then(|t| parse_user_dirs(&t, home)) {
+            return p;
+        }
+    }
+    home.join("Downloads")
 }
 
 // ------------------------------------------------------------------------------------------------ always-on catching

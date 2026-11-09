@@ -185,6 +185,22 @@ fn downloads_folder_from_user_dirs() {
     assert_eq!(default_folders(&t.0), vec![t.path("Downloads"), t.path("Telechargements")]);
 }
 
+#[test]
+fn one_downloads_folder_as_the_sandbox_sees_it() {
+    use turbine_engine::watch::downloads_folder_from;
+    let t = TempDir::new("dlfolder");
+    // Flatpak's copy of the host's file sits in the app's own config folder.
+    t.write("app-config/user-dirs.dirs", b"XDG_DOWNLOAD_DIR=\"$HOME/Telechargements\"\n");
+    t.write(".config/user-dirs.dirs", b"XDG_DOWNLOAD_DIR=\"$HOME/Other\"\n");
+    let configs = [t.path("app-config"), t.path(".config")];
+    assert_eq!(downloads_folder_from(&t.0, None, &configs), t.path("Telechargements"));
+    assert_eq!(downloads_folder_from(&t.0, Some("/mnt/sd/dl"), &configs), PathBuf::from("/mnt/sd/dl"));
+    // A relative or home-only value is ignored.
+    assert_eq!(downloads_folder_from(&t.0, Some("dl"), &configs), t.path("Telechargements"));
+    assert_eq!(downloads_folder_from(&t.0, None, &[t.path(".config")]), t.path("Other"));
+    assert_eq!(downloads_folder_from(&t.0, None, &[t.path("none")]), t.path("Downloads"));
+}
+
 // ------------------------------------------------------------------------------------------------ always-on catching
 
 fn ready(events: &[Event]) -> Vec<String> {
