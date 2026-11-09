@@ -15,6 +15,19 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.56" date="2026-11-08" type="development">
+      <description>
+        <p>Mods for any game, and a roomier, cleaner Turbine:</p>
+        <ul>
+          <li>Basic support for every Steam and Heroic game, asking where files go when it isn't sure</li>
+          <li>The header slides away while you scroll; a details panel for the selected mod</li>
+          <li>Get mods shows 4 cards per row with a short summary</li>
+          <li>The quick wheel is a pie: point at a wedge to pick it</li>
+          <li>Clean mod names, Rename, and Open its Nexus page</li>
+          <li>Save backups before Play, Why won't it start, Check game folder, press or hold, reduce motion</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.55" date="2026-11-08" type="development">
       <description>
         <p>Nexus Mods inside Turbine:</p>
