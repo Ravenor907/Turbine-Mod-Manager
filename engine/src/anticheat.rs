@@ -538,10 +538,11 @@ pub fn launch_option_uses_helper(set: &str, data: &Path) -> bool {
     set.contains(&*helper_path(data).to_string_lossy())
 }
 
-/// Keeps the player's Launch Options from before Turbine's line, the first time they are seen without it.
+/// Keeps the player's Launch Options from before Turbine's line: whatever they are while they don't hold Turbine's
+/// line is what Undo puts back (0.6, break M4: the newest, so options the player changed after an Undo aren't lost
+/// to older ones).
 pub fn remember_original(data: &Path, app_id: &str, set: &str) -> io::Result<()> {
-    // The first one seen is the true original: a later empty or edited text never replaces it.
-    if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() || original_file(data, app_id).exists() {
+    if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() {
         return Ok(());
     }
     fs::create_dir_all(launch_dir(data))?;

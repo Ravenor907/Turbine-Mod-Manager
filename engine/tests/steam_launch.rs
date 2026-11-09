@@ -219,7 +219,9 @@ fn accepted_lines_run_in_the_shell() {
     ] {
         assert_eq!(anticheat::launch_option_ok(&form, &c.data), ok, "{form}");
         let _ = fs::remove_file(&c.trace);
-        let st = Command::new("sh").arg("-c").arg(form.replace("%command%", &cmd.join(" "))).env("SteamAppId", APP).status().unwrap();
+        // The broken form is broken on purpose: its shell error stays out of the test output (break L10).
+        let err = if ok { std::process::Stdio::inherit() } else { std::process::Stdio::null() };
+        let st = Command::new("sh").arg("-c").arg(form.replace("%command%", &cmd.join(" "))).env("SteamAppId", APP).stderr(err).status().unwrap();
         let t = fs::read_to_string(&c.trace).unwrap_or_default();
         assert_eq!(st.success() && t.lines().any(|l| l == "game" || l.starts_with("game|")), ok, "{form}: {t}");
     }
@@ -620,9 +622,13 @@ fn undo_sticks_until_the_line_is_set_again() {
     // Or the player says so in Turbine.
     anticheat::mark_undone(&data, "1245620", &line).unwrap();
     assert!(!anticheat::still_undone(&data, "1245620", Some(&line), true));
-    // The first original is kept.
-    anticheat::remember_original(&data, "1245620", "PROTON_LOG=1 %command%").unwrap();
+    // The newest options without Turbine's line are the ones Undo puts back (break M4: "A", Undo, the player sets
+    // "B", Turbine's line again, Undo: "B" comes back), and Turbine's own line never counts as the player's.
+    anticheat::remember_original(&data, "1245620", "A %command%").unwrap();
+    anticheat::remember_original(&data, "1245620", "B %command%").unwrap();
+    anticheat::remember_original(&data, "1245620", &anticheat::launch_option(&data)).unwrap();
+    assert_eq!(anticheat::original_options(&data, "1245620"), "B %command%");
     anticheat::remember_original(&data, "1245620", "").unwrap();
-    assert_eq!(anticheat::original_options(&data, "1245620"), "PROTON_LOG=1 %command%");
+    assert_eq!(anticheat::original_options(&data, "1245620"), "");
     let _ = fs::remove_dir_all(&d);
 }
