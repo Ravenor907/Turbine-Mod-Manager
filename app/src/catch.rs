@@ -205,6 +205,8 @@ pub struct Catching {
     pub deferred: Vec<(Arrival, std::time::Instant)>,
     /// The status text last written to the log (each new one is logged once).
     pub said: String,
+    /// 0.6 (integration I4): the browser saved a download outside Downloads, and the player was told (once a run).
+    pub told_outside: bool,
 }
 
 fn status_text(active: bool, text: &str, level: &str, progress: Option<f64>, game: &str, added: &str, done: bool, ask: &str) -> String {
@@ -550,11 +552,15 @@ impl qobject::Turbine {
             if let Some(g) = game {
                 let d = watch::decide_all(Some(&g.id()), None, None, None, None, false);
                 crate::log::line("catch", &format!("{name}: {}, because {}; adding it", g.name, d.basis.words()));
-                // The mod ID and version from Nexus's file name pattern, when it has one.
+                // 0.6 (integration I2): the Nexus page the helper reported for this file comes first (Nexus's newer file
+                // names carry no ids); then the mod ID and version from the older file name pattern, when it has one.
                 let domain = nexus::domain_for(g.store, &g.store_id).unwrap_or("").to_string();
-                let hint = turbine_engine::store::nexus_ids_from_name(&name)
-                    .filter(|_| !domain.is_empty())
-                    .map(|(m, v)| (bridge::NexusRef { domain: domain.clone(), mod_id: m, file_id: None }, Some(v)));
+                let reported = self.rust().catching.helper_games.iter().rev().find(|(l, _, _)| *l == name).and_then(|(_, _, r)| r.clone());
+                let hint = reported.map(|r| (r, None)).or_else(|| {
+                    turbine_engine::store::nexus_ids_from_name(&name)
+                        .filter(|_| !domain.is_empty())
+                        .map(|(m, v)| (bridge::NexusRef { domain: domain.clone(), mod_id: m, file_id: None }, Some(v)))
+                });
                 self.as_mut().catch_add(g, a.path, hint, None);
                 self.catch_save(true);
                 return;
@@ -1121,6 +1127,15 @@ impl qobject::Turbine {
                         self.as_mut().fallback_to_watcher(&label, None);
                         if d.is_some() && !held && !e.contains("isn't in Downloads") {
                             self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them from the game menu, Add from Downloads.", "warn", None, "", "", true, "");
+                        } else if d.is_some() && !held && !self.rust().catching.told_outside {
+                            // Never silent (inapp-browser.md): once a run, where it went and the one setting that fixes it.
+                            self.as_mut().rust_mut().catching.told_outside = true;
+                            let folder = Path::new(raw).parent().map(|p| p.display().to_string()).unwrap_or_default();
+                            crate::log::line("bridge", &format!("{label} was saved in {folder}, outside Downloads: told the player"));
+                            self.as_mut().set_status(
+                                &format!("Chrome saved {label} outside Downloads, where Turbine can't read it. In Chrome: Settings, Downloads, Location: Downloads."),
+                                "warn", None, "", "", true, "",
+                            );
                         }
                         return;
                     }

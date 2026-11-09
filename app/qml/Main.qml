@@ -1526,7 +1526,8 @@ Window {
     Connections {
         target: Turbine
         function onGamesChanged() {
-            app.allGames = app.parse(Turbine.games, [])
+            // 0.6 (integration I11): a store's name with an em or en dash shows with a colon ("Witcher 3: Remastered").
+            app.allGames = app.parse(Turbine.games, []).map(g => Object.assign({}, g, { name: String(g.name || "").replace(/\s*[\u2014\u2013]\s*/g, ": ") }))
             app.orderGames(shot.arg("game") || seen.lastGame)
         }
         function onModsJsonChanged() {

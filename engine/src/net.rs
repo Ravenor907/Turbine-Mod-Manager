@@ -48,6 +48,9 @@ pub enum NetError {
     Http(u16),
     /// The player stopped it.
     Cancelled,
+    /// 0.6 (integration I6): the site isn't answering or a protection page stood in for the answer (5xx, or a 401/403
+    /// that is a web page with no answer from the site's API). Never the key's or the account's fault.
+    Down,
     /// Anything else (curl missing, disk full, broken connection), in words.
     Failed(String),
 }
@@ -67,6 +70,7 @@ impl std::fmt::Display for NetError {
             NetError::Mismatch(why) => write!(f, "The download didn't match what the site published ({why}), so it was deleted."),
             NetError::Http(c) => write!(f, "The server answered with an error ({c}). Try again later."),
             NetError::Cancelled => write!(f, "The download was stopped."),
+            NetError::Down => write!(f, "The site isn't answering right now. Try again in a few minutes."),
             NetError::Failed(why) => write!(f, "{why}"),
         }
     }
@@ -294,6 +298,20 @@ pub fn parse_headers(text: &str) -> (u16, Vec<(String, String)>) {
     (status, headers)
 }
 
+/// 0.6 (integration I6): is this refusal really the site being down or blocked, not the key? A 5xx, or a 401/403 whose
+/// answer is a web page (a protection page: its cf-mitigated or cf-ray header, or HTML) instead of the API's JSON.
+pub fn site_down(e: &NetError, headers: &[(String, String)], body_start: &[u8]) -> bool {
+    let h = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.to_ascii_lowercase());
+    let html = h("content-type").is_some_and(|t| t.contains("text/html"))
+        || String::from_utf8_lossy(body_start).trim_start().to_ascii_lowercase().starts_with("<!doctype html")
+        || String::from_utf8_lossy(body_start).trim_start().to_ascii_lowercase().starts_with("<html");
+    match e {
+        NetError::Http(s) if (500..=599).contains(s) => true,
+        NetError::Denied(_) => h("cf-mitigated").is_some() || (html && (h("cf-ray").is_some() || h("server").is_some_and(|v| v.contains("cloudflare")))),
+        _ => false,
+    }
+}
+
 /// Turns curl's exit code and the HTTP status into a result (pure).
 pub fn classify(exit: i32, status: u16, max_bytes: u64) -> Result<(), NetError> {
     match exit {
@@ -453,8 +471,9 @@ impl Client {
         let status = if status == 0 { hstatus } else { status };
         cleanup(false);
         if let Err(e) = classify(exit, status, req.max_bytes) {
+            let page = fs::read(&out).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
             let _ = fs::remove_file(&out);
-            return Err(e);
+            return Err(if site_down(&e, &headers, &page) { NetError::Down } else { e });
         }
         if !effective_url.is_empty() && !allowed_url(&effective_url) {
             let _ = fs::remove_file(&out);

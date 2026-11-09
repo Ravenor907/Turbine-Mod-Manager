@@ -429,3 +429,22 @@ fn heroic_cover_art_comes_from_its_image_cache() {
     assert_eq!(art.len(), 1);
     assert_eq!(art[0].0, Store::Epic);
 }
+
+#[test]
+fn a_blocked_or_down_site_is_never_the_keys_fault() {
+    use turbine_engine::net::{site_down, NetError};
+    let h = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+    // A protection page standing in for the API's answer.
+    assert!(site_down(&NetError::Denied(403), &h(&[("cf-mitigated", "challenge")]), b""));
+    assert!(site_down(&NetError::Denied(403), &h(&[("content-type", "text/html; charset=UTF-8"), ("cf-ray", "8f1")]), b"<!DOCTYPE html>"));
+    assert!(site_down(&NetError::Denied(403), &h(&[("server", "cloudflare")]), b"  <html><head>"));
+    // The site down.
+    assert!(site_down(&NetError::Http(503), &[], b""));
+    assert!(site_down(&NetError::Http(502), &h(&[("content-type", "text/html")]), b""));
+    // The API's own refusal (JSON) stays the key's or the account's.
+    assert!(!site_down(&NetError::Denied(401), &h(&[("content-type", "application/json"), ("cf-ray", "8f1")]), br#"{"message":"Please provide a valid API Key"}"#));
+    assert!(!site_down(&NetError::Denied(403), &[], br#"{"message":"forbidden"}"#));
+    assert!(!site_down(&NetError::NotFound, &h(&[("cf-mitigated", "challenge")]), b""));
+    assert!(!site_down(&NetError::Http(429), &[], b""));
+    assert_eq!(NetError::Down.to_string(), "The site isn't answering right now. Try again in a few minutes.");
+}

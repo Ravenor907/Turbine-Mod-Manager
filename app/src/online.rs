@@ -1264,7 +1264,15 @@ impl Net {
             let msg = String::from_utf8_lossy(&out.stderr);
             let line = msg.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it stopped with an error").trim().to_string();
             crate::log::line("update", &format!("Install failed: {msg}"));
-            return Err(format!("The update couldn't be installed ({line})."));
+            // 0.6 (integration I13): flatpak's own words only in the log; the player gets what to do.
+            let low = msg.to_ascii_lowercase();
+            if ["summary", "remote", "could not resolve", "unable to connect", "network"].iter().any(|w| low.contains(w)) {
+                return Err("Turbine's update needs the internet to fetch a part from Flathub. Connect and try again.".into());
+            }
+            if low.contains("no space") {
+                return Err("There isn't enough free space for the update. Free some space, then try again.".into());
+            }
+            return Err(format!("The update couldn't be installed ({line}). The details are in the activity log."));
         }
         crate::log::line("update", &format!("Installed Turbine {}", release.version));
         Ok(())
