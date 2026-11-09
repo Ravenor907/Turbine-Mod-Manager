@@ -4545,7 +4545,8 @@ Window {
                     pad("b")
                 })
                 steps.push(() => {
-                    const ok = cs[2]() && m.a !== "" && m.bLabel !== ""
+                    // A view with nothing to choose (the activity log only reads) has no A; every other one does.
+                    const ok = cs[2]() && (m.a !== "" || cs[0] === "Activity log") && m.bLabel !== ""
                     m.n++
                     if (!ok) m.bad++
                     check("A and B, " + cs[0] + ": A " + (m.a || "nothing") + ", B " + (m.bLabel || "nothing") + " from " + m.at + " to " + where() + (ok ? "" : "  PROBLEM"))
@@ -4623,7 +4624,8 @@ Window {
         // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
         else if (name === "heldcheck") script = [
             () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length; Turbine.quickMods(game.id, false) },
-            () => { if (heldOff.length < m.n) return false; modIndex = 0
+            () => { if (heldOff.length < m.n) { check("Held wait: " + heldOff.length + " held, " + mods.filter(x => x.enabled).length + " of " + mods.length + " on"); return false }
+                    modIndex = 0
                     check("Held note: row 1 " + (listItems[0] ? listItems[0].kind : "none") + " | " + heldWords + " | legend A " + (legendHints[0] ? legendHints[0][1] : "")) },
             () => { pad("a") },
             () => { if (heldOff.length > 0 || mods.some(x => !x.enabled)) return false
