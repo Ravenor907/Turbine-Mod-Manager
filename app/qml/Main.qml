@@ -124,7 +124,7 @@ Window {
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
-                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why"].indexOf(page) >= 0 || scripted
+                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
         readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
@@ -272,7 +272,7 @@ Window {
             else if (shot.page === "opening") { app.getArea = "fallback"; app.getAct("a") }
             // Hold Start: Play options; R3 Find with "glow" typed; Select several with one mod ticked.
             else if (shot.page === "playoptions") { app.press("start"); playOptionsShot.start() }
-            else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("y"); askView.open("Find a mod", "", "glow", "", 60, false, "Show them"); askView.accept() }
+            else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("y"); app.act("y"); askView.open("Find a mod", "", "glow", "", 60, false, "Done"); askView.accept(); app.act("start") }
             else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.startSelect(app.mods[0]); app.act("down") }
             // 0.54: a mod's file page opened on a free account: the status says to press Slow download.
             else if (shot.page === "slowhint") app.openNexus("https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1")
@@ -288,7 +288,10 @@ Window {
                 app.chainQueue = [{ name: "Community Patch", url: "https://www.nexusmods.com/witcher3/mods/3652?tab=files" }]
                 app.showChain("Better Torches")
             }
-            else if (shot.page === "listbar") { app.tab = 0; app.zone = "main"; app.listShow = "on"; app.modIndex = -1; app.listBarIndex = 1 }
+            // 0.57: My mods' Y pop-up (Find, Show, Sort, Select several), with Show "On" chosen.
+            else if (shot.page === "listbar") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.listShow = "on"; findPopShot.start() }
+            // 0.57: Get mods' Y pop-up and Get mods scrolled down to full screen, once the cards are in.
+            else if (shot.page === "findpop" || shot.page === "fullscroll") { app.zone = "main"; app.tab = 1; findPopShot.start() }
             // 0.52: A on Before you play runs the highlighted button; the mod and game menus offer the missing loader.
             else if (shot.page === "checkfocus") { app.startPlay(); checkFocusShot.start() }
             else if (shot.page === "menuskse") {
@@ -312,16 +315,16 @@ Window {
             else if (shot.page === "overwriteskip") { app.note("shot", "Overwrite sheet open: " + (app.sheet === "msg")); app.act("a"); Turbine.applyNow() }
             else if (shot.page === "nexuspick") app.openNexusPick()
             else if (shot.page === "why") app.openWhy()
-            // 0.56: a mod renamed, then the list scrolled down a row (the header slides away; the row stays in view).
+            // 0.56: a mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
             else if (shot.page === "tucked" && app.mods.length > 1) {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0
                 app.renameMod(app.mods[0], "Lanterns of the Road")
                 app.modIndex = 1
-                // Two mods fit on one screen: Down doesn't tuck the header. The picture shows it tucked anyway.
-                app.note("shot", "Short list keeps the header: " + !app.headerTucked)
-                app.headerTucked = true
-                Qt.callLater(() => app.note("shot", "Tucked name: " + tuckTitle.text + " (" + (tuckTitle.width > 0 ? "shown" : "0 wide") + ")"))
-                app.note("shot", "Header tucked: " + app.headerTucked + "; panel: " + app.showModPanel + " (design width " + Math.round(app.designWidth) + ", " + app.width + "x" + app.height + ", tab " + app.tab + ", page " + app.page + "); row 2 line: " + app.rowLine(app.mods[1]).text)
+                // Two mods fit on one screen: Down doesn't hide the bars. The picture shows them hidden anyway.
+                app.note("shot", "Short list keeps the bars: " + !app.barsHidden)
+                app.note("shot", "Bottom bar: " + barName.text + " | " + app.barStatus + " | tabs " + (legend.tabWordsFit ? app.tabs.length : "caps only") + " | Play " + (playBtn.visible ? "shown" : "hidden") + " | top bar " + (header.height > 0 ? "shown" : "none"))
+                app.barsHidden = true
+                app.note("shot", "Bars hidden: " + app.barsHidden + "; panel: " + app.showModPanel + " (design width " + Math.round(app.designWidth) + ", " + app.width + "x" + app.height + ", tab " + app.tab + ", page " + app.page + "); row 2 line: " + app.rowLine(app.mods[1]).text)
             }
             else if (shot.page === "basicmenu") {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"
@@ -359,6 +362,39 @@ Window {
         onTriggered: {
             if (stepNo === 0) { app.getArea = "grid"; app.getIndex = Math.min(4, app.getItems.length - 1); app.getAct("a"); stepNo = 1; start() }
             else { app.act("b"); app.note("shot", "Back from the mod page: search \"" + app.getText + "\", card " + (app.getIndex + 1)) }
+        }
+    }
+
+    // findpop: Y on Get mods once the cards are in, then Down to Sort. fullscroll: Down through the cards until the
+    // bars and the rail are gone.
+    Timer {
+        id: findPopShot
+        interval: 2500
+        onTriggered: {
+            if (shot.page === "listbar") {
+                app.zone = "main"; app.modIndex = 0
+                app.act("y"); app.act("down")
+                app.note("shot", "My mods pop-up legend: " + app.legendHints.map(x => x[0].toUpperCase() + " " + x[1]).join(" · "))
+            } else if (shot.page === "findpop") {
+                app.act("y"); app.act("down")
+                app.note("shot", "Get mods pop-up: " + app.findSections.map(x => x.title + ": " + x.options.join("/")).join("; ") + " | legend " + app.legendHints.map(x => x[0].toUpperCase() + " " + x[1]).join(" · ") + " | sheet " + app.sheet)
+                app.note("shot", "Get mods page: search row " + (app.getArea === "bar" ? "focused" : "none") + ", top bar " + (header.height > 0 ? "shown" : "none"))
+            } else {
+                for (let i = 0; i < 3; i++) app.act("down")
+                fullBackShot.start()
+            }
+        }
+    }
+    Timer {
+        id: fullBackShot
+        interval: 600
+        onTriggered: {
+            app.note("shot", "Full screen: bars hidden " + app.barsHidden + ", rail " + (rail.visible ? "shown" : "hidden") + ", bottom bar " + (legend.shown ? "shown" : "hidden") + ", card " + (app.getIndex + 1) + " of " + app.getItems.length)
+            // Up a row brings them back; then down again for the picture.
+            app.act("up")
+            app.note("shot", "Full screen, Up: bars hidden " + app.barsHidden)
+            app.act("down")
+            app.note("shot", "Full screen, Down again: bars hidden " + app.barsHidden)
         }
     }
 
@@ -419,19 +455,30 @@ Window {
     // ---------------------------------------------------------------- Labs mode and the activity log
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
     function note(kind, text) { Turbine.log(kind, text) }
-    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); headerTucked = false }
-    // 0.56: the header slides away while the list goes down and comes back going up, at the top, or on another
-    // tab (the tab row stays, with the game's name and Play). The focused row is kept fully in view.
-    property bool headerTucked: false
+    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); barsHidden = false }
+    // 0.57: no top bar on the game screen. Going down a long list hides the bottom bar and the rail too, so the
+    // content is truly full screen; going up, reaching the top, View, a tab change, a sheet or the rail bring them
+    // back. Reduce motion: no slide, they just go and come.
+    property bool barsHidden: false
+    readonly property bool gameScreen: page === "game" && !modPage
     readonly property bool reduceMotion: look.reduceMotion
-    onHeaderTuckedChanged: note("page", "Header " + (headerTucked ? "tucked away" : "shown"))
-    // It only tucks when there is more than a screen to see: the list is taller than its view and the focused row
-    // is past the first screen. Game switches and a flick back to the top bring it back.
+    onBarsHiddenChanged: { barsChangedAt = Date.now(); note("page", "Bars " + (barsHidden ? "hidden (full screen)" : "shown")) }
+    // They only hide when there is more than a screen to see: the list is taller than its view and the focused row
+    // is past the first screen. Game switches and a flick back to the top bring them back.
     function tuckFollow(now, before, longer) {
-        if (page !== "game") return
-        if (now <= 0) headerTucked = false
-        else if (now > before) { if (longer) headerTucked = true }
-        else if (now < before) headerTucked = false
+        if (page !== "game" || modPage) return
+        if (now <= 0) barsHidden = false
+        else if (now > before) { if (longer) barsHidden = true }
+        else if (now < before) barsHidden = false
+    }
+    // A touch or wheel scroll: down hides, up shows (a little give, and never while the bars just changed, since
+    // that changes the list's height too).
+    property real barsChangedAt: 0
+    function scrollFollow(y, before, longer) {
+        if (page !== "game" || modPage || Date.now() - barsChangedAt < 400) return
+        if (y <= px(4)) barsHidden = false
+        else if (y > before + px(24) && longer) barsHidden = true
+        else if (y < before - px(24)) barsHidden = false
     }
     function modRowPastFirstScreen(i) {
         if (!modList || modList.contentHeight <= modList.height) return false
@@ -443,13 +490,13 @@ Window {
     property int tuckGetBefore: 0
     onGetIndexChanged: {
         const cols = Math.max(1, gridColumns), row = Math.floor(getIndex / cols)
-        // About two rows of cards fit under the header: more than that is a longer grid.
+        // About two rows of cards fit on a screen: more than that is a longer grid.
         if (getArea === "grid") tuckFollow(row, Math.floor(tuckGetBefore / cols), Math.ceil(getItems.length / cols) > 2 && row >= 2)
-        else headerTucked = false
+        else barsHidden = false
         tuckGetBefore = getIndex
     }
     onTabChanged: {
-        headerTucked = false
+        barsHidden = false
         note("page", "Tab " + (tabs[tab] || tab))
         stopDangerHolds()
         selecting = false
@@ -458,13 +505,13 @@ Window {
         // A Basic game Turbine couldn't match on Nexus: asked once, when the player opens Get mods.
         if (tab === 1 && game && rules && rules.domainState === "ask" && !nexusAsked[game.id] && sheet === "" && pressRecent()) Qt.callLater(openNexusPick)
         if (tab === 1 && !browseData) {
-            // A first visit lands on the first card (Up reaches the search bar).
+            // A first visit lands on the first card (Y opens Search, Sort and Category).
             if (!restoreFocus && getText === "") restoreFocus = { area: "grid", index: 0 }
             browseNow()
         }
         else if (tab === 2) { if (orderMemo < 0 && order.length > 0) orderMemo = orderIndex; orderLand = true; Turbine.loadOrder() }
     }
-    onZoneChanged: note("page", "Focus zone " + zone)
+    onZoneChanged: { note("page", "Focus zone " + zone); if (zone !== "main" && barsHidden) barsHidden = false }
     onSetSectionChanged: {
         note("page", "Settings section " + (settingsSections[setSection] || setSection))
         if (settingsSections[setSection] === "Getting mods") { Turbine.handlerStatus(); if (!shot.on) Turbine.bridgeRefresh() }
@@ -572,20 +619,14 @@ Window {
     // Find (R3): only the mods whose name has every word typed, as it is typed.
     property string findText: ""
     property string findBefore: ""
-    // The bar over My mods: [Find] at any size, plus [Show] and [Sort] from 15 mods. Show narrows the list; Sort
-    // orders it (other sorts than Load order hide the numbers, and reorder waits for Load order).
+    // Show and Sort (in the Y pop-up): Show narrows the list; Sort orders it (other sorts than My order hide the
+    // numbers, and reorder waits for My order).
     property string listShow: "all"       // all, on, off, attention, new, update
     property string listSort: "order"     // order, az, recent
     readonly property var showKeys: ["all", "on", "off", "attention", "new", "update"]
     readonly property var showNames: ({ all: "All", on: "On", off: "Off", attention: "Needs attention", new: "New", update: "Update ready" })
     readonly property var sortKeys2: ["order", "az", "recent"]
     readonly property var sortNames2: ({ order: "My order", az: "A to Z", recent: "Recently added" })
-    readonly property bool listBarFull: mods.length >= 15 || listShow !== "all" || listSort !== "order" || shot.page === "listbar"
-    readonly property var listBar: [{ key: "find", label: findText !== "" ? "Find: " + findText : "Find" }]
-        .concat(listBarFull ? [{ key: "show", label: "Show: " + showNames[listShow] }, { key: "sort", label: "Sort: " + sortNames2[listSort] }] : [])
-        // Select several lives with the other whole-list tools, not in one mod's menu.
-        .concat(mods.length > 1 ? [{ key: "select", label: "Select several" }] : [])
-    property int listBarIndex: 0
     function needsAttention(m) { return (m.needsLoader && loaderMissing) || (m.enabled && (missingNeeds(m).length > 0 || isHidden(m) || !!modWarns[m.id])) }
     readonly property var shownMods: {
         const words = findText.toLowerCase().split(/\s+/).filter(w => w !== "")
@@ -604,27 +645,117 @@ Window {
         return list
     }
     readonly property bool listFiltered: findText !== "" || listShow !== "all" || listSort !== "order"
-    function listBarRun(i) {
-        const k = listBar[i] ? listBar[i].key : ""
-        if (k === "find") openFind()
-        else if (k === "select") { startSelect(null); modIndex = 0; toast.showPlain("A ticks a mod, X acts on every ticked mod, B is done.") }
-        else if (k === "show" || k === "sort") {
-            const keys = k === "show" ? showKeys : sortKeys2, names = k === "show" ? showNames : sortNames2
-            const now = keys.indexOf(k === "show" ? listShow : listSort)
-            openPick(k === "show" ? "Show" : "Sort", gameTitle, keys.map((key, i) => ({
-                icon: i === now ? "power" : "info", title: names[key], detail: i === now ? "Showing now" : "",
-                run: () => { if (k === "show") listShow = key; else listSort = key; note("action", "My mods: " + k + " " + names[key]) } })), "")
-            menuIndex = now
-        }
-    }
-    function listCycle(k, d) {
-        if (k === "show") { listShow = showKeys[(showKeys.indexOf(listShow) + d + showKeys.length) % showKeys.length]; note("action", "My mods: show " + showNames[listShow]) }
-        else if (k === "sort") { listSort = sortKeys2[(sortKeys2.indexOf(listSort) + d + sortKeys2.length) % sortKeys2.length]; note("action", "My mods: sort " + sortNames2[listSort]) }
-    }
     function openFind() {
         note("action", "Find a mod")
         findBefore = findText
         openAsk("find", "Find a mod", "Shows only the mods whose names have these words.", findText, "Part of a mod's name", 60, false, "Show them")
+    }
+    // ---------------------------------------------------------------- the Y pop-up (0.57)
+    // One pop-up for finding. Get mods: Search, Sort and Category (and From when the game has two sources). My
+    // mods: Find, Show, Sort and Select several. The D-pad moves, A chooses (nothing changes yet), Start shows the
+    // results, B closes. Y (or A on the field) opens the keyboard. A long category list ends in More..., which lists
+    // every category.
+    property var findPop: ({ kind: "get", text: "", sort: 0, cat: "", src: "", show: "all", order: "order" })
+    property int findRow: 0               // 0 the field, then one row per section
+    property int findCol: 0
+    readonly property int findCatMax: 6
+    function sortNamesFor(src) { return src === "nexus" ? ["Trending", "Most liked", "Most downloaded", "Recently updated", "Newest"] : ["Most downloaded", "Top rated", "Recently updated", "Newest"] }
+    readonly property var findSections: {
+        const f = findPop
+        if (f.kind === "mods") return [
+            { key: "show", title: "Show", options: showKeys.map(k => showNames[k]), chosen: showKeys.indexOf(f.show) },
+            { key: "sort", title: "Sort", options: sortKeys2.map(k => sortNames2[k]), chosen: sortKeys2.indexOf(f.order) }
+        ].concat(mods.length > 1 ? [{ key: "select", title: "Many at once", options: ["Select several"], chosen: -1 }] : [])
+        let l = []
+        const src = f.src || srcNow
+        if (sources.length > 1) l.push({ key: "source", title: "From", options: sources.map(srcName), chosen: Math.max(0, sources.indexOf(src)) })
+        l.push({ key: "sort", title: "Sort", options: sortNamesFor(src), chosen: f.sort })
+        // Categories are known for the source on screen only.
+        if (getCats.length > 0 && src === srcNow) {
+            const ci = Math.max(0, getCats.indexOf(f.cat))
+            let vals = []
+            for (let i = 0; i < Math.min(getCats.length, findCatMax); i++) vals.push(i)
+            // The chosen one always shows.
+            if (ci >= findCatMax) vals[findCatMax - 1] = ci
+            const more = getCats.length > findCatMax
+            l.push({ key: "category", title: "Category", options: vals.map(i => getCats[i] || "All").concat(more ? ["More..."] : []), values: vals,
+                     chosen: vals.indexOf(ci), more: more })
+        }
+        return l
+    }
+    readonly property int findRows: 1 + findSections.length
+    function openFindPop() {
+        if (!game || sheet !== "") return
+        const kind = tab === 1 && !modPage ? "get" : "mods"
+        if (kind === "mods" && mods.length === 0) return
+        findPop = { kind: kind, text: kind === "get" ? getText : findText, sort: getSortIndex, cat: getCategory, src: srcNow, show: listShow, order: listSort }
+        findRow = 0; findCol = 0
+        sheet = "findpop"
+        note("action", "Find pop-up (" + (kind === "get" ? "Get mods" : "My mods") + "): " + ["field"].concat(findSections.map(x => x.title + " " + x.options.length + (x.more ? " and More" : ""))).join(", "))
+    }
+    function findPopChoose(r, c) {
+        const sec = findSections[r - 1]
+        if (!sec) return
+        let f = Object.assign({}, findPop)
+        if (sec.key === "select") { sheet = ""; tab = 0; zone = "main"; startSelect(null); modIndex = 0; toast.showPlain("A ticks a mod, X acts on every ticked mod, B is done."); return }
+        if (sec.key === "category" && sec.more && c === sec.options.length - 1) {
+            const now = Math.max(0, getCats.indexOf(f.cat))
+            openPick("Category", gameTitle, getCats.map((x, i) => ({ icon: i === now ? "power" : "info", title: x || "All", detail: i === now ? "Chosen" : "", aLabel: "Choose",
+                run: () => { findPop = Object.assign({}, findPop, { cat: getCats[i] }); findCol = Math.min(findCol, findSections[findRow - 1] ? findSections[findRow - 1].options.length - 1 : 0); sheet = "findpop" } })), "findpop")
+            pickNoStart = true
+            menuIndex = now
+            return
+        }
+        if (sec.key === "source") { if (sources[c] !== (f.src || srcNow)) { f.src = sources[c]; f.sort = 0; f.cat = "" } }
+        else if (sec.key === "sort") { if (f.kind === "mods") f.order = sortKeys2[c]; else f.sort = c }
+        else if (sec.key === "show") f.show = showKeys[c]
+        else if (sec.key === "category") f.cat = getCats[sec.values[c]]
+        findPop = f
+        note("action", "Find pop-up: " + sec.title + " " + sec.options[c])
+    }
+    function findPopKeyboard() {
+        const g = findPop.kind === "get"
+        openAsk("popfind", g ? "Search " + gameTitle + " mods" : "Find a mod", g ? "Words from the mod's name or what it does." : "Shows only the mods whose names have these words.",
+                findPop.text, g ? "Search" : "Part of a mod's name", g ? 100 : 60, false, "Done")
+    }
+    function findPopApply() {
+        const f = findPop
+        sheet = ""
+        if (f.kind === "mods") {
+            findText = f.text; listShow = f.show; listSort = f.order; tab = 0; zone = "main"; modIndex = 0
+            note("action", "Find pop-up: show results: \"" + f.text + "\", " + showNames[f.show] + ", " + sortNames2[f.order] + ": " + shownMods.length + " shown")
+            return
+        }
+        if (f.src && f.src !== srcNow) { getSource = f.src; browseData = null; catList = [] }
+        getText = f.text; getSortIndex = f.sort; getCategory = f.cat
+        zone = "main"; getArea = "grid"; getIndex = 0; gridReturn = -1
+        restoreFocus = { area: getText === "" && starterItems.length > 0 ? "recent" : "grid", index: 0 }
+        note("action", "Find pop-up: show results: \"" + f.text + "\", " + (sortNamesFor(srcNow)[f.sort] || "") + ", " + (f.cat || "All"))
+        browseNow()
+    }
+    function findPopAct(b) {
+        const sec = findSections[findRow - 1]
+        const n = findRow === 0 ? 1 : (sec ? sec.options.length : 1)
+        // Up and Down land on the row's chosen option.
+        if (b === "up" || b === "down") {
+            findRow = Math.max(0, Math.min(findRows - 1, findRow + (b === "up" ? -1 : 1)))
+            const s2 = findSections[findRow - 1]
+            findCol = s2 && s2.chosen >= 0 ? s2.chosen : 0
+        }
+        else if (b === "left") findCol = Math.max(0, findCol - 1)
+        else if (b === "right") findCol = Math.min(n - 1, findCol + 1)
+        else if (b === "y" || (b === "a" && findRow === 0)) findPopKeyboard()
+        else if (b === "a") findPopChoose(findRow, findCol)
+        else if (b === "start") findPopApply()
+        else if (b === "b" || b === "view") { sheet = ""; note("action", "Find pop-up closed") }
+    }
+    function findPopALabel() {
+        if (findRow === 0) return "Keyboard"
+        const sec = findSections[findRow - 1]
+        if (!sec) return ""
+        if (sec.key === "select") return "Select several"
+        if (sec.more && findCol === sec.options.length - 1) return "More"
+        return "Choose"
     }
     // Select several (from the bar over My mods): A ticks, X acts on every ticked mod, B done.
     property bool selecting: false
@@ -846,10 +977,10 @@ Window {
             if (app.restoreFocus) {
                 const r = app.restoreFocus
                 app.restoreFocus = null
-                app.getArea = r.area === "grid" && (v.items || []).length === 0 ? "bar" : r.area
+                app.getArea = r.area === "recent" && app.starterItems.length === 0 ? "grid" : r.area === "fallback" ? "grid" : r.area
                 app.getIndex = Math.max(0, Math.min(r.index, (v.items || []).length - 1))
             } else if (app.getArea === "grid") app.getIndex = Math.max(0, Math.min(app.getIndex, (v.items || []).length - 1))
-            else if (app.getArea === "fallback") { app.getArea = "bar"; app.getIndex = 0 }
+            else if (app.getArea === "fallback") { app.getArea = "grid"; app.getIndex = 0 }
         }
         function onDetailsJsonChanged() {
             let d = app.parse(Turbine.detailsJson, null)
@@ -975,7 +1106,7 @@ Window {
     property int orderMemo: -1
     function saveFocus(gid) {
         let all = Object.assign({}, focusMemo)
-        all[gid] = { tab: tab, get: { area: getArea === "fallback" ? "bar" : getArea, index: getIndex, text: getText }, order: orderIndex }
+        all[gid] = { tab: tab, get: { area: getArea === "fallback" ? "grid" : getArea, index: getIndex, text: getText }, order: orderIndex }
         focusMemo = all
     }
     // The mod last focused in each game: switching back lands on it (else on the first mod).
@@ -990,7 +1121,7 @@ Window {
     onGameChanged: {
         allOffWas = []
         disarm()
-        headerTucked = false
+        barsHidden = false
         if (!game || sameGameReorder) return
         if (memoGame !== "" && memoGame !== game.id) saveFocus(memoGame)
         memoGame = game.id
@@ -1004,7 +1135,7 @@ Window {
         history = []
         landedOn = ""
         browseData = null; catList = []
-        getArea = "bar"; getIndex = 0; getText = ""; getCategory = ""
+        getArea = "grid"; getIndex = 0; getText = ""; getCategory = ""
         order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
         // Back to a game: its tab and the row it was on. First visit: My mods, the first mod.
@@ -1566,6 +1697,9 @@ Window {
         if (h.verify && (h.verify.missing.length + h.verify.changed.length) > 0)
             rows.push({ icon: "info", title: plural(h.verify.missing.length + h.verify.changed.length, "mod file is", "mod files are") + " missing or changed", detail: "A puts them back", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } })
         for (const c of (h.copies || [])) rows.push({ icon: "info", title: "Another copy of " + gameTitle, detail: c + ". Mods go only into the one shown here.", info: true, run: () => {} })
+        // The bottom bar's warnings, each with its reason.
+        for (const m of mods.filter(m => m.enabled && !!modWarns[m.id]).slice(0, 4))
+            rows.push({ icon: "info", title: m.name, detail: modWarns[m.id], info: true, run: () => {} })
         if (rules && rules.antiCheat) rows.push({ icon: "info", title: "Anti-cheat: " + rules.antiCheat.name, detail: "Online play with mods can get you banned", info: true, run: () => {} })
         const on = mods.filter(m => m.enabled).length
         if (on > 0) rows.push({ icon: "play", title: "Try it without mods", detail: "Play without mods. If it starts, a mod is the cause.", run: () => { sheet = ""; Turbine.playOriginal() } })
@@ -2385,6 +2519,7 @@ Window {
         else note("page", "Sheet " + sheet + " opened with no press")
         menuIndex = 0; stopDangerHolds()
         if (sheet !== "") closeWheel()
+        if (sheet !== "" && barsHidden) barsHidden = false
         // An installer's choices: the Nexus page closes so they show; any other sheet over the page gives the page
         // its keyboard focus back when it closes.
         if (sheet === "fomod" && page === "browser") closeBrowser("installer")
@@ -2632,6 +2767,7 @@ Window {
         }
         const s = sheet
         const k = key => () => sheetAct(key)
+        if (s === "findpop") return { a: bind(findPopALabel(), k("a")), b: bind("Close", k("b")), y: bind("Keyboard", k("y")), start: bind("Show results", k("start")) }
         if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") {
             // A says what the highlighted row does ("A Uninstall", "A Rename").
             const row = s === "modmenu" ? modMenuItems[menuIndex] : s === "cardmenu" ? cardMenuItems[menuIndex] : null
@@ -2658,7 +2794,8 @@ Window {
     function sheetAct(b) {
         const bs = buttonSheet()
         if (bs) { buttonSheetAct(bs, b); return }
-        if (sheet === "report") reportView.handleButton(b)
+        if (sheet === "findpop") findPopAct(b)
+        else if (sheet === "report") reportView.handleButton(b)
         else if (sheet === "perf") perfView.handleButton(b)
         else if (sheet === "activity") activityView.handleButton(b)
         else if (sheet === "details" || sheet === "notice") {
@@ -2904,14 +3041,10 @@ Window {
                 o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
-            o.y = bind("Find", openFind)
+            // Y: the pop-up with Find, Show, Sort and Select several.
+            if (mods.length > 0) o.y = bind("Find", openFindPop)
             o.lt = bind("", () => { modIndex = Math.max(0, modIndex - pageJump) })
             o.rt = bind("", () => { modIndex = Math.min(listItems.length - 1, modIndex + pageJump) })
-            if (modIndex < 0) {
-                if (listBar[listBarIndex]) o.a = bind("Choose", () => listBarRun(listBarIndex))
-                o.b = bind("Back", () => { modIndex = 0 })
-                return o
-            }
             const it = focusedItem
             if (it && it.kind === "mod") {
                 o.a = bind(it.m.enabled ? "Turn off" : "Turn on", () => toggle(it.m))
@@ -2936,15 +3069,15 @@ Window {
             return o
         }
         if (tab === 1) {
-            o.b = bind(getArea === "bar" ? (getText !== "" ? "Clear search" : "My mods") : getArea === "fallback" ? "My mods" : "Back", getBack)
+            o.b = bind(getArea === "fallback" || getText === "" ? "My mods" : "Clear search", getBack)
             if (getArea === "fallback") {
                 o.a = bind("Open on Nexus", openNexusMods)
                 o.x = bind("Try again here", retryBrowse)
                 return o
             }
-            o.y = bind("Search", () => getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))))
-            if (getArea === "bar") o.a = bind(getBar[getIndex] && getBar[getIndex].key === "search" ? "Search" : "Choose", () => getBarRun(getIndex))
-            else if (getArea === "recent") o.a = bind("Open", () => getAct("a"))
+            // Y: the pop-up with Search, Sort and Category.
+            o.y = bind("Find", openFindPop)
+            if (getArea === "recent") o.a = bind("Open", () => getAct("a"))
             else {
                 if (getItems[getIndex]) o.a = bind("Open", () => getAct("a"))
                 if (getItems[getIndex]) o.x = bind("Options", () => { menuIndex = 0; sheet = "cardmenu" })
@@ -3021,36 +3154,24 @@ Window {
         }
         if (!game) { if (b === "left") { zone = "rail"; railIndex = 0 } return }
         if (zone === "play") {
-            if (b === "down") zone = "main"
+            if (b === "up" || b === "down") zone = "main"
             else if (b === "left") { zone = "rail"; railIndex = current }
             return
         }
         if (modPage) { modPageAct(b); return }
-        if (tab === 1 && sources.length > 0) {
-            // Up from the top of Get mods' bar: the Play button.
-            if (b === "up" && getArea === "bar") { zone = "play"; return }
-            getAct(b); return
-        }
+        // 0.57: Play is in the bottom bar (Start); Up at the top stays there and brings the bars back.
+        if (tab === 1 && sources.length > 0) { getAct(b); return }
         if (tab === 2) {
-            if (b === "up" && orderIndex === -1) { zone = "play"; return }
+            if (b === "up" && orderIndex === -1) { barsHidden = false; return }
             orderAct(b); return
         }
         if (tab === 1 || listItems.length === 0) {
             if (b === "left") { zone = "rail"; railIndex = current }
-            else if (b === "up") zone = "play"
             return
         }
         if (selecting) { if (b === "left") { selecting = false; ticked = {}; zone = "rail"; railIndex = current } else selectAct(b); return }
-        if (modIndex < 0) {
-            // The bar over the list (Find, Show, Sort, Select several).
-            if (b === "left") { if (listBarIndex > 0) listBarIndex--; else { zone = "rail"; railIndex = current } }
-            else if (b === "right") listBarIndex = Math.min(listBar.length - 1, listBarIndex + 1)
-            else if (b === "down") modIndex = 0
-            else if (b === "up") zone = "play"
-            return
-        }
-        if (b === "up" && modIndex === 0) { modIndex = -1; listBarIndex = Math.min(listBarIndex, listBar.length - 1) }
-        else if (b === "up") modIndex = Math.max(0, modIndex - 1)
+        if (modIndex < 0) modIndex = 0
+        if (b === "up") { if (modIndex === 0) barsHidden = false; modIndex = Math.max(0, modIndex - 1) }
         else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
         else if (b === "left") { zone = "rail"; railIndex = current }
     }
@@ -3202,32 +3323,24 @@ Window {
                                      slot("Downloads", true, () => { browserTab = 1 }, "What Nexus is sending"), slot("Zoom out", true, () => browserZoomBy(-0.1), "Smaller page")]
         const common = [slot("Play options", g, openPlayOptions, "Play without mods, launch options"), slot("Game menu", g, () => { menuIndex = 0; sheet = "gamemenu" }, "Everything for this game"),
                         slot("Settings", true, openSettings, "Look, controls and accounts"), slot("Games", games.length > 0, openGamesPick, "Every game, last played first")]
-        if (k === "get") return [slot("Search", sources.length > 0, () => { if (modPage) getBack(); getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))) }, "Find mods by name"),
-                                 slot("Sort", sources.length > 0, () => pickBar("sort"), "Trending, Newest, Most liked"),
-                                 slot("Category", getCats.length > 0, () => pickBar("category"), "Show one kind of mod")].concat(common)
-                                 .concat([slot("Recently viewed", recentViewed.length > 0, openRecentPick, recentViewed.length > 0 ? plural(recentViewed.length, "mod page", "mod pages") + " you opened" : "Mod pages you open show here")])
-        if (k === "order") return [slot("Find plugin", order.length > 0, openFindPlugin, "Find a plugin by name"), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }, "Put plugins in a safe order"),
-                                   slot("Add from Downloads", g, openAdd, "A mod file you downloaded")].concat(common).concat([slot("Loadouts", g, openProfiles, "Save or switch sets of mods")])
-        return [slot("Find", k === "mods" && mods.length > 0, openFind, "Find a mod by name"), slot("Sort", k === "mods" && mods.length > 1, () => listBarRunKey("sort"), "Order, name or newest"),
-                slot("Show", k === "mods" && mods.length > 0, () => listBarRunKey("show"), "All, on, off or with problems")].concat(common)
-                .concat([updateList.length > 0 ? slot("Updates (" + updateList.length + ")", k === "mods", openUpdates, "Mods with a newer version")
-                                               : slot("Select several", k === "mods" && mods.length > 1, () => { tab = 0; zone = "main"; startSelect(mods[Math.max(0, modIndex)] || null) }, "Turn on, off or remove many at once")])
+        // 0.57: Up is the Y pop-up (Find, Show, Sort; Search, Sort, Category), Right Add from Downloads and Up-left
+        // Loadouts on every tab; Up-right is the tab's own.
+        const tail = [slot("Add from Downloads", g, openAdd, "A mod file you downloaded")].concat(common).concat([slot("Loadouts", g, openProfiles, "Save or switch sets of mods")])
+        if (k === "get") return [slot("Find", sources.length > 0, () => { if (modPage) getBack(); openFindPop() }, "Search, sort and category"),
+                                 slot("Recently viewed", recentViewed.length > 0, openRecentPick, recentViewed.length > 0 ? plural(recentViewed.length, "mod page", "mod pages") + " you opened" : "Mod pages you open show here")].concat(tail)
+        if (k === "order") return [slot("Find plugin", order.length > 0, openFindPlugin, "Find a plugin by name"), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }, "Put plugins in a safe order")].concat(tail)
+        return [slot("Find", k === "mods" && mods.length > 0, openFindPop, "Find, show, sort, select several"),
+                slot(updateList.length > 0 ? "Updates (" + updateList.length + ")" : "Updates", k === "mods" && updateList.length > 0, openUpdates, updateList.length > 0 ? "Mods with a newer version" : "No updates ready")].concat(tail)
     }
     // The wheel's Recently viewed: the last mod pages opened in this game.
     function openRecentPick() {
         openPick("Recently viewed", gameTitle, recentViewed.map(r => ({ icon: "info", title: cleanName(r.name), detail: "", aLabel: "Open",
             run: () => { tab = 1; zone = "main"; openDetails(r) } })), "")
     }
-    function listBarRunKey(key) {
-        const keys = key === "show" ? showKeys : sortKeys2, names = key === "show" ? showNames : sortNames2
-        const now = keys.indexOf(key === "show" ? listShow : listSort)
-        openPick(key === "show" ? "Show" : "Sort", gameTitle, keys.map((kk, i) => ({
-            icon: i === now ? "power" : "info", title: names[kk], detail: i === now ? "Showing now" : "",
-            run: () => { if (key === "show") listShow = kk; else listSort = kk; note("action", "My mods: " + key + " " + names[kk]) } })), "")
-        menuIndex = now
-    }
     function wheelPress() {
         if (wheelOpen) { closeWheel(); return }
+        // View brings the bars back too.
+        barsHidden = false
         wheelOpen = true; wheelSlot = -1; wheelHeld = true; wheelPicked = false
         note("action", "Quick wheel open (" + wheelKind + "): " + wheelSlots.map(x => x.label + (x.ok ? "" : " (dim)")).join("; "))
     }
@@ -3347,11 +3460,11 @@ Window {
             () => { if (mods.length < 2) return false
                 const ctxs = [
                     ["My mods", () => { sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0 }],
-                    ["My mods bar", () => { modIndex = -1 }],
-                    ["Rail", () => { modIndex = 0; zone = "rail"; railIndex = current }],
+                    ["Find pop-up (My mods)", () => { openFindPop() }],
+                    ["Rail", () => { sheet = ""; modIndex = 0; zone = "rail"; railIndex = current }],
                     ["Play", () => { zone = "play" }],
-                    ["Get mods bar", () => { zone = "main"; tab = 1; getArea = "bar"; getIndex = 0 }],
-                    ["Get mods grid", () => { getArea = "grid"; getIndex = 0 }],
+                    ["Find pop-up (Get mods)", () => { zone = "main"; tab = 1; getArea = "grid"; getIndex = 0; openFindPop() }],
+                    ["Get mods grid", () => { sheet = ""; getArea = "grid"; getIndex = 0 }],
                     ["Load order", () => { tab = 2; orderIndex = 0 }],
                     ["Settings", () => { tab = 0; openSettings() }],
                     ["Settings Look", () => { setSection = settingsSections.indexOf("Look"); setRow = 0 }],
@@ -3795,7 +3908,7 @@ Window {
     property bool browseLoading: false
     property bool loadingMore: false
     property bool noMore: false
-    property string getArea: "bar"        // bar, recent, grid, fallback
+    property string getArea: "grid"       // recent (Good first mods), grid, fallback
     property int getIndex: 0
     // The card B left from (Down from the bar goes back to it); -1 when there is none.
     property int gridReturn: -1
@@ -3820,13 +3933,6 @@ Window {
     })
     // Updates for your mods, on the Get mods start page.
     readonly property var updateList: Object.keys(updateMap).map(k => ({ u: updateMap[k], m: mods.find(x => x.id === k) })).filter(x => !!x.m)
-    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search mods" },
-                                   { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }]
-        .concat(getCats.length > 0 ? [{ key: "category", label: "Category: " + (getCategory || "All") }] : [])
-        .concat(sources.length > 1 ? [{ key: "source", label: "From: " + srcName(srcNow) }] : [])
-        .concat([{ key: "add", label: "Add from Downloads" }])
-        // Last, so the search field keeps its room.
-        .concat(updateList.length > 0 && getText === "" ? [{ key: "updates", label: "Updates (" + updateList.length + ")" }] : [])
     // 0.56: Good first mods (from the game's data file) on the Get mods start page, for this source.
     readonly property var starterItems: getText === "" && rules && rules.starters ? rules.starters.filter(x => x.source === srcNow)
         .map(x => ({ id: x.id, name: x.name, icon: "", source: x.source, what: x.what })) : []
@@ -3841,10 +3947,6 @@ Window {
         all[game.id] = list.slice(0, 8)
         getSet.recent = JSON.stringify(all)
     }
-    // The one-time line over the grid for a game with no mods yet.
-    readonly property bool bannerOn: !!game && modsLoaded && mods.length === 0 && parse(seen.bannerDone, []).indexOf(game.id) < 0
-    // Not with Good first mods on screen: they say the same thing, and the banner pushed the first cards off it.
-    readonly property string getBanner: bannerOn && starterItems.length === 0 ? "No mods for " + gameTitle + " yet. Pick one below, or search." : ""
     // Entering a game with no mods lands on Get mods (once per visit).
     property string landedOn: ""
     property bool landAgain: false
@@ -3860,9 +3962,6 @@ Window {
             note("focus", "No mods yet: Get mods, first card")
             tab = 1
         }
-    }
-    onModsChanged: if (game && mods.length > 0 && parse(seen.bannerDone, []).indexOf(game.id) < 0 && !shot.on) {
-        let d = parse(seen.bannerDone, []); d.push(game.id); seen.bannerDone = JSON.stringify(d)
     }
     // Get mods history: B goes back exactly one step and puts everything back as it was.
     property var history: []
@@ -3895,12 +3994,12 @@ Window {
             note("action", "Back to the results")
             return
         }
-        if (getArea === "grid" || getArea === "recent") {
-            // Back to the search bar; Down comes back to the same card.
-            if (getArea === "grid") gridReturn = getIndex
-            getArea = "bar"; getIndex = Math.max(0, getBar.findIndex(x => x.key === "search")); return
+        // 0.57: no bar to go back to. B clears a search first, then goes to My mods.
+        if (getText !== "" && getArea !== "fallback") {
+            getText = ""; getArea = "grid"; getIndex = 0; gridReturn = -1
+            restoreFocus = { area: starterItems.length > 0 ? "recent" : "grid", index: 0 }
+            note("action", "Search cleared"); browseNow(); return
         }
-        if (getText !== "") { getText = ""; getArea = "bar"; getIndex = 0; note("action", "Search cleared"); browseNow(); return }
         tab = 0
     }
     function browseNow() {
@@ -3926,7 +4025,7 @@ Window {
         note("action", "Try again here")
         nexusPublic = ""
         browseData = null
-        getArea = "bar"; getIndex = 0
+        getArea = "grid"; getIndex = 0
         browseNow()
     }
     function getAct(b) {
@@ -3939,64 +4038,24 @@ Window {
             else if (b === "left") { zone = "rail"; railIndex = current }
             return
         }
-        if (getArea === "bar") {
-            const k = getBar[getIndex] ? getBar[getIndex].key : ""
-            if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
-            else if (b === "right") getIndex = Math.min(getBar.length - 1, getIndex + 1)
-            else if (b === "down") {
-                if (gridReturn >= 0 && gridReturn < getItems.length) { getArea = "grid"; getIndex = gridReturn; gridReturn = -1 }
-                else if (starterItems.length > 0) { getArea = "recent"; getIndex = 0 }
-                else if (getItems.length > 0) { getArea = "grid"; getIndex = 0 }
-            }
-            else if (b === "a") getBarRun(getIndex)
-        } else if (getArea === "recent") {
+        if (getArea !== "recent" && getArea !== "grid") { getArea = "grid"; getIndex = 0 }
+        if (getArea === "recent") {
             if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") getIndex = Math.min(starterItems.length - 1, getIndex + 1)
-            else if (b === "up") { getArea = "bar"; getIndex = 0 }
+            else if (b === "up") barsHidden = false
             // Down keeps the column (the strip's 4th card goes to the grid's 4th).
             else if (b === "down" && getItems.length > 0) { getArea = "grid"; getIndex = Math.min(getItems.length - 1, getIndex % cols) }
             else if (b === "a" && starterItems[getIndex]) openDetails(starterItems[getIndex])
         } else {
             if (b === "left") { if (getIndex % cols > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") { if (getIndex % cols < cols - 1) getIndex = Math.min(getItems.length - 1, getIndex + 1) }
-            else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = Math.min(starterItems.length - 1, getIndex) } else { getArea = "bar"; getIndex = 0 } }
+            else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = Math.min(starterItems.length - 1, getIndex) } else barsHidden = false }
             else if (b === "down") getIndex = Math.min(getItems.length - 1, getIndex + cols)
             else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
             else if (b === "x" && getItems[getIndex]) { menuIndex = 0; sheet = "cardmenu" }
             // Infinite scroll: the next 30 when the focus reaches the last row.
             if (getIndex >= getItems.length - cols) browseMore()
         }
-    }
-    // A on Sort, Category or From: every choice in one list; one read when one is chosen.
-    function pickBar(k) {
-        const names = k === "sort" ? sortNames : k === "category" ? getCats.map(x => x || "All") : sources.map(srcName)
-        const now = k === "sort" ? getSortIndex : k === "category" ? Math.max(0, getCats.indexOf(getCategory)) : Math.max(0, sources.indexOf(srcNow))
-        openPick(k === "sort" ? "Sort" : k === "category" ? "Category" : "Get mods from", gameTitle, names.map((n, i) => ({
-            icon: i === now ? "power" : "info", title: n, detail: i === now ? "Showing now" : "",
-            run: () => {
-                if (i === now) return
-                if (k === "sort") getSortIndex = i
-                else if (k === "category") getCategory = getCats[i]
-                else { getSource = sources[i]; getCategory = ""; getSortIndex = 0; browseData = null }
-                note("action", "Get mods " + k + " " + n)
-                browseNow()
-            } })), "")
-        menuIndex = now
-    }
-    // Steps Sort, Category or From (kept for the pointer and tests).
-    function cycleBar(k, d) {
-        if (k === "sort") { getSortIndex = (getSortIndex + d + sortNames.length) % sortNames.length; note("action", "Get mods sort " + sortNames[getSortIndex]) }
-        else if (k === "category") { getCategory = getCats[(getCats.indexOf(getCategory) + d + getCats.length) % getCats.length]; note("action", "Get mods category " + (getCategory || "All")) }
-        else if (k === "source") { getSource = sources[(sources.indexOf(srcNow) + d + sources.length) % sources.length]; getCategory = ""; getSortIndex = 0; note("action", "Get mods source " + getSource); browseData = null }
-        browseNow()
-    }
-    function getBarRun(i) {
-        const k = getBar[i] ? getBar[i].key : ""
-        getArea = "bar"; getIndex = i
-        if (k === "search") openAsk("search", "Search " + gameTitle + " mods", "Words from the mod's name or what it does.", getText, "Search", 100, false, "Search")
-        else if (k === "sort" || k === "category" || k === "source") pickBar(k)
-        else if (k === "add") openAdd()
-        else if (k === "updates") openUpdates()
     }
     function openUpdates() {
         openPick("Updates for your mods", plural(updateList.length, "mod has", "mods have") + " a newer version", updateList.map(x => ({
@@ -5331,11 +5390,12 @@ Window {
     function askDone(text) {
         reportEditing(false)
         sheet = askReturn === "ask" ? "" : askReturn
-        if (askPurpose === "search") { getText = text; getArea = "bar"; getIndex = 0; note("action", "Get Mods search"); browseNow() }
+        if (askPurpose === "search") { getText = text; getArea = "grid"; getIndex = 0; note("action", "Get Mods search"); browseNow() }
         else if (askPurpose === "nexusKey" && text !== "") Turbine.setNexusKey(text)
         else if (askPurpose === "newProfile" && text !== "") Turbine.profileCreate(text)
         else if (askPurpose === "putafter") putAfter(text)
         else if (askPurpose === "findplugin" && text !== "") findPlugin(text)
+        else if (askPurpose === "popfind") { findPop = Object.assign({}, findPop, { text: text }); findRow = 0; note("action", "Find pop-up: words \"" + text + "\"") }
         else if (askPurpose === "find") { findText = text; modIndex = 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
         else if (askPurpose.indexOf("renameProfile:") === 0 && text !== "" && text !== askPurpose.substring(14)) Turbine.profileRename(askPurpose.substring(14), text)
         else if (askPurpose === "code" && text !== "") Turbine.profileImportCode(text)
@@ -5372,7 +5432,7 @@ Window {
     readonly property var helpRows: [
         { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
         { kind: "info", key: "buttons", title: "The buttons",
-          how: "A does the highlighted thing. B goes back (hold it to go home). X: options for what's highlighted. Y: Find or Search. LB and RB: tabs. LT and RT: a page up or down. View: the quick wheel. Start: Play (hold it for Play options). Right stick: the pointer; RT or R3 clicks, LT opens options." },
+          how: "A does the highlighted thing. B goes back (hold it to go home). X: options for what's highlighted. Y: Find, with search, sort and show. LB and RB: tabs. LT and RT: a page up or down. View: the quick wheel. Start: Play (hold it for Play options). Right stick: the pointer; RT or R3 clicks, LT opens options." },
         { kind: "info", key: "touch", title: "Touch",
           how: "Tap does it. Hold a moment for options. Hold, then drag to reorder. Swipe sideways on the tabs to switch them." }
     ].concat(hiddenIds.length > 0 ? [
@@ -6036,7 +6096,11 @@ Window {
         // ===== Rail: the logo, the games (last played first, portrait art), Settings pinned at the bottom.
         Rectangle {
             id: rail
-            width: app.px(72)
+            // 0.57: full screen while scrolling down (the bottom bar goes too).
+            width: app.barsHidden ? 0 : app.px(72)
+            Behavior on width { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            visible: width > 0
+            clip: true
             height: parent.height
             color: c.rail
             z: 5
@@ -6281,15 +6345,16 @@ Window {
                 anchors.fill: parent
                 anchors.leftMargin: app.px(14)
                 anchors.rightMargin: app.px(14)
-                anchors.bottomMargin: legend.height + app.px(16)
+                anchors.bottomMargin: legend.shown ? legend.height + app.px(8) : app.px(8)
                 spacing: app.px(8)
 
-                // Header: the game's wide art darkened under the words, its name, the status under it, Start Play.
+                // Header, on every page but the game screen (0.57: no top bar there; the bottom bar has the game's name,
+                // its status and Play): the page's name, B Back for touch, and on a mod page Start Play.
                 Rectangle {
                     id: header
                     width: parent.width + app.px(28)
                     x: -app.px(14)
-                    height: app.headerTucked ? 0 : app.px(72)
+                    height: app.gameScreen ? 0 : app.px(72)
                     visible: height > 0
                     Behavior on height { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                     color: c.panel
@@ -6325,7 +6390,7 @@ Window {
                     }
                     Column {
                         x: backBtn.visible ? backBtn.x + backBtn.width + app.px(14) : app.px(16)
-                        width: parent.width - x - playBtn.width - app.px(40) - (resultCaps.visible ? resultCaps.width + app.px(14) : 0)
+                        width: parent.width - x - pagePlayBtn.width - app.px(40) - (resultCaps.visible ? resultCaps.width + app.px(14) : 0)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(2)
                         Text {
@@ -6394,7 +6459,7 @@ Window {
                     Row {
                         id: resultCaps
                         visible: app.page === "game" && app.modPage && app.getItems.length > 1
-                        anchors.right: playBtn.left
+                        anchors.right: pagePlayBtn.left
                         anchors.rightMargin: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(6)
@@ -6403,7 +6468,7 @@ Window {
                         Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
                     }
                     Rectangle {
-                        id: playBtn
+                        id: pagePlayBtn
                         visible: app.page === "game" && app.game !== null
                         anchors.right: parent.right
                         anchors.rightMargin: app.px(14)
@@ -6430,112 +6495,8 @@ Window {
                     }
                 }
 
-                // Tabs (game page only): My mods, Get mods, and Load order for plugin games. LB and RB switch them.
-                // The mod page is its own screen: no tabs over it.
-                Rectangle {
-                    visible: app.page === "game" && app.game !== null && !app.modPage
-                    width: parent.width
-                    height: app.px(38)
-                    radius: app.px(6)
-                    color: c.panel
-                    // With the header tucked away: the game's name at the left, so it is still clear which game this is.
-                    TextMetrics { id: tuckMetrics; font: tuckTitle.font; text: tuckTitle.text }
-                    Text {
-                        id: tuckTitle
-                        visible: app.headerTucked
-                        x: app.px(10)
-                        // A fixed width from the text itself (never from the Text's own size, which can end up 0).
-                        width: visible ? Math.min(Math.ceil(tuckMetrics.advanceWidth) + app.px(2), app.px(220)) : 0
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: app.game ? app.shortGame(app.game.name) : ""
-                        elide: Text.ElideRight
-                        color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(15); font.bold: true
-                    }
-                    // My mods' whole-list tools (Find, Show, Sort, Select several), and Play while the header is tucked.
-                    Row {
-                        id: tabTools
-                        anchors.right: parent.right
-                        anchors.rightMargin: app.px(4)
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: app.px(6)
-                        Repeater {
-                            model: app.tab === 0 && app.modsLoaded && app.mods.length > 0 ? app.listBar : []
-                            Rectangle {
-                                required property int index
-                                required property var modelData
-                                readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex < 0 && app.listBarIndex === index
-                                width: toolText.implicitWidth + app.px(18); height: app.px(30); radius: app.px(5)
-                                color: foc ? c.focusFill : c.card
-                                border.color: foc ? c.accent : c.line
-                                border.width: foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
-                                Row {
-                                    anchors.centerIn: parent
-                                    spacing: app.px(6)
-                                    Text { id: toolText; text: parent.parent.modelData.label; color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(13); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                                }
-                                Accessible.role: Accessible.Button
-                                Accessible.name: modelData.label
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { app.modIndex = -1; app.listBarIndex = parent.index; app.listBarRun(parent.index) } }
-                            }
-                        }
-                        Rectangle {
-                            visible: app.headerTucked && app.game !== null
-                            width: tuckPlay.implicitWidth + app.px(16); height: app.px(30); radius: app.px(6)
-                            gradient: Gradient {
-                                GradientStop { position: 0; color: c.accentHi }
-                                GradientStop { position: 1; color: c.accent }
-                            }
-                            Row {
-                                id: tuckPlay
-                                anchors.centerIn: parent
-                                spacing: app.px(6)
-                                Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.px(14); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                            }
-                            Accessible.role: Accessible.Button
-                            Accessible.name: "Play"
-                            TapHandler { onTapped: app.startPlay() }
-                        }
-                    }
-                    Row {
-                        id: tabRow
-                        anchors.left: tuckTitle.right
-                        anchors.leftMargin: tuckTitle.visible ? app.px(10) : app.px(3)
-                        anchors.right: tabTools.left
-                        anchors.rightMargin: app.px(6)
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        anchors.margins: app.px(3)
-                        spacing: app.px(4)
-                        Key { id: ltKey; k: "lb"; anchors.verticalCenter: parent.verticalCenter }
-                        Repeater {
-                            model: app.tabs
-                            Rectangle {
-                                required property int index
-                                required property string modelData
-                                width: (tabRow.width - ltKey.width * 2 - tabRow.spacing * (app.tabs.length + 1)) / app.tabs.length
-                                height: tabRow.height
-                                radius: app.px(5)
-                                color: app.tab === index ? c.raised : "transparent"
-                                Accessible.role: Accessible.PageTab
-                                Accessible.name: modelData + (app.tab === index ? ", selected" : "") + ", " + (index + 1) + " of " + app.tabs.length
-                                Rectangle { visible: app.tab === parent.index; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
-                                Label { anchors.centerIn: parent; width: Math.min(implicitWidth, parent.width - app.px(8)); horizontalAlignment: Text.AlignHCenter; text: parent.modelData; font.weight: Font.DemiBold; color: app.tab === parent.index ? c.text : c.muted }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { app.modPage = false; app.tab = parent.index } }
-                            }
-                        }
-                        Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
-                    }
-                    // Touch: a sideways swipe on the tabs is LB or RB.
-                    DragHandler {
-                        target: null
-                        xAxis.enabled: true; yAxis.enabled: false
-                        acceptedDevices: PointerDevice.TouchScreen
-                        onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the tabs"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
-                    }
-                }
+                // 0.57: no tab row. The bottom bar names the tabs (LB and RB switch them, a tap or a sideways swipe too);
+                // My mods' Find, Show, Sort and Select several are in the Y pop-up.
                 // Page content
                 Item {
                     id: content
@@ -6561,30 +6522,9 @@ Window {
                         onActivated: app.railExtra > 0 ? app.showHiddenGames() : app.load()
                     }
 
-                    // My mods: "+ Get mods for <game>", the mods, then the collapsed Removed row.
-                    // (0.56: the list tools moved to the tab row; this keeps the old place empty.)
-                    Row {
-                        id: listBarRow
-                        visible: false
-                        height: visible ? app.px(36) : 0
-                        x: app.px(4)
-                        spacing: app.px(8)
-                        Repeater {
-                            model: app.listBar
-                            Rectangle {
-                                required property int index
-                                required property var modelData
-                                readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex < 0 && app.listBarIndex === index
-                                width: chipText.implicitWidth + app.px(28); height: app.px(32); radius: app.px(6)
-                                color: foc ? c.focusFill : c.card
-                                border.color: foc ? c.accent : c.line
-                                border.width: foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
-                                Text { id: chipText; anchors.centerIn: parent; text: parent.modelData.label; color: c.text; font.family: app.bodyFont; font.pixelSize: app.px(14); font.weight: Font.DemiBold }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { app.modIndex = -1; app.listBarIndex = parent.index; app.listBarRun(parent.index) } }
-                            }
-                        }
-                    }
+                    // My mods: the mods, then the collapsed Removed row (0.57: Find, Show, Sort and Select several are in
+                    // the Y pop-up).
+                    Item { id: listBarRow; height: 0 }
                     Label {
                         id: moveLine
                         y: listBarRow.height
@@ -6679,8 +6619,9 @@ Window {
                         anchors.topMargin: listBarRow.height + moveLine.height
                         // The header sliding away or back changes the list's height: the focused row stays fully in view.
                         onHeightChanged: if (app.modIndex >= 0) positionViewAtIndex(app.modIndex, ListView.Contain)
-                        // A touch flick back to the top brings the header back.
-                        onAtYBeginningChanged: if (atYBeginning && moving) app.headerTucked = false
+                        // A touch or wheel scroll hides the bars going down and brings them back going up or at the top.
+                        property real lastY: 0
+                        onContentYChanged: { if (moving) app.scrollFollow(contentY + topMargin, lastY + topMargin, contentHeight > height + app.px(40)); lastY = contentY }
                         topMargin: app.px(4)
                         bottomMargin: app.px(4)
                         clip: true
@@ -6824,17 +6765,15 @@ Window {
                         loadingMore: app.loadingMore
                         search: app.getText
                         category: app.getCategory
-                        bar: app.getBar
                         recent: app.starterItems
                         recentTitle: "Good first mods"
-                        banner: app.getBanner !== "" ? app.getBanner + (app.nexusLine !== "" ? " " + app.nexusLine + "." : "") : app.nexusLine
                         fallback: app.nexusFallback
                         fallbackTitle: "Browse " + app.gameTitle + " mods on Nexus Mods"
                         columns: app.gridColumns
                         focusArea: app.getArea
                         focusIndex: app.getIndex
                         active: app.zone === "main" && app.sheet === ""
-                        onBarClicked: (i) => app.getBarRun(i)
+                        onContentScrolled: (y, before, longer) => app.scrollFollow(y, before, longer)
                         onRecentClicked: (i) => { app.getArea = "recent"; app.getIndex = i; app.getAct("a") }
                         onItemClicked: (i) => { app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
                         onItemMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.getArea = "grid"; app.getIndex = i; app.menuIndex = 0; app.sheet = "cardmenu" } }
@@ -7605,6 +7544,24 @@ Window {
         onActivated: (index) => { app.menuIndex = index; app.cardMenuRun(index) }
         onClosed: app.act("b")
     }
+    // Y's pop-up: Search, Sort and Category on Get mods; Find, Show, Sort and Select several on My mods.
+    FindSheet {
+        id: findView
+        ui: kit
+        visible: app.sheet === "findpop"
+        title: app.findPop.kind === "get" ? "Find mods for " + app.gameTitle : "Find in my mods"
+        subtitle: app.findPop.kind === "get" ? app.nexusLine : ""
+        fieldLabel: app.findPop.kind === "get" ? "Search" : "Find"
+        text: app.findPop.text
+        placeholder: app.findPop.kind === "get" ? "Words from a mod's name, Y types" : "Part of a mod's name, Y types"
+        sections: app.findSections
+        focusRow: app.findRow
+        focusCol: app.findCol
+        onFieldClicked: { app.findRow = 0; app.findPopKeyboard() }
+        onOptionClicked: (r, c) => { app.findRow = r; app.findCol = c; app.findPopChoose(r, c) }
+        onShowClicked: app.findPopApply()
+        onClosed: app.act("b")
+    }
     // A small menu made on the spot: Play options (hold Start), a profile's Rename and Delete, Select several's actions.
     ModMenu {
         id: pickMenu
@@ -7727,60 +7684,185 @@ Window {
         onEditEnded: app.reportEditing(false)
     }
 
-    // Legend: what binds() says A, B, X and Y do here, then one more (the pointer's buttons, or Start when a sheet
-    // covers Play). At most five; LB/RB, View and Start are caps on the tab bar, the wheel button and Play. Hidden
-    // after a touch until the next press. Declared after the menus so their backdrop never dims it.
+    // The bottom bar (0.57: the only bar on the game screen). Left to right: the game's name with the tab and its
+    // status under it (a warning there is tappable), LB RB and the tabs, then the legend: what binds() says A, B, X
+    // and Y do here and one more (the pointer's buttons, or Start when a sheet covers Play), at most five, then View
+    // Wheel, and Start Play on the right. Elsewhere it is the legend and View alone. After a touch the button hints
+    // hide until the next press (the game's name, the tabs and Play stay). Scrolling down hides it with the rail.
+    // Declared after the menus so their backdrop never dims it.
     readonly property var legendHints: legendFor(binds())
+    readonly property bool barGame: page === "game" && game !== null && !modPage
+    // "My mods · Basic support · 2 mods on", or the problem in the status's own color.
+    readonly property string barStatus: (tabs[tab] ? tabs[tab].replace(/ \(\d+\)$/, "") : "") + (supportChip !== "" ? " · " + supportChip : "")
+        + " · " + (statusNow.level === "ok" ? (statusNow.detail || statusNow.words) : statusNow.words) + (pill.words !== "" ? " · " + pill.words : "")
+    readonly property bool barTappable: statusNow.level === "warn" || statusNow.level === "stop" || pill.words !== ""
+    // A tap on the status line: what is waiting (downloads, updates, the loadout), else why there is a problem.
+    function statusTap() {
+        note("action", "Status tapped: " + barStatus)
+        if (!dl.active && !browserOpen && webDlsRunning > 0) openNexusDownloads()
+        else if (updateCount > 0 && !dl.active && statusNow.level === "ok") openUpdates()
+        else if (pill.words.indexOf("Loadout: ") === 0 && statusNow.level === "ok") openProfiles()
+        else if (statusNow.level === "warn" || statusNow.level === "stop") openWhy()
+    }
     Rectangle {
         id: legend
+        // Shown unless the content went full screen (a sheet or the wheel always brings it back).
+        readonly property bool shown: visible && !(app.barsHidden && app.sheet === "" && !app.wheelOpen)
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: app.px(8)
+        anchors.bottomMargin: shown ? 0 : -height - app.px(2)
+        Behavior on anchors.bottomMargin { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: rail.width + app.px(14)
-        anchors.rightMargin: app.px(14)
-        height: app.px(36)
-        radius: app.px(6)
+        anchors.leftMargin: rail.width
+        height: app.px(48)
         color: c.panel
         // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
         z: app.wheelOpen ? 80 : 40
         // The Nexus page has its legend in its own bar.
-        visible: app.lastInput !== "touch" && app.sheet !== "tutorial" && (app.page !== "browser" || app.wheelOpen || app.sheet !== "")
+        visible: app.sheet !== "tutorial" && (app.barGame || (app.lastInput !== "touch" && (app.page !== "browser" || app.wheelOpen || app.sheet !== "")))
+        Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
+        readonly property real gap: app.px(12)
+        // Touch: a sideways swipe on the bar is LB or RB.
+        DragHandler {
+            enabled: app.barGame
+            target: null
+            xAxis.enabled: true; yAxis.enabled: false
+            acceptedDevices: PointerDevice.TouchScreen
+            onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the bottom bar"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
+        }
         Row {
-            id: legendRow
-            anchors.verticalCenter: parent.verticalCenter
-            x: app.px(12)
-            spacing: app.px(16)
-            Repeater {
-                model: app.legendHints
-                Hint {
-                    required property var modelData
-                    k: modelData[0]
-                    label: modelData[1]
-                    pre: modelData[2] || ""
-                    k2: modelData[3] || ""
-                    label2: modelData[4] || ""
+            id: barRow
+            x: app.px(14)
+            height: parent.height
+            spacing: legend.gap
+            // The game: its name, and the tab and status under it.
+            Column {
+                id: barGameCol
+                visible: app.barGame
+                width: visible ? Math.min(app.px(170), Math.max(barName.implicitWidth, barSub.implicitWidth)) : 0
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                    id: barName
+                    width: parent.width; elide: Text.ElideRight
+                    text: app.game ? app.shortGame(app.game.name) : ""
+                    color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(15); font.bold: true
+                }
+                Text {
+                    id: barSub
+                    width: parent.width; elide: Text.ElideRight
+                    text: app.barStatus
+                    color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
+                    font.family: app.bodyFont; font.pixelSize: app.px(12)
+                    font.underline: app.barTappable && (app.statusNow.level === "warn" || app.statusNow.level === "stop")
+                }
+                Accessible.role: app.barTappable ? Accessible.Button : Accessible.StaticText
+                Accessible.name: barName.text + ", " + app.barStatus
+                HoverHandler { enabled: app.barTappable; onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { enabled: app.barTappable; onTapped: app.statusTap() }
+            }
+            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+            // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
+            Row {
+                id: barTabs
+                visible: app.barGame
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: app.px(6)
+                Key { k: "lb"; anchors.verticalCenter: parent.verticalCenter }
+                Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
+                Repeater {
+                    model: legend.tabWordsFit ? app.tabs : []
+                    Row {
+                        required property int index
+                        required property string modelData
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: app.px(6)
+                        Text { visible: parent.index > 0; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.px(14); anchors.verticalCenter: parent.verticalCenter }
+                        Text {
+                            text: parent.modelData.replace(/ \(\d+\)$/, "")
+                            color: app.tab === parent.index ? c.text : c.muted
+                            font.family: app.bodyFont; font.pixelSize: app.px(14); font.bold: app.tab === parent.index
+                            anchors.verticalCenter: parent.verticalCenter
+                            Accessible.role: Accessible.PageTab
+                            Accessible.name: text + (app.tab === parent.index ? ", selected" : "") + ", " + (parent.index + 1) + " of " + app.tabs.length
+                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                            TapHandler { onTapped: { const i = parent.parent.index; app.note("touch", "Tab tapped: " + app.tabs[i]); app.modPage = false; app.tab = i } }
+                        }
+                    }
                 }
             }
-        }
-        // The quick wheel's button: View's cap (a tap opens it too).
-        Rectangle {
-            id: wheelBtn
-            anchors.right: parent.right
-            anchors.rightMargin: app.px(4)
-            anchors.verticalCenter: parent.verticalCenter
-            width: wheelRow.implicitWidth + app.px(16); height: app.px(30); radius: app.px(6)
-            color: app.wheelOpen ? c.focusFill : c.raised
-            visible: app.sheet === "" || app.wheelOpen
+            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
             Row {
-                id: wheelRow
-                anchors.centerIn: parent
-                spacing: app.px(6)
-                Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                Label { text: app.wheelOpen ? "Close" : "Quick wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                id: legendRow
+                visible: app.lastInput !== "touch" || !app.barGame
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: app.px(app.barGame ? 12 : 16)
+                Repeater {
+                    model: app.legendHints
+                    Hint {
+                        required property var modelData
+                        k: modelData[0]
+                        label: modelData[1]
+                        pre: modelData[2] || ""
+                        k2: modelData[3] || ""
+                        label2: modelData[4] || ""
+                    }
+                }
             }
+            // The quick wheel's button: View's cap (a tap opens it too).
+            Rectangle {
+                id: wheelBtn
+                anchors.verticalCenter: parent.verticalCenter
+                width: wheelRow.implicitWidth + app.px(16); height: app.px(30); radius: app.px(6)
+                color: app.wheelOpen ? c.focusFill : c.raised
+                visible: app.sheet === "" || app.wheelOpen
+                Row {
+                    id: wheelRow
+                    anchors.centerIn: parent
+                    spacing: app.px(6)
+                    Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
+                    Label { visible: legend.wheelWord || app.wheelOpen; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                }
+                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { onTapped: app.wheelPress() }
+            }
+        }
+        // The tab names show when everything fits; otherwise LB and RB alone (the status line names the tab).
+        TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
+        // Room first goes to the tab names, then to the word Wheel (its cap always shows).
+        TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); text: "Wheel" }
+        readonly property real barFree: width - app.px(28) - barGameCol.width - (legendRow.visible ? legendRow.implicitWidth : 0) - app.px(70)
+                                        - (playBtn.visible ? playBtn.width + app.px(14) : 0) - app.px(60) - legend.gap * 6
+        readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
+        readonly property real wheelWordNeed: wheelMetrics.advanceWidth + app.px(6)
+        readonly property bool tabWordsFit: barFree >= tabWordsNeed
+        readonly property bool wheelWord: !app.barGame || barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= wheelWordNeed)
+        Rectangle {
+            id: playBtn
+            visible: app.barGame
+            anchors.right: parent.right
+            anchors.rightMargin: app.px(14)
+            anchors.verticalCenter: parent.verticalCenter
+            width: playRow.implicitWidth + app.px(24); height: app.px(36); radius: app.px(6)
+            opacity: Turbine.busy ? 0.7 : 1
+            // The focus ring when Play has the focus (a mod just arrived).
+            border.color: c.text
+            border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
+            gradient: Gradient {
+                GradientStop { position: 0; color: c.accentHi }
+                GradientStop { position: 1; color: c.accent }
+            }
+            Row {
+                id: playRow
+                anchors.centerIn: parent
+                spacing: app.px(8)
+                Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
+                // Play waits for changes being saved: it says so.
+                Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            }
+            Accessible.role: Accessible.Button
+            Accessible.name: "Play"
             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { onTapped: app.wheelPress() }
+            TapHandler { onTapped: app.startPlay() }
         }
     }
     QuickWheel {

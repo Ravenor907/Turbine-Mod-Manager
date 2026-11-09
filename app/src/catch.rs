@@ -1118,7 +1118,7 @@ impl qobject::Turbine {
                         let held = self.rust().catching.deferred.iter().any(|(x, _)| label_of(&x.path) == label);
                         self.as_mut().fallback_to_watcher(&label, None);
                         if d.is_some() && !held && !e.contains("isn't in Downloads") {
-                            self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them from Get Mods, Add from Downloads.", "warn", None, "", "", true, "");
+                            self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them from the game menu, Add from Downloads.", "warn", None, "", "", true, "");
                         }
                         return;
                     }
@@ -1139,7 +1139,7 @@ impl qobject::Turbine {
                         let label = label_of(&path);
                         crate::log::line("bridge", &format!("{label}: no game for it here"));
                         self.as_mut().set_status(
-                            &format!("Turbine doesn't know which game {label} is for. Add it from that game's Get Mods, Add from Downloads."),
+                            &format!("Turbine doesn't know which game {label} is for. Open that game in Turbine, then the game menu, Add from Downloads."),
                             "warn",
                             None,
                             "",

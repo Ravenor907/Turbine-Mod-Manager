@@ -12,7 +12,7 @@ signals below, so touch works too.
 | A | Do the focused thing |
 | B | Back one level, focus put back where it was. Hold 1 s: home |
 | X | Quick menu for the focused item (max 6 rows) |
-| Y | Find (My mods, Load order) or Search (Get mods) |
+| Y | Find: the pop-up with Search, Sort and Category (Get mods) or Find, Show, Sort and Select several (My mods); Find plugin (Load order) |
 | LB / RB | Previous / next tab of this view: game tabs, Settings sections, installer steps; on a mod page the previous / next result. Never another game |
 | LT / RT | Pointer hidden: a page up / down (move mode: top / bottom). Pointer showing: LT right click, RT left click |
 | R3 | Left mouse button. Pointer showing: press and release at the pointer, held it drags. Pointer hidden: the pointer shows on the focused item and A runs |
@@ -34,14 +34,32 @@ legend, so the legend can't promise something a button doesn't do. The D-pad and
 are never in the legend. Sheets answer through `sheetBinds()`.
 
 Legend rules: at most 5; A, B, X, Y in that order, then one more (the pointer's "RT Click, LT Menu" while it shows,
-or Start when a sheet covers Play). LB/RB are caps at the ends of the tab bar (and the Settings sections and the mod
-page header), View is the cap on the quick wheel's button, Start is the cap on Play: never printed twice. Holds read
-"hold A Delete". After a touch the legend hides until the next press.
+or Start when a sheet covers Play). LB/RB are caps before the tab names in the bottom bar (and on the mod page
+header), View is the cap on the Wheel button, Start is the cap on Play: never printed twice. Holds read
+"hold A Delete". After a touch the button hints hide until the next press.
+
+### The bottom bar (0.57)
+
+No top bar on the game screen. The bottom bar, left to right: the game's name with the tab and status under it
+("My mods · Basic support · 2 mods on"; a warning in its color, and a tap on it opens Why won't it start? or what
+the status is about), LB RB and the tab names, the legend, View Wheel, and Start Play on the right. Going down a
+long list or grid hides it and the rail (truly full screen); going up, the top, View, a tab change, a sheet or the
+rail bring them back, sliding unless Reduce motion is on.
+
+## FindSheet (0.57)
+
+Y's pop-up. Get mods: a Search field, Sort buttons and Category buttons (six, then More..., which lists them all),
+and From with two sources. My mods: a Find field, Show and Sort buttons, and Select several. The D-pad moves, A
+chooses (nothing changes yet; A on the field or Y opens the keyboard), Start shows the results, B closes.
+Properties: `title`, `subtitle`, `fieldLabel`, `text`, `placeholder`, `sections` ([{key, title, options, chosen}]),
+`focusRow` (0 the field), `focusCol`. Signals: `fieldClicked()`, `optionClicked(row, col)`, `showClicked()`,
+`closed()`.
 
 ### Focus
 
-Zones: the rail, Play (in the header), the content. Left at the first column reaches the rail; Right or A comes
-back. Up from the top row reaches the filter bar, then Play. Tab bars aren't focusable (LB/RB, a swipe). Each game
+Zones: the rail, Play (in the bottom bar), the content. Left at the first column reaches the rail; Right or A comes
+back. Up at the top row stays there (and brings the bars back). Tabs aren't focusable (LB/RB, a tap on a tab's name
+in the bottom bar, a sideways swipe on it). Each game
 remembers its tab and row (`focusMemo`, `lastFocusId`), each tab its own row; Get mods remembers its search and card.
 
 | After | Focus lands on |
@@ -72,14 +90,16 @@ push, let go of View: that place. In Labs the middle is Report.
 
 | Place | My mods | Get mods | Load order |
 | --- | --- | --- | --- |
-| Up | Find | Search | Find plugin |
-| Up-right | Sort | Sort | Sort |
-| Right | Show | Category | Show (dimmed) |
+| Up | Find (the Y pop-up) | Find (the Y pop-up) | Find plugin |
+| Up-right | Updates (n) | Recently viewed | Sort |
+| Right | Add from Downloads | Add from Downloads | Add from Downloads |
 | Down-right | Play options | Play options | Play options |
-| Down | Full menu | Full menu | Full menu |
+| Down | Game menu | Game menu | Game menu |
 | Down-left | Settings | Settings | Settings |
 | Left | Games | Games | Games |
-| Up-left | Updates (n) | Add a file | Loadouts |
+| Up-left | Loadouts | Loadouts | Loadouts |
+
+(0.57: Sort, Show, Category and Select several left the wheel for the Y pop-up.)
 
 Properties: `slots` ([{label, ok}]), `focusIndex` (-1 the middle), `labs`, `viewGlyph`. Signals: `activated(index)`,
 `closed()`. Full menu is GameMenu with Activity log and Help added.

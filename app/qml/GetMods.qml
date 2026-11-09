@@ -1,11 +1,11 @@
 import QtQuick
 import QtQuick.Shapes
 
-// Get mods: the bar (search with Steam's keyboard, sort, category, where from, Add from Downloads), then a
-// the mods as picture cards, four to a row: thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
+// Get mods: the mods as picture cards, four to a row (0.57: no bar over them; Y opens the pop-up with Search, Sort
+// and Category, and Add from Downloads is in the game menu): thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
 // an "Installed · On" (or Off) or "Update ready" ribbon and a "Code mod" chip where known. (Recently viewed is on the
 // quick wheel.) When browsing failed (no key and Nexus refused), one big card
-// opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "bar", "recent", "grid" or "fallback"
+// opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "recent", "grid" or "fallback"
 // with focusIndex) and passes taps through the signals.
 Item {
     id: gm
@@ -16,10 +16,8 @@ Item {
     property bool loadingMore: false
     property string search: ""
     property string category: ""
-    property var bar: []                    // [{key, label}]
     property var recent: []                 // the strip over the cards: [{id, name, icon, what}]
     property string recentTitle: "Good first mods"
-    property string banner: ""              // "No mods for The Witcher 3 yet. Pick one below, or search."
     property bool fallback: false
     property string fallbackTitle: ""
     property string focusArea: "grid"
@@ -30,13 +28,14 @@ Item {
     readonly property var cats: result && result.categories ? [""].concat(result.categories) : []
     readonly property bool showRecent: recent.length > 0 && search === "" && !fallback
 
-    signal barClicked(int index)
     signal recentClicked(int index)
     signal itemClicked(int index)
     signal itemMenu(int index)            // right-click on a card (its X menu)
     signal fallbackClicked(string key)
     // After a scroll by the wheel or a swipe: the first and last cards in view (the focus follows into view).
     signal scrolled(int first, int last)
+    // A scroll by touch or the wheel: where the cards are now and before, and whether there is more than a screen.
+    signal contentScrolled(real y, real before, bool longer)
 
     function count(n) {
         n = n || 0
@@ -45,83 +44,12 @@ Item {
         return String(n)
     }
     onFocusIndexChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain)
-    onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "bar") grid.positionViewAtBeginning()
+    onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "recent") grid.positionViewAtBeginning()
     function gridItem(i) { return grid.itemAtIndex(i) }
 
     Column {
         anchors.fill: parent
         spacing: gm.ui.px(8)
-        Row {
-            id: barRow
-            visible: !gm.fallback
-            width: parent.width
-            height: visible ? gm.ui.px(42) : 0
-            spacing: gm.ui.px(8)
-            Repeater {
-                model: gm.bar
-                Rectangle {
-                    id: b
-                    required property int index
-                    required property var modelData
-                    readonly property bool foc: gm.active && gm.focusArea === "bar" && gm.focusIndex === index
-                    readonly property bool isSearch: modelData.key === "search"
-                    readonly property real otherWidth: {
-                        let w = 0
-                        for (let i = 0; i < barRow.children.length; i++) {
-                            const c = barRow.children[i]
-                            if (c !== b && c.isSearch === false) w += c.width
-                        }
-                        return w
-                    }
-                    width: isSearch ? Math.max(gm.ui.px(140), barRow.width - gm.ui.px(8) * (gm.bar.length - 1) - otherWidth) : label.implicitWidth + gm.ui.px(26)
-                    height: parent.height
-                    radius: gm.ui.px(6)
-                    color: foc ? gm.ui.c.focusFill : isSearch ? gm.ui.c.ground : gm.ui.c.card
-                    border.color: foc ? gm.ui.c.accent : gm.ui.c.line
-                    border.width: foc ? gm.ui.px(2) : Math.max(1, gm.ui.px(1))
-                    Shape {
-                        visible: b.isSearch
-                        x: gm.ui.px(12); anchors.verticalCenter: parent.verticalCenter
-                        width: gm.ui.px(18); height: width
-                        preferredRendererType: Shape.CurveRenderer
-                        ShapePath {
-                            strokeColor: gm.ui.c.muted; strokeWidth: 2; fillColor: "transparent"; capStyle: ShapePath.RoundCap
-                            scale: Qt.size(gm.ui.px(18) / 24, gm.ui.px(18) / 24)
-                            PathSvg { path: "M10.5 3a7.5 7.5 0 1 1 0 15 7.5 7.5 0 0 1 0-15z M16 16l5 5" }
-                        }
-                    }
-                    Text {
-                        id: label
-                        x: b.isSearch ? gm.ui.px(38) : gm.ui.px(13)
-                        width: b.isSearch ? parent.width - gm.ui.px(50) : implicitWidth
-                        anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideRight
-                        text: b.modelData.label
-                        color: b.isSearch && gm.search === "" ? gm.ui.c.muted : gm.ui.c.text
-                        font.family: gm.ui.bodyFont
-                        font.pixelSize: gm.ui.px(15)
-                        font.weight: b.isSearch ? Font.Normal : Font.DemiBold
-                    }
-                    HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: gm.barClicked(b.index) }
-                }
-            }
-        }
-        // A one-time line for a game with no mods yet.
-        Rectangle {
-            visible: gm.banner !== "" && !gm.fallback
-            width: parent.width
-            height: visible ? gm.ui.px(40) : 0
-            radius: gm.ui.px(6)
-            color: gm.ui.c.card
-            border.color: gm.ui.c.accentLo
-            Row {
-                x: gm.ui.px(12); anchors.verticalCenter: parent.verticalCenter
-                spacing: gm.ui.px(10)
-                InfoMark { anchors.verticalCenter: parent.verticalCenter }
-                Text { text: gm.banner; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(15); anchors.verticalCenter: parent.verticalCenter }
-            }
-        }
         // Recently viewed
         Column {
             visible: gm.showRecent
@@ -226,6 +154,9 @@ Item {
                 cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + gm.ui.px(76)
                 model: gm.items
                 onMovementEnded: gm.scrolled(indexAt(gm.ui.px(10), contentY + gm.ui.px(10)), indexAt(width - gm.ui.px(10), contentY + height - gm.ui.px(10)))
+                // A touch or wheel scroll (not the focus moving): Main.qml hides or shows the bars.
+                property real lastY: 0
+                onContentYChanged: { if (moving) gm.contentScrolled(contentY, lastY, contentHeight > height + gm.ui.px(40)); lastY = contentY }
                 footer: Item {
                     width: grid.width
                     height: gm.loadingMore ? gm.ui.px(36) : 0

@@ -92,7 +92,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             text: ["A picks and B goes back. X shows options for what's highlighted, and Y searches this list. LB and RB switch tabs. The right stick moves a pointer, and RT clicks.",
-                   "Press View for the quick wheel: Find, Sort, Settings, your games and more, from anywhere. Games: Left to the rail, or View then Left.",
+                   "Press View for the quick wheel: Find, Add from Downloads, Settings, your games and more, from anywhere. Games: Left to the rail, or View then Left.",
                    "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
                    "Press START to play the game with your mods on. That's all you need."][tut.card] || ""
             color: tut.ui.c.soft
@@ -120,7 +120,7 @@ Item {
                 Rectangle { anchors.fill: parent; radius: width / 2; color: tut.ui.c.card; border.color: tut.ui.c.line; border.width: Math.max(1, tut.ui.px(2)) }
                 Rectangle { anchors.centerIn: parent; width: tut.ui.px(54); height: width; radius: width / 2; color: tut.ui.c.raised }
                 Repeater {
-                    model: ["Find", "Sort", "Show", "Play options", "Game menu", "Settings", "Games", "Select several"]
+                    model: ["Find", "Updates", "Add from Downloads", "Play options", "Game menu", "Settings", "Games", "Loadouts"]
                     Text {
                         required property int index
                         required property string modelData

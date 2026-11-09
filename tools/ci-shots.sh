@@ -198,7 +198,7 @@ need $c "8: toggle keeps the row" "Toggle: focus on row 2"
 need $c "8: a menu closes back to its row" "Menu modmenu closed: focus on row 2"
 need $c "8: tabs keep the row" "Tabs round trip: tab 1 and back to 0, row 2"
 need $c "8: a game round trip keeps tab and row" "Game round trip: back on .*, tab 0, .*: the same mod"
-need $c "Quick wheel: Up then Right" "Wheel: slot 1 Sort"
+need $c "Quick wheel: Up then Right" "Wheel: slot 1 Updates"
 need $c "Quick wheel held" 'Wheel held, Left, let go: sheet pick "Games"'
 need $c "Uninstall keeps the row" "Uninstall: row 1 is ghost"
 need $c "Put back" "Put back: .* is back"
@@ -267,6 +267,8 @@ shoot "quickexit-1280x800" 1280x800 quickexit "$h" --game=$skyrim "--selftest-im
 shoot "chain-1280x800" 1280x800 chain "$PWD/home" --game=steam:292030
 fresh "listbar"; h="$PWD/fh/listbar"
 shoot "listbar-1280x800" 1280x800 listbar "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+need listbar-1280x800 "My mods: Y opens the pop-up with Find, Show, Sort, Select several" "Find pop-up \\(My mods\\): field, Show 6, Sort 3, Many at once 1"
+need listbar-1280x800 "My mods pop-up legend" "My mods pop-up legend: A Choose · B Close · Y Keyboard · START Show results"
 log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
@@ -654,13 +656,22 @@ for size in $SIZES; do
   need "checkbasic-$size" "Any game: unreal-paks rule ($size)" "Placed by rule unreal-paks: Lantern/Content/Paks/~mods"
   need "checkbasic-$size" "Any game: anti-cheat before Play ($size)" "Check before Play: .*Anti-cheat"
 done
-# 0.56, layout: a renamed mod, the header tucked away with the details panel, Get mods four to a row, the pie wheel.
+# 0.56 and 0.57, layout: a renamed mod, the bars hidden with the details panel; no top bar, the game's name, tabs
+# and Play in the bottom bar; the Y pop-up on Get mods; Get mods scrolled to full screen and back.
 for size in $SIZES; do
   shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
   need "tucked-$size" "Rename ($size)" "Renamed .* to Lanterns of the Road"
-  need "tucked-$size" "A short list keeps the header ($size)" "Short list keeps the header: true"
-  need "tucked-$size" "The tucked bar names the game ($size)" "Tucked name: Skyrim SE \\(shown\\)"
-  need "tucked-$size" "Header slides away going down ($size)" "Header tucked: true; panel: true"
+  need "tucked-$size" "A short list keeps the bars ($size)" "Short list keeps the bars: true"
+  need "tucked-$size" "The bottom bar names the game and has Play, no top bar ($size)" "Bottom bar: Skyrim SE \\| My mods · .* \\| tabs (3|caps only) \\| Play shown \\| top bar none"
+  need "tucked-$size" "The bars hide going down ($size)" "Bars hidden: true; panel: true"
+  shoot "findpop-$size" "$size" findpop "$PWD/home" --game=$skyrim
+  need "findpop-$size" "Get mods: Y opens the pop-up ($size)" "Find pop-up \\(Get mods\\): field, Sort 5, Category"
+  need "findpop-$size" "Get mods pop-up: Sort and Category buttons, Start shows ($size)" "Get mods pop-up: Sort: Trending/.*; Category: All/.* \\| legend A Choose · B Close · Y Keyboard · START Show results \\| sheet findpop"
+  need "findpop-$size" "Get mods: no search row, no top bar ($size)" "Get mods page: search row none, top bar none"
+  shoot "fullscroll-$size" "$size" fullscroll "$PWD/home" --game=$skyrim
+  need "fullscroll-$size" "Get mods: down to full screen ($size)" "Full screen: bars hidden true, rail hidden"
+  need "fullscroll-$size" "Get mods: Up brings the bars back ($size)" "Full screen, Up: bars hidden false"
+  need "fullscroll-$size" "Get mods: Down hides them again ($size)" "Full screen, Down again: bars hidden true"
   shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"
 done
