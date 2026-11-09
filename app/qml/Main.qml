@@ -335,7 +335,8 @@ Window {
     }
     Timer {
         running: shot.on
-        interval: shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
+        interval: ["findpop", "fullscroll", "listbar"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -369,7 +370,7 @@ Window {
     // bars and the rail are gone.
     Timer {
         id: findPopShot
-        interval: 2500
+        interval: 3500
         onTriggered: {
             if (shot.page === "listbar") {
                 app.zone = "main"; app.modIndex = 0
@@ -7739,17 +7740,21 @@ Window {
             Column {
                 id: barGameCol
                 visible: app.barGame
-                width: visible ? Math.min(app.px(170), Math.max(barName.implicitWidth, barSub.implicitWidth)) : 0
+                // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
+                TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
+                TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
+                readonly property real want: Math.min(app.px(170), Math.ceil(Math.max(barNameMetrics.advanceWidth, barSubMetrics.advanceWidth)) + app.px(2))
+                width: visible ? want : 0
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
                     id: barName
-                    width: parent.width; elide: Text.ElideRight
+                    width: barGameCol.want; elide: Text.ElideRight
                     text: app.game ? app.shortGame(app.game.name) : ""
                     color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(15); font.bold: true
                 }
                 Text {
                     id: barSub
-                    width: parent.width; elide: Text.ElideRight
+                    width: barGameCol.want; elide: Text.ElideRight
                     text: app.barStatus
                     color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
                     font.family: app.bodyFont; font.pixelSize: app.px(12)
