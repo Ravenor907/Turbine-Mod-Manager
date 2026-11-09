@@ -5,8 +5,9 @@ import QtQuick
 // is filled; the focus ring is on the button A would choose. Nothing changes until Start (or Show results) shows the
 // results; B (or Close, or a tap outside) closes. Main.qml moves the focus (focusRow 0 is the field, then one row
 // per section, focusCol the button) and handles the keys; taps come back through the signals.
-Item {
+Overlay {
     id: fs
+    onOutsideTapped: fs.closed()
     required property var ui
     anchors.fill: parent
 
@@ -25,7 +26,6 @@ Item {
     signal closed()
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: fs.closed() }
     Rectangle {
         id: box
         anchors.horizontalCenter: parent.horizontalCenter
@@ -37,7 +37,7 @@ Item {
         border.color: fs.ui.c.line
         border.width: Math.max(1, fs.ui.px(1))
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Flickable {
             id: flick
             anchors.fill: parent

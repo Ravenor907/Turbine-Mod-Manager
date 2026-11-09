@@ -5,8 +5,9 @@ import QtQuick
 // the watcher could only guess. A presses the highlighted button, B the cancel one, Start the
 // first (SheetButtons); Main.qml handles the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the
 // wheel) and the buttons stay in view at the bottom.
-Item {
+Overlay {
     id: sh
+    onOutsideTapped: sh.closed()
     required property var ui
     anchors.fill: parent
 
@@ -34,7 +35,6 @@ Item {
     onVisibleChanged: if (visible) flick.contentY = 0
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: sh.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - sh.ui.px(40), sh.ui.px(660))
@@ -45,7 +45,7 @@ Item {
         color: sh.ui.c.panel
         border.color: sh.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Rectangle { width: parent.width; height: sh.ui.px(3); color: sh.ui.c.accent; radius: sh.ui.px(2) }
         Flickable {
             id: flick

@@ -3,8 +3,9 @@ import QtQuick
 // Pages to open on Nexus Mods, for what a free account can't download inside Turbine (a mod, what it needs, SKSE,
 // a shared profile's Nexus mods). A opens the focused page in the browser; pressing Mod Manager Download there
 // sends the file back to Turbine. B closes. Main.qml handles the keys.
-Item {
+Overlay {
     id: pg
+    onOutsideTapped: pg.closed()
     required property var ui
     anchors.fill: parent
 
@@ -18,7 +19,6 @@ Item {
     signal closed()
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: pg.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - pg.ui.px(40), pg.ui.px(680))
@@ -27,7 +27,7 @@ Item {
         color: pg.ui.c.panel
         border.color: pg.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: col
             x: pg.ui.px(22); y: pg.ui.px(20)

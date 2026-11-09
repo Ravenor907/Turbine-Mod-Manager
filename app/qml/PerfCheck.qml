@@ -7,8 +7,9 @@ import Turbine
 // time Turbine used, how it draws (and whether that's software drawing), startup time, screen and scale numbers,
 // memory and how long controller presses waited. The report shows here before Copy report or Report a bug (which
 // sends it along). Left and Right choose a button, A uses it, B closes (or stops a check under way).
-Item {
+Overlay {
     id: perf
+    onOutsideTapped: perf.closeClicked()
     required property var ui
     required property var win
     anchors.fill: parent
@@ -166,7 +167,6 @@ Item {
 
     // ------------------------------------------------------------- the screen
     Rectangle { anchors.fill: parent; color: "#C8000000" }
-    MouseArea { anchors.fill: parent; onClicked: perf.closeClicked() }
     Rectangle {
         id: box
         anchors.centerIn: parent
@@ -176,7 +176,7 @@ Item {
         color: perf.ui.c.panel
         border.color: perf.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: col
             x: perf.ui.px(18); y: perf.ui.px(18)

@@ -4,8 +4,9 @@ import QtQuick
 // X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus
 // right in Turbine, Added, START plays). 4: Press START to play, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
 // Left back, B skips, Start finishes) and remembers it was seen; Settings, Help shows it again.
-Item {
+Overlay {
     id: tut
+    closeOnOutside: false
     required property var ui
     property int card: 0
     property int count: 4
@@ -19,7 +20,6 @@ Item {
     z: 100
 
     Rectangle { anchors.fill: parent; color: tut.ui.c.ground; opacity: 0.97 }
-    MouseArea { anchors.fill: parent }
 
     // A face button as it looks on the pad: round, its letter in the middle.
     component Face: Column {

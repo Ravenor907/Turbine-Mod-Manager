@@ -3,8 +3,9 @@ import QtQuick
 // Labs > Activity log: the last 500 lines of what Turbine did, newest at the bottom. Up and Down (the D-pad) scroll
 // a few lines at a time, the left stick turned like a wheel and the mouse wheel scroll it too. A runs the focused
 // button (Copy to clipboard or Save to Downloads); Left and Right choose it; B closes. Main.qml sends the keys.
-Item {
+Overlay {
     id: al
+    onOutsideTapped: al.closeClicked()
     required property var ui
     anchors.fill: parent
 
@@ -58,7 +59,6 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: al.closeClicked() }
     Rectangle {
         id: box
         anchors.centerIn: parent
@@ -69,7 +69,7 @@ Item {
         color: al.ui.c.panel
         border.color: al.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Rectangle { width: parent.width; height: al.ui.px(3); color: al.ui.c.accent; radius: al.ui.px(2) }
         Text {
             id: head

@@ -151,6 +151,8 @@ function checkFile(file) {
     const open = i;
     if (src[i] !== "{") { fail(i, "expected { after " + type); return; }
     i++;
+    // 0.59: a property or handler set twice in one object stops the file loading ("Property value set multiple times").
+    const assigned = new Set();
     for (;;) {
       skipSpace(false);
       if (i >= n) { fail(open, type + " { never closed"); return; }
@@ -202,6 +204,8 @@ function checkFile(file) {
       if (src.startsWith("on ", i)) { i += 3; skipSpace(true); ident(); skipSpace(true); object(word); continue; }
       if (src[i] === "{" && /^[A-Z]/.test(word.split(".").pop())) { object(word); continue; }
       if (src[i] === ":") {
+        if (assigned.has(word)) fail(at, word + " is set twice in one " + type);
+        assigned.add(word);
         i++;
         if (word === "id") {
           skipSpace(true);
@@ -271,10 +275,76 @@ function finalNames(file) {
   return out;
 }
 
+// 0.59: every overlay uses Overlay.qml. In Qt 6 a backdrop MouseArea stops the items under it but never their
+// pointer handlers, so a full-window backdrop of a file's own lets taps through to the page beneath: the only
+// backdrop allowed is Overlay's (which also never closes while another layer is on top; Main.qml turns the layers
+// beneath off). In Main.qml every overlay sits in the sheet layer (the quick wheel and the tutorial above it), and
+// every tap wired from the page layer, the browser and the sheets asks app.gate() first.
+function overlays(files) {
+  const fs = require("fs");
+  const out = [];
+  const rootOf = {};
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    const m = /^([A-Z][\w.]*)\s*\{/m.exec(src.replace(/^\s*(import|pragma)[^\n]*$/gm, "").replace(/^\s*\/\/[^\n]*$/gm, ""));
+    rootOf[f.split("/").pop().replace(/\.qml$/, "")] = m ? m[1] : "";
+  }
+  const overlayTypes = new Set(Object.keys(rootOf).filter(k => rootOf[k] === "Overlay").concat(["Overlay"]));
+  for (const f of files) {
+    const name = f.split("/").pop().replace(/\.qml$/, "");
+    if (name === "Overlay" || name === "CardGuard") continue;
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    // A full-window MouseArea or TapHandler straight under the root object (four spaces in), or one filling a
+    // root-level backdrop Rectangle.
+    for (let k = 0; k < lines.length; k++) {
+      const l = lines[k];
+      if (!/^ {4}(MouseArea|TapHandler)\b/.test(l) && !/^ {8}(MouseArea|TapHandler) \{ anchors\.fill: parent/.test(l)) continue;
+      if (/^ {8}/.test(l)) {
+        // Only when its parent is a root-level Rectangle that fills the window.
+        let j = k - 1; while (j >= 0 && !/^ {4}\S/.test(lines[j])) j--;
+        const block = lines.slice(j, k).join("\n");
+        if (!/^ {4}Rectangle \{/.test(lines[j] || "") || !/anchors\.fill: parent/.test(block)) continue;
+      } else {
+        let block = l; for (let j = k + 1; j < lines.length && j < k + 10 && !/^ {4}\}/.test(lines[j - 1]); j++) block += "\n" + lines[j];
+        if (!/anchors\.fill: parent/.test(block)) continue;
+      }
+      if (/overlay-check: /.test(l)) continue;
+      if (rootOf[name] !== "Overlay") out.push(f + ":" + (k + 1) + ": a full-window backdrop of its own: make the root Overlay (Overlay.qml) and use onOutsideTapped");
+    }
+    if (name !== "Main") continue;
+    const at = (re) => lines.findIndex(x => re.test(x));
+    const sheetsFrom = at(/^ {8}id: sheetLayer$/), barFrom = at(/^ {8}id: legend$/);
+    const pageFrom = at(/^ {8}id: mainRow$/), pageTo = at(/^ {8}id: sheetLayer$/);
+    if (sheetsFrom < 0 || barFrom < 0 || pageFrom < 0) { out.push(f + ": no mainRow, sheetLayer or legend"); continue; }
+    for (let k = 0; k < lines.length; k++) {
+      const m = /^\s*([A-Z]\w*) \{/.exec(lines[k]);
+      if (m && overlayTypes.has(m[1]) && !(k > sheetsFrom && k < barFrom) && ["QuickWheel", "Tutorial"].indexOf(m[1]) < 0)
+        out.push(f + ":" + (k + 1) + ": " + m[1] + " is an overlay outside the sheet layer");
+    }
+    // Taps from the page (main row and the Nexus page) and the sheets ask app.gate() first.
+    for (let k = pageFrom; k < barFrom; k++) {
+      const l = lines[k];
+      if (!/^\s*on(Tapped|[A-Z]\w*Clicked|Activated|ItemMenu|RowMenu|RowHeld|Swiped|Closed|OutsideTapped|Choose|Next|Back|Stop)\s*:/.test(l)) continue;
+      if (/gate\(/.test(l) || /gate\(/.test(lines[k + 1] || "")) continue;
+      // The status card's own windows (over other apps) aren't under any layer of this window.
+      let j = k; while (j > 0 && !/^ {4}[A-Z]/.test(lines[j])) j--;
+      if (/^ {4}StatusOverlay\b/.test(lines[j])) continue;
+      out.push(f + ":" + (k + 1) + ": a tap with no app.gate() first: " + l.trim().slice(0, 80));
+    }
+    for (const fn of ["onSigninClicked", "onGooglePassword", "onGoogleChrome", "onCloseClicked", "onTabClicked", "onDownloadClicked"]) {
+      const k = lines.findIndex(x => x.indexOf("function " + fn + "(") >= 0);
+      if (k >= 0 && !/gate\(/.test(lines[k])) out.push(f + ":" + (k + 1) + ": the Nexus page's " + fn + " has no app.gate() first");
+    }
+  }
+  console.log("Overlay check: " + [...overlayTypes].filter(t => t !== "Overlay").length + " overlays on Overlay.qml, " + out.length + " problems");
+  return out;
+}
+
 const files = process.argv.slice(2);
 let all = [];
 for (const f of files) all = all.concat(checkFile(f)).concat(finalNames(f));
 for (const f of files) if (f.endsWith("Main.qml")) all = all.concat(settingsRows(f));
+all = all.concat(overlays(files));
 for (const e of all) console.log(e);
 console.log("QML check: " + files.length + " files, " + all.length + " problems");
 process.exit(all.length ? 1 : 0);

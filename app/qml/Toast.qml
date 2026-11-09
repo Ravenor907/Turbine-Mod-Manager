@@ -25,6 +25,9 @@ Rectangle {
     property string kind: "info"
 
     signal hidden()
+    // A press on the toast (0.59): Main.qml stops that press reaching anything beneath it.
+    signal pressedOn()
+    signal pressEnded()
 
     // show(text, strong, detail); the last two are optional.
     function show(t, s, d) {
@@ -71,6 +74,19 @@ Rectangle {
     opacity: shown ? 1 : 0
     visible: opacity > 0
     Behavior on opacity { NumberAnimation { duration: 160 } }
+
+    // A tap on the toast dismisses it and goes nowhere else (0.59).
+    MouseArea {  // overlay-check: the toast's own box, not the window
+        anchors.fill: parent
+        enabled: root.shown
+        acceptedButtons: Qt.AllButtons
+        preventStealing: true
+        onWheel: (w) => { w.accepted = true }
+        onPressed: root.pressedOn()
+        onReleased: root.pressEnded()
+        onCanceled: root.pressEnded()
+        onClicked: root.hide()
+    }
 
     Row {
         id: toastRow

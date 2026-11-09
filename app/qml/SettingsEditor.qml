@@ -5,8 +5,9 @@ import QtQuick
 // moves a list on, or opens Steam's keyboard for a number or text; Start saves; X is Reset to default; Y switches to
 // the plain text of the file (A there edits the line); B goes back (twice when there are changes not saved). Taps
 // and clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
-Item {
+Overlay {
     id: se
+    closeOnOutside: false
     required property var ui
     anchors.fill: parent
 
@@ -122,7 +123,6 @@ Item {
     onShownChanged: if (focusIndex >= shown.length) focusIndex = Math.max(0, shown.length - 1)
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent }
     Rectangle {
         id: box
         anchors.centerIn: parent

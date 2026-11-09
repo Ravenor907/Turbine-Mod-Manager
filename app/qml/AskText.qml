@@ -3,11 +3,13 @@ import QtQuick
 // A line of text from the player: a search, a profile name, a Thunderstore profile code, the Nexus Mods key. In Game
 // Mode Steam's on-screen keyboard opens with it (Main.qml asks Steam). The field has the focus first: A opens the
 // keyboard again. Down: the buttons Clear, Cancel and Done (SheetButtons). Start or Enter is Done, B or Esc cancels.
-Item {
+Overlay {
     id: ask
+    onOutsideTapped: ask.cancel()
     required property var ui
     anchors.fill: parent
-    visible: false
+    // Main.qml draws it only while app.sheet is "ask" (0.59).
+    property bool shown: false
 
     property string title: ""
     property string note: ""
@@ -25,13 +27,13 @@ Item {
         title = t; note = n || ""; placeholder = ph || ""
         maxLength = max || 200; secret = !!hide; doneLabel = done || "Done"
         field.text = start || ""
-        visible = true
+        shown = true
         field.forceActiveFocus()
         field.cursorPosition = field.length
     }
-    function close() { visible = false }
-    function accept() { const t = field.text.trim(); visible = false; accepted(t) }
-    function cancel() { visible = false; cancelled() }
+    function close() { shown = false }
+    function accept() { const t = field.text.trim(); shown = false; accepted(t) }
+    function cancel() { shown = false; cancelled() }
     function clear() { field.text = "" }
     function handleButton(b) {
         if (b === "a" || b === "start") accept()
@@ -39,7 +41,6 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: "#C8000000" }
-    MouseArea { anchors.fill: parent; onClicked: ask.cancel() }
     Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         y: ask.ui.px(40)
@@ -48,7 +49,7 @@ Item {
         radius: ask.ui.px(10)
         color: ask.ui.c.panel
         border.color: ask.ui.c.line
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: col
             x: ask.ui.px(18); y: ask.ui.px(18)

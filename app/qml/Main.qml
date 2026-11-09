@@ -2963,6 +2963,8 @@ Window {
         menuIndex = 0; stopDangerHolds()
         if (sheet !== "") closeWheel()
         if (sheet !== "" && barsHidden) barsHidden = false
+        // 0.59: the text prompt lives only while it is the sheet (another sheet replacing it closes it unanswered).
+        if (sheet !== "ask" && askView.shown) { note("page", "Text entry closed: another sheet replaced it"); askView.close(); reportEditing(false) }
         // An installer's choices: the Nexus page closes so they show; any other sheet over the page gives the page
         // its keyboard focus back when it closes.
         if (sheet === "fomod" && page === "browser") closeBrowser("installer")
@@ -3758,6 +3760,29 @@ Window {
     // Tap View: it stays open, the D-pad picks (Up then Right is Up-right), A does it, B closes. Or hold View, push a
     // direction and let go of View. In Labs the middle takes the report shot.
     property bool wheelOpen: false
+    // ---- 0.59: one input layer. In Qt 6 a MouseArea that takes a press stops the items under it but not their
+    // pointer handlers, so an overlay's backdrop alone can't stop a tap reaching a card beneath. Everything under
+    // the top layer is turned off instead (a disabled item and its handlers never see a press): 0 the page (main
+    // row and the Nexus page), 2 a sheet, menu or prompt, 3 the quick wheel, 4 the tutorial. The bottom bar stays
+    // on up to the wheel (its Close is in the bar).
+    readonly property int topLayer: sheet === "tutorial" ? 4 : wheelOpen ? 3
+                                    : (sheet !== "" || askView.shown || perfView.visible || reportView.visible) ? 2 : 0
+    // A press that landed on something drawn over the layers without turning them off (the bar over a sheet, a
+    // toast over anything): the handlers under it ignore that press. Cleared once the press is done.
+    property int pressCover: -1
+    function coverPress(layer) { pressCover = layer; coverClear.restart() }
+    // After the release has reached every handler (passive ones get it after the backdrop that took the press).
+    function coverEnd() { Qt.callLater(() => { app.pressCover = -1 }) }
+    Timer { id: coverClear; interval: 8000; onTriggered: app.pressCover = -1 }
+    // Every tap wired from the page, the bar or a sheet asks first. In normal use it never refuses (the layers are
+    // off); when it does, the build's checks fail on the LEAK line.
+    property int beneathHits: 0
+    property int coveredHits: 0
+    function gate(layer, name) {
+        if (topLayer > layer) { beneathHits++; note("touch", "LEAK " + name + " (layer " + layer + " under " + topLayer + ")"); return false }
+        if (pressCover > layer) { coveredHits++; note("touch", "Covered: " + name + " under a press on layer " + pressCover); return false }
+        return true
+    }
     property int wheelSlot: -1            // 0 Up, 1 Up-right, 2 Right, 3 Down-right, 4 Down, 5 Down-left, 6 Left, 7 Up-left
     property bool wheelHeld: false
     property bool wheelPicked: false
@@ -5196,14 +5221,14 @@ Window {
         }
         function onDialogWanted(request) { app.browserDialog(request) }
         function onMenuWanted() { app.openBrowserMenu() }
-        function onSigninClicked() { app.signinStart() }
-        function onGooglePassword() { app.googleSetPassword() }
-        function onGoogleChrome() { app.googleUseChrome() }
+        function onSigninClicked() { if (!app.gate(0, "browser onSigninClicked")) return; app.signinStart() }
+        function onGooglePassword() { if (!app.gate(0, "browser onGooglePassword")) return; app.googleSetPassword() }
+        function onGoogleChrome() { if (!app.gate(0, "browser onGoogleChrome")) return; app.googleUseChrome() }
         function onPagePressed() { Turbine.browserPressed() }
         function onPageDown() { Turbine.browserPointerDown() }
-        function onCloseClicked() { app.closeBrowser("back") }
-        function onTabClicked(i) { app.browserTab = i }
-        function onDownloadClicked(i) { app.browserDlIndex = i; app.browserRowAct(i) }
+        function onCloseClicked() { if (!app.gate(0, "browser onCloseClicked")) return; app.closeBrowser("back") }
+        function onTabClicked(i) { if (!app.gate(0, "browser onTabClicked")) return; app.browserTab = i }
+        function onDownloadClicked(i) { if (!app.gate(0, "browser onDownloadClicked")) return; app.browserDlIndex = i; app.browserRowAct(i) }
     }
     // The page's alert and questions, in Turbine's own menu (the answer goes back to the page).
     function browserDialog(request) {
@@ -6583,7 +6608,7 @@ Window {
         // In the legend, a hint for one button is also a button: a tap or click does what the button does.
         readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y"].indexOf(k) >= 0
         spacing: app.px(6)
-        TapHandler { enabled: hint.clickable; onTapped: { app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
+        TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
         Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Repeater {
@@ -6637,6 +6662,8 @@ Window {
     Row {
         id: mainRow
         anchors.fill: parent
+        // 0.59: off while anything covers it (see topLayer).
+        enabled: app.topLayer === 0
 
         // ===== Rail: the logo, the games (last played first, portrait art), Settings pinned at the bottom.
         Rectangle {
@@ -6669,7 +6696,7 @@ Window {
                     visible: status === Image.Ready
                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                     TapHandler {
-                        onPressedChanged: pressed ? app.holdStart("the rail icon") : app.holdStop()
+                        onPressedChanged: pressed ? (app.gate(0, "rail icon hold") ? app.holdStart("the rail icon") : null) : app.holdStop()
                     }
                 }
                 Rectangle {
@@ -6818,9 +6845,9 @@ Window {
                         border.color: c.rail; border.width: app.px(2)
                     }
                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                    TapHandler { onTapped: { app.railIndex = tileItem.index; app.railSelect(tileItem.index) } }
+                    TapHandler { onTapped: { if (!app.gate(0, "railIndex")) return; { app.railIndex = tileItem.index; app.railSelect(tileItem.index) } } }
                     // Right-click (LT with the pointer): the game's options, like X.
-                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (app.sheet === "") { app.zone = "rail"; app.railIndex = tileItem.index; app.openRailMenu() } }
+                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: { if (!app.gate(0, "sheet (right)")) return; if (app.sheet === "") { app.zone = "rail"; app.railIndex = tileItem.index; app.openRailMenu() } } }
                 }
             }
             // Every game hidden from the rail: one way back, right here.
@@ -6848,7 +6875,7 @@ Window {
                     font.bold: true
                 }
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: app.showHiddenGames() }
+                TapHandler { onTapped: { if (!app.gate(0, "showHiddenGames")) return; app.showHiddenGames() } }
             }
             Rectangle {
                 id: gear
@@ -6875,7 +6902,7 @@ Window {
                     border.color: c.rail; border.width: app.px(2)
                 }
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: app.openSettings() }
+                TapHandler { onTapped: { if (!app.gate(0, "openSettings")) return; app.openSettings() } }
             }
         }
 
@@ -6931,7 +6958,7 @@ Window {
                         color: c.raised
                         Hint { id: backRow; anchors.centerIn: parent; k: "b"; label: app.page === "place" ? app.placeBLabel : "Back" }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                        TapHandler { onTapped: app.act("b") }
+                        TapHandler { onTapped: { if (!app.gate(0, "act")) return; app.act("b") } }
                     }
                     Column {
                         x: backBtn.visible ? backBtn.x + backBtn.width + app.px(14) : app.px(16)
@@ -6996,7 +7023,7 @@ Window {
                                 border.color: c.accentLo
                                 Text { id: pillText; anchors.centerIn: parent; text: pill.words; color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(13); font.bold: true }
                                 // Updates ready: the list of them (a free account picks each one's page there).
-                                TapHandler { onTapped: if (!app.dl.active && !app.browserOpen && app.webDlsRunning > 0) app.openNexusDownloads(); else if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() }
+                                TapHandler { onTapped: { if (!app.gate(0, "dl")) return; if (!app.dl.active && !app.browserOpen && app.webDlsRunning > 0) app.openNexusDownloads(); else if (app.updateCount > 0 && !app.dl.active) app.openUpdates(); else if (pill.words.indexOf("Loadout: ") === 0) app.openProfiles() } }
                             }
                         }
                     }
@@ -7036,7 +7063,7 @@ Window {
                             Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                        TapHandler { onTapped: app.startPlay() }
+                        TapHandler { onTapped: { if (!app.gate(0, "startPlay")) return; app.startPlay() } }
                     }
                 }
 
@@ -7064,7 +7091,7 @@ Window {
                                       : "Turbine looks in Steam's libraries, including SD cards, and in Heroic. Install a game and it shows up here.") : ""
                         buttonKey: none ? "a" : ""
                         buttonLabel: none ? (app.railExtra > 0 ? "Show hidden games" : "Look again") : ""
-                        onActivated: app.railExtra > 0 ? app.showHiddenGames() : app.load()
+                        onActivated: { if (!app.gate(0, "onActivated")) return; app.railExtra > 0 ? app.showHiddenGames() : app.load() }
                     }
 
                     // My mods: the mods, then the collapsed Removed row (0.57: Find, Show, Sort and Select several are in
@@ -7218,9 +7245,9 @@ Window {
                                 // The legend says what A and X do: nothing printed twice.
                                 showHints: false
                                 // A click or tap anywhere on the row is A on it (turns it on or off; ticks it in Select several).
-                                onClicked: app.rowA(() => { if (!app.moving) app.modIndex = entry.index })
+                                onClicked: { if (!app.gate(0, "onClicked")) return; app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
                                 // A right-click (LT with the pointer) opens the mod's menu, like X.
-                                onMenuClicked: if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" }
+                                onMenuClicked: { if (!app.gate(0, "onMenuClicked")) return; if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" } }
                             }
                             Rectangle {
                                 visible: entry.kind !== "mod"
@@ -7245,7 +7272,7 @@ Window {
                                     font.italic: entry.kind === "ghost"
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: app.rowA(() => { app.modIndex = entry.index }) }
+                                TapHandler { onTapped: { if (!app.gate(0, "rowA")) return; app.rowA(() => { app.modIndex = entry.index }) } }
                             }
                         }
                     }
@@ -7261,7 +7288,7 @@ Window {
                         buttonKey: "a"
                         buttonLabel: app.nexusUnknown ? "Pick the Nexus game" : "Add from Downloads"
                         buttonFocused: app.zone === "main"
-                        onActivated: app.nexusUnknown ? app.openNexusPick() : app.openAdd()
+                        onActivated: { if (!app.gate(0, "onActivated")) return; app.nexusUnknown ? app.openNexusPick() : app.openAdd() }
                     }
                     // 0.57: an online-only anti-cheat game: no mods, and why.
                     EmptyState {
@@ -7313,7 +7340,7 @@ Window {
                                         Text { text: "Get mods"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
                                     Accessible.role: Accessible.Button; Accessible.name: "Get mods"
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } }
+                                    TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } } }
                                 }
                                 Rectangle {
                                     id: emptyAdd
@@ -7325,7 +7352,7 @@ Window {
                                         Text { text: "Add a file"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
                                     Accessible.role: Accessible.Button; Accessible.name: "Add a file"
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } }
+                                    TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } } }
                                 }
                             }
                         }
@@ -7341,7 +7368,7 @@ Window {
                         buttonLabel: app.rules && app.rules.domain ? "Get mods on Nexus" : "Add from Downloads"
                         buttonFocused: app.zone === "main"
                         note: app.rules && app.rules.domain ? "X: Add from Downloads" : ""
-                        onActivated: app.rules && app.rules.domain ? app.tab = 1 : app.openAdd()
+                        onActivated: { if (!app.gate(0, "onActivated")) return; app.rules && app.rules.domain ? app.tab = 1 : app.openAdd() }
                     }
                     // Where do these files go? (Basic games), and Change where it goes.
                     PlaceFiles {
@@ -7361,9 +7388,9 @@ Window {
                         gameIndex: app.placeGameIndex
                         modIndex: app.placeModIndex
                         preview: app.placePreview
-                        onRowClicked: (pane, index) => { app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("a") }
-                        onRowHeld: (pane, index) => { app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("x") }
-                        onSwiped: (dir) => app.placeAct(dir < 0 ? "lb" : "rb")
+                        onRowClicked: (pane, index) => { if (!app.gate(0, "onRowClicked")) return; app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("a") }
+                        onRowHeld: (pane, index) => { if (!app.gate(0, "onRowHeld")) return; app.placePane = pane; if (pane === 0) app.placeGameIndex = index; else app.placeModIndex = index; app.placeAct("x") }
+                        onSwiped: (dir) => { if (!app.gate(0, "onSwiped")) return; app.placeAct(dir < 0 ? "lb" : "rb") }
                     }
                     GetMods {
                         id: getView
@@ -7386,10 +7413,10 @@ Window {
                         focusIndex: app.getIndex
                         active: app.zone === "main" && app.sheet === ""
                         onContentScrolled: (y, before, longer) => app.scrollFollow(y, before, longer)
-                        onRecentClicked: (i) => { app.getArea = "recent"; app.getIndex = i; app.getAct("a") }
-                        onItemClicked: (i) => { app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
-                        onItemMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.getArea = "grid"; app.getIndex = i; app.menuIndex = 0; app.sheet = "cardmenu" } }
-                        onFallbackClicked: (k) => { app.getArea = "fallback"; app.getAct(k) }
+                        onRecentClicked: (i) => { if (!app.gate(0, "onRecentClicked")) return; app.getArea = "recent"; app.getIndex = i; app.getAct("a") }
+                        onItemClicked: (i) => { if (!app.gate(0, "onItemClicked")) return; app.getArea = "grid"; app.getIndex = i; app.openDetails(app.getItems[i]) }
+                        onItemMenu: (i) => { if (!app.gate(0, "onItemMenu")) return; if (app.sheet === "") { app.zone = "main"; app.getArea = "grid"; app.getIndex = i; app.menuIndex = 0; app.sheet = "cardmenu" } }
+                        onFallbackClicked: (k) => { if (!app.gate(0, "onFallbackClicked")) return; app.getArea = "fallback"; app.getAct(k) }
                         // After the left stick's wheel (or a swipe): the focus comes into view with the cards.
                         onScrolled: (first, last) => {
                             if (app.getArea !== "grid" || first < 0) return
@@ -7413,12 +7440,12 @@ Window {
                         focusIndex: app.pageInline >= 0 ? -1 : app.pageIndex
                         helpLabels: app.pageHelpLabels
                         helpFocus: app.pageInline
-                        onHelpClicked: (i) => { app.pageInline = i; app.modPageAct("a") }
-                        onInstallClicked: { app.pageIndex = 0; app.pageInline = -1; app.installFromDetails() }
-                        onVersionsClicked: { app.pageIndex = 1; app.openVersions() }
-                        onNeedClicked: (i) => { app.pageIndex = i + 2; app.openNeed(i) }
+                        onHelpClicked: (i) => { if (!app.gate(0, "onHelpClicked")) return; app.pageInline = i; app.modPageAct("a") }
+                        onInstallClicked: { if (!app.gate(0, "onInstallClicked")) return; app.pageIndex = 0; app.pageInline = -1; app.installFromDetails() }
+                        onVersionsClicked: { if (!app.gate(0, "onVersionsClicked")) return; app.pageIndex = 1; app.openVersions() }
+                        onNeedClicked: (i) => { if (!app.gate(0, "onNeedClicked")) return; app.pageIndex = i + 2; app.openNeed(i) }
                         // Right-click (LT with the pointer): the page's options, like X.
-                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: if (app.sheet === "" && app.pageMenuItems.length > 0) { app.zone = "main"; app.act("x") } }
+                        TapHandler { acceptedButtons: Qt.RightButton; onTapped: { if (!app.gate(0, "sheet (right)")) return; if (app.sheet === "" && app.pageMenuItems.length > 0) { app.zone = "main"; app.act("x") } } }
                     }
                     // Load order tab (Skyrim)
                     LoadOrderList {
@@ -7435,9 +7462,9 @@ Window {
                         focusIndex: app.orderIndex
                         moving: app.orderMoving
                         active: app.zone === "main" && app.sheet === ""
-                        onSortClicked: { app.orderIndex = -1; Turbine.orderSort() }
-                        onRowClicked: (i) => app.rowA(() => { if (!app.orderMoving) app.orderIndex = i })
-                        onRowMenu: (i) => { if (app.sheet === "") { app.zone = "main"; app.orderIndex = i; app.openPluginMenu() } }
+                        onSortClicked: { if (!app.gate(0, "onSortClicked")) return; app.orderIndex = -1; Turbine.orderSort() }
+                        onRowClicked: (i) => { if (!app.gate(0, "onRowClicked")) return; app.rowA(() => { if (!app.orderMoving) app.orderIndex = i }) }
+                        onRowMenu: (i) => { if (!app.gate(0, "onRowMenu")) return; if (app.sheet === "") { app.zone = "main"; app.orderIndex = i; app.openPluginMenu() } }
                         onScrolled: (first, last) => {
                             if (app.orderMoving || first < 0) return
                             if (app.orderIndex < first) app.orderIndex = app.orderLandOn(first, 1)
@@ -7465,7 +7492,7 @@ Window {
                                     Rectangle { visible: app.setSection === parent.index; width: app.px(3); height: parent.height; color: c.accent; radius: app.px(2) }
                                     Label { x: app.px(14); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; font.pixelSize: app.fpx(16); font.bold: app.setSection === parent.index; color: app.setSection === parent.index ? c.text : c.muted }
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { app.setSection = parent.index; app.setRow = 0 } }
+                                    TapHandler { onTapped: { if (!app.gate(0, "setSection")) return; { app.setSection = parent.index; app.setRow = 0 } } }
                                 }
                             }
                             Key { k: "rb"; anchors.horizontalCenter: parent.horizontalCenter }
@@ -7521,7 +7548,7 @@ Window {
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                                 TapHandler {
                                                     onTapped: {
-                                                        if (!app.tapOnce()) return
+                                                        if (!app.gate(0, "look choice " + srow.modelData.key) || !app.tapOnce()) return
                                                         app.setRow = srow.index
                                                         const v = srow.modelData.options[parent.index]
                                                         if (srow.modelData.key === "layout") app.layoutPreview(v)
@@ -7547,7 +7574,7 @@ Window {
                                                 border.color: c.text
                                                 border.width: look.accent === modelData ? app.px(2) : 0
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                                TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } }
+                                                TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } } }
                                             }
                                         }
                                         Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
@@ -7572,7 +7599,7 @@ Window {
                                             Accessible.role: Accessible.Button
                                             Accessible.name: srow.modelData.label + ": smaller"
                                             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                            TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": - tapped"); srow.modelData.step(-1) } }
+                                            TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": - tapped"); srow.modelData.step(-1) } } }
                                         }
                                         Rectangle {
                                             id: track
@@ -7597,7 +7624,7 @@ Window {
                                             Accessible.role: Accessible.Button
                                             Accessible.name: srow.modelData.label + ": bigger"
                                             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                            TapHandler { onTapped: { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": + tapped"); srow.modelData.step(1) } }
+                                            TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": + tapped"); srow.modelData.step(1) } } }
                                         }
                                         Label { text: srow.now + (srow.modelData.unit || ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                                     }
@@ -7611,7 +7638,7 @@ Window {
                                     }
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: app.rowA(() => { app.setRow = srow.index; app.zone = "settings" }, true) }
+                                TapHandler { onTapped: { if (!app.gate(0, "rowA")) return; app.rowA(() => { app.setRow = srow.index; app.zone = "settings" }, true) } }
                             }
                         }
                         // About: the app icon (ten presses turn Labs mode on or off), version, the scrolling test.
@@ -7637,7 +7664,7 @@ Window {
                                         mipmap: true
                                     }
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { app.setRow = 0; app.labsTap() } }
+                                    TapHandler { onTapped: { if (!app.gate(0, "setRow")) return; { app.setRow = 0; app.labsTap() } } }
                                 }
                                 Column {
                                     anchors.verticalCenter: parent.verticalCenter
@@ -7656,7 +7683,7 @@ Window {
                                 border.width: foc ? app.px(2) : 0
                                 Hint { id: perfRow; anchors.centerIn: parent; k: "a"; label: "Scrolling test (2,000 rows)" }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { app.page = "perf"; app.zone = "perf" } }
+                                TapHandler { onTapped: { if (!app.gate(0, "page")) return; { app.page = "perf"; app.zone = "perf" } } }
                             }
                         }
                         // Labs: Report a bug, Performance check, and the checklist of things to confirm on the device.
@@ -7756,7 +7783,7 @@ Window {
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                                 TapHandler {
                                                     onTapped: {
-                                                        if (!app.tapOnce()) return
+                                                        if (!app.gate(0, "labs choice") || !app.tapOnce()) return
                                                         app.setRow = lrow.index
                                                         if (lrow.isItem) { app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) }
                                                         else if (!parent.on) app.rowStep(lrow.modelData, lrow.modelData.key === "zoom" && parent.index === 0 ? -1 : 1)
@@ -7766,7 +7793,7 @@ Window {
                                         }
                                     }
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (app.settingsFocusable(lrow.index)) app.rowA(() => { app.setRow = lrow.index; app.zone = "settings" }, true) } }
+                                    TapHandler { onTapped: { if (!app.gate(0, "settingsFocusable")) return; { if (app.settingsFocusable(lrow.index)) app.rowA(() => { app.setRow = lrow.index; app.zone = "settings" }, true) } } }
                                 }
                             }
                         }
@@ -7826,6 +7853,7 @@ Window {
         anchors.fill: parent
         active: app.browserOpen
         visible: app.page === "browser"
+        enabled: app.topLayer === 0
         sourceComponent: Component {
             NexusBrowser {
                 ui: kit
@@ -7855,397 +7883,6 @@ Window {
         }
     }
 
-    // ---------------------------------------------------------------- sheets
-    Rectangle {
-        anchors.fill: parent
-        visible: app.sheet === "details" || app.sheet === "notice"
-        color: "#B0000000"
-        TapHandler { onTapped: app.act("b") }
-
-        // Game details: what Turbine found, so the owner can check detection on the device.
-        Rectangle {
-            visible: app.sheet === "details" && app.game !== null
-            anchors.centerIn: parent
-            width: Math.min(parent.width - app.px(40), app.px(600))
-            height: detailCol.implicitHeight + app.px(32)
-            radius: app.px(10)
-            color: c.panel
-            border.color: c.line
-            Column {
-                id: detailCol
-                x: app.px(18); y: app.px(16)
-                width: parent.width - app.px(36)
-                spacing: app.px(8)
-                Label { text: app.game ? app.game.name : ""; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold; width: parent.width }
-                Repeater {
-                    model: app.game ? [
-                        ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
-                        ["Runs as", app.runtimeWords(app.game)],
-                        ["Stored on", (app.game.launcher === "Steam" ? "Steam library, " : "") + app.game.drive],
-                        ["Folder", String(app.game.installDir || "").split("/").filter(x => x !== "").slice(-1)[0] || ""],
-                        // A Steam build number means nothing to people; the number stays for reports, in Labs.
-                        ["Game version", app.game.launcher === "Steam" ? (app.game.build ? "Reported by Steam" : "Not reported") : (app.game.build || "Not reported")],
-                    ].concat(app.labsOn ? [["Store ID", app.game.storeId], ["Build", app.game.build || "none"], ["Full folder", app.game.installDir]] : []).concat([
-
-                        ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
-                        ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
-                                    : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
-                    ]).concat(app.rules && app.rules.supportLevel !== "full" ? [
-                        ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
-                    ] : []).concat(app.rules && app.rules.antiCheat ? [
-                        ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
-                    ] : []).concat(app.checkPaths.length > 0 ? [
-                        ["Same scripts", app.checkPaths.join("; ")]
-                    ] : []).concat(app.rules && app.rules.launchOption ? [
-                        ["Loader setup", app.rules.launchHelp || ""],
-                        ["Launch Option", app.rules.launchOption]
-                    ] : []) : []
-                    Row {
-                        required property var modelData
-                        width: detailCol.width
-                        spacing: app.px(12)
-                        Label { width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
-                        Label { width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
-                    }
-                }
-                Hint { k: "b"; label: "Close" }
-            }
-        }
-
-        // Not SteamOS: said once, then Turbine runs as it is.
-        Rectangle {
-            visible: app.sheet === "notice"
-            anchors.centerIn: parent
-            width: Math.min(parent.width - app.px(40), app.px(520))
-            height: noticeCol.implicitHeight + app.px(36)
-            radius: app.px(10)
-            color: c.panel
-            border.color: c.line
-            Column {
-                id: noticeCol
-                x: app.px(20); y: app.px(18)
-                width: parent.width - app.px(40)
-                spacing: app.px(10)
-                Label { text: "Made for SteamOS"; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
-                Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
-                Hint { k: "a"; label: "OK" }
-            }
-        }
-    }
-
-    // ---------------------------------------------------------------- menus and prompts (they cover the window)
-    ModMenu {
-        ui: kit
-        visible: app.sheet === "modmenu"
-        title: app.menuMod ? app.menuMod.name : ""
-        subtitle: !app.menuMod ? ""
-                  : [app.modWords(app.menuMod), (app.menuMod.enabled ? "On" : "Off") + (app.ordered ? ", " + app.ordinal(app.mods.indexOf(app.menuMod) + 1) + " in load order" : "")].filter(s => s !== "").join(" · ")
-        items: app.modMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
-        focusIndex: app.menuIndex
-        onActivated: (index) => { app.menuIndex = index; app.modMenuRun(index) }
-        onClosed: app.act("b")
-    }
-    GameMenu {
-        id: gameMenuView
-        ui: kit
-        visible: app.sheet === "gamemenu"
-        gameName: app.gameTitle
-        restoreDate: app.lastGood ? "From " + app.when(app.lastGood.savedAt) + " · " + app.plural(app.lastGood.modsOn, "mod", "mods") + " on" : ""
-        restoreEmptyText: "Nothing saved yet. A setup is saved each time you play with mods."
-        extraItems: app.gameMenuItems.slice(2).map(m => ({ key: m.act, label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
-        focusIndex: app.menuIndex
-        // Reset runs only while a finger or the pointer stays down on it (a tap says to hold).
-        onActivated: (index, key) => { app.menuIndex = index; if (key !== "reset" || !resetHold.running) app.gameMenuRun(index) }
-        onHeld: (index, down) => {
-            const it = app.gameMenuItems[index]
-            if (!it || it.act !== "reset") return
-            app.menuIndex = index
-            app.clickHeld = down
-            if (down && !resetHold.running && !app.pressTwice) { app.resetHeld = 0; resetHold.start() }
-            else if (!down) app.stopReset()
-        }
-        onClosed: app.act("b")
-    }
-    AddMods {
-        ui: kit
-        visible: app.sheet === "add"
-        subtitle: app.addAll ? "Every mod file in Downloads and its Game Mods folders, newest first"
-                             : "Mod files in Downloads and Game Mods/" + app.gameTitle + ", newest first"
-        files: app.addList.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: (d.modified > 0 ? app.age(d.modified) : "") + (app.addAll && d.folder ? " · " + d.folder : "") }))
-        focusIndex: app.addIndex
-        emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Y shows every mod file in Downloads."
-        laterText: ""
-        onActivated: (index) => { app.addIndex = index; app.addChosen() }
-        onClosed: app.act("b")
-    }
-    PrePlayCheck {
-        id: checkView
-        ui: kit
-        visible: app.sheet === "check"
-        checks: app.checks
-        buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
-        focusIndex: app.checkIndex
-        note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
-        onActivated: (index, key) => { app.checkIndex = index; app.checkChoose(index) }
-        onClosed: app.act("b")
-    }
-    LoaderPrompt {
-        ui: kit
-        visible: app.sheet === "loader"
-        title: (app.loaderShort || "Mod loader") + " needed"
-        loaderName: app.loaderShort
-        loaderFullName: app.rules && app.rules.loader && app.rules.loader.name.indexOf(" (") > 0 ? app.rules.loader.name.split(" (")[1].replace(")", "") : ""
-        explain: app.rules && app.rules.loader ? app.rules.loader.explain : ""
-        neededBy: app.loaderFor
-        sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
-        sourceShown: app.loaderSourceShown
-        canDownload: app.loaderCanGet
-        buttons: app.loaderLabels.map(l => ({ key: "", label: l }))
-        focusIndex: app.loaderIndex
-        onActivated: (index, key) => { app.loaderIndex = index; app.act(key || "a") }
-        onClosed: app.act("b")
-    }
-
-    // Installer choices: over the main area, the rail stays in view.
-    FomodSheet {
-        id: fomodView
-        ui: kit
-        visible: app.sheet === "fomod" && app.fomod !== null
-        x: rail.width
-        width: parent.width - rail.width
-        height: parent.height - legend.height - app.px(16)
-        info: app.fomod
-        onChoose: (g, o) => { app.note("action", "Installer: question " + (g + 1) + ", option " + (o + 1)); Turbine.fomodChoose(g, o) }
-        onNext: { app.note("action", "Installer: next step"); Turbine.fomodNext() }
-        onBack: { app.note("action", "Installer: back a step"); Turbine.fomodBack() }
-        onStop: { app.note("action", "Installer: stopped"); Turbine.fomodCancel() }
-    }
-    VersionsSheet {
-        ui: kit
-        visible: app.sheet === "versions"
-        modName: app.detailsData && app.detailsData.name ? app.detailsData.name : ""
-        versions: app.otherVersions
-        focusIndex: app.versionIndex
-        note: app.detailsData && app.detailsData.versionsNote ? app.detailsData.versionsNote : ""
-        onActivated: (i) => { app.versionIndex = i; app.installVersion(i) }
-        onClosed: app.act("b")
-    }
-    PagesSheet {
-        ui: kit
-        visible: app.sheet === "pages"
-        title: app.pagesTitle
-        pages: app.pagesList
-        focusIndex: app.pagesIndex
-        gameMode: Turbine.gamemode
-        handlerSet: app.handler.state !== "no"
-        onActivated: (i) => { app.pagesIndex = i; app.openPage(i) }
-        onClosed: app.act("b")
-    }
-    CodeSheet {
-        ui: kit
-        visible: app.sheet === "code"
-        info: app.codeData
-        onCopyClicked: app.act("a")
-        onClosed: app.act("b")
-    }
-    PluginSheet {
-        ui: kit
-        visible: app.sheet === "plugin" && app.orderPlugin !== null
-        plugin: app.orderPlugin
-        position: app.orderIndex + 1
-        notes: app.orderPlugin ? (app.orderMessages[app.orderPlugin.name.toLowerCase()] || []) : []
-        onClosed: app.act("b")
-    }
-    ProfilesSheet {
-        id: profilesView
-        ui: kit
-        visible: app.sheet === "profiles"
-        gameName: app.gameTitle
-        profiles: app.profileList
-        active: app.profileData ? app.profileData.active : ""
-        actions: app.profileActions
-        plan: app.importData
-        premium: app.account.premium === true
-        focusIndex: app.profIndex
-        onActivated: (i) => { app.profIndex = i; app.profileRun(i) }
-        onClosed: app.act("b")
-    }
-    AddMods {
-        ui: kit
-        visible: app.sheet === "shares"
-        title: "Import a share file"
-        subtitle: "Shared loadout files in your Downloads folder, newest first"
-        files: app.shares.map(x => ({ name: x.name, size: "", age: "" }))
-        focusIndex: app.shareIndex
-        actionLabel: "Read"
-        emptyText: "No shared loadout files in Downloads. Someone makes one with Loadouts, Export to a share file."
-        laterText: ""
-        onActivated: (index) => { app.shareIndex = index; app.act("a") }
-        onClosed: app.act("b")
-    }
-    // The no-browser warning, the browser helper's steps, install notes, "Add this file?" and Add Chrome to Steam.
-    InfoSheet {
-        id: infoView
-        ui: kit
-        visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper", "msg"].indexOf(app.sheet) >= 0
-        title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
-               : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
-               : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
-               : app.sheet === "helper" ? "Set up the browser helper"
-               : app.sheet === "addbrowser" && app.addMode === "helper" ? "Set up the browser helper too"
-               : app.sheet === "addbrowser" ? "Add Chrome to Steam so it opens in Game Mode"
-               : app.sheet === "found" ? "Found a download"
-               : app.sheet === "oldhelper" ? "Your browser helper is out of date"
-               : app.sheet === "msg" && app.msgData ? app.msgData.title
-               : "Added " + app.notesName
-        text: app.sheet === "quick" ? app.quickText
-              : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file in Turbine. Press Slow download; it's added too."
-                                    : "A opens its files on Nexus. Pick the top file under Main files, press Manual download, then Slow download. It's added too.")
-              : app.sheet === "nobrowser" ? (app.browser.text || "")
-              : app.sheet === "addbrowser" && app.addMode === "helper" ? "Turbine started " + app.openName + " through Steam. Without the browser helper it opens on its start page, not on the mod. The helper opens the mod's page for you and saves the download in the right game's folder."
-              : app.sheet === "addbrowser" ? "Game Mode only shows apps Steam starts. Add your browser to Steam once, and Turbine opens Nexus in it right over Turbine. Once:"
-              : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
-              : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
-                    + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
-              : app.sheet === "notes" ? "Something to know about this mod:"
-              : app.sheet === "oldhelper" ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. Turbine already put the new version in its folder. After this once, the helper updates by itself."
-              : app.sheet === "msg" && app.msgData ? (app.msgData.text || "")
-              : ""
-        steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
-               : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
-                                           "Turn on Developer mode (top right).",
-                                           "Press Load unpacked.",
-                                           "Choose Downloads, then the folder Turbine browser helper."]
-               : app.sheet === "addbrowser" && app.addMode !== "helper" ? ["Switch to Desktop Mode: press the Steam button, open Power, and pick Switch to Desktop.",
-                                           "In Desktop Mode, open Steam, then Games, then Add a Non-Steam Game to My Library.",
-                                           "Tick Google Chrome and press Add Selected Programs.",
-                                           "Switch back to Game Mode, open Turbine and press Recheck."]
-               : app.sheet === "msg" && app.msgData ? (app.msgData.steps || [])
-               : []
-        notes: app.sheet === "notes" ? app.notesList : app.sheet === "msg" && app.msgData ? (app.msgData.notes || []) : []
-        footnote: app.sheet === "msg" && app.msgData ? (app.msgData.footnote || "")
-                  : app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
-                  : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
-                  : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
-                  : app.sheet === "oldhelper" ? "Until then, Nexus pages open in Steam's browser." + (app.bridge.helper ? " Helper " + app.bridge.helper + ", Turbine's " + (app.bridge.bundled || "") + "." : "")
-                  : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.found.gameName + ": " + app.found.why + ". " : "")
-                    + "The file stays in Downloads either way." + (app.found.more > 0 ? " " + app.plural(app.found.more, "more file waits", "more files wait") + " after this one." : "")
-                  : ""
-        buttons: app.infoButtons
-        focusIndex: app.infoIndex
-        onActivated: (i) => { app.infoIndex = i; app.infoRun(i) }
-        onClosed: app.act("b")
-    }
-    // Removed mods (A Put back, X Delete now) and the hold-to-confirm sheet for deleting for good.
-    RemovedSheet {
-        ui: kit
-        visible: app.sheet === "removed"
-        mods: app.removedMods
-        focusIndex: app.removedIndex
-        now: app.today
-        onActivated: (i) => { app.removedIndex = i; app.removedRun(i) }
-        onDeleteClicked: (i) => { app.removedIndex = i; app.removedDelete(i) }
-        onClosed: app.act("b")
-    }
-    InfoSheet {
-        id: confirmSheet
-        ui: kit
-        visible: app.sheet === "confirm"
-        title: app.confirmVerb === "delete" ? "Delete for good?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
-        text: app.confirmText
-        buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
-                                 : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
-                  { key: "", label: "Keep" }]
-        focusIndex: app.confirmIndex
-        // Hold mode: a tap on Delete only moves the highlight; holding a finger or the pointer on it counts like
-        // holding A. Press twice mode: a tap counts like a press of A.
-        onActivated: (i) => {
-            if (i !== 0) { app.confirmIndex = i; app.act("b"); return }
-            if (app.pressTwice) { app.confirmIndex = 0; app.startConfirm(); return }
-            app.confirmIndex = i
-            if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to " + app.confirmWords())
-        }
-        onHeld: (i, down) => {
-            if (i !== 0 || app.pressTwice) return
-            app.confirmIndex = 0
-            app.clickHeld = down
-            if (down) app.startConfirm(); else app.stopConfirm()
-        }
-        onClosed: app.act("b")
-    }
-    // X on a Get mods card.
-    ModMenu {
-        ui: kit
-        visible: app.sheet === "cardmenu"
-        title: app.cardItem ? app.cardItem.name : ""
-        subtitle: app.cardItem ? (app.cardItem.owner || "") : ""
-        items: app.cardMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: false }))
-        focusIndex: app.menuIndex
-        onActivated: (index) => { app.menuIndex = index; app.cardMenuRun(index) }
-        onClosed: app.act("b")
-    }
-    // Y's pop-up: Search, Sort and Category on Get mods; Find, Show, Sort and Select several on My mods.
-    FindSheet {
-        id: findView
-        ui: kit
-        visible: app.sheet === "findpop"
-        title: app.findPop.kind === "get" ? "Find mods for " + app.gameTitle : "Find in my mods"
-        subtitle: app.findPop.kind === "get" ? app.nexusLine : ""
-        fieldLabel: app.findPop.kind === "get" ? "Search" : "Find"
-        text: app.findPop.text
-        placeholder: app.findPop.kind === "get" ? "Words from a mod's name, Y types" : "Part of a mod's name, Y types"
-        sections: app.findSections
-        focusRow: app.findRow
-        focusCol: app.findCol
-        onFieldClicked: { app.findRow = 0; app.findPopKeyboard() }
-        onOptionClicked: (r, c) => { app.findRow = r; app.findCol = c; app.findPopChoose(r, c) }
-        onShowClicked: app.findPopApply()
-        onClosed: app.act("b")
-    }
-    // A small menu made on the spot: Play options (hold Start), a profile's Rename and Delete, Select several's actions.
-    ModMenu {
-        id: pickMenu
-        ui: kit
-        visible: app.sheet === "pick"
-        title: app.pickTitle
-        subtitle: app.pickSub
-        items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
-        focusIndex: app.menuIndex
-        onActivated: (index) => {
-            // The Mod Manager Download question: nothing for its first second, and a tap (or two, or a click) on Get
-            // it only picks it: only A gets it, so a page can't get a mod by asking for taps where the row appears.
-            if (app.nxmAsking && (app.nxmAskQuiet() || index === 0)) {
-                if (!app.nxmAskQuiet()) app.menuIndex = 0
-                app.note("nxm", "Tap on the question: " + (app.nxmAskQuiet() ? "ignored (it just opened)" : "Get it picked; only A gets it"))
-                return
-            }
-            app.menuIndex = index; app.pickRun(index)
-        }
-        onClosed: { if (app.nxmAskQuiet()) return; app.act("b") }
-    }
-    // The focused game's name beside the rail, up in the header (never over the tabs), and until a game has been
-    // opened from the rail once, how to pick one.
-    Rectangle {
-        id: railLabel
-        readonly property bool on: app.zone === "rail" && app.railIndex < app.games.length
-        readonly property bool hint: !seen.railHintDone || shot.page === "rail"
-        visible: on && app.sheet === ""
-        z: 20
-        x: rail.width + app.px(4)
-        y: app.px(6)
-        width: Math.max(railLabelText.implicitWidth, railHintText.visible ? railHintText.implicitWidth : 0) + app.px(24)
-        height: railLabelText.implicitHeight + (railHintText.visible ? railHintText.implicitHeight + app.px(2) : 0) + app.px(12)
-        radius: app.px(6)
-        color: c.raised
-        border.color: c.accent
-        border.width: Math.max(1, app.px(1))
-        Column {
-            anchors.centerIn: parent
-            spacing: app.px(2)
-            Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.weight: Font.DemiBold }
-            Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
-        }
-    }
     // The status card over other apps (see showOverlay).
     StatusOverlay {
         id: panelWin
@@ -8270,72 +7907,472 @@ Window {
         status: shot.on ? app.status : app.transfer
         fomod: app.fomod
     }
-    // X on "Found <file>": which game it goes into.
-    GamePicker {
-        ui: kit
-        visible: app.sheet === "pickgame"
-        fileName: app.found ? app.found.name : ""
-        games: app.games
-        focusIndex: app.pickIndex
-        onActivated: (i) => { app.pickIndex = i; app.pickGame(i) }
-        onClosed: app.act("b")
-    }
-    AskText {
-        id: askView
-        ui: kit
-        focusIndex: app.askIndex
-        onAccepted: (text) => app.askDone(text)
-        onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = 0 } }
-        onCancelled: app.askCancelled()
-    }
+    // ---------------------------------------------------------------- sheets
+    // 0.59: every sheet, menu and prompt in one layer: off under the quick wheel and the tutorial (see topLayer).
+    Item {
+        id: sheetLayer
+        anchors.fill: parent
+        enabled: app.topLayer <= 2
+        Overlay {
+            visible: app.sheet === "details" || app.sheet === "notice"
+            onOutsideTapped: { if (!app.gate(2, "sheet onOutsideTapped")) return; app.act("b") }
+            Rectangle { anchors.fill: parent; color: "#B0000000" }
 
-    // 0.58: Edit settings (a mod's config files, the game's own, and Seamless Co-op's).
-    SettingsEditor {
-        id: settingsView
-        ui: kit
-        visible: app.sheet === "settingsedit"
-        onSaveClicked: app.settingsSaveNow()
-        onResetClicked: app.settingsResetAsk()
-        onCloseClicked: { app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsReturn }
-        onTypeAsked: (row, value, label) => {
-            app.settingsTypeRow = row
-            const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
-            app.openAsk("settingvalue", label, help.trim(), value, label, 2000, false, "Done")
+            // Game details: what Turbine found, so the owner can check detection on the device.
+            Rectangle {
+                visible: app.sheet === "details" && app.game !== null
+                anchors.centerIn: parent
+                width: Math.min(parent.width - app.px(40), app.px(600))
+                height: detailCol.implicitHeight + app.px(32)
+                radius: app.px(10)
+                color: c.panel
+                border.color: c.line
+                CardGuard {}
+                Column {
+                    id: detailCol
+                    x: app.px(18); y: app.px(16)
+                    width: parent.width - app.px(36)
+                    spacing: app.px(8)
+                    Label { text: app.game ? app.game.name : ""; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold; width: parent.width }
+                    Repeater {
+                        model: app.game ? [
+                            ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
+                            ["Runs as", app.runtimeWords(app.game)],
+                            ["Stored on", (app.game.launcher === "Steam" ? "Steam library, " : "") + app.game.drive],
+                            ["Folder", String(app.game.installDir || "").split("/").filter(x => x !== "").slice(-1)[0] || ""],
+                            // A Steam build number means nothing to people; the number stays for reports, in Labs.
+                            ["Game version", app.game.launcher === "Steam" ? (app.game.build ? "Reported by Steam" : "Not reported") : (app.game.build || "Not reported")],
+                        ].concat(app.labsOn ? [["Store ID", app.game.storeId], ["Build", app.game.build || "none"], ["Full folder", app.game.installDir]] : []).concat([
+
+                            ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
+                            ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
+                                        : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
+                        ]).concat(app.rules && app.rules.supportLevel !== "full" ? [
+                            ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
+                        ] : []).concat(app.rules && app.rules.antiCheat ? [
+                            ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
+                        ] : []).concat(app.checkPaths.length > 0 ? [
+                            ["Same scripts", app.checkPaths.join("; ")]
+                        ] : []).concat(app.rules && app.rules.launchOption ? [
+                            ["Loader setup", app.rules.launchHelp || ""],
+                            ["Launch Option", app.rules.launchOption]
+                        ] : []) : []
+                        Row {
+                            required property var modelData
+                            width: detailCol.width
+                            spacing: app.px(12)
+                            Label { width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
+                            Label { width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
+                        }
+                    }
+                    Hint { k: "b"; label: "Close" }
+                }
+            }
+
+            // Not SteamOS: said once, then Turbine runs as it is.
+            Rectangle {
+                visible: app.sheet === "notice"
+                anchors.centerIn: parent
+                width: Math.min(parent.width - app.px(40), app.px(520))
+                height: noticeCol.implicitHeight + app.px(36)
+                radius: app.px(10)
+                color: c.panel
+                border.color: c.line
+                CardGuard {}
+                Column {
+                    id: noticeCol
+                    x: app.px(20); y: app.px(18)
+                    width: parent.width - app.px(40)
+                    spacing: app.px(10)
+                    Label { text: "Made for SteamOS"; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
+                    Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
+                    Hint { k: "a"; label: "OK" }
+                }
+            }
         }
-    }
-    ActivityLog {
-        id: activityView
-        ui: kit
-        visible: app.sheet === "activity"
-        lines: app.activityLines
-        onCopyClicked: {
-            Turbine.copyText(app.activityLines.slice(-500).join("\n") + "\n")
-            toast.showPlain("Copied the last " + Math.min(500, app.activityLines.length) + " lines of the activity log.")
+
+        // ---------------------------------------------------------------- menus and prompts (they cover the window)
+        ModMenu {
+            ui: kit
+            visible: app.sheet === "modmenu"
+            title: app.menuMod ? app.menuMod.name : ""
+            subtitle: !app.menuMod ? ""
+                      : [app.modWords(app.menuMod), (app.menuMod.enabled ? "On" : "Off") + (app.ordered ? ", " + app.ordinal(app.mods.indexOf(app.menuMod) + 1) + " in load order" : "")].filter(s => s !== "").join(" · ")
+            items: app.modMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
+            focusIndex: app.menuIndex
+            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; app.modMenuRun(index) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
         }
-        onSaveClicked: {
-            const r = app.parse(Turbine.saveActivityLog(), { error: "Couldn't save it." })
-            toast.showPlain(r.error ? r.error : "Saved to Downloads as " + r.file + ".")
+        GameMenu {
+            id: gameMenuView
+            ui: kit
+            visible: app.sheet === "gamemenu"
+            gameName: app.gameTitle
+            restoreDate: app.lastGood ? "From " + app.when(app.lastGood.savedAt) + " · " + app.plural(app.lastGood.modsOn, "mod", "mods") + " on" : ""
+            restoreEmptyText: "Nothing saved yet. A setup is saved each time you play with mods."
+            extraItems: app.gameMenuItems.slice(2).map(m => ({ key: m.act, label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
+            focusIndex: app.menuIndex
+            // Reset runs only while a finger or the pointer stays down on it (a tap says to hold).
+            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; if (key !== "reset" || !resetHold.running) app.gameMenuRun(index) }
+            onHeld: (index, down) => {
+                const it = app.gameMenuItems[index]
+                if (!it || it.act !== "reset") return
+                app.menuIndex = index
+                app.clickHeld = down
+                if (down && !resetHold.running && !app.pressTwice) { app.resetHeld = 0; resetHold.start() }
+                else if (!down) app.stopReset()
+            }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
         }
-        onCloseClicked: app.sheet = ""
-    }
-    PerfCheck {
-        id: perfView
-        ui: kit
-        win: app
-        onCopyClicked: (text) => { Turbine.copyText(text); toast.showPlain("Performance check copied.") }
-        onReportClicked: (text) => app.openReport(null, "Performance check", text)
-        onCloseClicked: { perfView.close(); app.sheet = "" }
-        Component.onCompleted: if (shot.page === "perfcheck") reportText = "Turbine performance check\nTurbine: 0.2 (build sample)\nVerdict: Smooth\n"
-            + "Still: 60 fps, median 16.7 ms, worst 18.9 ms, spikes 0.0%, CPU 9%\nScrolling: 59 fps, median 16.7 ms, worst 24.0 ms, spikes 0.4%, CPU 31%\n"
-            + "Idle: 0 frames in 4.0 s, CPU 0.2%\n\nStartup: first frame 640 ms after start\nDrawing: Vulkan, software drawing no"
-    }
-    LabsReport {
-        id: reportView
-        ui: kit
-        onSendClicked: app.sendReport()
-        onCloseClicked: app.dismissReport()
-        onEditStarted: app.reportEditing(true)
-        onEditEnded: app.reportEditing(false)
+        AddMods {
+            ui: kit
+            visible: app.sheet === "add"
+            subtitle: app.addAll ? "Every mod file in Downloads and its Game Mods folders, newest first"
+                                 : "Mod files in Downloads and Game Mods/" + app.gameTitle + ", newest first"
+            files: app.addList.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: (d.modified > 0 ? app.age(d.modified) : "") + (app.addAll && d.folder ? " · " + d.folder : "") }))
+            focusIndex: app.addIndex
+            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Y shows every mod file in Downloads."
+            laterText: ""
+            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.addIndex = index; app.addChosen() }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        PrePlayCheck {
+            id: checkView
+            ui: kit
+            visible: app.sheet === "check"
+            checks: app.checks
+            buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
+            focusIndex: app.checkIndex
+            note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
+            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.checkIndex = index; app.checkChoose(index) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        LoaderPrompt {
+            ui: kit
+            visible: app.sheet === "loader"
+            title: (app.loaderShort || "Mod loader") + " needed"
+            loaderName: app.loaderShort
+            loaderFullName: app.rules && app.rules.loader && app.rules.loader.name.indexOf(" (") > 0 ? app.rules.loader.name.split(" (")[1].replace(")", "") : ""
+            explain: app.rules && app.rules.loader ? app.rules.loader.explain : ""
+            neededBy: app.loaderFor
+            sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
+            sourceShown: app.loaderSourceShown
+            canDownload: app.loaderCanGet
+            buttons: app.loaderLabels.map(l => ({ key: "", label: l }))
+            focusIndex: app.loaderIndex
+            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.loaderIndex = index; app.act(key || "a") }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+
+        // Installer choices: over the main area, the rail stays in view.
+        FomodSheet {
+            id: fomodView
+            ui: kit
+            visible: app.sheet === "fomod" && app.fomod !== null
+            x: rail.width
+            width: parent.width - rail.width
+            height: parent.height - legend.height - app.px(16)
+            info: app.fomod
+            onChoose: (g, o) => { if (!app.gate(2, "sheet onChoose")) return; app.note("action", "Installer: question " + (g + 1) + ", option " + (o + 1)); Turbine.fomodChoose(g, o) }
+            onNext: { if (!app.gate(2, "sheet onNext")) return; app.note("action", "Installer: next step"); Turbine.fomodNext() }
+            onBack: { if (!app.gate(2, "sheet onBack")) return; app.note("action", "Installer: back a step"); Turbine.fomodBack() }
+            onStop: { if (!app.gate(2, "sheet onStop")) return; app.note("action", "Installer: stopped"); Turbine.fomodCancel() }
+        }
+        VersionsSheet {
+            ui: kit
+            visible: app.sheet === "versions"
+            modName: app.detailsData && app.detailsData.name ? app.detailsData.name : ""
+            versions: app.otherVersions
+            focusIndex: app.versionIndex
+            note: app.detailsData && app.detailsData.versionsNote ? app.detailsData.versionsNote : ""
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.versionIndex = i; app.installVersion(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        PagesSheet {
+            ui: kit
+            visible: app.sheet === "pages"
+            title: app.pagesTitle
+            pages: app.pagesList
+            focusIndex: app.pagesIndex
+            gameMode: Turbine.gamemode
+            handlerSet: app.handler.state !== "no"
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.pagesIndex = i; app.openPage(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        CodeSheet {
+            ui: kit
+            visible: app.sheet === "code"
+            info: app.codeData
+            onCopyClicked: { if (!app.gate(2, "sheet onCopyClicked")) return; app.act("a") }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        PluginSheet {
+            ui: kit
+            visible: app.sheet === "plugin" && app.orderPlugin !== null
+            plugin: app.orderPlugin
+            position: app.orderIndex + 1
+            notes: app.orderPlugin ? (app.orderMessages[app.orderPlugin.name.toLowerCase()] || []) : []
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        ProfilesSheet {
+            id: profilesView
+            ui: kit
+            visible: app.sheet === "profiles"
+            gameName: app.gameTitle
+            profiles: app.profileList
+            active: app.profileData ? app.profileData.active : ""
+            actions: app.profileActions
+            plan: app.importData
+            premium: app.account.premium === true
+            focusIndex: app.profIndex
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.profIndex = i; app.profileRun(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        AddMods {
+            ui: kit
+            visible: app.sheet === "shares"
+            title: "Import a share file"
+            subtitle: "Shared loadout files in your Downloads folder, newest first"
+            files: app.shares.map(x => ({ name: x.name, size: "", age: "" }))
+            focusIndex: app.shareIndex
+            actionLabel: "Read"
+            emptyText: "No shared loadout files in Downloads. Someone makes one with Loadouts, Export to a share file."
+            laterText: ""
+            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.shareIndex = index; app.act("a") }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        // The no-browser warning, the browser helper's steps, install notes, "Add this file?" and Add Chrome to Steam.
+        InfoSheet {
+            id: infoView
+            ui: kit
+            visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "oldhelper", "msg"].indexOf(app.sheet) >= 0
+            title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
+                   : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
+                   : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
+                   : app.sheet === "helper" ? "Set up the browser helper"
+                   : app.sheet === "addbrowser" && app.addMode === "helper" ? "Set up the browser helper too"
+                   : app.sheet === "addbrowser" ? "Add Chrome to Steam so it opens in Game Mode"
+                   : app.sheet === "found" ? "Found a download"
+                   : app.sheet === "oldhelper" ? "Your browser helper is out of date"
+                   : app.sheet === "msg" && app.msgData ? app.msgData.title
+                   : "Added " + app.notesName
+            text: app.sheet === "quick" ? app.quickText
+                  : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file in Turbine. Press Slow download; it's added too."
+                                        : "A opens its files on Nexus. Pick the top file under Main files, press Manual download, then Slow download. It's added too.")
+                  : app.sheet === "nobrowser" ? (app.browser.text || "")
+                  : app.sheet === "addbrowser" && app.addMode === "helper" ? "Turbine started " + app.openName + " through Steam. Without the browser helper it opens on its start page, not on the mod. The helper opens the mod's page for you and saves the download in the right game's folder."
+                  : app.sheet === "addbrowser" ? "Game Mode only shows apps Steam starts. Add your browser to Steam once, and Turbine opens Nexus in it right over Turbine. Once:"
+                  : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
+                  : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
+                        + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
+                  : app.sheet === "notes" ? "Something to know about this mod:"
+                  : app.sheet === "oldhelper" ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. Turbine already put the new version in its folder. After this once, the helper updates by itself."
+                  : app.sheet === "msg" && app.msgData ? (app.msgData.text || "")
+                  : ""
+            steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
+                   : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
+                                               "Turn on Developer mode (top right).",
+                                               "Press Load unpacked.",
+                                               "Choose Downloads, then the folder Turbine browser helper."]
+                   : app.sheet === "addbrowser" && app.addMode !== "helper" ? ["Switch to Desktop Mode: press the Steam button, open Power, and pick Switch to Desktop.",
+                                               "In Desktop Mode, open Steam, then Games, then Add a Non-Steam Game to My Library.",
+                                               "Tick Google Chrome and press Add Selected Programs.",
+                                               "Switch back to Game Mode, open Turbine and press Recheck."]
+                   : app.sheet === "msg" && app.msgData ? (app.msgData.steps || [])
+                   : []
+            notes: app.sheet === "notes" ? app.notesList : app.sheet === "msg" && app.msgData ? (app.msgData.notes || []) : []
+            footnote: app.sheet === "msg" && app.msgData ? (app.msgData.footnote || "")
+                      : app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
+                      : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
+                      : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
+                      : app.sheet === "oldhelper" ? "Until then, Nexus pages open in Steam's browser." + (app.bridge.helper ? " Helper " + app.bridge.helper + ", Turbine's " + (app.bridge.bundled || "") + "." : "")
+                      : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.found.gameName + ": " + app.found.why + ". " : "")
+                        + "The file stays in Downloads either way." + (app.found.more > 0 ? " " + app.plural(app.found.more, "more file waits", "more files wait") + " after this one." : "")
+                      : ""
+            buttons: app.infoButtons
+            focusIndex: app.infoIndex
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.infoIndex = i; app.infoRun(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        // Removed mods (A Put back, X Delete now) and the hold-to-confirm sheet for deleting for good.
+        RemovedSheet {
+            ui: kit
+            visible: app.sheet === "removed"
+            mods: app.removedMods
+            focusIndex: app.removedIndex
+            now: app.today
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.removedIndex = i; app.removedRun(i) }
+            onDeleteClicked: (i) => { if (!app.gate(2, "sheet onDeleteClicked")) return; app.removedIndex = i; app.removedDelete(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        InfoSheet {
+            id: confirmSheet
+            ui: kit
+            visible: app.sheet === "confirm"
+            title: app.confirmVerb === "delete" ? "Delete for good?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
+            text: app.confirmText
+            buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
+                                     : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
+                      { key: "", label: "Keep" }]
+            focusIndex: app.confirmIndex
+            // Hold mode: a tap on Delete only moves the highlight; holding a finger or the pointer on it counts like
+            // holding A. Press twice mode: a tap counts like a press of A.
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return
+                if (i !== 0) { app.confirmIndex = i; app.act("b"); return }
+                if (app.pressTwice) { app.confirmIndex = 0; app.startConfirm(); return }
+                app.confirmIndex = i
+                if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to " + app.confirmWords())
+            }
+            onHeld: (i, down) => {
+                if (i !== 0 || app.pressTwice) return
+                app.confirmIndex = 0
+                app.clickHeld = down
+                if (down) app.startConfirm(); else app.stopConfirm()
+            }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        // X on a Get mods card.
+        ModMenu {
+            ui: kit
+            visible: app.sheet === "cardmenu"
+            title: app.cardItem ? app.cardItem.name : ""
+            subtitle: app.cardItem ? (app.cardItem.owner || "") : ""
+            items: app.cardMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: false }))
+            focusIndex: app.menuIndex
+            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; app.cardMenuRun(index) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        // Y's pop-up: Search, Sort and Category on Get mods; Find, Show, Sort and Select several on My mods.
+        FindSheet {
+            id: findView
+            ui: kit
+            visible: app.sheet === "findpop"
+            title: app.findPop.kind === "get" ? "Find mods for " + app.gameTitle : "Find in my mods"
+            subtitle: app.findPop.kind === "get" ? app.nexusLine : ""
+            fieldLabel: app.findPop.kind === "get" ? "Search" : "Find"
+            text: app.findPop.text
+            placeholder: app.findPop.kind === "get" ? "Words from a mod's name, Y types" : "Part of a mod's name, Y types"
+            sections: app.findSections
+            focusRow: app.findRow
+            focusCol: app.findCol
+            onFieldClicked: { if (!app.gate(2, "sheet onFieldClicked")) return; app.findRow = 0; app.findPopKeyboard() }
+            onOptionClicked: (r, c) => { if (!app.gate(2, "sheet onOptionClicked")) return; app.findRow = r; app.findCol = c; app.findPopChoose(r, c) }
+            onShowClicked: { if (!app.gate(2, "sheet onShowClicked")) return; app.findPopApply() }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        // A small menu made on the spot: Play options (hold Start), a profile's Rename and Delete, Select several's actions.
+        ModMenu {
+            id: pickMenu
+            ui: kit
+            visible: app.sheet === "pick"
+            title: app.pickTitle
+            subtitle: app.pickSub
+            items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
+            focusIndex: app.menuIndex
+            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return
+                // The Mod Manager Download question: nothing for its first second, and a tap (or two, or a click) on Get
+                // it only picks it: only A gets it, so a page can't get a mod by asking for taps where the row appears.
+                if (app.nxmAsking && (app.nxmAskQuiet() || index === 0)) {
+                    if (!app.nxmAskQuiet()) app.menuIndex = 0
+                    app.note("nxm", "Tap on the question: " + (app.nxmAskQuiet() ? "ignored (it just opened)" : "Get it picked; only A gets it"))
+                    return
+                }
+                app.menuIndex = index; app.pickRun(index)
+            }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; if (app.nxmAskQuiet()) return; app.act("b") }
+        }
+        // The focused game's name beside the rail, up in the header (never over the tabs), and until a game has been
+        // opened from the rail once, how to pick one.
+        Rectangle {
+            id: railLabel
+            readonly property bool on: app.zone === "rail" && app.railIndex < app.games.length
+            readonly property bool hint: !seen.railHintDone || shot.page === "rail"
+            visible: on && app.sheet === ""
+            z: 20
+            x: rail.width + app.px(4)
+            y: app.px(6)
+            width: Math.max(railLabelText.implicitWidth, railHintText.visible ? railHintText.implicitWidth : 0) + app.px(24)
+            height: railLabelText.implicitHeight + (railHintText.visible ? railHintText.implicitHeight + app.px(2) : 0) + app.px(12)
+            radius: app.px(6)
+            color: c.raised
+            border.color: c.accent
+            border.width: Math.max(1, app.px(1))
+            Column {
+                anchors.centerIn: parent
+                spacing: app.px(2)
+                Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.weight: Font.DemiBold }
+                Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
+            }
+        }
+        // X on "Found <file>": which game it goes into.
+        GamePicker {
+            ui: kit
+            visible: app.sheet === "pickgame"
+            fileName: app.found ? app.found.name : ""
+            games: app.games
+            focusIndex: app.pickIndex
+            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.pickIndex = i; app.pickGame(i) }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+        }
+        AskText {
+            id: askView
+            ui: kit
+            // 0.59: drawn only while it is the sheet, so another sheet can never open under it.
+            visible: shown && app.sheet === "ask"
+            focusIndex: app.askIndex
+            onAccepted: (text) => app.askDone(text)
+            onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = 0 } }
+            onCancelled: app.askCancelled()
+        }
+
+        // 0.58: Edit settings (a mod's config files, the game's own, and Seamless Co-op's).
+        SettingsEditor {
+            id: settingsView
+            ui: kit
+            visible: app.sheet === "settingsedit"
+            onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return; app.settingsSaveNow() }
+            onResetClicked: { if (!app.gate(2, "sheet onResetClicked")) return; app.settingsResetAsk() }
+            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsReturn }
+            onTypeAsked: (row, value, label) => { if (!app.gate(2, "sheet onTypeAsked")) return
+                app.settingsTypeRow = row
+                const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
+                app.openAsk("settingvalue", label, help.trim(), value, label, 2000, false, "Done")
+            }
+        }
+        ActivityLog {
+            id: activityView
+            ui: kit
+            visible: app.sheet === "activity"
+            lines: app.activityLines
+            onCopyClicked: { if (!app.gate(2, "sheet onCopyClicked")) return
+                Turbine.copyText(app.activityLines.slice(-500).join("\n") + "\n")
+                toast.showPlain("Copied the last " + Math.min(500, app.activityLines.length) + " lines of the activity log.")
+            }
+            onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return
+                const r = app.parse(Turbine.saveActivityLog(), { error: "Couldn't save it." })
+                toast.showPlain(r.error ? r.error : "Saved to Downloads as " + r.file + ".")
+            }
+            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.sheet = "" }
+        }
+        PerfCheck {
+            id: perfView
+            ui: kit
+            win: app
+            onCopyClicked: (text) => { if (!app.gate(2, "sheet onCopyClicked")) return; Turbine.copyText(text); toast.showPlain("Performance check copied.") }
+            onReportClicked: (text) => { if (!app.gate(2, "sheet onReportClicked")) return; app.openReport(null, "Performance check", text) }
+            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; perfView.close(); app.sheet = "" }
+            Component.onCompleted: if (shot.page === "perfcheck") reportText = "Turbine performance check\nTurbine: 0.2 (build sample)\nVerdict: Smooth\n"
+                + "Still: 60 fps, median 16.7 ms, worst 18.9 ms, spikes 0.0%, CPU 9%\nScrolling: 59 fps, median 16.7 ms, worst 24.0 ms, spikes 0.4%, CPU 31%\n"
+                + "Idle: 0 frames in 4.0 s, CPU 0.2%\n\nStartup: first frame 640 ms after start\nDrawing: Vulkan, software drawing no"
+        }
+        LabsReport {
+            id: reportView
+            ui: kit
+            onSendClicked: { if (!app.gate(2, "sheet onSendClicked")) return; app.sendReport() }
+            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.dismissReport() }
+            onEditStarted: app.reportEditing(true)
+            onEditEnded: app.reportEditing(false)
+        }
     }
 
     // The bottom bar (0.57: the only bar on the game screen). Left to right: the game's name with the tab and its
@@ -8379,6 +8416,20 @@ Window {
         z: app.wheelOpen ? 80 : 40
         // The Nexus page has its legend in its own bar.
         visible: app.sheet !== "tutorial" && (app.barGame || (app.lastInput !== "touch" && (app.page !== "browser" || app.wheelOpen || app.sheet !== "")))
+        // 0.59: on up to the quick wheel (its Close is here); the tutorial covers it.
+        enabled: app.topLayer <= 3
+        // The bar takes every press on it, so a tap on the bar never reaches a sheet's backdrop or a button beneath
+        // (one tap on a hint is one press of that button, like the controller).
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            onWheel: (w) => { w.accepted = true }
+            onPressed: app.coverPress(3)
+            onReleased: app.coverEnd()
+            onCanceled: app.coverEnd()
+        }
         Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
         readonly property real gap: app.px(18)
         readonly property real edge: app.px(16)
@@ -8649,6 +8700,7 @@ Window {
         onActivated: (i) => { app.wheelSlot = i; app.wheelFire(i) }
         onPointed: (i) => { app.wheelSlot = i; app.wheelPicked = true }
         onClosed: app.closeWheel()
+        onMiddleTapped: { app.note("touch", "Quick wheel: middle tapped"); app.wheelSlot = -1; if (app.labsOn) app.wheelAct("a"); else app.closeWheel() }
     }
     Tutorial {
         ui: kit
@@ -8698,11 +8750,13 @@ Window {
         function done(m) { put("done", m) }
         function problem(m) { put("problem", m) }
         function showPlain(m) { put("info", m) }
+        onPressedOn: app.coverPress(5)
+        onPressEnded: app.coverEnd()
         // The new-mod picture keeps its toast up (it arrives a few seconds before the picture).
         timeout: shot.page === "newmod" ? 0 : 4000
     }
     // The build's input check: a plain mouse area over everything, to see the left button go down and up.
-    MouseArea { id: inputProbe; anchors.fill: parent; z: 100000; visible: app.probeOn; enabled: app.probeOn; acceptedButtons: Qt.LeftButton }
+    MouseArea { id: inputProbe; anchors.fill: parent; z: 100000; visible: app.probeOn; enabled: app.probeOn; acceptedButtons: Qt.LeftButton }  // overlay-check: the build's input probe only
     // Labs: the brass ring that fills around the rail icon while View (or the icon) is held for a report.
     Shape {
         id: holdRing

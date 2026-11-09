@@ -4,8 +4,9 @@ import QtQuick
 // the game right away). Below them: New profile, Export to a share file, Import a share file, Import a Thunderstore
 // code. When a share is being imported, the sheet shows what it needs instead: mods Turbine gets by itself, from Nexus
 // Mods, ones to add by hand, ones already here, and Get them.
-Item {
+Overlay {
     id: ps
+    onOutsideTapped: ps.closed()
     required property var ui
     anchors.fill: parent
     visible: false
@@ -24,7 +25,6 @@ Item {
     readonly property int rows: plan ? (plan.error ? 1 : 2) : profiles.length + actions.length
 
     Rectangle { anchors.fill: parent; color: "#B0000000" }
-    MouseArea { anchors.fill: parent; onClicked: ps.closed() }
     Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
@@ -33,7 +33,7 @@ Item {
         width: Math.min(parent.width * 0.55, ps.ui.px(520))
         color: ps.ui.c.panel
         border.color: ps.ui.c.line
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             x: ps.ui.px(18); y: ps.ui.px(18)
             width: parent.width - ps.ui.px(36)

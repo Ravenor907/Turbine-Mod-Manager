@@ -2,8 +2,9 @@ import QtQuick
 
 // Profiles > Create a Thunderstore code: uploads the profile, then shows its code big enough to read across a room
 // and copies it. A copies it again, B closes.
-Item {
+Overlay {
     id: cs
+    onOutsideTapped: cs.closed()
     required property var ui
     anchors.fill: parent
 
@@ -15,7 +16,6 @@ Item {
     readonly property string state_: info ? info.state : ""
 
     Rectangle { anchors.fill: parent; color: "#C8000000" }
-    MouseArea { anchors.fill: parent; onClicked: cs.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - cs.ui.px(40), cs.ui.px(720))
@@ -23,7 +23,7 @@ Item {
         radius: cs.ui.px(10)
         color: cs.ui.c.panel
         border.color: cs.ui.c.line
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: col
             x: cs.ui.px(22); y: cs.ui.px(20)

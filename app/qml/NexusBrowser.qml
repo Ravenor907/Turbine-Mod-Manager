@@ -91,7 +91,7 @@ Item {
 
     Rectangle { anchors.fill: parent; color: nb.ui.c.ground }
     // Nothing under the page reacts to the pointer, a tap or the wheel while it is on screen.
-    MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (w) => { w.accepted = true } }
+    MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (w) => { w.accepted = true } }  // overlay-check: the page itself (layer 0), not an overlay
 
     // ---------------------------------------------------------------- the bar (40 design pixels)
     Rectangle {

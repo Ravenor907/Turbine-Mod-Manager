@@ -11,8 +11,9 @@ import QtQuick.Shapes
 //   ui.px(n)      design pixels to screen pixels
 //   ui.titleFont  font family for titles
 //   ui.bodyFont   font family for everything else
-Item {
+Overlay {
     id: root
+    onOutsideTapped: root.closed()
     // Plain words as StyledText. Options that start with two hyphens ("--launcher-skip") get a thin space between
     // the hyphens and show in bold: in Barlow the two hyphens otherwise touch and read as one long dash.
     function styled(t) {
@@ -67,7 +68,6 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-        MouseArea { anchors.fill: parent; onClicked: root.closed() }
     }
 
     Rectangle {
@@ -82,7 +82,7 @@ Item {
         border.color: root.ui.c.accentLo
         clip: true
 
-        MouseArea { anchors.fill: parent }   // taps on the card don't close it
+        CardGuard {}   // taps on the card don't close it
 
         Column {
             id: content

@@ -2,8 +2,9 @@ import QtQuick
 
 // One plugin's details from the Load order tab (X): what kind it is, its place, the plugins it needs, and LOOT's
 // notes on it (warnings like a dirty plugin or one that doesn't work with another). B closes it.
-Item {
+Overlay {
     id: sheet
+    onOutsideTapped: sheet.closed()
     required property var ui
     anchors.fill: parent
 
@@ -16,7 +17,6 @@ Item {
     function levelWord(l) { return l === "error" ? "Problem" : l === "warn" ? "Warning" : "Note" }
 
     Rectangle { anchors.fill: parent; color: "#B0000000" }
-    MouseArea { anchors.fill: parent; onClicked: sheet.closed() }
     Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
@@ -25,7 +25,7 @@ Item {
         width: Math.min(parent.width * 0.6, sheet.ui.px(560))
         color: sheet.ui.c.panel
         border.color: sheet.ui.c.line
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Flickable {
             id: view
             anchors.fill: parent

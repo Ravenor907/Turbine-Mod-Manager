@@ -2,8 +2,9 @@ import QtQuick
 
 // "Which game is it for?": the installed games, for a download Turbine found in Downloads. A (or a click) adds the
 // file to the focused game, B goes back to the question. Main.qml handles the keys.
-Item {
+Overlay {
     id: gp
+    onOutsideTapped: gp.closed()
     required property var ui
     anchors.fill: parent
 
@@ -17,7 +18,6 @@ Item {
     onFocusIndexChanged: list.positionViewAtIndex(focusIndex, ListView.Contain)
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: gp.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - gp.ui.px(40), gp.ui.px(620))
@@ -26,7 +26,7 @@ Item {
         color: gp.ui.c.panel
         border.color: gp.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Rectangle { width: parent.width; height: gp.ui.px(3); color: gp.ui.c.accent; radius: gp.ui.px(2) }
         Column {
             id: head

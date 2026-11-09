@@ -4,8 +4,9 @@ import QtQuick
 // (its picture from the archive and its description). The D-pad moves, A picks; in "pick one" questions A also goes
 // on. The last row is Next (or Install on the last page). B goes back a page, and on the first page asks to stop.
 // LB and RB do nothing here, so a game can't be switched mid-install. Main.qml drives it with handleButton().
-Item {
+Overlay {
     id: fs
+    closeOnOutside: false
     required property var ui
     property var info: null               // the engine's installer JSON: {game, waiting, data, images}
     property int page: 0                  // which group of the current step
@@ -68,7 +69,6 @@ Item {
     onBack: lastStep = stepIndex
 
     Rectangle { anchors.fill: parent; color: fs.ui.c.ground }
-    MouseArea { anchors.fill: parent }
     Column {
         anchors.fill: parent
         anchors.margins: fs.ui.px(14)

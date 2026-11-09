@@ -9,8 +9,9 @@ import QtQuick
 //
 // Main.qml takes the screenshot, calls open(), passes controller buttons to handleButton() and does the saving when
 // sendClicked comes.
-Item {
+Overlay {
     id: report
+    onOutsideTapped: report.closeClicked()
     required property var ui
     anchors.fill: parent
     visible: false
@@ -175,7 +176,6 @@ Item {
 
     Rectangle { anchors.fill: parent; color: "#C8000000" }
     // A tap beside it closes it (Main.qml asks first when something was typed).
-    MouseArea { anchors.fill: parent; onClicked: report.closeClicked() }
 
     Rectangle {
         id: box
@@ -186,7 +186,7 @@ Item {
         color: report.ui.c.panel
         border.color: report.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }   // taps inside don't close it
+        CardGuard {}   // taps inside don't close it
         Flickable {
             id: view
             anchors.fill: parent

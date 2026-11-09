@@ -3,8 +3,9 @@ import QtQuick
 // Recently removed: "Empty (delete all 2 for good)", then one row per mod ("<name> · removed Nov 6 · 6 days left").
 // A puts the focused mod back, X deletes it for good; both deletions ask first (Main.qml's hold-to-confirm sheet).
 // Main.qml handles the keys.
-Item {
+Overlay {
     id: rs
+    onOutsideTapped: rs.closed()
     required property var ui
     anchors.fill: parent
 
@@ -23,7 +24,6 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
-    MouseArea { anchors.fill: parent; onClicked: rs.closed() }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - rs.ui.px(40), rs.ui.px(620))
@@ -32,7 +32,7 @@ Item {
         color: rs.ui.c.panel
         border.color: rs.ui.c.line
         clip: true
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: col
             x: rs.ui.px(22); y: rs.ui.px(20)

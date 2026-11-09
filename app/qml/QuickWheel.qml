@@ -3,10 +3,12 @@ import QtQuick
 // The quick wheel (View): a pie of eight wedges in fixed places, the same on every screen. The left stick (or a
 // pointer over it) picks a wedge by its angle; the D-pad still works (Up then Right is Up-right). The picked wedge
 // fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name, dimmed.
-// While it is open nothing behind it takes a press, a tap or a scroll; a tap outside the pie closes it.
+// While it is open everything behind it is turned off (Main.qml's topLayer), and this backdrop takes every press,
+// scroll and hover; a tap outside the pie closes it, a tap in the middle is A with no wedge.
 // Main.qml owns the slots ({label, ok, desc}) and the keys; a tap on a wedge does it.
-Item {
+Overlay {
     id: qw
+    closeOnOutside: false
     required property var ui
     property var slots: []
     property int focusIndex: -1
@@ -16,6 +18,7 @@ Item {
     signal activated(int index)
     signal pointed(int index)
     signal closed()
+    signal middleTapped()
 
     anchors.fill: parent
     z: 70
@@ -26,12 +29,15 @@ Item {
         anchors.fill: parent
         hoverEnabled: true
         acceptedButtons: Qt.AllButtons
+        preventStealing: true
         onWheel: (w) => { w.accepted = true }
         onPressed: (m) => { m.accepted = true }
         onClicked: (m) => {
+            if (m.button !== Qt.LeftButton) return
             const i = pie.wedgeAt(m.x - pie.x, m.y - pie.y)
             if (i === -2) qw.closed()
-            else if (i >= 0) qw.activated(i)
+            else if (i === -1) qw.middleTapped()
+            else qw.activated(i)
         }
         onPositionChanged: (m) => {
             const i = pie.wedgeAt(m.x - pie.x, m.y - pie.y)

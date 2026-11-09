@@ -12,8 +12,9 @@ import QtQuick.Shapes
 //   ui.px(n)      design pixels to screen pixels
 //   ui.titleFont  font family for titles
 //   ui.bodyFont   font family for everything else
-Item {
+Overlay {
     id: root
+    onOutsideTapped: root.closed()
 
     required property var ui
 
@@ -91,7 +92,6 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-        MouseArea { anchors.fill: parent; onClicked: root.closed() }
     }
 
     Rectangle {
@@ -108,7 +108,7 @@ Item {
         border.width: Math.max(1, root.ui.px(1.5))
         border.color: root.side ? root.ui.c.line : root.ui.c.accentLo
 
-        MouseArea { anchors.fill: parent }   // taps on the card don't close it
+        CardGuard {}   // taps on the card don't close it
 
         Column {
             id: head

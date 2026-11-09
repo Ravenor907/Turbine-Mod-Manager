@@ -3,8 +3,9 @@ import QtQuick
 // "Other versions" from a mod's details (X): older Thunderstore versions, or a Nexus mod's other files (old
 // versions, optional files, updates) in their groups. A installs the focused one in place of the installed copy;
 // B closes. Main.qml handles the keys.
-Item {
+Overlay {
     id: vs
+    onOutsideTapped: vs.closed()
     required property var ui
     anchors.fill: parent
 
@@ -31,7 +32,6 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: "#B0000000" }
-    MouseArea { anchors.fill: parent; onClicked: vs.closed() }
     Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
@@ -40,7 +40,7 @@ Item {
         width: Math.min(parent.width * 0.6, vs.ui.px(560))
         color: vs.ui.c.panel
         border.color: vs.ui.c.line
-        MouseArea { anchors.fill: parent }
+        CardGuard {}
         Column {
             id: head
             x: vs.ui.px(18); y: vs.ui.px(18)
