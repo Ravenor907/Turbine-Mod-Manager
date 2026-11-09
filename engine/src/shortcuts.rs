@@ -6,7 +6,7 @@
 //! The file lives at <Steam>/userdata/<account>/config/shortcuts.vdf (binary VDF, see vdf::parse_binary). Each
 //! shortcut keeps its 32-bit appid; very old files have none, and then Steam's own rule gives it:
 //! crc32(exe + name) with the top bit set. The id Steam's rungameid link takes is (appid << 32) | 0x02000000.
-//! Turbine never writes this file.
+//! Turbine writes this file only to add or remove its own tiles, while Steam is closed (see `add_shortcut`).
 
 use crate::vdf::{self, Vdf};
 use std::path::{Path, PathBuf};
@@ -201,4 +201,268 @@ pub fn find_turbine(home: &Path) -> Option<(u32, String)> {
 pub fn rungameid_from_env(value: &str) -> Option<String> {
     let v = value.trim();
     (!v.is_empty() && v.len() <= 20 && v.bytes().all(|b| b.is_ascii_digit()) && v != "0").then(|| format!("steam://rungameid/{v}"))
+}
+
+// ---- Turbine's own tiles (0.59: the co-op tile) ----
+//
+// Steam keeps shortcuts.vdf in memory while it runs and writes it back over any change made meanwhile, and it reads
+// the file again only when it starts. There is no documented way to add a non-Steam game to a running Steam (the
+// client's own script API is for plugins inside Steam), and the tools that do this (Steam ROM Manager, BoilR,
+// SteamTinkerLaunch) write the file while Steam is closed, then Steam is started again. Turbine does the same:
+// it changes the file only when the app says Steam is closed, keeps a backup first, checks right before replacing
+// it that nobody changed it since it was read, and never adds a second copy of its tile. Everything else in the
+// file is written back byte for byte (vdf::BinDoc).
+
+/// A shortcut Turbine adds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewShortcut {
+    pub name: String,
+    /// The program as Steam stores it (in quotes).
+    pub exe: String,
+    pub start_dir: String,
+    pub launch_options: String,
+    /// The Flatpak's id when the program is `flatpak run <id>` (Steam's own "Add a non-Steam game" fills it the same
+    /// way); empty otherwise.
+    pub flatpak_id: String,
+}
+
+impl NewShortcut {
+    /// The appid Steam ROM Manager, BoilR and Steam's own older rule give it: crc32(exe + name) with the top bit
+    /// set. Grid art is named by it.
+    pub fn appid(&self) -> u32 {
+        legacy_appid(&self.exe, &self.name)
+    }
+}
+
+/// The words in a co-op tile's launch options that mark it (one per game).
+pub fn coop_marker(game_id: &str) -> String {
+    format!("--play-coop {game_id}")
+}
+
+/// The co-op tile for a game ("steam:1245620"): Turbine's Flatpak with `--play-coop <game id>`. Turbine then gets
+/// the game ready for Seamless Co-op for the next Play only and starts it through Steam, so Steam's own launch,
+/// playtime and overlay are used.
+pub fn coop_tile(game_name: &str, game_id: &str, flatpak_id: &str) -> NewShortcut {
+    NewShortcut {
+        name: format!("{game_name} Co-op"),
+        exe: "\"/usr/bin/flatpak\"".into(),
+        start_dir: "\"/usr/bin/\"".into(),
+        launch_options: format!("run --branch=stable --arch=x86_64 {flatpak_id} {}", coop_marker(game_id)),
+        flatpak_id: flatpak_id.into(),
+    }
+}
+
+/// The game id after `--play-coop` in Turbine's own arguments ("steam:<digits>"), when it is a plausible one.
+pub fn play_coop_arg(args: &[String]) -> Option<String> {
+    let i = args.iter().position(|a| a == "--play-coop")?;
+    let id = args.get(i + 1)?;
+    let digits = id.strip_prefix("steam:")?;
+    (!digits.is_empty() && digits.len() <= 10 && digits.bytes().all(|b| b.is_ascii_digit())).then(|| id.clone())
+}
+
+/// What a change to the shortcuts did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TileChange {
+    /// Added with this appid; Steam shows it after it starts again.
+    Added(u32),
+    /// Already there (this appid): nothing written.
+    Already(u32),
+    /// Removed (this appid); Steam drops it after it starts again.
+    Removed(u32),
+    /// Not there: nothing written.
+    NotThere,
+}
+
+/// The shortcuts.vdf for the account signed in last (the most recently changed one), or, when that account has no
+/// non-Steam games yet, where its file goes.
+pub fn tile_file(home: &Path) -> Option<PathBuf> {
+    if let Some(f) = shortcut_files(home).into_iter().next() {
+        return Some(f);
+    }
+    let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for root in crate::steam::steam_roots(home).into_iter().chain([home.join(".local/share/Steam"), home.join(".steam/steam")]) {
+        let Ok(rd) = std::fs::read_dir(root.join("userdata")) else { continue };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let cfg = e.path().join("config");
+            if name != "0" && name.bytes().all(|b| b.is_ascii_digit()) && cfg.is_dir() {
+                let t = std::fs::metadata(&cfg).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+                dirs.push((t, cfg.join("shortcuts.vdf")));
+            }
+        }
+    }
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.0));
+    dirs.into_iter().map(|(_, p)| p).next()
+}
+
+/// The backup Turbine writes before each change (the file as it was just before).
+pub fn backup_file(file: &Path) -> PathBuf {
+    file.with_file_name("shortcuts.vdf.turbine-backup")
+}
+
+/// The file as it was before Turbine's first change, kept for good.
+pub fn original_file(file: &Path) -> PathBuf {
+    file.with_file_name("shortcuts.vdf.turbine-original")
+}
+
+const STEAM_OPEN: &str = "Close Steam first: Steam writes its list of non-Steam games back over any change while it runs";
+
+fn entry_text(e: &vdf::BinItem, key: &str) -> String {
+    e.children().iter().find(|i| i.key_is(key)).and_then(vdf::BinItem::as_text).unwrap_or_default()
+}
+
+fn entry_appid(e: &vdf::BinItem) -> u32 {
+    e.child("appid").and_then(vdf::BinItem::as_int).filter(|a| *a != 0).unwrap_or_else(|| legacy_appid(&entry_text(e, "Exe"), &entry_text(e, "AppName")))
+}
+
+/// Is this entry Turbine's tile with this marker (Turbine's program and the marker in its launch options)?
+fn is_tile(e: &vdf::BinItem, marker: &str) -> bool {
+    let s = Shortcut { appid: 0, name: String::new(), exe: entry_text(e, "Exe"), launch_options: entry_text(e, "LaunchOptions") };
+    is_turbine(&s) && s.launch_options.contains(marker)
+}
+
+/// The file's bytes and parsed form (an empty list when there is no file yet).
+fn load(file: &Path) -> Result<(Option<Vec<u8>>, vdf::BinDoc), String> {
+    match std::fs::read(file) {
+        Ok(b) if b.len() > 16 << 20 => Err("Steam's list of non-Steam games is too big to be one".into()),
+        Ok(b) => {
+            let doc = vdf::parse_binary_doc(&b).map_err(|e| format!("Steam's list of non-Steam games can't be read ({e})"))?;
+            if !doc.items.iter().any(|i| i.key_is("shortcuts") && matches!(i.value, vdf::BinValue::Obj(..))) {
+                return Err("Steam's list of non-Steam games has no list in it".into());
+            }
+            Ok((Some(b), doc))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Ok((None, vdf::BinDoc { items: vec![vdf::BinItem::obj("shortcuts", Vec::new())], end: Some(0x08), tail: Vec::new() }))
+        }
+        Err(e) => Err(format!("Steam's list of non-Steam games can't be read ({e})")),
+    }
+}
+
+fn list_mut(doc: &mut vdf::BinDoc) -> &mut Vec<vdf::BinItem> {
+    let root = doc.items.iter_mut().find(|i| i.key_is("shortcuts")).and_then(vdf::BinItem::children_mut);
+    root.expect("checked in load")
+}
+
+/// Backs the file up, then replaces it, unless it changed since it was read.
+fn save(file: &Path, before: Option<&[u8]>, doc: &vdf::BinDoc) -> Result<(), String> {
+    let dir = file.parent().ok_or("no folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    if let Some(b) = before {
+        let orig = original_file(file);
+        if !orig.exists() {
+            std::fs::write(&orig, b).map_err(|e| format!("Couldn't keep a copy of Steam's list first ({e})"))?;
+        }
+        std::fs::write(backup_file(file), b).map_err(|e| format!("Couldn't keep a copy of Steam's list first ({e})"))?;
+    }
+    let tmp = file.with_file_name("shortcuts.vdf.turbine-tmp");
+    std::fs::write(&tmp, vdf::write_binary_doc(doc)).map_err(|e| e.to_string())?;
+    let now = std::fs::read(file).ok();
+    if now.as_deref() != before {
+        let _ = std::fs::remove_file(&tmp);
+        return Err("Steam's list of non-Steam games changed meanwhile (is Steam running?): nothing written".into());
+    }
+    std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+}
+
+/// Adds the shortcut unless one with the same marker (Turbine's tile) or the same appid is there. Only while Steam
+/// is closed (`steam_running` from the app's own check); a backup first.
+pub fn add_shortcut(file: &Path, s: &NewShortcut, marker: &str, steam_running: bool) -> Result<TileChange, String> {
+    let (before, mut doc) = load(file)?;
+    let appid = s.appid();
+    let list = list_mut(&mut doc);
+    if let Some(e) = list.iter().find(|e| is_tile(e, marker) || entry_appid(e) == appid) {
+        return Ok(TileChange::Already(entry_appid(e)));
+    }
+    if steam_running {
+        return Err(STEAM_OPEN.into());
+    }
+    let next = list.iter().filter_map(|e| std::str::from_utf8(&e.key).ok()?.parse::<u32>().ok()).max().map_or(0, |m| m + 1).max(list.len() as u32);
+    use vdf::BinItem as I;
+    list.push(I::obj(
+        &next.to_string(),
+        vec![
+            I::int("appid", appid),
+            I::text("AppName", &s.name),
+            I::text("Exe", &s.exe),
+            I::text("StartDir", &s.start_dir),
+            I::text("icon", ""),
+            I::text("ShortcutPath", ""),
+            I::text("LaunchOptions", &s.launch_options),
+            I::int("IsHidden", 0),
+            I::int("AllowDesktopConfig", 1),
+            I::int("AllowOverlay", 1),
+            I::int("OpenVR", 0),
+            I::int("Devkit", 0),
+            I::text("DevkitGameID", ""),
+            I::int("DevkitOverrideAppID", 0),
+            I::int("LastPlayTime", 0),
+            I::text("FlatpakAppID", &s.flatpak_id),
+            I::obj("tags", Vec::new()),
+        ],
+    ));
+    save(file, before.as_deref(), &doc)?;
+    Ok(TileChange::Added(appid))
+}
+
+/// Removes Turbine's tile with this marker (and only that), renumbering the rest as Steam does. Only while Steam is
+/// closed; a backup first.
+pub fn remove_shortcut(file: &Path, marker: &str, steam_running: bool) -> Result<TileChange, String> {
+    let (before, mut doc) = load(file)?;
+    let list = list_mut(&mut doc);
+    let Some(at) = list.iter().position(|e| is_tile(e, marker)) else { return Ok(TileChange::NotThere) };
+    if steam_running {
+        return Err(STEAM_OPEN.into());
+    }
+    let appid = entry_appid(&list[at]);
+    list.remove(at);
+    for (n, e) in list.iter_mut().enumerate() {
+        if std::str::from_utf8(&e.key).ok().is_some_and(|k| k.parse::<u32>().is_ok()) {
+            e.key = n.to_string().into_bytes();
+        }
+    }
+    save(file, before.as_deref(), &doc)?;
+    Ok(TileChange::Removed(appid))
+}
+
+/// The library art Steam shows for a shortcut, by the names Turbine's art folder uses and the names Steam's grid
+/// folder wants: (art name, grid file name before the extension).
+pub fn art_names(appid: u32) -> [(&'static str, String); 5] {
+    [
+        ("cover", format!("{appid}p")),
+        ("wide", format!("{appid}")),
+        ("hero", format!("{appid}_hero")),
+        ("logo", format!("{appid}_logo")),
+        ("icon", format!("{appid}_icon")),
+    ]
+}
+
+/// Copies the tile's art (cover/wide/hero/logo/icon .png or .jpg in `art_dir`) into the grid folder next to the
+/// shortcuts file, named by the shortcut's appid. Missing pieces are skipped. Answers the files written.
+pub fn copy_tile_art(art_dir: &Path, file: &Path, appid: u32) -> Result<Vec<PathBuf>, String> {
+    let grid = file.with_file_name("grid");
+    let mut out = Vec::new();
+    for (src, dst) in art_names(appid) {
+        for ext in ["png", "jpg"] {
+            let from = art_dir.join(format!("{src}.{ext}"));
+            if from.is_file() {
+                std::fs::create_dir_all(&grid).map_err(|e| e.to_string())?;
+                let to = grid.join(format!("{dst}.{ext}"));
+                std::fs::copy(&from, &to).map_err(|e| format!("Couldn't copy {}: {e}", from.display()))?;
+                out.push(to);
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Removes the art `copy_tile_art` put in the grid folder for this appid (only those names).
+pub fn remove_tile_art(file: &Path, appid: u32) {
+    let grid = file.with_file_name("grid");
+    for (_, dst) in art_names(appid) {
+        for ext in ["png", "jpg"] {
+            let _ = std::fs::remove_file(grid.join(format!("{dst}.{ext}")));
+        }
+    }
 }

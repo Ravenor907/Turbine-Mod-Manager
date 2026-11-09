@@ -325,6 +325,168 @@ impl BinReader<'_> {
     }
 }
 
+// ---- Binary VDF, kept exactly (0.59: writing shortcuts.vdf) ----
+//
+// `parse_binary` turns every value into text, which is right for reading but would lose each value's type on the
+// way back. To change shortcuts.vdf, Turbine keeps each item's type byte and its value's exact bytes, changes only
+// the items it adds or removes, and writes everything else back byte for byte.
+
+/// One item of a binary VDF object: its type byte, its key (the bytes before the zero) and its value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinItem {
+    pub kind: u8,
+    pub key: Vec<u8>,
+    pub value: BinValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BinValue {
+    /// The items, then the end byte the file used (0x08, or 0x0B in some files).
+    Obj(Vec<BinItem>, u8),
+    /// The value's bytes exactly as in the file (a text's closing zero included).
+    Raw(Vec<u8>),
+}
+
+/// A whole binary VDF file: the top-level items, the end byte after them (when the file has one) and anything after
+/// that, all kept as they were.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinDoc {
+    pub items: Vec<BinItem>,
+    pub end: Option<u8>,
+    pub tail: Vec<u8>,
+}
+
+impl BinItem {
+    /// A text value (type 0x01).
+    pub fn text(key: &str, value: &str) -> BinItem {
+        let mut v = value.as_bytes().to_vec();
+        v.retain(|b| *b != 0);
+        v.push(0);
+        BinItem { kind: B_STR, key: key.as_bytes().to_vec(), value: BinValue::Raw(v) }
+    }
+
+    /// A 32-bit number (type 0x02), little endian.
+    pub fn int(key: &str, value: u32) -> BinItem {
+        BinItem { kind: B_INT, key: key.as_bytes().to_vec(), value: BinValue::Raw(value.to_le_bytes().to_vec()) }
+    }
+
+    /// An object (type 0x00) ending with 0x08.
+    pub fn obj(key: &str, items: Vec<BinItem>) -> BinItem {
+        BinItem { kind: B_OBJ, key: key.as_bytes().to_vec(), value: BinValue::Obj(items, B_END) }
+    }
+
+    pub fn key_is(&self, key: &str) -> bool {
+        self.key.eq_ignore_ascii_case(key.as_bytes())
+    }
+
+    /// The text of a text value (type 0x01), without its closing zero.
+    pub fn as_text(&self) -> Option<String> {
+        match (&self.value, self.kind) {
+            (BinValue::Raw(b), B_STR) => Some(String::from_utf8_lossy(b.strip_suffix(&[0]).unwrap_or(b)).into_owned()),
+            _ => None,
+        }
+    }
+
+    /// A 32-bit number (type 0x02).
+    pub fn as_int(&self) -> Option<u32> {
+        match (&self.value, self.kind) {
+            (BinValue::Raw(b), B_INT) if b.len() == 4 => Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+            _ => None,
+        }
+    }
+
+    pub fn children(&self) -> &[BinItem] {
+        match &self.value {
+            BinValue::Obj(items, _) => items,
+            BinValue::Raw(_) => &[],
+        }
+    }
+
+    pub fn children_mut(&mut self) -> Option<&mut Vec<BinItem>> {
+        match &mut self.value {
+            BinValue::Obj(items, _) => Some(items),
+            BinValue::Raw(_) => None,
+        }
+    }
+
+    /// The child with this key (case-insensitive).
+    pub fn child(&self, key: &str) -> Option<&BinItem> {
+        self.children().iter().find(|i| i.key_is(key))
+    }
+}
+
+/// Parses binary VDF keeping every byte (see `BinDoc`). Never panics on a broken file.
+pub fn parse_binary_doc(bytes: &[u8]) -> Result<BinDoc, VdfError> {
+    let mut r = BinReader { b: bytes, pos: 0 };
+    let (items, end) = r.raw_object(0)?;
+    let tail = bytes[r.pos..].to_vec();
+    Ok(BinDoc { items, end, tail })
+}
+
+/// The file's bytes. `write_binary_doc(&parse_binary_doc(b)?) == b` for every file it parses.
+pub fn write_binary_doc(doc: &BinDoc) -> Vec<u8> {
+    fn items(out: &mut Vec<u8>, list: &[BinItem]) {
+        for i in list {
+            out.push(i.kind);
+            out.extend_from_slice(&i.key);
+            out.push(0);
+            match &i.value {
+                BinValue::Obj(children, end) => {
+                    items(out, children);
+                    out.push(*end);
+                }
+                BinValue::Raw(b) => out.extend_from_slice(b),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    items(&mut out, &doc.items);
+    if let Some(e) = doc.end {
+        out.push(e);
+    }
+    out.extend_from_slice(&doc.tail);
+    out
+}
+
+impl BinReader<'_> {
+    /// Items up to the object's end byte (None at the top level when the file just ends).
+    fn raw_object(&mut self, depth: usize) -> Result<(Vec<BinItem>, Option<u8>), VdfError> {
+        let mut items = Vec::new();
+        loop {
+            let Some(t) = self.byte() else {
+                return if depth == 0 { Ok((items, None)) } else { Err(self.err("missing end of object")) };
+            };
+            if t == B_END || t == B_END_ALT {
+                return Ok((items, Some(t)));
+            }
+            let rest = &self.b[self.pos..];
+            let len = rest.iter().position(|&c| c == 0).ok_or_else(|| self.err("text without an end"))?;
+            let key = rest[..len].to_vec();
+            self.pos += len + 1;
+            let start = self.pos;
+            let value = match t {
+                B_OBJ if depth >= MAX_DEPTH => return Err(self.err("nested too deeply")),
+                B_OBJ => {
+                    let (children, end) = self.raw_object(depth + 1)?;
+                    BinValue::Obj(children, end.unwrap_or(B_END))
+                }
+                B_STR => {
+                    self.cstr()?;
+                    BinValue::Raw(self.b[start..self.pos].to_vec())
+                }
+                B_WSTR => {
+                    self.wstr()?;
+                    BinValue::Raw(self.b[start..self.pos].to_vec())
+                }
+                B_INT | B_PTR | B_COLOR | B_FLOAT => BinValue::Raw(self.take(4)?.to_vec()),
+                B_U64 | B_I64 => BinValue::Raw(self.take(8)?.to_vec()),
+                _ => return Err(self.err("unknown value type")),
+            };
+            items.push(BinItem { kind: t, key, value });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
