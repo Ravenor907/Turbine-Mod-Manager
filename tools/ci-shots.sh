@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -897,6 +897,12 @@ for size in $SIZES; do
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
   fi
   # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
+  # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
+  fresh "heldcheck-$size"; h="$PWD/fh/heldcheck-$size"
+  shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
+  need "heldcheck-$size" "Mods off from Steam's menu shows in My mods with its way back ($size)" "Held note: row 1 held \| Mods off from Steam's menu: 2 mods turned off \| legend A Turn them back on"
+  need "heldcheck-$size" "Turn them back on by A ($size)" "Held back on by A: 2 of 2 on, note gone"
+  need "heldcheck-$size" "Turn them back on by a tap ($size)" "Held back on by a tap: 2 of 2 on, note gone"
   fresh "editbutton-$size"; h="$PWD/fh/editbutton-$size"
   shoot "editbutton-$size" "$size" editbutton "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
   if grep -q "Edit button: the panel doesn't fit here" "$PWD/data/editbutton-$size/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=I8: no panel at $size::the row's X menu has Edit settings"; else

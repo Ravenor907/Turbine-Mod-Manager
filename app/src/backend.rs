@@ -1298,7 +1298,13 @@ impl Worker {
             }
             _ => "null".into(),
         };
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update}}}", &mods[..mods.len() - 1]);
+        // 0.6: the mods Mods off (Steam's menu) turned off and that are still off: My mods says so, with Turn them back on.
+        let held: Vec<String> = {
+            let ids = slot.store.held_off();
+            slot.store.mods().iter().filter(|m| !m.enabled && ids.contains(&m.id)).map(|m| quote(&m.id)).collect()
+        };
+        let held = held.join(",");
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}]}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);

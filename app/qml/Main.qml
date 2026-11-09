@@ -129,7 +129,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -353,9 +353,11 @@ Window {
         }
     }
     Timer {
+        id: shotTimer
         running: shot.on
         // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
-        interval: shot.page === "splashmid" ? 520 : shot.page === "splashafter" ? 2400 : ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        // 0.6: a scripted page takes its picture 1.5 s after its last step (shotAfterScript), 50 s at the latest.
+        interval: shot.page === "splashmid" ? 520 : shot.page === "splashafter" ? 2400 : ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 50000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: {
             // 0.58: every picture checks the bottom bar (nothing overlaps Play or goes past the edge).
@@ -1182,11 +1184,21 @@ Window {
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
     readonly property var listItems: {
         let l = shownMods.map(m => ({ kind: "mod", m: m }))
+        // 0.6: mods turned off from Steam's menu (Mods off) say so first, with the way back on that row.
+        if (heldOff.length > 0 && !selecting) l.unshift({ kind: "held", m: { id: "", name: "" } })
         // Just uninstalled: the row stays, dimmed, for 8 seconds ("Removed", A puts it back), then the next row.
         if (ghost && game && ghost.game === game.id) l.splice(Math.max(0, Math.min(ghost.index, l.length)), 0, { kind: "ghost", m: { id: ghost.id, name: ghost.name } })
         return l.concat(removedMods.length > 0 ? [{ kind: "removed", m: { id: "", name: "" } }] : [])
     }
     property var ghost: null              // {game, id, name, index}
+    // 0.6: the ids of mods that Mods off in Steam's menu turned off and that are still off.
+    property var heldOff: []
+    function turnHeldBackOn() {
+        if (!game || heldOff.length === 0) return
+        note("action", "Turn them back on (Mods off from Steam's menu, " + heldOff.length + ")")
+        Turbine.quickMods(game.id, true)
+    }
+    readonly property string heldWords: "Mods off from Steam's menu: " + plural(heldOff.length, "mod", "mods") + " turned off"
     Timer { id: ghostTimer; interval: 8000; onTriggered: app.ghostExpired() }
     // The removed row just went (the next mod slid under the highlight): an A in the next 400 ms still means
     // "Put back", never the mod that slid in.
@@ -1533,6 +1545,7 @@ Window {
             app.placements = v.placements || {}
             app.guardedMods = v.guarded || {}
             app.gameUpdate = v.gameUpdate || null
+            app.heldOff = v.heldOff || []
             app.modsLoaded = true
             app.checkModHold()
             Qt.callLater(app.maybeGameUpdate)
@@ -3919,6 +3932,7 @@ Window {
                 o.a = bind(it.m.enabled ? "Turn off" : "Turn on", () => toggle(it.m))
                 o.x = bind("Options", () => { menuIndex = 0; sheet = "modmenu" })
             } else if (it && it.kind === "ghost") o.a = bind("Put back", () => putBack(it.m.id))
+            else if (it && it.kind === "held") o.a = bind("Turn them back on", turnHeldBackOn)
             else if (it && it.kind === "removed") {
                 o.a = bind("Open", openRemoved)
                 o.x = bind("Options", openRemoved)
@@ -4327,7 +4341,7 @@ Window {
     property bool probeOn: false
     function check(text) { note("check", text) }
     function scriptTick() {
-        if (scriptStep >= script.length) { scriptTimer.stop(); return }
+        if (scriptStep >= script.length) { scriptTimer.stop(); shotAfterScript(); return }
         let ok = true
         try { ok = script[scriptStep]() !== false } catch (e) { check("Step " + (scriptStep + 1) + " stopped: " + e); ok = true }
         if (ok || ++scriptTries > 12) {
@@ -4335,6 +4349,14 @@ Window {
                            + ", Get mods " + getArea + " " + getIndex + " of " + getItems.length + ", mod page " + modPage + ", sheet \"" + sheet + "\")")
             scriptStep++; scriptTries = 0
         }
+    }
+    // 0.6: the picture of a scripted page comes once its steps are done, however long they took (a fixed time cut
+    // the longer ones short: Menu fit's last menus never ran).
+    function shotAfterScript() {
+        if (!shot.scripted || shot.page === "inputcheck") return
+        check("Script done: " + script.length + " steps")
+        shotTimer.interval = 1500
+        shotTimer.restart()
     }
     function runScript(name) {
         const m = scriptMemo
@@ -4459,6 +4481,20 @@ Window {
         ]
         // 0.6 (I8): Edit settings on the mod's panel: a tap and Right then A open that mod's settings; no button
         // for a mod without settings.
+        // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
+        else if (name === "heldcheck") script = [
+            () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length; Turbine.quickMods(game.id, false) },
+            () => { if (heldOff.length < m.n) return false; modIndex = 0
+                    check("Held note: row 1 " + (listItems[0] ? listItems[0].kind : "none") + " | " + heldWords + " | legend A " + (legendHints[0] ? legendHints[0][1] : "")) },
+            () => { pad("a") },
+            () => { if (heldOff.length > 0 || mods.some(x => !x.enabled)) return false
+                    check("Held back on by A: " + mods.filter(x => x.enabled).length + " of " + mods.length + " on, note " + (listItems.some(x => x.kind === "held") ? "still there" : "gone")); Turbine.quickMods(game.id, false) },
+            () => { if (heldOff.length < m.n) return false; modIndex = 1
+                    const it = modList.itemAtIndex(0); if (!it) return false
+                    const p = it.mapToItem(null, it.width - app.px(40), it.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
+            () => { if (heldOff.length > 0 || mods.some(x => !x.enabled)) return false
+                    check("Held back on by a tap: " + mods.filter(x => x.enabled).length + " of " + mods.length + " on, note " + (listItems.some(x => x.kind === "held") ? "still there" : "gone")); Turbine.pointerHide() }
+        ]
         else if (name === "editbutton") script = [
             () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0
                     m.with = mods.find(x => settingsFilesOf(x.id).length > 0); m.without = mods.find(x => settingsFilesOf(x.id).length === 0)
@@ -7877,7 +7913,7 @@ Window {
                             readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex === index
                             readonly property Item pill: row.pillItem
                             width: modList.width
-                            height: kind === "mod" ? row.implicitHeight : app.px(app.desktopLayout ? 38 : 46)
+                            height: kind === "mod" ? row.implicitHeight : kind === "held" ? Math.max(app.touchFloor + app.px(8), app.px(52)) : app.px(app.desktopLayout ? 38 : 46)
                             ModRow {
                                 id: row
                                 visible: entry.kind === "mod"
@@ -7923,13 +7959,34 @@ Window {
                                 Label {
                                     x: app.px(14)
                                     anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - app.px(28)
+                                    width: parent.width - app.px(28) - (heldButton.visible ? heldButton.width + app.px(12) : 0)
                                     elide: Text.ElideRight
                                     text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
+                                          : entry.kind === "held" ? app.heldWords
                                           : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
-                                    color: entry.kind === "ghost" ? c.soft : c.muted
+                                    color: entry.kind === "ghost" ? c.soft : entry.kind === "held" ? c.warn : c.muted
                                     font.pixelSize: app.fpx(15)
                                     font.italic: entry.kind === "ghost"
+                                }
+                                // The held note's way back, on the row itself (a tap anywhere on the row does it too).
+                                Rectangle {
+                                    id: heldButton
+                                    visible: entry.kind === "held"
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: app.px(6)
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    height: parent.height - app.px(8)
+                                    width: heldButtonText.implicitWidth + app.px(24)
+                                    radius: app.px(6)
+                                    color: c.accent
+                                    Label {
+                                        id: heldButtonText
+                                        anchors.centerIn: parent
+                                        text: "Turn them back on"
+                                        color: c.onAccent
+                                        font.pixelSize: app.fpx(15)
+                                        font.bold: true
+                                    }
                                 }
                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                 TapHandler { onTapped: { if (!app.gate(0, "rowA")) return; app.rowA(() => { app.modIndex = entry.index }) } }
