@@ -102,6 +102,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selftestPad"]
         fn selftest_pad(self: Pin<&mut Self>, button: &QString, pressed: bool);
+        /// 0.6: a check's press (down and up) made `age_ms` before it is handled.
+        #[qinvokable]
+        #[cxx_name = "selftestPadAged"]
+        fn selftest_pad_aged(self: Pin<&mut Self>, button: &QString, age_ms: i32);
 
         /// Touch: the pointer goes (the ring follows the finger instead).
         #[qinvokable]
@@ -279,6 +283,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "copyText"]
         fn copy_text(self: &Self, text: &QString);
+
+        /// 0.6: a steady clock in ms (never jumps with the wall clock), for when things were shown and pressed.
+        #[qinvokable]
+        #[cxx_name = "monoMs"]
+        fn mono_ms_now(self: &Self) -> f64;
+        /// When the last controller press was made (SDL's time stamp), on monoMs's clock.
+        #[qinvokable]
+        #[cxx_name = "pressAt"]
+        fn press_at_ms(self: &Self) -> f64;
 
         /// 0.6: Decky Loader and Turbine's Steam menu plugin on this device: {"checked","decky","plugin","url"}.
         #[qinvokable]
@@ -965,6 +978,10 @@ pub struct TurbineRust {
     pub(crate) update_waits: Vec<(u64, String)>,
     pub(crate) reset_for: QString,
     pub(crate) reader: Option<Pads>,
+    /// 0.6: how long ago the presses being handled now were made (SDL's own time stamps), in ms.
+    pub(crate) press_wait: u32,
+    /// When the last press was made, on `mono_ms`'s clock.
+    pub(crate) press_at: f64,
     /// The games from the last scan, to hand to the worker.
     pub(crate) found: Vec<Game>,
     /// The game on screen.
@@ -1072,6 +1089,8 @@ impl Default for TurbineRust {
             update_waits: Vec::new(),
             reset_for: QString::default(),
             reader: None,
+            press_wait: 0,
+            press_at: 0.0,
             found: Vec::new(),
             current: String::new(),
             dirty: String::new(),
@@ -1774,6 +1793,8 @@ impl qobject::Turbine {
             Some(r) => (r.poll(), r.connected(), r.sticks(), r.quiet(), r.take_dropped_out()),
             None => (Vec::new(), false, crate::pointer::Sticks::default(), false, false),
         };
+        let wait = self.rust().reader.as_ref().map(|r| r.last_press_wait()).unwrap_or(0);
+        self.as_mut().rust_mut().press_wait = wait;
         if *self.pads() != connected {
             self.as_mut().set_pads(connected);
             let name = self.rust().reader.as_ref().and_then(|r| r.names().into_iter().next()).unwrap_or_default();
@@ -1863,6 +1884,8 @@ impl qobject::Turbine {
             }
         }
         if pressed {
+            let at = mono_ms() - f64::from(self.rust().press_wait);
+            self.as_mut().rust_mut().press_at = at;
             crate::log::line("pad", &format!("Press {button}"));
             // Any other press means the player is using the buttons: the pointer goes, so the triggers page
             // again at once. (R3 with the pointer hidden shows it at the focus: Main.qml.)
@@ -1878,7 +1901,21 @@ impl qobject::Turbine {
         const ALL: [&str; 21] = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "start", "view", "r3", "l3", "up", "down", "left", "right", "l4", "r4", "l5", "r5", "lost"];
         let b = button.to_string();
         if let Some(k) = ALL.iter().find(|k| **k == b) {
+            // A check's press is made now.
+            self.as_mut().rust_mut().press_wait = 0;
             self.as_mut().handle_pad(*k, pressed);
+        }
+    }
+
+    /// 0.6 (break M2): a check's press that was made `age_ms` before it is handled (a stalled window).
+    pub fn selftest_pad_aged(mut self: Pin<&mut Self>, button: &QString, age_ms: i32) {
+        let b = button.to_string();
+        const ALL: [&str; 5] = ["a", "b", "left", "right", "start"];
+        if let Some(k) = ALL.iter().find(|k| **k == b) {
+            self.as_mut().rust_mut().press_wait = age_ms.max(0) as u32;
+            self.as_mut().handle_pad(*k, true);
+            self.as_mut().rust_mut().press_wait = 0;
+            self.as_mut().handle_pad(*k, false);
         }
     }
 
@@ -2680,6 +2717,14 @@ impl qobject::Turbine {
         QString::from(crate::system::decky_json().as_str())
     }
 
+    pub fn mono_ms_now(&self) -> f64 {
+        mono_ms()
+    }
+
+    pub fn press_at_ms(&self) -> f64 {
+        self.rust().press_at
+    }
+
     pub fn copy_text(&self, text: &QString) {
         let text = text.to_string().replace('\0', "");
         let Ok(c) = std::ffi::CString::new(text) else { return };
@@ -3244,4 +3289,10 @@ fn launch_at(w: &Worker, game: &Game, how: &str, url: String) {
         return;
     }
     w.post(move |t| t.launch(QString::from(url.as_str())))
+}
+
+/// 0.6: ms since Turbine started, on a steady clock (the interface's times for the question's quiet second).
+pub(crate) fn mono_ms() -> f64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
 }

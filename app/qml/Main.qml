@@ -129,7 +129,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -639,7 +639,7 @@ Window {
     Timer { id: sizeNote; interval: 500; onTriggered: app.note("window", "Window " + app.width + " x " + app.height + ", scale " + app.s.toFixed(2)) }
     // The first frame drawn: how long starting took (Labs > Performance check).
     property bool shown: false
-    onFrameSwapped: if (!shown) { shown = true; Turbine.markShown() }
+    onFrameSwapped: { if (!shown) { shown = true; Turbine.markShown() } if (nxmWaitFrame) nxmShown("first frame") }
 
     // ---------------------------------------------------------------- fonts
     FontLoader { id: cinzel; source: "file:///app/share/turbine-mod-manager/fonts/Cinzel.ttf" }
@@ -1631,7 +1631,7 @@ Window {
         function onPad(button, pressed) {
             app.padEvents++
             if (button === "wheel") { app.stickWheel(pressed ? 1 : -1); return }
-            if (pressed) app.lastInput = "pad"
+            if (pressed) { app.lastInput = "pad"; app.pressStamp = Turbine.pressAt(); app.pressFresh = true }
             pressed ? app.press(button) : app.release(button)
         }
         // 0.3
@@ -3556,6 +3556,7 @@ Window {
         // A real mouse (not the controller pointer, which Turbine draws itself).
         HoverHandler { onPointChanged: if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse" }
         Keys.onPressed: (e) => {
+            app.pressFresh = false
             const map = {}
             map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
             map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
@@ -3691,10 +3692,12 @@ Window {
         } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game && !nxmAsking && !pickNoStart)) && b === "start") {
             // Start plays from any menu (the legend shows it while a menu covers the Play button).
             stopReset(); sheet = ""; startPlay()
-        } else if (sheet === "pick" && nxmAskQuiet()) {
-            note("nxm", "Press " + b + " ignored: the question opened " + (Date.now() - nxmAskAt) + " ms ago")
+        } else if (sheet === "pick" && nxmAskQuiet(actStamp)) {
+            note("nxm", "Press " + b + " ignored: made " + Math.round(actStamp - nxmShownAt) + " ms after the question showed")
         } else if (sheet === "pick" && nxmAsking && (b === "left" || b === "right" || b === "up" || b === "down")) {
-            // Right (or Up) to Get it, Left (or Down) back to Not now.
+            // Right (or Up) to Get it, Left (or Down) back to Not now. The player chose: the ring never moves by
+            // itself after this (break M1).
+            nxmRingMove.stop()
             menuIndex = b === "right" || b === "up" ? 0 : 1
         } else if (sheet === "pick") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
@@ -3781,7 +3784,14 @@ Window {
     // act() runs it and the legend prints it, so the legend can't say something the button doesn't do. The D-pad
     // and the left stick move the focus (navigate()); they are never in the legend.
     function bind(label, run, pre) { return { label: label, run: run, pre: pre || "" } }
+    // 0.6 (break M2): when the press being handled was made, on Turbine.monoMs's clock: a controller press by SDL's
+    // own time stamp (a stalled window handles it late, but it was made early), anything else now.
+    property real pressStamp: 0
+    property bool pressFresh: false
+    property real actStamp: 0
     function act(b) {
+        actStamp = pressFresh ? pressStamp : Turbine.monoMs()
+        pressFresh = false
         landFocus = false
         if (sheet === "tutorial") { tutorialAct(b); return }
         if (wheelOpen) { wheelAct(b); return }
@@ -4625,6 +4635,28 @@ Window {
             () => { if (!focusedItem || focusedItem.kind !== "ghost") return false; check("Journey uninstall: the row says " + focusedItem.m.name + " removed, A " + (binds().a ? binds().a.label : "")); pad("a") },
             () => { if (!mods.some(x => x.id === m.mid)) return false; check("Journey put back: " + mods.find(x => x.id === m.mid).name + " is back in My mods") }
         ]
+        // 0.6 (break M1, M2, M8): the Mod Manager Download question by real presses, timed from its first frame: no
+        // input in its first second (also a press made then but handled late), the ring moves to Get it at 1.2 s
+        // only when nothing was pressed, and a Left after the first second keeps Not now for good.
+        else if (name === "mmdguard") {
+            const ask = () => nxmAsk("nxm://skyrimspecialedition/mods/1/files/2", { name: game ? game.name : "", game: game ? game.id : "" })
+            const since = () => nxmShownAt > 0 ? Turbine.monoMs() - nxmShownAt : -1
+            script = [
+                () => { if (!game || !modsLoaded) return false; sheet = ""; page = "game"; tab = 0; zone = "main"; ask() },
+                () => { if (nxmShownAt === 0) return false; const f = nxmAskFirst || {}
+                        pad("a"); check("Guard at first: A " + f.a + ", B " + f.b + ", input " + (f.quiet ? "off" : "ON") + "; A at " + Math.round(since()) + " ms: " + (nxmAsking ? "ignored" : "TAKEN")) },
+                // A press made 0.5 s after the question showed, handled 0.9 s later (a stalled window): still ignored.
+                () => { if (since() < 1400) return false
+                        Turbine.selftestPadAged("a", Math.round(since() - 500))
+                        check("Guard late press: made at 500 ms, handled at " + Math.round(since()) + " ms: " + (nxmAsking ? "ignored" : "TAKEN")) },
+                () => { const o = binds(); check("Guard after the quiet second: ring on " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + ", A " + (o.a ? o.a.label : "")); pad("b") },
+                () => { if (sheet !== "") return false; ask() },
+                () => { if (since() < 1050) return false; pad("right"); pad("left") },
+                () => { if (since() < 1700) return false; const o = binds()
+                        check("Guard Left at about 1 s: ring on " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " at " + Math.round(since()) + " ms, A " + (o.a ? o.a.label : ""))
+                        pad("a"); check("Guard A then: " + (nxmAsking ? "still asking" : sheet === "" && nxmAskLink === "" ? "closed, nothing downloaded" : "other")) }
+            ]
+        }
         // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
         else if (name === "heldcheck") script = [
             () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length; Turbine.quickMods(game.id, false) },
@@ -4983,8 +5015,12 @@ Window {
                 check("Browser check: the Added note cleared at the next click: " + (!browserNoteNow || browserNoteNow.text.indexOf("Added") < 0 ? "yes" : "no")) } },
             // Every Mod Manager Download link from the page asks: on Not now, deaf for a second, then Right and A.
             { name: "mmd asks", max: 15000, wait: () => nxmAsking,
-              act: () => { const o = binds(); check("Browser check: Mod Manager Download asks: " + pickTitle + ", focus " + pickItems[menuIndex].title + ", A " + o.a.label + ", B " + o.b.label + ", page input " + (nexusView.view.enabled ? "on" : "off"))
-                           pad("a"); check("Browser check: A at once on the question: " + (nxmAsking ? "ignored" : "taken")) } },
+              // What it offered the moment it opened (nxmAskFirst), and an A made 300 ms after it showed (judged by when it
+              // was made, so a slow runner can't turn it into a late press).
+              act: () => { const f = nxmAskFirst || {}
+                           check("Browser check: Mod Manager Download asks: " + pickTitle + ", focus " + (f.ring === 1 ? "Not now" : "Get it") + ", A " + f.a + ", B " + f.b + ", page input " + (nexusView.view.enabled ? "on" : "off"))
+                           Turbine.selftestPadAged("a", nxmShownAt > 0 ? Math.max(0, Math.round(Turbine.monoMs() - nxmShownAt - 300)) : 0)
+                           check("Browser check: A at once on the question: " + (nxmAsking ? "ignored" : "taken")) } },
             // 0.56 (L1, L2): two taps on Get it don't get it, and a page alert or confirm doesn't replace the question.
             { name: "mmd taps", after: 1200, act: () => {
                 pickMenu.activated(0); pickMenu.activated(0)
@@ -5030,7 +5066,7 @@ Window {
             { name: "tries", after: 9000, act: () => { check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")"))
                                                          // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
                                                          btClick(700, 512) } },
-            { name: "another mod asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && Date.now() - nxmAskAt > 1300,
+            { name: "another mod asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && nxmShownAt > 0 && Turbine.monoMs() - nxmShownAt > 1400,
               act: () => { check("Browser check: another mod's link asks: " + nxmAskWords()); pad("b") } },
             { name: "auto page again", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load(browserAddress(btFiles + "&links=1")) } },
             // H1b: A on a link to an outside site that sends the view straight back to a Nexus page that goes to its
@@ -5041,7 +5077,7 @@ Window {
             // H1c: an outside page read for a while; a tap on it sends the view to mod 1's page that does the same.
             { name: "outside page", after: 300, act: () => nexusView.load("http://127.0.0.1:47801/tapme") },
             { name: "tap outside", max: 15000, wait: () => pageIs(/tapme/), after: 800, act: () => btClick(190, 80) },
-            { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && Date.now() - nxmAskAt > 1300,
+            { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && nxmShownAt > 0 && Turbine.monoMs() - nxmShownAt > 1400,
               act: () => { check("Browser check: a tap off Nexus asks: " + nxmAskWords()); pad("b") } },
             { name: "slow", max: 15000, wait: () => sheet === "" && pageIs(/file_id=56/), after: 600,
               act: () => { check("Browser check: after Not now, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")); bt.pressAt = Date.now(); btClick(160, 188) } },
@@ -6445,7 +6481,19 @@ Window {
         nxmAsk(link, r)
     }
     // 0.6 (I17): after the quiet second the ring moves to Get it by itself, so A says yes (B is still Not now).
+    // Started from the question's first frame on screen (nxmShown); a press of a direction or a tap stops it.
     Timer { id: nxmRingMove; interval: 1200; onTriggered: if (app.nxmAsking && app.sheet === "pick" && app.menuIndex === 1) { app.menuIndex = 0; app.note("nxm", "The ring moved to Get it") } }
+    // 0.6 (break M2): the quiet second and the ring's move count from the first frame that shows the question.
+    property real nxmShownAt: 0
+    property bool nxmWaitFrame: false
+    Timer { id: nxmFrameFallback; interval: 250; onTriggered: if (app.nxmWaitFrame) app.nxmShown("no frame in 250 ms") }
+    function nxmShown(how) {
+        nxmWaitFrame = false
+        if (!nxmAsking) return
+        nxmShownAt = Turbine.monoMs()
+        nxmRingMove.restart()
+        note("nxm", "The question is on screen (" + how + ")")
+    }
 
     // 0.6: Steam's menu (the Decky plugin, decky/) asks Turbine, open or just started for it, to do one thing for one
     // game: open on it, Report a bug, Mods on or off, or a Play. The same buttons' own steps run, on screen. A request
@@ -6485,7 +6533,8 @@ Window {
     property string nxmAskMod: ""
     property string nxmAskFile: ""
     readonly property bool nxmAsking: sheet === "pick" && nxmAskLink !== "" && pickBLabel === "Not now"
-    function nxmAskQuiet() { return nxmAsking && Date.now() - nxmAskAt < 1000 }
+    // No input for the question's first second on screen; `at`: when the press was made (default: now).
+    function nxmAskQuiet(at) { return nxmAsking && (nxmShownAt === 0 || (at === undefined ? Turbine.monoMs() : at) - nxmShownAt < 1000) }
     function nxmAskTitle() {
         const m = /^nxm:\/\/[a-z0-9_-]+\/mods\/([0-9]+)\/files\/([0-9]+)/i.exec(nxmAskLink)
         return "Get " + (nxmAskMod !== "" ? nxmAskMod : "mod " + (m ? m[1] : "")) + " (" + (nxmAskFile !== "" ? nxmAskFile : "file " + (m ? m[2] : "")) + ") for "
@@ -6503,7 +6552,8 @@ Window {
         pickBLabel = "Not now"
         menuIndex = 1
         nxmAskAt = Date.now()
-        nxmRingMove.restart()
+        nxmShownAt = 0; nxmWaitFrame = true
+        nxmRingMove.stop(); nxmFrameFallback.restart()
         keyRoot.forceActiveFocus()
         // The build's checks read what the question offered the moment it opened (not after the quiet second, when
         // the ring has moved to Get it): its A and B, and whether input was still off.
@@ -9175,6 +9225,7 @@ Window {
             items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
             focusIndex: app.menuIndex
             onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return
+                if (app.nxmAsking) nxmRingMove.stop()   // a tap is the player's choice: the ring stays (break M1)
                 // The Mod Manager Download question: nothing for its first second, and a tap (or two, or a click) on Get
                 // it only picks it: only A gets it, so a page can't get a mod by asking for taps where the row appears.
                 if (app.nxmAsking && (app.nxmAskQuiet() || index === 0)) {

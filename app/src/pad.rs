@@ -35,6 +35,9 @@ pub struct Pads {
     waits: VecDeque<u32>,
     /// A controller went away since the last `take_dropped_out` (holds in the interface stop).
     dropped_out: bool,
+    /// 0.6: how long the newest press read in the last poll waited in SDL's queue (ms), so the interface can judge a
+    /// press by when it was made, not when it was handled (a stalled window handles it late).
+    last_wait: u32,
 }
 
 impl Pads {
@@ -69,6 +72,7 @@ impl Pads {
             timer,
             waits: VecDeque::new(),
             dropped_out: false,
+            last_wait: 0,
         };
         if let Some(sub) = pads.subsystem.as_ref() {
             let count = sub.num_joysticks().unwrap_or(0);
@@ -159,6 +163,11 @@ impl Pads {
         std::mem::take(&mut self.dropped_out)
     }
 
+    /// How long ago (ms) the newest press of the last poll was made (0 when none or unknown).
+    pub fn last_press_wait(&self) -> u32 {
+        self.last_wait
+    }
+
     /// True during the quiet time after Turbine comes back to the front (presses are dropped).
     pub fn quiet(&self) -> bool {
         self.quiet_until.is_some_and(|until| Instant::now() < until)
@@ -224,6 +233,10 @@ impl Pads {
                 }
             }
         }
+        self.last_wait = match (stamps.last(), self.timer.as_ref()) {
+            (Some(s), Some(t)) => t.ticks().saturating_sub(*s),
+            _ => 0,
+        };
         for stamp in stamps {
             self.note_wait(stamp);
         }

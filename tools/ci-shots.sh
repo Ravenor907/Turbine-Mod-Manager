@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -920,6 +920,14 @@ for size in $SIZES; do
   need "golden-$size" "Journey: A puts it back ($size)" "Journey put back: .* is back in My mods"
   if ran "golden-$size" && ! grep -q "Journey put back" "$PWD/data/golden-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     grep -h "engine\|action\|Journey\|Sheet" "$PWD/data/golden-$size/turbine-mod-manager/activity.log" | tail -n 30 | sed 's/^/::notice title=golden log::/' || true; fi
+  # 0.6 (break M1, M2): the Mod Manager Download question's guard, timed from its first frame.
+  rm -rf "$PWD/fh/mmdguard-$size"; python3 tools/fake-home.py "$PWD/fh/mmdguard-$size" > /dev/null; h="$PWD/fh/mmdguard-$size"
+  shoot "mmdguard-$size" "$size" mmdguard "$h" --game=$skyrim
+  need "mmdguard-$size" "M8: at first Not now, input off, A ignored ($size)" "Guard at first: A Not now, B Not now, input off; A at [0-9]+ ms: ignored"
+  need "mmdguard-$size" "M2: a press made in the first second but handled late is ignored ($size)" "Guard late press: made at 500 ms, handled at [0-9]+ ms: ignored"
+  need "mmdguard-$size" "M8: after the quiet second the ring is on Get it ($size)" "Guard after the quiet second: ring on Get it, A Get it"
+  need "mmdguard-$size" "M1: Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
+  need "mmdguard-$size" "M1: then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
   # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
   rm -rf "$PWD/fh/heldcheck-$size"; python3 tools/fake-home.py "$PWD/fh/heldcheck-$size" > /dev/null; h="$PWD/fh/heldcheck-$size"
   shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
