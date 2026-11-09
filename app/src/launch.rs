@@ -102,7 +102,7 @@ static LAST_OPEN: std::sync::Mutex<Vec<(String, std::time::Instant)>> = std::syn
 /// Some(milliseconds since) when `url` was opened less than `RELAUNCH_GUARD` ago; otherwise remembers it as opened
 /// now and answers None. Each page is remembered on its own (A, B, then A again within 8 seconds opens A once).
 /// Steam's browser (the player's own choice after a press) is never held back by this.
-fn recently_opened(url: &str, now: std::time::Instant) -> Option<u128> {
+pub(crate) fn recently_opened(url: &str, now: std::time::Instant) -> Option<u128> {
     let mut last = LAST_OPEN.lock().unwrap_or_else(|e| e.into_inner());
     crate::bridge::page_guard(&mut last, url, now, RELAUNCH_GUARD)
 }

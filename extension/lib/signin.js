@@ -27,7 +27,7 @@
     waiting: "Turbine is waiting for you to sign in to Nexus Mods.",
     waitingHow: "Press Sign in to Nexus Mods and sign in there (Google works too). Turbine takes the sign-in by itself when you're done.",
     notYet: "This browser isn't signed in to Nexus Mods yet. Press Sign in to Nexus Mods first.",
-    sending: "Signed in to Nexus. Sending it to Turbine...",
+    sending: "You're signed in to Nexus here. Sending it to Turbine...",
     ok: "Signed in. Go back to Turbine.",
     failed: "Turbine didn't take the sign-in.",
     expired: "This sign-in request is over (Turbine waits 15 minutes). Press Sign in with my browser in Turbine again.",
@@ -219,7 +219,11 @@
     function fromTurbine(msg) {
       if (msg.type === "signin.request") {
         if (s && s.id === msg.id && live()) {
-          // The same request again (the helper reconnected): carry on where it was.
+          // The same request again (the helper reconnected, or the player pressed again in Turbine and Steam
+          // brought the browser forward): carry on where it was, with the page in front.
+          windowUntil = now() + NEW_WINDOW_MS;
+          if (typeof s.tabId === "number") focusTab(s.tabId);
+          else showPage();
           startPolling();
           if (waiting()) check("again");
           return;

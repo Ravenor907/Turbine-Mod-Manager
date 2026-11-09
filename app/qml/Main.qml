@@ -5550,11 +5550,19 @@ Window {
             app.browserSay("The sign-in didn't come back from the browser in 15 minutes. Press Google sign-in to try again.", "warn")
         }
     }
+    // After a sign-in from the browser: did Turbine really come to the front? Said in the activity log either way.
+    Timer {
+        id: signinFrontCheck; interval: 5000
+        onTriggered: app.note("browser", app.active
+            ? "Sign in with my browser: Turbine is in front again"
+            : "Sign in with my browser: Turbine didn't come to the front within 5 seconds (the browser's page says: press the Steam button, then pick Turbine)")
+    }
     function signinStart() {
         const r = parse(Turbine.signinStart(), { how: "error", text: "Turbine couldn't start the sign-in." })
         note("browser", "Sign in with my browser: " + r.how)
         if (r.how === "nohelper" || r.how === "error") { browserSay(r.text, "warn"); toast.showPlain(r.text); return }
-        if (r.how === "desktop" || r.how === "shortcut") { signinWaitSince = Date.now(); signinWaitText = r.text }
+        if (r.how === "guarded") { if (signinWaitSince === 0) signinWaitSince = Date.now(); signinWaitText = r.text; browserSay(r.text, "hint"); return }
+        if (r.how === "desktop" || r.how === "shortcut" || r.how === "helper") { signinWaitSince = Date.now(); signinWaitText = r.text }
         browserSay(r.text, r.how === "steam" ? "warn" : "hint")
         if (shot.on) return
         if (r.how === "desktop") Qt.openUrlExternally(r.url)
@@ -5583,6 +5591,7 @@ Window {
             if (back !== "") Qt.openUrlExternally(back)
             else if (Turbine.gamemode) toast.showPlain(text + ". Press the Steam button, then Turbine.")
             app.raise(); app.requestActivate()
+            signinFrontCheck.restart()
         }
     }
 

@@ -220,14 +220,15 @@ test("A request opens Turbine's own page in front and waits; nothing goes before
 
 test("Already signed in: the sign-in goes at once; Turbine's answer brings the page to Signed in", async () => {
   const x = flow();
-  x.br.jar.push(SESSION_COOKIE, { name: "SID", value: "g", domain: ".google.com" });
+  x.br.jar.push(SESSION_COOKIE, { name: "SID", value: "g", domain: ".google.com" }, { name: "cf_clearance", value: "cf1", domain: ".nexusmods.com" }, { name: "__cf_bm", value: "cf2", domain: ".nexusmods.com" }, { name: "_cfuvid", value: "cf3", domain: ".nexusmods.com" });
   x.f.fromTurbine({ type: "signin.request", id: SID, steam: true });
   await x.clock.tick(10);
   const c = x.sent.find((m) => m.type === "signin.cookies");
   assert.ok(c, "cookies sent");
   assert.equal(c.id, SID);
-  assert.deepEqual(c.cookies.map((k) => k.name), ["nexusmods_session"]);
+  assert.deepEqual(c.cookies.map((k) => k.name), ["nexusmods_session"], "never Cloudflare's or another site's");
   assert.equal(x.f.view().phase, "sent");
+  assert.match(x.f.view().text, /signed in to Nexus here/);
   // The same cookies don't go again by themselves.
   await x.clock.tick(10000);
   assert.equal(x.sent.filter((m) => m.type === "signin.cookies").length, 1);
@@ -309,9 +310,14 @@ test("Pressed again: the same tab starts over with the new request; the same req
   const x = flow();
   x.f.fromTurbine({ type: "signin.request", id: SID });
   await x.clock.tick(10);
+  const before = x.br.focused.length;
   x.f.fromTurbine({ type: "signin.request", id: SID });
   await x.clock.tick(10);
-  assert.equal(x.br.created.length, 1, "a reconnecting helper hears the same request: no second tab");
+  assert.equal(x.br.created.length, 1, "a reconnecting helper (or a press again) hears the same request: no second tab");
+  assert.ok(x.br.focused.length > before, "the page comes forward");
+  x.br.fire("windowCreated", { id: 6, type: "normal" });
+  await x.clock.tick(10);
+  assert.deepEqual(x.br.moves[x.br.moves.length - 1], [10, { windowId: 6, index: -1 }], "and takes a window Steam opens for it");
   x.f.fromTurbine({ type: "signin.request", id: SID2 });
   await x.clock.tick(10);
   assert.equal(x.br.created.length, 1, "a new press reuses the tab");

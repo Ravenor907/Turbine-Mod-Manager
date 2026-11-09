@@ -569,6 +569,8 @@ pub const OPEN_SINCE: &str = "0.53";
 /// The first helper version that knows "reload" (reloads itself from its folder with chrome.runtime.reload()).
 /// The helper version that knows the sign-in request (0.55).
 pub const SIGNIN_SINCE: &str = "0.55";
+/// The helper version with its own sign-in page (0.59): it opens that page itself when asked for the sign-in.
+pub const SIGNIN_PAGE_SINCE: &str = "0.59";
 pub const RELOAD_SINCE: &str = "0.54";
 /// What the player does once when the helper is too old to reload itself.
 pub const OLD_HELPER_TEXT: &str =
@@ -1122,6 +1124,13 @@ pub fn cookie_host(domain: &str) -> Option<String> {
     (d == "nexusmods.com" || d.ends_with(".nexusmods.com")).then_some(d)
 }
 
+/// Cloudflare's own cookies on Nexus (cf_clearance, __cf_bm, _cfuvid and the like): tied to the browser that passed
+/// Cloudflare's check, so they never go into Turbine's browser (they could make Cloudflare check it again).
+pub fn cloudflare_cookie(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.starts_with("cf_") || n.starts_with("__cf") || n.starts_with("_cfuvid")
+}
+
 /// A cookie name: a token (RFC 6265), nothing a Set-Cookie line could be split on.
 fn cookie_name_ok(n: &str) -> bool {
     !n.is_empty() && n.len() <= MAX_COOKIE_NAME && n.bytes().all(|b| b.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?={}".contains(&b))
@@ -1167,6 +1176,19 @@ pub fn signin_request_for(steam: bool) -> Result<String, String> {
         broadcast(&signin_request_message(&id, steam));
     }
     Ok(id)
+}
+
+/// A press while a request still waits (not taken, within SIGNIN_WAIT) keeps that request: the helper hears the same
+/// id again and brings its page forward instead of starting over. Answers the id and whether it was kept.
+pub fn signin_request_or_reuse(steam: bool) -> Result<(String, bool), String> {
+    if let Some(m) = signin_waiting_message(Instant::now()) {
+        let id = signin_waiting(Instant::now()).unwrap_or_default();
+        if connected() {
+            broadcast(&m);
+        }
+        return Ok((id, true));
+    }
+    signin_request_for(steam).map(|id| (id, false))
 }
 
 /// The same, for the desktop.
@@ -1266,7 +1288,7 @@ pub fn signin_cookies(msg: &Json, want: Option<&str>) -> Result<(Vec<SigninCooki
         let name = c.str_at("name").unwrap_or("");
         let value = c.str_at("value").unwrap_or("");
         let path = c.str_at("path").filter(|p| !p.is_empty()).unwrap_or("/");
-        let (Some(host), true, true, true) = (host, cookie_name_ok(name), cookie_value_ok(value), cookie_path_ok(path)) else {
+        let (Some(host), true, true, true, false) = (host, cookie_name_ok(name), cookie_value_ok(value), cookie_path_ok(path), cloudflare_cookie(name)) else {
             dropped += 1;
             continue;
         };
@@ -2025,6 +2047,20 @@ mod tests {
     }
 
     #[test]
+    fn cloudflares_cookies_never_go_into_turbines_browser() {
+        for n in ["cf_clearance", "__cf_bm", "_cfuvid", "CF_Clearance", "__cflb"] {
+            assert!(cloudflare_cookie(n), "{n}");
+        }
+        for n in ["nexusmods_session", "member_id", "cfg", "my_cf_thing"] {
+            assert!(!cloudflare_cookie(n), "{n}");
+        }
+        let list = [cookie(".nexusmods.com", "nexusmods_session", "abc"), cookie(".nexusmods.com", "cf_clearance", "x"), cookie(".nexusmods.com", "__cf_bm", "y"), cookie(".nexusmods.com", "_cfuvid", "z")];
+        let (got, dropped) = signin_cookies(&answer_with(ID, &list), Some(ID)).unwrap();
+        assert_eq!(got.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["nexusmods_session"]);
+        assert_eq!(dropped, 3);
+    }
+
+    #[test]
     fn status_steps_are_words_for_the_log() {
         let st = |id: &str, step: &str| json::parse(&format!("{{\"type\":\"signin.status\",\"id\":{},\"step\":{}}}", quote(id), quote(step))).unwrap();
         assert!(signin_status_line(&st(ID, "page"), Some(ID)).unwrap().contains("Turbine's sign-in page"));
@@ -2069,6 +2105,10 @@ mod tests {
         assert_eq!(signin_waiting_message(Instant::now()), None, "a reconnecting helper isn't asked again");
         assert_eq!(signin_key_waiting(Instant::now()).as_deref(), Some(id.as_str()));
         assert_eq!(signin_key_waiting(Instant::now() + SIGNIN_WAIT + Duration::from_secs(1)), None);
+        // A press while it waits keeps the same request.
+        let (kept, reused) = signin_request_or_reuse(true).unwrap();
+        assert!(!reused, "the taken one isn't reused");
+        assert_eq!(signin_request_or_reuse(true).unwrap(), (kept.clone(), true));
         // A new press starts over: a new id, waiting again, the old one gone.
         let again = signin_request().unwrap();
         assert_ne!(again, id);

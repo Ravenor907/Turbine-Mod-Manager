@@ -103,11 +103,17 @@
     return d === "nexusmods.com" || d.endsWith(".nexusmods.com");
   }
 
+  // Cloudflare's own cookies (cf_clearance, __cf_bm, _cfuvid): tied to this browser's check, never sent to Turbine.
+  function isCloudflareCookie(name) {
+    const n = String(name || "").toLowerCase();
+    return n.startsWith("cf_") || n.startsWith("__cf") || n.startsWith("_cfuvid");
+  }
+
   // The cookies chrome.cookies.getAll gave, reduced to Nexus's own, with only the fields Turbine needs.
   function nexusCookies(list) {
     if (!Array.isArray(list)) return [];
     return list
-      .filter((c) => c && typeof c.name === "string" && typeof c.value === "string" && isNexusCookieDomain(c.domain))
+      .filter((c) => c && typeof c.name === "string" && typeof c.value === "string" && isNexusCookieDomain(c.domain) && !isCloudflareCookie(c.name))
       .slice(0, MAX_COOKIES)
       .map((c) => ({
         name: c.name,
@@ -334,6 +340,7 @@
     isSigninId,
     isNexusCookieDomain,
     nexusCookies,
+    isCloudflareCookie,
     SIGNIN_URL,
     SIGNIN_COOKIE_NAMES,
     KEY_PAGE_URL,

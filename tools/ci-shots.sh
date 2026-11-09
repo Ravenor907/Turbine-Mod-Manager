@@ -583,7 +583,7 @@ if command -v Xvfb > /dev/null; then
     # The sign-in pass-through: a helper's answer for another request is refused whole; the real one puts only
     # Nexus's cookie into Turbine's browser, never logs its value, and the cookie is kept on disk with the profile.
     need $n "Sign-in: an answer for another request is refused ($size)" "Sign-in from the browser refused: the sign-in answer is for another request"
-    need $n "Sign-in: only Nexus's cookie is taken ($size)" "Sign-in from the browser: 1 Nexus cookie\(s\) put into Turbine's browser \(turbine_signin_check\); 2 for other sites or unreadable, dropped"
+    need $n "Sign-in: only Nexus's cookie is taken ($size)" "Sign-in from the browser: 1 Nexus cookie\(s\) put into Turbine's browser \(turbine_signin_check\); 3 for other sites or unreadable, dropped"
     need $n "Sign-in: Turbine says it is signed in ($size)" "Signed in to Nexus \(from the player's browser\)"
     if grep -rq "valueNeverLogged7f3" "$PWD/data/$n/turbine-mod-manager/activity.log" "shots/$n.log"; then echo "::error title=Sign-in: a cookie value was logged ($size)::"; fail=1
     else echo "::notice title=Sign-in: no cookie value in the logs ($size)::"; fi
@@ -591,6 +591,8 @@ if command -v Xvfb > /dev/null; then
     if [ -n "$kept" ]; then echo "::notice title=Sign-in: the cookie is in the profile on disk ($size)::${kept#$PWD/}"
     else echo "::error title=Sign-in: the cookie isn't in the profile on disk ($size)::"; find "$PWD/data/$n" -maxdepth 4 | head -n 40; fail=1; fi
     if grep -rlaE "other_site_check|look_alike_check" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: another site's cookie got in ($size)::"; fail=1; fi
+    if grep -rlaE "cf_turbine_check|cfValueNeverKept9" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: a Cloudflare cookie got in ($size)::"; fail=1
+    else echo "::notice title=Sign-in: no Cloudflare cookie in Turbine's browser ($size)::"; fi
     # 6: signed links and the account number never go into the log whole.
     leak=$(grep -Eh "user_id=|[?&]key=|[?&]md5=|expires=[0-9]" "$log" 2>/dev/null || true)
     if [ -n "$leak" ]; then echo "::error title=6: a signed link or user_id is in the log ($size)::"; echo "$leak" | head -n 5 | cut -c1-200; fail=1

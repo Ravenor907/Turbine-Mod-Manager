@@ -508,17 +508,39 @@ impl qobject::Turbine {
             crate::log::line("web", "Sign in with my browser: the browser helper isn't set up");
             return out("nohelper", url, "", NO_HELPER);
         }
-        match crate::bridge::signin_request_for(*self.gamemode()) {
-            Ok(_) => crate::log::line(
-                "web",
-                &format!("Sign in with my browser: asked the helper for Nexus's sign-in{}", if crate::bridge::connected() { "" } else { " (sent when it connects, within 15 minutes)" }),
-            ),
+        // A press while a request still waits keeps it (one request, one tab in the browser).
+        let reused = match crate::bridge::signin_request_or_reuse(*self.gamemode()) {
+            Ok((_, reused)) => {
+                crate::log::line(
+                    "web",
+                    &format!(
+                        "Sign in with my browser: {}{}",
+                        if reused { "a sign-in already waits: the helper brings its page forward" } else { "asked the helper for Nexus's sign-in" },
+                        if crate::bridge::connected() { "" } else { " (sent when it connects, within 15 minutes)" }
+                    ),
+                );
+                reused
+            }
             Err(e) => {
                 crate::log::line("web", &format!("Sign in with my browser couldn't start: {e}"));
                 return out("error", url, "", "Turbine couldn't start the sign-in. Try again.");
             }
+        };
+        // Pressed again within 8 seconds: the browser is already starting; don't start it (and its window) again.
+        if *self.gamemode() {
+            if let Some(ago) = crate::launch::recently_opened(url, Instant::now()) {
+                crate::log::line("browser", &format!("Sign in with my browser: the browser was started {ago} ms ago, not starting it again"));
+                return out("guarded", url, "", WAITING_IN_BROWSER);
+            }
+        }
+        if reused && !*self.gamemode() {
+            return out("guarded", url, "", WAITING_IN_BROWSER);
         }
         if !*self.gamemode() {
+            // A connected helper that has its own sign-in page opens it; the browser needn't open Nexus as well.
+            if crate::bridge::connected() && !crate::bridge::version_older(&crate::bridge::helper_version(), crate::bridge::SIGNIN_PAGE_SINCE) {
+                return out("helper", url, "", "Sign in in your browser: it shows Turbine's sign-in page. Turbine signs in by itself when you're done.");
+            }
             return out("desktop", url, "", "Sign in in your browser. Turbine signs in by itself when you're done.");
         }
         let r = turbine_engine::json::parse(&crate::launch::open_through_steam(url)).unwrap_or(Json::Null);
@@ -700,16 +722,18 @@ impl qobject::Turbine {
         } else if step == "signin" {
             // The sign-in pass-through end to end, as if the player pressed Sign in with my browser and the helper
             // answered: first an answer for another request (refused whole), then the real one with a Nexus cookie,
-            // another site's and a look-alike's (only Nexus's goes into the profile). The value is never logged.
+            // another site's, a look-alike's and a Cloudflare one (only Nexus's sign-in goes into the profile). The
+            // value is never logged.
             match crate::bridge::signin_request() {
                 Ok(id) => {
                     let msg = |id: &str| {
                         format!(
-                            "{{\"type\":\"signin.cookies\",\"id\":{},\"cookies\":[{},{},{}]}}",
+                            "{{\"type\":\"signin.cookies\",\"id\":{},\"cookies\":[{},{},{},{}]}}",
                             quote(id),
                             "{\"name\":\"turbine_signin_check\",\"value\":\"valueNeverLogged7f3\",\"domain\":\".nexusmods.com\",\"hostOnly\":false,\"path\":\"/\",\"secure\":true,\"httpOnly\":true,\"sameSite\":\"lax\",\"expirationDate\":4102444800}",
                             "{\"name\":\"other_site_check\",\"value\":\"x\",\"domain\":\".google.com\",\"path\":\"/\"}",
-                            "{\"name\":\"look_alike_check\",\"value\":\"x\",\"domain\":\"evilnexusmods.com\",\"path\":\"/\"}"
+                            "{\"name\":\"look_alike_check\",\"value\":\"x\",\"domain\":\"evilnexusmods.com\",\"path\":\"/\"}",
+                            "{\"name\":\"cf_turbine_check\",\"value\":\"cfValueNeverKept9\",\"domain\":\".nexusmods.com\",\"path\":\"/\",\"secure\":true}"
                         )
                     };
                     let wrong = "0".repeat(32);
@@ -730,6 +754,8 @@ impl qobject::Turbine {
     }
 }
 
+/// A press while the sign-in already waits in the player's browser.
+pub const WAITING_IN_BROWSER: &str = "Waiting for you to sign in in your browser. Turbine signs in by itself when you're done.";
 /// The browser's sign-in page is up (the helper said so): what the pill says while Turbine waits.
 pub const SIGNIN_PAGE_UP: &str = "Waiting for your Nexus sign-in in the browser. Turbine signs in by itself when you're done.";
 /// The helper's sign-in was refused (an old or broken answer).

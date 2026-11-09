@@ -188,7 +188,7 @@ test("Sign in with my browser, end to end against Turbine's real bridge", { skip
   vm.runInContext(fs.readFileSync(path.join(extDir, "background.js"), "utf8"), ctx, { filename: "background.js" });
   t.after(() => vm.runInContext("bridge.stop(); tracker.stop(); signinFlow.stop();", ctx));
   await until(() => vm.runInContext("bridge.getState().conn", ctx) === "connected", 5000, "helper connected to Turbine");
-  assert.ok(said(/^BRIDGE connected/));
+  await until(() => said(/^BRIDGE connected/), 3000, "Turbine heard the helper connect");
 
   // The player presses Sign in with my browser in Turbine (Game Mode).
   turbine.stdin.write("signin\n");
@@ -207,7 +207,7 @@ test("Sign in with my browser, end to end against Turbine's real bridge", { skip
   fire("pageMsg", { kind: "signin.go" });
   await until(() => tabs.get(tabId).url === P.SIGNIN_URL, 3000, "tab on Nexus's sign-in page");
   const cookie = { name: "nexusmods_session", value: COOKIE_VALUE, domain: ".nexusmods.com", path: "/", secure: true, httpOnly: true, hostOnly: false, sameSite: "lax", expirationDate: 1893456000 };
-  jar.push(cookie, { name: "SID", value: "googleValue", domain: ".google.com", path: "/" });
+  jar.push(cookie, { name: "SID", value: "googleValue", domain: ".google.com", path: "/" }, { name: "cf_clearance", value: "cfValue1", domain: ".nexusmods.com", path: "/" }, { name: "__cf_bm", value: "cfValue2", domain: ".nexusmods.com", path: "/" });
   fire("cookieChanged", { removed: false, cookie });
   await until(() => said(/^TOOK nexusmods_session$/), 5000, "Turbine took Nexus's cookie (and only Nexus's)");
   await until(() => shown.some((m) => m.signin && m.signin.phase === "ok"), 3000, "Signed in shown");
