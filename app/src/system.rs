@@ -176,13 +176,39 @@ fn host_exists(path: &std::path::Path) -> Option<bool> {
     }
 }
 
+/// Is Turbine's plugin among Decky's plugins (whatever its folder is called)? Its package.json names it
+/// "turbine-decky". Asked with grep on the host, fixed arguments, only package.json files read.
+fn host_has_plugin(plugins: &std::path::Path) -> Option<bool> {
+    use std::process::{Command, Stdio};
+    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg("grep");
+        c
+    } else {
+        Command::new("grep")
+    };
+    let status = cmd
+        .args(["-r", "-l", "-s", "-F", "--include=package.json", "\"name\": \"turbine-decky\"", "--"])
+        .arg(plugins)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) | Some(2) => Some(false),
+        _ => None,
+    }
+}
+
 /// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
 /// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
 pub fn decky_json() -> String {
     use turbine_engine::json::quote;
     let home = turbine_engine::home_dir();
     let decky = host_exists(&home.join("homebrew/services/PluginLoader"));
-    let plugin = host_exists(&home.join("homebrew/plugins/Turbine/plugin.json")) == Some(true);
+    let plugin = host_has_plugin(&home.join("homebrew/plugins")) == Some(true);
     crate::log::line("app", &format!("Steam menu plugin: Decky {}, Turbine's plugin {}", match decky { Some(true) => "found", Some(false) => "not found", None => "unknown" }, if plugin { "installed" } else { "not installed" }));
     format!(
         "{{\"checked\":true,\"decky\":{},\"plugin\":{plugin},\"url\":{}}}",
