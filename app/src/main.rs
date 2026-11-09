@@ -17,6 +17,7 @@ mod pad;
 mod pointer;
 mod quick;
 mod single;
+mod steamsetup;
 mod system;
 mod web;
 
@@ -150,6 +151,10 @@ fn choose_platform() -> Option<&'static str> {
 
 fn main() {
     // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
+    // 0.6: the host script's call once Steam has closed: make the waiting change to Steam's settings, then end.
+    if let Some(code) = steamsetup::apply_from_args() {
+        std::process::exit(code);
+    }
     if let Some(req) = quick::wanted() {
         std::process::exit(quick::run(req));
     }
@@ -227,6 +232,10 @@ fn main() {
             log::line("quick", &format!("Started from Steam's menu: {l}"));
             single::push(l);
         }
+    }
+    // 0.6: Turbine's own Steam library art (at every start, so after every update too; never over the player's own).
+    if !screenshot {
+        std::thread::spawn(steamsetup::art_at_start);
     }
     let mut app = QGuiApplication::new();
     if let Some(mut a) = app.as_mut() {

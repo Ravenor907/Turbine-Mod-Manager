@@ -132,11 +132,22 @@ impl qobject::Turbine {
         };
         let set = if game.store == turbine_engine::games::Store::Steam { steam::launch_options(&turbine_engine::home_dir(), &game.store_id) } else { None };
         let ok = if me3 { set.as_deref().is_some_and(|x| ac::launch_option_ok(x, &data_home())) } else { set.as_deref().is_some_and(|x| !needed.is_empty() && x.contains(needed.replace("%command%", "").trim())) };
+        // 0.59: "PROTON_LOG=1 if ..." in front of Turbine's line is a shell error (Steam starts nothing): the doctor
+        // offers the same settings with export in front instead.
+        let fix = if me3 { set.as_deref().and_then(|x| ac::launch_option_fix(x, &data_home())) } else { None };
+        let needed = match &fix {
+            Some(f) => {
+                crate::log::line("launch", &format!("{}: the Launch Options have settings in front of Turbine's line without export (a shell error); offering: {f}", game.name));
+                f.clone()
+            }
+            None => needed,
+        };
         let launch = format!(
-            "{{\"listed\":{},\"set\":{},\"needed\":{},\"ok\":{ok}}}",
+            "{{\"listed\":{},\"set\":{},\"needed\":{},\"ok\":{ok},\"fix\":{}}}",
             set.is_some(),
             quote(set.as_deref().unwrap_or("")),
-            quote(&needed)
+            quote(&needed),
+            fix.is_some()
         );
         let copies: Vec<String> = self
             .rust()

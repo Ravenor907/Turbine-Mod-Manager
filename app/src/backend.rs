@@ -864,6 +864,51 @@ pub mod qobject {
         #[cxx_name = "launchUndo"]
         fn launch_undo(self: Pin<&mut Self>, game: &QString);
 
+        /// 0.6: one Steam restart for a change to Steam's own settings ("options", "undo", "tile", "untile");
+        /// `resume` "play", "coop" or "". Answers {"ok","state","words"} (steamsetup.rs).
+        #[qinvokable]
+        #[cxx_name = "steamSetupStart"]
+        fn steam_setup_start(self: &Self, game_id: &QString, kind: &QString, resume: &QString) -> QString;
+
+        /// 0.6: the Steam restart's state: {"state","words","resume","what","age"}.
+        #[qinvokable]
+        #[cxx_name = "steamSetupState"]
+        fn steam_setup_state(self: &Self) -> QString;
+
+        /// 0.6: the Steam restart is over: its files go (its log lines go to the activity log).
+        #[qinvokable]
+        #[cxx_name = "steamSetupFinish"]
+        fn steam_setup_finish(self: &Self);
+
+        /// 0.6: at start, changes to Steam's settings that Steam wrote over: {"lost":[names]}.
+        #[qinvokable]
+        #[cxx_name = "steamChangesCheck"]
+        fn steam_changes_check(self: &Self) -> QString;
+
+        /// 0.6: the co-op tile for a game: {"there"}.
+        #[qinvokable]
+        #[cxx_name = "coopTileJson"]
+        fn coop_tile_json(self: &Self, game_id: &QString) -> QString;
+
+        /// 0.6, Settings: Turbine's Steam library art: {"found","on"}.
+        #[qinvokable]
+        #[cxx_name = "steamArtJson"]
+        fn steam_art_json(self: &Self) -> QString;
+
+        /// 0.6, Settings: Steam library art Add (true) or Remove (false). Answers the words.
+        #[qinvokable]
+        #[cxx_name = "steamArtSet"]
+        fn steam_art_set(self: &Self, on: bool) -> QString;
+
+        /// 0.6, Labs: Proton's log for Steam launches of me3 games, in the helper's folder.
+        #[qinvokable]
+        #[cxx_name = "protonLogOn"]
+        fn proton_log_on(self: &Self) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setProtonLog"]
+        fn set_proton_log(self: &Self, on: bool);
+
         /// 0.58: the game wasn't seen running about 20 seconds after Play.
         #[qsignal]
         #[cxx_name = "notStarted"]

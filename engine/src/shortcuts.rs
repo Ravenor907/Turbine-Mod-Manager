@@ -243,13 +243,14 @@ pub fn coop_marker(game_id: &str) -> String {
 
 /// The co-op tile for a game ("steam:1245620"): Turbine's Flatpak with `--play-coop <game id>`. Turbine then gets
 /// the game ready for Seamless Co-op for the next Play only and starts it through Steam, so Steam's own launch,
-/// playtime and overlay are used.
+/// playtime and overlay are used. `--from-tile`: Turbine opens the game's link itself (no Steam menu plugin reads its
+/// answer), or opens its own window on the game when something needs the player first.
 pub fn coop_tile(game_name: &str, game_id: &str, flatpak_id: &str) -> NewShortcut {
     NewShortcut {
         name: format!("{game_name} Co-op"),
         exe: "\"/usr/bin/flatpak\"".into(),
         start_dir: "\"/usr/bin/\"".into(),
-        launch_options: format!("run --branch=stable --arch=x86_64 {flatpak_id} {}", coop_marker(game_id)),
+        launch_options: format!("run --branch=stable --arch=x86_64 {flatpak_id} {} --from-tile", coop_marker(game_id)),
         flatpak_id: flatpak_id.into(),
         icon: String::new(),
     }

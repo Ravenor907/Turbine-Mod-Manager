@@ -90,7 +90,10 @@ fn appid_like_steam() {
     assert_eq!(tile.name, "ELDEN RING Co-op");
     assert_eq!(tile.appid(), 3_871_208_806);
     assert_eq!(shortcuts::rungameid_url(tile.appid()), format!("steam://rungameid/{}", (3_871_208_806u64 << 32) | 0x0200_0000));
-    assert!(tile.launch_options.ends_with("io.github.ravenor907.TurbineModManager --play-coop steam:1245620"));
+    assert!(tile.launch_options.ends_with("io.github.ravenor907.TurbineModManager --play-coop steam:1245620 --from-tile"));
+    // Turbine's own reading of those arguments finds the game.
+    let args: Vec<String> = tile.launch_options.split(' ').skip(4).map(str::to_string).collect();
+    assert_eq!(shortcuts::play_coop_arg(&args).as_deref(), Some("steam:1245620"));
     // The old reader gives the second game (no appid stored) the same rule.
     let list = shortcuts::parse(&steam_file()).unwrap();
     assert_eq!(list[1].appid, 3_806_792_068);

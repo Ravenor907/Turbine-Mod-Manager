@@ -91,6 +91,7 @@ impl FakeSteam {
             .env("TURBINE_PROC", "no-such-turbine")
             .env("TURBINE_POLL", "0.1")
             .env("TURBINE_WAIT", "40")
+            .env("TURBINE_SETTLE", "0")
             .status()
             .unwrap();
         assert!(st.success());

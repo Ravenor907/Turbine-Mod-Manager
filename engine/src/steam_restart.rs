@@ -250,7 +250,8 @@ pub fn busy(home: &Path, games: &[crate::Game], own_appid: Option<u32>) -> Optio
 /// that runs Turbine's --apply-steam-setup>. The first run starts itself again in its own session and returns at
 /// once, so nothing that happens to Turbine (Steam closing it) reaches it. Names can be changed for the tests:
 /// TURBINE_STEAM (the steam command), TURBINE_STEAM_PROC (Steam's process name), TURBINE_PROC (Turbine's),
-/// TURBINE_POLL (seconds between checks), TURBINE_WAIT (how many checks before giving up).
+/// TURBINE_POLL (seconds between checks), TURBINE_WAIT (how many checks before giving up), TURBINE_SETTLE (seconds
+/// between Steam starting and the link back to Turbine).
 pub fn script_text() -> String {
     r##"#!/bin/bash
 # Turbine Mod Manager: one Steam restart to change Steam's own settings (the player asked for it in Turbine). Steam
@@ -320,7 +321,8 @@ fi
 if steam_up; then say "Steam is running again"; else say "Steam didn't start again"; state="failed"; words="Steam didn't start again. Start it yourself; the change is made."; fi
 finish "$state $words"
 if [ -n "$back" ] && ! pgrep -x "$turbine_proc" > /dev/null 2>&1; then
-  sleep "$poll"
+  # Steam takes a moment after it starts before it takes links.
+  sleep "${TURBINE_SETTLE:-10}"
   say "Bringing Turbine back: $back"
   "$steam_cmd" "$back" < /dev/null > /dev/null 2>&1 &
 fi

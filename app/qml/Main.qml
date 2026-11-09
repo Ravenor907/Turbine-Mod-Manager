@@ -824,6 +824,15 @@ Window {
                                 { key: "b", label: "Not now", run: () => {} }] })
             return
         }
+        // 0.6 (I1): Turbine sets the line itself with one Steam restart; pasting it is the fallback.
+        askSteamRestart({ game: o.game, kind: "options", resume: o.coop === true ? "coop" : "play", name: o.name,
+                          title: o.outdated === true ? "Update " + o.name + "'s launch setting" : "One step before " + o.name + " plays with mods",
+                          intro: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs one setting for that, and Turbine can set it for you.",
+                          aLabel: "Restart Steam and set it up", manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) })
+    }
+    // The paste steps (Set it up myself): the exact text to copy into Steam's Launch Options.
+    function openLaunchPaste(o) {
+        note("action", "Launch Options step: set it up myself")
         const steps = ["A copies the text above.",
                        "In Steam: " + o.name + ", the gear, Properties, General, Launch Options.",
                        o.outdated === true ? "Replace Turbine's older line there with this one (it starts the game normally if Turbine is ever removed)." : o.set !== "" ? "Replace what is there now (" + o.set + ") with it: paste, or type it." : "Paste it there, or type it.",
@@ -977,6 +986,77 @@ Window {
                       openSettingsFile(mod, rel, title, pin, back) } },
                             { key: "b", label: "Cancel", run: () => { sheet = "settingsedit" } }] })
     }
+    // ---------------------------------------------------------------- 0.6 (I1): one Steam restart, asked first
+    // Steam's own settings (a game's launch setting, the co-op tile) change only while Steam is closed. Turbine asks
+    // once, with the warning, then a small helper on the device closes Steam, makes the change and starts Steam
+    // again; in Game Mode Turbine closes with Steam and comes back through its Steam entry, then goes on.
+    property int steamTick: 0                  // bumps when Steam's settings changed (the game menu reads them again)
+    property real steamSetupSince: 0
+    function askSteamRestart(o) {
+        note("action", "Steam restart asked for " + o.name + " (" + o.kind + ")")
+        openMsg({ title: o.title,
+                  text: o.intro + "\n\nTurbine needs to restart Steam once to finish setting up " + o.name + ". Steam will close and open again; any game or download in progress will stop. Save your game first if one is running.",
+                  buttons: [{ key: "a", label: o.aLabel, run: () => runSteamRestart(o) }]
+                           .concat(o.manual ? [{ key: "x", label: o.manualLabel, run: o.manual }] : [])
+                           .concat([{ key: "b", label: "Not now", run: () => note("action", "Steam restart: not now") }]) })
+    }
+    function runSteamRestart(o) {
+        const r = parse(Turbine.steamSetupStart(o.game, o.kind, o.resume), { ok: false, state: "", words: "Turbine couldn't start the restart." })
+        note("action", "Steam restart for " + o.name + ": " + (r.ok ? r.state : "refused: " + r.words))
+        if (!r.ok) {
+            openMsg({ title: "Steam can't restart right now", text: r.words,
+                      buttons: (o.manual ? [{ key: "x", label: o.manualLabel, run: o.manual }] : []).concat([{ key: "b", label: "OK", run: () => {} }]) })
+            return
+        }
+        if (r.state === "done") { steamSetupResult(parse(Turbine.steamSetupState(), { state: "done", resume: o.resume === "" ? "" : "play " + o.game + " " + (o.resume === "coop" ? "coop" : "solo") })); return }
+        steamSetupSince = Date.now()
+        steamSetupPoll.start()
+        toast.info(Turbine.gamemode ? "Restarting Steam. Turbine closes with it and comes back when Steam is ready." : "Restarting Steam. Turbine goes on when Steam is back.")
+    }
+    Timer {
+        id: steamSetupPoll; interval: 1000; repeat: true
+        onTriggered: {
+            const s = app.parse(Turbine.steamSetupState(), { state: "none" })
+            if (s.state === "running" && Date.now() - app.steamSetupSince < 240000) return
+            stop()
+            if (s.state === "running") { app.note("action", "Steam restart: no result after 4 minutes"); s.state = "failed"; s.words = "The restart didn't finish. If Steam is closed, start it again, then try once more." }
+            app.steamSetupResult(s)
+        }
+    }
+    function steamSetupResult(s) {
+        Turbine.steamSetupFinish()
+        steamTick++
+        note("action", "Steam restart: " + s.state + (s.words ? " (" + s.words + ")" : "") + (s.resume ? ", then " + s.resume : ""))
+        if (s.state !== "done") {
+            openMsg({ title: "Steam's setting wasn't changed", text: (s.words || "Something went wrong during the restart.") + " The activity log has each step.",
+                      buttons: [{ key: "y", label: "Activity log", run: () => openActivity() }, { key: "b", label: "OK", run: () => {} }] })
+            return
+        }
+        toast.done("Done: " + (s.what || "Steam's setting") + " is set.")
+        // Go on with the Play that asked for it (once this game's mods are read).
+        const parts = String(s.resume || "").split(" ")
+        if (parts[0] === "play" && parts[1]) quickRequest("turbine:quick " + (parts[2] === "coop" ? "play-coop" : "play") + " " + encodeURIComponent(parts[1]), 0)
+    }
+    // At start: a restart that finished while Turbine was closed (Game Mode), and changes Steam wrote over.
+    function steamSetupAtStart() {
+        const s = parse(Turbine.steamSetupState(), { state: "none" })
+        if (s.state === "running" && s.age < 300) { steamSetupSince = Date.now() - s.age * 1000; steamSetupPoll.start() }
+        else if ((s.state === "done" || s.state === "failed") && s.age < 900) steamSetupResult(s)
+        else if (s.state !== "none") { note("action", "Steam restart from " + s.age + " s ago: left (" + s.state + ")"); Turbine.steamSetupFinish() }
+        const lost = parse(Turbine.steamChangesCheck(), { lost: [] }).lost
+        if (lost.length > 0) toast.info("Steam put back its own settings for " + lost.join(", ") + " (it was still running). Play or the game menu sets them up again.")
+    }
+    // The co-op tile in Steam's library (with Seamless Co-op installed).
+    readonly property bool coopTileThere: steamTick >= 0 && !!game && seamlessIn && parse(Turbine.coopTileJson(game.id), { there: false }).there === true
+    function openCoopTile() {
+        if (!game) return
+        const add = !coopTileThere
+        askSteamRestart({ game: game.id, kind: add ? "tile" : "untile", resume: "", name: gameTitle,
+                          title: add ? "Add a Co-op tile to Steam" : "Remove the Co-op tile from Steam",
+                          intro: add ? "A tile in your Steam library that starts " + gameTitle + " with Seamless Co-op in one press: Turbine gets the mods ready and Steam starts the game as usual."
+                                     : "Takes the " + gameTitle + " Co-op tile and its pictures out of your Steam library.",
+                          aLabel: add ? "Restart Steam and add it" : "Restart Steam and remove it" })
+    }
     // ---------------------------------------------------------------- 0.58: Undo the launch options change
     function openLaunchUndo(current) {
         const list = parse(Turbine.launchUndoJson(current), [])
@@ -986,6 +1066,13 @@ Window {
         openPick("Undo the launch options change", "Pick the game", list.map(x => ({ icon: "restore", title: x.name, detail: x.original !== "" ? "Back to: " + x.original : "Back to empty", aLabel: "Show", run: () => showLaunchUndo(x) })), "")
     }
     function showLaunchUndo(x) {
+        // 0.6 (I1): Turbine puts the old setting back itself with one Steam restart; doing it by hand is the fallback.
+        askSteamRestart({ game: x.game, kind: "undo", resume: "", name: shortGame(x.name),
+                          title: "Undo the launch options change: " + shortGame(x.name),
+                          intro: "Turbine puts back " + shortGame(x.name) + "'s launch setting as it was before: " + (x.original !== "" ? x.original : "empty") + ". Steam then starts the game normally, with its anti-cheat.",
+                          aLabel: "Restart Steam and put it back", manualLabel: "Do it myself", manual: () => showLaunchUndoPaste(x) })
+    }
+    function showLaunchUndoPaste(x) {
         Turbine.launchUndo(x.game)
         const back = x.original
         openMsg({ title: "Undo the launch options change: " + shortGame(x.name),
@@ -1755,6 +1842,7 @@ Window {
         else if (!shot.on) {
             Turbine.accountStatus()
             Turbine.startCatching()
+            Qt.callLater(steamSetupAtStart)
             if (updates.auto) { selfAuto = true; Turbine.selfCheck(labsOn && updates.prerelease, false) }
         }
         load()
@@ -2316,6 +2404,9 @@ Window {
         { icon: "play", title: "Play with mods again", detail: "Play has started it without mods since the game updated", ok: true, act: "unhold" }
     ] : []).concat(seamlessIn ? [
         { icon: "info", title: "Co-op settings", detail: "Seamless Co-op: the session password, then every other option", ok: true, act: "coopsettings" }
+    ] : []).concat(seamlessIn && game && String(game.id).indexOf("steam:") === 0 ? [
+        coopTileThere ? { icon: "remove", title: "Remove the Co-op tile from Steam", detail: "Takes it out of your Steam library (one Steam restart)", ok: true, act: "cooptile" }
+                      : { icon: "play", title: "Add a Co-op tile to Steam", detail: "Seamless Co-op in one press from your Steam library (one Steam restart)", ok: true, act: "cooptile" }
     ] : []).concat(acMode === "me3" && game && String(game.id).indexOf("steam:") === 0 ? [
         { icon: "restore", title: "Undo the launch options change", detail: "Shows what to paste back in Steam", ok: true, act: "launchundo" }
     ] : []).concat(acMode === "me3" && acInfo.seamless ? [
@@ -2350,7 +2441,7 @@ Window {
       .sort((a, b) => gameMenuOrder.indexOf(a.act) - gameMenuOrder.indexOf(b.act))
     // 0.59 (R4): the game menu in four sections, always in this order (rows that don't apply are left out; rows that
     // apply but can't be used now are shown dimmed, and A on one says why).
-    readonly property var gameMenuOrder: ["unhold", "coopsettings", "original", "restore", "acguide", "acask", "acon",
+    readonly property var gameMenuOrder: ["unhold", "coopsettings", "cooptile", "original", "restore", "acguide", "acask", "acon",
         "add", "updateall", "checkupdates", "alloff", "allon", "profiles", "overlaps", "outdated", "nexusdl", "nexuslist",
         "why", "verify", "saves", "ersaves", "loader", "me3", "seamless", "acleftover", "kcdrestore", "launchundo", "reset",
         "gamesettings", "details", "activity", "help"]
@@ -2366,6 +2457,10 @@ Window {
         const need = (h.launch && h.launch.needed) || "", set = (h.launch && h.launch.set) || ""
         if (need === "") return null
         if (h.launch.ok === true || (h.launch.ok === undefined && set.indexOf(need.replace(/ ?%command%/, "").trim()) >= 0)) return { icon: "power", title: "Steam's Launch Options: set", detail: "Steam has what " + gameTitle + " needs", info: true, run: () => {} }
+        // 0.59: settings typed in front of Turbine's line without "export" stop Steam starting the game at all.
+        if (h.launch.fix === true)
+            return { icon: "info", title: "Steam's Launch Options: a setting in front breaks the line", detail: "Steam starts nothing like this. A copies the same line with export in front. Then in Steam: " + gameTitle + ", the gear, Properties, Launch Options, paste.",
+                     run: () => { Turbine.copyText(need); note("action", "Launch option fix copied: " + need); toast.done("Copied. Paste it in Steam: Properties, Launch Options.") } }
         // 0.59 (T14): the steps, not the 150 character line; the line is what A copies.
         return { icon: "info", title: set === "" ? "Steam's Launch Options: line missing" : "Steam's Launch Options: line changed", detail: "A copies the line. Then in Steam: " + gameTitle + ", the gear, Properties, Launch Options, paste.",
                  run: () => { Turbine.copyText(need); note("action", "Launch option copied: " + need); toast.done("Copied. Paste it in Steam: Properties, Launch Options.") } }
@@ -2467,6 +2562,7 @@ Window {
         else if (item.act === "acguide") openAcGuide()
         else if (item.act === "unhold") { sheet = ""; releaseHold("as you asked") }
         else if (item.act === "coopsettings") openCoopSettings()
+        else if (item.act === "cooptile") openCoopTile()
         else if (item.act === "ersaves") openErSaves()
         else if (item.act === "launchundo") openLaunchUndo(true)
         else if (item.act === "gamesettings") openGameSettings()
@@ -6462,14 +6558,16 @@ Window {
     // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
     readonly property var helpRows: [
         { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
-        { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: what to paste back in Steam's Launch Options", action: "Show" },
+        { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: puts Steam's Launch Options back as they were", action: "Show" },
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Play (hold: Play options). Right stick: pointer, RT clicks." },
         { kind: "info", key: "touch", title: "Touch",
           how: "Tap does it. Hold for options (Move is there: then tap where the mod goes). Swipe sideways on the bottom bar to switch tabs." }
-    ].concat(hiddenIds.length > 0 ? [
+    ].concat(steamArt.found ? [
+        { kind: "action", key: "steamart", title: "Steam library art", how: steamArt.on ? "Turbine's pictures in your Steam library (your own pictures are never replaced)" : "Off: Steam shows its own pictures for Turbine", action: steamArt.on ? "Remove" : "Add" }
+    ] : []).concat(hiddenIds.length > 0 ? [
         { kind: "action", key: "unhide", title: "Games hidden from the rail: " + hiddenIds.length, how: "Puts them back on the rail", action: "Show them" }
     ] : [])
     // 0.6: the optional Steam menu plugin (decky/): Turbine's panel in the Quick Access menu, through Decky Loader.
@@ -6599,6 +6697,7 @@ Window {
         else if (r.key === "openIn") { if (!shot.on) browserSet.openIn = browserSet.openIn === "mine" ? "turbine" : "mine" }
         else if (r.key === "zoom") { browserZoomBy(d * 0.1); if (!shot.on) browserSet.zoom = browserZoom }
         else if (r.key === "noGpu") { webNoGpu = !webNoGpu; Turbine.setWebNoGpu(webNoGpu); toast.showPlain("Takes effect the next time Turbine starts.") }
+        else if (r.key === "protonLog") { protonLog = !protonLog; Turbine.setProtonLog(protonLog); toast.showPlain(protonLog ? "On: the next Steam launch writes Proton's log. Report a problem includes it." : "Off.") }
         else if (r.key === "channel") { updates.prerelease = !updates.prerelease; Turbine.selfCheck(updates.prerelease, false) }
         note("action", "Setting " + r.key + " changed")
     }
@@ -6611,6 +6710,7 @@ Window {
         problem: () => saveProblemReport(),
         decky: () => openDecky(),
         launchundo: () => openLaunchUndo(false),
+        steamart: () => { const w = Turbine.steamArtSet(!steamArt.on); steamArt = parse(Turbine.steamArtJson(), { found: false, on: true }); note("action", "Steam library art: " + (steamArt.on ? "added" : "removed")); toast.info(w) },
         steamBrowser: (r) => labsRun(r), keyless: (r) => labsRun(r), gmBrowser: (r) => labsRun(r),
         nexusKey: () => openAsk("nexusKey", "Nexus key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it"),
         pasteKey: () => pasteKey(),
@@ -6848,12 +6948,16 @@ Window {
         { kind: "action", key: "activity", title: "Activity log", how: "The last 500 lines of what Turbine did, to read, copy or save to Downloads", action: "Open" },
         { kind: "toggle", key: "noGpu", title: "Nexus page: draw without the GPU", how: "For a black or frozen Nexus page in Turbine. Takes effect the next time Turbine starts.",
           value: webNoGpu, options: [false, true], names: ["Off", "On"] },
+        { kind: "toggle", key: "protonLog", title: "Proton log for me3 games", how: "Proton writes its own log for the next Steam launches of Elden Ring and the other me3 games. Report a problem includes it.",
+          value: protonLog, options: [false, true], names: ["Off", "On"] },
         { kind: "action", key: "addChrome", title: "Use Chrome in Game Mode", how: "How to add Chrome to Steam once (for signing in with Google)", action: "Show how" }
     ].concat(updates.prerelease ? [
         { kind: "action", key: "stable", title: "Go back to stable", how: "Installs the latest stable Turbine, even if it's older, and turns Pre-release off", action: "Go back" }
     ] : []).concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
     property var labsAnswers: parse(labsSet.states, {})
     property bool webNoGpu: Turbine.webNoGpu()
+    property bool protonLog: Turbine.protonLogOn()
+    property var steamArt: parse(Turbine.steamArtJson(), { found: false, on: true })
     readonly property string labsDone: {
         const n = labsItems.filter(x => labsAnswers[x.id] === "works").length
         const p = labsItems.filter(x => labsAnswers[x.id] === "problem").length

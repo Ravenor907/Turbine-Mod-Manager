@@ -30,6 +30,11 @@ pub fn run(req: Result<Request, String>) -> i32 {
     };
     let parsed = json::parse(&answer).ok();
     let ok = parsed.as_ref().and_then(|v| v.get("ok")).and_then(Json::as_bool).unwrap_or(false);
+    // 0.6: the co-op tile in Steam's library (--from-tile): no plugin reads the answer, so Turbine opens the game's
+    // link itself, or its own window on the game when something needs the player first.
+    if std::env::args().any(|a| a == "--from-tile") {
+        from_tile(parsed.as_ref(), ok);
+    }
     if json_out {
         println!("{answer}");
     } else {
@@ -40,6 +45,45 @@ pub fn run(req: Result<Request, String>) -> i32 {
         0
     } else {
         1
+    }
+}
+
+/// Opens a steam:// link on the host (Steam passes it to the running Steam).
+fn open_steam_link(url: &str) {
+    use std::process::{Command, Stdio};
+    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg("steam");
+        c
+    } else {
+        Command::new("steam")
+    };
+    match cmd.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+        Ok(_) => crate::log::line("quick", &format!("Co-op tile: opened {url}")),
+        Err(e) => crate::log::line("quick", &format!("Co-op tile: couldn't open {url}: {e}")),
+    }
+}
+
+fn from_tile(answer: Option<&Json>, ok: bool) {
+    let launch = answer.and_then(|v| v.str_at("launch")).unwrap_or("");
+    if ok && !launch.is_empty() {
+        open_steam_link(launch);
+        return;
+    }
+    // Something needs the player (the session password, a check before Play): Turbine opens on the game.
+    let data = backend::data_home();
+    let folder = crate::log::folder(&data);
+    let game = std::env::args().skip_while(|a| a != "--play-coop").nth(1).unwrap_or_default();
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let sent = answer.and_then(|v| v.get("sent")).and_then(Json::as_bool) == Some(true);
+    if !sent {
+        // Turbine's own Play Seamless Co-op on screen: it opens the session password first when it isn't set.
+        let _ = q::write_request(&folder, Action::PlayCoop, &game, now);
+    }
+    let words = answer.and_then(|v| v.str_at("words")).unwrap_or("");
+    crate::log::line("quick", &format!("Co-op tile: Turbine opens on {game} first ({words})"));
+    if let Some((id, _)) = turbine_engine::shortcuts::find_turbine(&turbine_engine::home_dir()) {
+        open_steam_link(&turbine_engine::shortcuts::rungameid_url(id));
     }
 }
 
@@ -183,6 +227,18 @@ fn change(r: &Request, game: &Game, data: &std::path::Path) -> String {
     }
 }
 
+/// Seamless Co-op's session password as the game will read it (Turbine's edited copy or the mod's own file). None
+/// when the settings file isn't found.
+fn coop_password(root: &std::path::Path, mod_id: &str) -> Option<String> {
+    use turbine_engine::settings::{self, Format};
+    let staged = turbine_engine::store::staged_dir(root, mod_id);
+    let rel = settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini"))?;
+    let file = settings::effective(root, mod_id, &rel, &staged.join(&rel));
+    let text = std::fs::read_to_string(file).ok()?;
+    let f = settings::parse(&text, Format::Ini).into_iter().find(|f| f.key.to_ascii_lowercase().contains("password"))?;
+    Some(f.value.trim().to_string())
+}
+
 fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
     if crate::system::game_running(&game.install_dir) == Some(true) {
         return q::answer_json(false, &format!("{} is already running.", game.name), "");
@@ -217,6 +273,11 @@ fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
                 if let Err(e) = slot.store.set_enabled(&id, true) {
                     return q::answer_json(false, &format!("Couldn't turn Seamless Co-op on: {e}"), "");
                 }
+            }
+            // The session password: every co-op player needs the same one, so an empty one needs the player first.
+            if coop_password(slot.store.root(), &id).is_some_and(|p| p.is_empty()) {
+                crate::log::line("quick", &format!("{}: Seamless Co-op's session password isn't set: Turbine opens its settings first", game.name));
+                return q::answer_json(false, "Set the Seamless Co-op session password first. Turbine opens its settings.", ",\"needsTurbine\":true,\"password\":false");
             }
         }
     }
