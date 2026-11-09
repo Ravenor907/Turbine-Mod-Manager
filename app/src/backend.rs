@@ -2566,6 +2566,7 @@ impl qobject::Turbine {
             settings: settings.to_string().lines().map(str::to_string).collect(),
             games,
             log: crate::log::last_lines(300),
+            launch: ac::launch_report_lines(&data_home()),
         };
         let name = report::file_name(&crate::log::file_stamp());
         let dir = crate::labs::downloads();

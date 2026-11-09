@@ -76,6 +76,9 @@ pub struct ProblemReport {
     /// One line per game: "Name (store:id): how Turbine plays it".
     pub games: Vec<String>,
     pub log: Vec<String>,
+    /// 0.59: the Steam launch logs (`anticheat::launch_report_lines`): the helper's log, me3's output and own log,
+    /// Proton's log.
+    pub launch: Vec<String>,
 }
 
 /// The report's text, every line redacted.
@@ -98,6 +101,13 @@ pub fn build(r: &ProblemReport) -> String {
     for l in &r.log {
         t.push_str(l);
         t.push('\n');
+    }
+    if !r.launch.is_empty() {
+        t.push_str("\nSteam launch logs (newest last):\n");
+        for l in &r.launch {
+            t.push_str(l);
+            t.push('\n');
+        }
     }
     t.lines().map(redact).collect::<Vec<_>>().join("\n") + "\n"
 }
@@ -140,9 +150,10 @@ mod tests {
             settings: vec!["Interface size: 100%".into(), "nexusKey: secretsecret".into()],
             games: vec!["ELDEN RING (steam:1245620): me3, offline with mods".into()],
             log: vec!["a line".into()],
+            launch: vec!["-- steam-launch.log (last 1 lines) --".into(), "me3 ended with exit code 1 after 2 s".into()],
         };
         let t = build(&r);
-        for want in ["Turbine: 0.58", "Screen: 1920 x 1080", "Interface size: 100%", "ELDEN RING (steam:1245620)", "a line", "nexusKey: (hidden)"] {
+        for want in ["Turbine: 0.58", "Screen: 1920 x 1080", "Interface size: 100%", "ELDEN RING (steam:1245620)", "a line", "nexusKey: (hidden)", "Steam launch logs", "me3 ended with exit code 1 after 2 s"] {
             assert!(t.contains(want), "{want} in {t}");
         }
         assert!(!t.contains("secretsecret"));

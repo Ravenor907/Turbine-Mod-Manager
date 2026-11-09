@@ -398,10 +398,11 @@ pub fn launch_args(me3: &Path, profile: &Path) -> Vec<String> {
 // sets the game's Launch Options once to `<helper> %command%` (the launch option doctor shows and copies the exact
 // text; Turbine never writes Steam's settings), and Turbine starts the game with steam://rungameid/<app id>. The
 // helper is a small script Turbine writes into its own data folder. When Turbine has mods on for the game (a
-// "<app id>.me3" file next to it, one argument per line), it runs me3 with Turbine's profile; me3 picks the same
-// Proton that Steam has set for the game. Otherwise (no file, or "<app id>.plain" for one Play without mods) it runs
-// Steam's own command unchanged. Steam's reaper and launch wrapper stay in front either way, so Steam sees the game
-// running. Every step goes to steam-launch.log next to it.
+// "<app id>.me3" file next to it, one argument per line), it starts the game through me3 with Turbine's profile.
+// Otherwise (no file, or "<app id>.plain" for one Play without mods) it runs Steam's own command unchanged. 0.59:
+// Steam's command stays whole in its own order (launch wrapper, reaper with the app id, runtime, Proton); me3's
+// Windows build takes the place of the game's program under Steam's own Proton (`helper_args_for`). Without the
+// reaper and the app id in front, the game starts the normal way. Every step goes to steam-launch.log next to it.
 
 /// The helper's folder in Turbine's data folder.
 pub fn launch_dir(data: &Path) -> PathBuf {
@@ -447,12 +448,61 @@ pub fn launch_option(data: &Path) -> String {
 
 /// Do the Launch Options as set in Steam run the helper with Steam's command after it, in the line that falls back
 /// to Steam's own command without the helper? The older line (the helper alone, before 0.58's release) is outdated:
-/// it counts as not set, so Play shows the one-time step again with the line that falls back.
+/// it counts as not set, so Play shows the one-time step again with the line that falls back. In front of the line
+/// only `export NAME=value;` statements may stand (`export PROTON_LOG=1; if ...`): `NAME=value if ...` is a shell
+/// syntax error, so Steam would start nothing (`launch_option_fix` offers the export form).
 pub fn launch_option_ok(set: &str, data: &Path) -> bool {
     let p = helper_path(data).to_string_lossy().to_string();
     let Some(i) = set.find(&p) else { return false };
     let compact: String = set.split_whitespace().collect::<Vec<_>>().join(" ");
-    set[i + p.len()..].contains("%command%") && compact.contains("-x") && compact.contains("else %command%") && compact.trim_end().ends_with("fi")
+    let Some(head) = line_head(&compact) else { return false };
+    exports_only(head)
+        && set[i + p.len()..].contains("%command%")
+        && compact.contains("-x")
+        && compact.contains("else %command%")
+        && compact.trim_end().ends_with("fi")
+}
+
+/// The text in front of the line's `if [`, or None without one.
+fn line_head(compact: &str) -> Option<&str> {
+    let at = compact.match_indices("if [").map(|(n, _)| n).find(|&n| n == 0 || matches!(compact.as_bytes()[n - 1], b' ' | b';'))?;
+    Some(&compact[..at])
+}
+
+fn is_name(n: &str) -> bool {
+    let mut c = n.chars();
+    c.next().is_some_and(|f| f.is_ascii_alphabetic() || f == '_') && c.all(|x| x.is_ascii_alphanumeric() || x == '_')
+}
+
+/// `NAME=value` words (no spaces inside a value).
+fn assignments(words: &str) -> bool {
+    let w: Vec<&str> = words.split_whitespace().collect();
+    !w.is_empty() && w.iter().all(|a| a.split_once('=').is_some_and(|(n, v)| is_name(n) && !v.contains(';')))
+}
+
+/// Empty, or only `export NAME=value ...;` statements, each ended by `;`.
+fn exports_only(head: &str) -> bool {
+    let head = head.trim();
+    if head.is_empty() {
+        return true;
+    }
+    let Some(body) = head.strip_suffix(';') else { return false };
+    body.split(';').all(|st| st.trim().strip_prefix("export ").is_some_and(assignments))
+}
+
+/// The line to offer when the Launch Options hold Turbine's line with `NAME=value` in front without `export` (a
+/// syntax error): the same settings as `export NAME=value; ` in front of Turbine's line. None otherwise.
+pub fn launch_option_fix(set: &str, data: &Path) -> Option<String> {
+    if !launch_option_uses_helper(set, data) || launch_option_ok(set, data) {
+        return None;
+    }
+    let compact: String = set.split_whitespace().collect::<Vec<_>>().join(" ");
+    let head = line_head(&compact)?.trim();
+    let bare = head.strip_prefix("export ").unwrap_or(head).trim_end_matches(';').trim();
+    if !assignments(bare) {
+        return None;
+    }
+    Some(format!("export {bare}; {}", launch_option(data)))
 }
 
 /// Undo the launch options change: until the player sets the line again (the Launch Options text then differs from
@@ -505,24 +555,34 @@ pub fn original_options(data: &Path, app_id: &str) -> String {
 
 /// The helper's text. It runs only Turbine's own me3 from the file Turbine wrote, or Steam's own command.
 /// `flatpak_id`: Turbine's Flatpak; when it is no longer installed the helper runs Steam's own command.
+///
+/// 0.59: Steam's whole command stays as Steam built it (the launch wrapper with its options, the reaper with
+/// `SteamLaunch AppId=<app>`, the runtime and Proton with its verb, in Steam's own order). With me3's Windows build
+/// (the normal case) only the game's program after Proton's verb is swapped for me3.exe, so Proton is exactly the
+/// one Steam chose. With the Linux me3 (an older armed file) everything before the runtime stays in front. When the
+/// reaper or `AppId=<app>` isn't in what stays in front, the game starts the normal way. me3 runs as a child: its
+/// exit code, run time and last output lines go to steam-launch.log.
 pub fn helper_text(flatpak_id: Option<&str>) -> String {
     let installed = match flatpak_id {
         Some(id) => format!(
-            "# Turbine gone (uninstalled, its data kept): the game starts normally.\nif command -v flatpak > /dev/null 2>&1 && ! flatpak info {id} > /dev/null 2>&1; then\n  say \"Turbine Mod Manager isn't installed any more: Steam's own command\"\n  exec \"$@\"\nfi\n"
+            "# Turbine gone (uninstalled, its data kept): the game starts normally. Steam's library path and overlay are\n# left out of the check so they can't make it fail.\nif command -v flatpak > /dev/null 2>&1; then\n  env -u LD_LIBRARY_PATH -u LD_PRELOAD flatpak info {id} > /dev/null 2>&1\n  code=$?\n  if [ \"$code\" -ne 0 ]; then\n    say \"Turbine Mod Manager isn't installed any more (flatpak info answered $code): Steam's own command\"\n    exec \"$@\"\n  fi\nfi\n"
         ),
         None => String::new(),
     };
-    let text = r#"#!/bin/bash
+    let text = r##"#!/bin/bash
 # Turbine Mod Manager's Steam launch helper. Steam runs it from a game's Launch Options (Turbine's line runs Steam's
 # own command when this file is gone). With mods on in Turbine (a "<app id>.me3" file next to it, one argument per
 # line, written by Turbine from its current state) it starts the game through Turbine's own me3 with Turbine's profile;
 # "<app id>.me3.once" is for the next Play only. Otherwise, and on any doubt, it runs Steam's own command unchanged.
-# It runs nothing else. Turbine writes this file again when it changes; every step goes to steam-launch.log.
+# Steam's command stays whole and in its own order: its launch wrapper, its reaper with the app id, its runtime and
+# its Proton. With me3's Windows build only the game's program is swapped for me3.exe. It runs nothing else. Turbine
+# writes this file again when it changes; every step goes to steam-launch.log.
 here=$(cd "$(dirname "$0")" && pwd)
 data=$(dirname "$here")
 log="$here/steam-launch.log"
 if [ -f "$log" ] && [ "$(wc -c < "$log")" -gt 262144 ]; then tail -n 400 "$log" > "$log.tmp" && mv -f "$log.tmp" "$log"; fi
 say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log" 2>/dev/null; }
+args=("$@")
 app="${SteamAppId:-${STEAM_COMPAT_APP_ID:-}}"
 if [ -z "$app" ]; then
   for a in "$@"; do case "$a" in AppId=*) app="${a#AppId=}" ;; esac; done
@@ -535,6 +595,13 @@ fi
 case "$app" in
   ''|*[!0-9]*) say "No app id: Steam's own command"; exec "$@" ;;
 esac
+# Proton's own log, into this folder (Report a problem picks it up): on when Turbine's setting is on, or when the
+# Launch Options turned it on themselves.
+if [ -f "$here/proton-log.on" ]; then export PROTON_LOG=1; fi
+if [ -n "${PROTON_LOG:-}" ] && [ "$PROTON_LOG" != 0 ]; then
+  export PROTON_LOG_DIR="$here"
+  say "Proton log on: $here/steam-$app.log"
+fi
 @INSTALLED@if [ -f "$here/$app.plain" ]; then
   if [ -n "$(find "$here/$app.plain" -mmin -10 2> /dev/null)" ]; then
     rm -f "$here/$app.plain" "$here/$app.me3.once"
@@ -564,28 +631,90 @@ while IFS= read -r line || [ -n "$line" ]; do
   me3+=("$line")
 done < "$flag"
 case "$flag" in *.run) rm -f "$flag" ;; esac
-# Only Turbine's own me3, from its data folder.
-case "${me3[0]}" in
-  "$data"/me3/*/bin/me3) ;;
-  *) say "The mods file doesn't name Turbine's own me3 (${me3[0]}): Steam's own command, without mods"; exec "$@" ;;
+normal() {
+  say "$1: Steam's own command, without mods"
+  exec "${args[@]}"
+}
+# Only Turbine's own me3, from its data folder: the Windows build (run by Steam's own Proton) or the Linux one.
+prog="${me3[0]}"
+case "$prog" in
+  "$data"/me3/*/bin/win64/me3.exe) mode=windows ;;
+  "$data"/me3/*/bin/me3) mode=linux ;;
+  *) normal "The mods file doesn't name Turbine's own me3 ($prog)" ;;
 esac
-if [ "${#me3[@]}" -lt 2 ] || [ ! -x "${me3[0]}" ]; then
-  say "me3 isn't where Turbine put it (${me3[0]}): Steam's own command, without mods"
-  exec "$@"
+if [ "${#me3[@]}" -lt 2 ] || [ ! -f "$prog" ] || { [ "$mode" = linux ] && [ ! -x "$prog" ]; }; then
+  normal "me3 isn't where Turbine put it ($prog)"
 fi
-# Steam's reaper and launch wrapper stay in front (they tell Steam the game is running); the Proton part is me3's.
-args=("$@")
-prefix=()
-for ((i = 0; i < ${#args[@]}; i++)); do
-  case "${args[$i]}" in
-    */steam-launch-wrapper)
-      if [ "${args[$((i + 1))]}" = "--" ]; then prefix=("${args[@]:0:$((i + 2))}"); else prefix=("${args[@]:0:$((i + 1))}"); fi ;;
-    */proton) say "Steam's Proton for this game: ${args[$i]} (me3 uses the same one from Steam's settings)" ;;
+# The game and the profile must be there (a Windows path is Proton's Z: drive, the whole file system).
+unix_path() {
+  local p="${1#[A-Za-z]:}"
+  printf '%s' "${p//\\//}"
+}
+for ((i = 1; i + 1 < ${#me3[@]}; i++)); do
+  case "${me3[$i]}" in
+    --exe|-p)
+      f=$(unix_path "${me3[$((i + 1))]}")
+      [ -f "$f" ] || normal "Not found: $f (${me3[$((i + 1))]})" ;;
   esac
 done
-say "Mods on: ${prefix[*]} ${me3[*]}"
-exec "${prefix[@]}" "${me3[@]}" > "$here/me3-$app.log" 2>&1
-"#;
+# Steam's command: where its runtime starts (the first one of its runtime or Proton) and where Proton is.
+cut=-1
+proton=-1
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[$i]}" in
+    */proton)
+      [ "$cut" -lt 0 ] && cut=$i
+      proton=$i
+      break ;;
+    */_v2-entry-point|*/SteamLinuxRuntime*/*) [ "$cut" -lt 0 ] && cut=$i ;;
+  esac
+done
+if [ "$mode" = windows ]; then
+  # Everything up to Proton's verb stays; the game's program after it is swapped for me3.exe.
+  if [ "$proton" -lt 0 ] || [ $((proton + 2)) -ge "${#args[@]}" ]; then
+    normal "Steam's command has no Proton with a program to run (${args[*]})"
+  fi
+  keep=("${args[@]:0:$((proton + 2))}")
+  extra=("${args[@]:$((proton + 3))}")
+  say "Steam's Proton for this game: ${args[$proton]} ${args[$((proton + 1))]}; me3 starts the game in place of ${args[$((proton + 2))]}"
+  cmd=("${keep[@]}" "${me3[@]}")
+  if [ "${#extra[@]}" -gt 0 ]; then cmd+=(-- "${extra[@]}"); fi
+else
+  # The Linux me3 builds its own runtime and Proton: everything in front of Steam's stays.
+  if [ "$cut" -lt 0 ]; then
+    normal "Steam's command has no runtime or Proton (${args[*]})"
+  fi
+  keep=("${args[@]:0:$cut}")
+  if [ "$proton" -ge 0 ]; then say "Steam's Proton for this game: ${args[$proton]} (the Linux me3 picks its own from Steam's settings)"; fi
+  cmd=("${keep[@]}" "${me3[@]}")
+fi
+# Steam's reaper with this app's id must be in front: it is how Steam knows the game is running.
+reaper=no
+appid=no
+for a in "${keep[@]}"; do
+  case "$a" in
+    */reaper) reaper=yes ;;
+    "AppId=$app") appid=yes ;;
+  esac
+done
+if [ "$reaper" != yes ] || [ "$appid" != yes ]; then
+  normal "Steam's reaper with AppId=$app isn't in front of the game (reaper: $reaper, AppId: $appid; Steam's command: ${args[*]})"
+fi
+say "Kept in front: ${keep[*]}"
+say "Mods on ($mode me3): ${cmd[*]}"
+out="$here/me3-$app.log"
+start=$SECONDS
+"${cmd[@]}" > "$out" 2>&1
+code=$?
+say "me3 ended with exit code $code after $((SECONDS - start)) s"
+tail -n 20 "$out" 2> /dev/null | sed -e 's/\x1b\][^\x07]*\x07//g' -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\r$//' | while IFS= read -r l; do say "me3: $l"; done
+# me3's own log (the Windows build keeps it inside the game's Proton prefix): a copy next to this file.
+if [ "$mode" = windows ] && [ -n "${STEAM_COMPAT_DATA_PATH:-}" ]; then
+  own=$(ls -t "$STEAM_COMPAT_DATA_PATH"/pfx/drive_c/users/steamuser/AppData/Local/garyttierney/me3/data/logs/*/*.log 2> /dev/null | head -n 1)
+  if [ -n "$own" ] && cp -f "$own" "$here/me3-$app-own.log" 2> /dev/null; then say "me3's own log: $own (copied to me3-$app-own.log)"; fi
+fi
+exit "$code"
+"##;
     text.replace("@INSTALLED@", &installed)
 }
 
@@ -609,8 +738,116 @@ pub fn write_helper(data: &Path, flatpak_id: Option<&str>) -> io::Result<bool> {
 }
 
 /// me3's arguments for the helper (the program first), without flatpak-spawn: the helper already runs on the host.
+/// This is the Linux me3, which builds its own runtime and Proton; `helper_args_for` with the game's program is the
+/// 0.59 way.
 pub fn helper_args(me3: &Path, profile: &Path) -> Vec<String> {
     launch_args(me3, profile).into_iter().skip(2).collect()
+}
+
+/// A host path as Proton's programs see it: the Z: drive is the whole file system.
+pub fn windows_path(p: &Path) -> String {
+    format!("Z:{}", p.to_string_lossy().replace('/', "\\"))
+}
+
+/// me3's arguments for the helper (0.59). With the game's program (`game_exe`, the host path): me3's Windows build,
+/// which the helper runs under Steam's own Proton in place of the game's program, with the game and the profile as
+/// Z: paths (`--exe` means me3 needs no Steam lookup of its own; its Windows binaries are next to me3.exe). Without
+/// it: the Linux me3 (`helper_args`).
+pub fn helper_args_for(me3: &Path, profile: &Path, game_exe: Option<&Path>) -> Vec<String> {
+    match game_exe {
+        Some(exe) => vec![
+            me3.join("bin/win64/me3.exe").to_string_lossy().into(),
+            "launch".into(),
+            "--exe".into(),
+            windows_path(exe),
+            "-p".into(),
+            windows_path(profile),
+        ],
+        None => helper_args(me3, profile),
+    }
+}
+
+/// Proton's own log for Steam launches of the games the helper starts (steam-<app id>.log in the helper's folder):
+/// on while this file is there.
+pub fn proton_log_file(data: &Path) -> PathBuf {
+    launch_dir(data).join("proton-log.on")
+}
+
+/// Turns Proton's log on or off for the next Steam launches.
+pub fn set_proton_log(data: &Path, on: bool) -> io::Result<()> {
+    if on {
+        fs::create_dir_all(launch_dir(data))?;
+        fs::write(proton_log_file(data), b"on\n")
+    } else {
+        remove_if(&proton_log_file(data))
+    }
+}
+
+/// The last `n` lines of a text file (empty when it can't be read).
+fn last_lines(path: &Path, n: usize) -> Vec<String> {
+    let Ok(b) = fs::read(path) else { return Vec::new() };
+    let t = String::from_utf8_lossy(&b);
+    let lines: Vec<&str> = t.lines().collect();
+    lines[lines.len().saturating_sub(n)..].iter().map(|l| strip_escapes(l)).collect()
+}
+
+/// A line without terminal escape codes (colours, window titles) and carriage returns.
+fn strip_escapes(l: &str) -> String {
+    let mut out = String::new();
+    let mut it = l.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' {
+            if c != '\r' {
+                out.push(c);
+            }
+            continue;
+        }
+        match it.next() {
+            Some('[') => {
+                for x in it.by_ref() {
+                    if x.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                for x in it.by_ref() {
+                    if x == '\u{7}' {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The Steam launch logs for Report a problem: the helper's log, then for each game me3's output, me3's own log
+/// (copied from the game's Proton prefix) and Proton's log when there is one. Each with a heading line and its last
+/// lines.
+pub fn launch_report_lines(data: &Path) -> Vec<String> {
+    let dir = launch_dir(data);
+    let mut out = Vec::new();
+    let add = |name: &str, n: usize, out: &mut Vec<String>| {
+        let lines = last_lines(&dir.join(name), n);
+        if !lines.is_empty() {
+            out.push(format!("-- {name} (last {} lines) --", lines.len()));
+            out.extend(lines);
+        }
+    };
+    add("steam-launch.log", 80, &mut out);
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())
+        .unwrap_or_default();
+    names.sort();
+    for name in names.iter().filter(|n| n.starts_with("me3-") && n.ends_with(".log")) {
+        add(name, 40, &mut out);
+    }
+    for name in names.iter().filter(|n| n.starts_with("steam-") && n.ends_with(".log") && *n != "steam-launch.log") {
+        add(name, 60, &mut out);
+    }
+    out
 }
 
 fn check_app_id(app_id: &str) -> io::Result<()> {

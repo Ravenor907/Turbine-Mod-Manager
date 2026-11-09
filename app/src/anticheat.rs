@@ -246,7 +246,7 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     sync_helper(w, slot);
     let _ = ac::clear_plain(data, &slot.game.store_id);
     let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())))?;
-    let args = ac::helper_args(&me3, &profile);
+    let args = ac::helper_args_for(&me3, &profile, game_exe(slot).as_deref());
     let r = match coop {
         ac::Coop::Seamless => ac::arm_once(data, &slot.game.store_id, &args, "Seamless Co-op, this Play only"),
         ac::Coop::Solo => ac::arm_with(data, &slot.game.store_id, Some(&args), &state_words(slot)),
@@ -269,6 +269,13 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
 fn state_words(slot: &Slot) -> String {
     let on = slot.store.mods().iter().filter(|m| m.enabled).count();
     format!("mods on: {on} {} through me3, solo, written by Turbine", if on == 1 { "mod" } else { "mods" })
+}
+
+/// The game's own program in its folder (from the game data's gameExe): me3's Windows build starts it under Steam's
+/// own Proton (0.59). None when the data doesn't name it or it isn't there: the helper then gets the Linux me3.
+fn game_exe(slot: &Slot) -> Option<std::path::PathBuf> {
+    let rel = special(slot)?.game_exe.as_ref()?;
+    Some(slot.game.install_dir.join(rel)).filter(|p| p.is_file())
 }
 
 /// The normal launch for a game me3 starts (no mods on, or Play without mods): the helper runs Steam's own command.
@@ -314,7 +321,7 @@ pub(crate) fn sync_helper(w: &Worker, slot: &Slot) {
     let why = not_armed_why(w, slot);
     let game = slot.store.me3_game();
     let args = match (why, &game) {
-        (None, Some(g)) => ac::write_profile_for(slot.store.root(), g, ac::Coop::Solo).ok().map(|(p, _)| ac::helper_args(&ac::me3_dir(data), &p)),
+        (None, Some(g)) => ac::write_profile_for(slot.store.root(), g, ac::Coop::Solo).ok().map(|(p, _)| ac::helper_args_for(&ac::me3_dir(data), &p, game_exe(slot).as_deref())),
         _ => None,
     };
     let r = match &args {
