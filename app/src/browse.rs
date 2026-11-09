@@ -539,6 +539,28 @@ impl Lock {
     }
 }
 
+/// 0.6: a request from Steam's menu (quick.rs) holds this second lock for as long as it holds the main one, taken
+/// before it and let go after it. A Turbine that starts meanwhile sees it and waits for the request to finish instead
+/// of closing as a second copy. (A lock file, not a process id: each Flatpak run has its own process numbers.)
+pub const QUICK_MARK: &str = "turbine.lock.quick";
+
+/// Is a request from Steam's menu running now (it holds the quick mark)?
+pub fn quick_running(folder: &Path) -> bool {
+    matches!(lock_instance(&folder.join(QUICK_MARK)), Lock::Taken)
+}
+
+/// Takes the one-Turbine lock, waiting up to `max` for the one holding it to finish.
+pub fn lock_wait(path: &Path, max: Duration) -> Lock {
+    let t = Instant::now();
+    loop {
+        let l = lock_instance(path);
+        if !matches!(l, Lock::Taken) || t.elapsed() >= max {
+            return l;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 /// Takes the one-Turbine lock (never waits).
 pub fn lock_instance(path: &Path) -> Lock {
     use std::os::unix::fs::OpenOptionsExt;
@@ -1126,6 +1148,39 @@ mod tests {
         note_press(now);
         assert!(note_main_frame("data:text/html,x", now));
         assert!(last_press().is_none());
+    }
+
+    #[test]
+    fn a_turbine_started_during_a_steam_menu_request_waits_for_it() {
+        let d = std::env::temp_dir().join(format!("turbine-quickmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(!quick_running(&d), "no request yet");
+        // The request: the mark first, then the main lock.
+        let mark = lock_instance(&d.join(QUICK_MARK));
+        let main = lock_instance(&d.join(LOCK_FILE));
+        assert!(mark.mine() && main.mine());
+        assert!(quick_running(&d));
+        assert!(matches!(lock_instance(&d.join(LOCK_FILE)), Lock::Taken));
+        // It finishes a moment later; the waiting Turbine then gets the lock.
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(600));
+            drop(main);
+            drop(mark);
+        });
+        let started = Instant::now();
+        let got = lock_wait(&d.join(LOCK_FILE), Duration::from_secs(20));
+        assert!(got.mine(), "{got:?}");
+        assert!(started.elapsed() >= Duration::from_millis(400));
+        t.join().unwrap();
+        assert!(!quick_running(&d));
+        // A window Turbine (no mark) is not waited for: the wait gives up at its limit.
+        drop(got);
+        let window = lock_instance(&d.join(LOCK_FILE));
+        assert!(!quick_running(&d));
+        assert!(matches!(lock_wait(&d.join(LOCK_FILE), Duration::from_millis(300)), Lock::Taken));
+        drop(window);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

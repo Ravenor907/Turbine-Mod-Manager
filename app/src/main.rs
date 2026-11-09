@@ -165,10 +165,19 @@ fn main() {
     // partial downloads or the browser's profile (screenshot runs skip this).
     let link = single::link_from_args().filter(|l| single::plausible_link(l));
     let screenshot = std::env::args().any(|a| a.starts_with("--screenshot="));
-    let lock = if screenshot { browse::Lock::Unknown("a screenshot run".into()) } else { browse::lock_instance(&log::folder(&backend::data_home()).join(browse::LOCK_FILE)) };
+    let lock_folder = log::folder(&backend::data_home());
+    let mut lock = if screenshot { browse::Lock::Unknown("a screenshot run".into()) } else { browse::lock_instance(&lock_folder.join(browse::LOCK_FILE)) };
     let start = if screenshot { None } else { Some(single::start(link.as_deref())) };
     if matches!(start, Some(single::Start::Forwarded)) {
         return;
+    }
+    // 0.6: the lock is held by a request from Steam's menu (Mods off, Play...), not by another window: wait for it to
+    // finish (seconds), then open as usual.
+    let mut waited_for_quick = false;
+    if matches!(lock, browse::Lock::Taken) && browse::quick_running(&lock_folder) {
+        eprintln!("A request from Steam's menu is running; Turbine opens when it is done.");
+        lock = browse::lock_wait(&lock_folder.join(browse::LOCK_FILE), std::time::Duration::from_secs(120));
+        waited_for_quick = true;
     }
     if matches!(lock, browse::Lock::Taken) {
         // Another Turbine holds the lock but didn't answer on its socket: this one still never shares its profile.
@@ -185,6 +194,7 @@ fn main() {
         log::line("app", &format!("Drawing through {p} (SteamOS: the status overlay needs X11)"));
     }
     match &lock {
+        browse::Lock::Mine(_) if waited_for_quick => log::line("app", "One Turbine at a time: waited for a request from Steam's menu to finish, then took the lock"),
         browse::Lock::Mine(_) => log::line("app", "One Turbine at a time: this one holds the lock"),
         browse::Lock::Unknown(why) => log::line("app", &format!("One Turbine at a time: not locked ({why}); partial downloads are left alone")),
         browse::Lock::Taken => {}

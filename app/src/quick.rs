@@ -100,6 +100,9 @@ fn answer(r: &Request) -> String {
         crate::log::line("quick", &format!("Steam's menu: no game matches \"{}\"", r.game));
         return q::not_found_json(&r.game);
     };
+    // Held from before the main lock until after it: a Turbine started meanwhile waits for this request instead of
+    // closing as a second copy (browse.rs, QUICK_MARK).
+    let _quick_mark = crate::browse::lock_instance(&folder.join(crate::browse::QUICK_MARK));
     // Turbine's window holds this lock while it is open (browse.rs).
     let lock = crate::browse::lock_instance(&folder.join(crate::browse::LOCK_FILE));
     let open = matches!(lock, crate::browse::Lock::Taken);
