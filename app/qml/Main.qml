@@ -6982,12 +6982,12 @@ Window {
     // Things to confirm on the device: what the build server can't check. title, how to try it, what should happen.
     readonly property var labsItems: [
         // 0.58: modded launches through Steam, Seamless Co-op, Edit settings, the bar.
-        { id: "steam-me3", title: "Elden Ring with mods in Game Mode", how: "Game Mode, Elden Ring with a mod on: press Play. Do the one-time Launch Options step it shows (A copies the text; paste it in Steam, Properties, Launch Options), then press Play again.",
+        { id: "steam-me3", title: "Elden Ring with mods in Game Mode", how: "Game Mode, Elden Ring with a mod on: press Play. Answer Restart Steam and set it up: Steam closes, comes back, and Turbine goes on with the Play.",
           expect: "The game shows in Game Mode (not Steam's blank launching screen) with the mod, offline. Steam's own Play button starts it with mods too; with every mod off it starts normally online." },
         { id: "steam-plain", title: "Play without mods after the step", how: "With the Launch Options set and mods on, Play options, Play without mods.",
           expect: "Elden Ring starts normally with its anti-cheat; the next Play starts it with mods again." },
-        { id: "coop-play", title: "Play Seamless Co-op", how: "Elden Ring with Seamless Co-op: set a session password in Seamless Co-op settings, then press Co-op beside Play.",
-          expect: "Seamless Co-op starts with your password and its own .co2 save; Play alone starts the solo modded game." },
+        { id: "coop-play", title: "Play Seamless Co-op", how: "Elden Ring with Seamless Co-op: press Play and choose Play Seamless Co-op (an empty session password opens its settings first).",
+          expect: "Seamless Co-op starts with your password and its own co-op save; Play with mods starts the solo modded game." },
         { id: "edit-settings", title: "Edit settings with the controller", how: "X on a mod with an .ini or .cfg file, Edit settings. Change a toggle, a number and a text (Steam keyboard); each saves by itself.",
           expect: "The game uses the new values; Reset to default puts the mod's own back; a mod update keeps your values." },
         { id: "launch-check", title: "The didn't start sheet", how: "Press Play on a game that can't start (for example Elden Ring with the Launch Options text removed in Steam).",
@@ -6998,7 +6998,7 @@ Window {
         { id: "ac-original", title: "Normal launch after mods", how: "After playing with mods, turn every mod off (or Play without mods).",
           expect: "Steam starts it the normal way, with its anti-cheat, and online play works. Steam's Verify finds nothing to repair." },
         { id: "ac-seamless", title: "Seamless Co-op through me3", how: "Elden Ring, game menu, Get Seamless Co-op. Then Play.",
-          expect: "Seamless Co-op starts with the game and uses its own .co2 saves; turning it off in My mods takes it out." },
+          expect: "Seamless Co-op starts with the game and uses its own co-op saves; turning it off in My mods takes it out." },
         { id: "ac-halo", title: "Halo MCC guide", how: "Halo MCC: add a mod, press Play.",
           expect: "Before you play says to pick Anti-Cheat Disabled (Mods and Limited Services) in Steam's Play menu, and the mod works there." },
         { id: "ac-refuse", title: "Online-only games refuse mods", how: "Open Dead by Daylight, Apex Legends or Destiny 2 and try Add from Downloads.",
