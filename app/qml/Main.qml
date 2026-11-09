@@ -422,6 +422,8 @@ Window {
                     const m = app.mods.find(x => x.name.indexOf("Glow") >= 0)
                     app.tab = 0; app.zone = "main"; app.modIndex = Math.max(0, app.listItems.findIndex(x => x.kind === "mod" && x.m === m))
                     app.note("shot", "Mod menu: " + app.modMenuTitles())
+                    // It comes in off (SKSE isn't there): on, so the edited copy goes into the game.
+                    if (m && !m.enabled) Turbine.setEnabled(m.id, true)
                     if (m) app.openModSettings(m)
                     const r = settingsView.shown[settingsView.focusIndex]
                     app.note("shot", "Settings page: " + app.sheet + " | " + settingsView.shown.length + " rows | focus " + (r && r.f ? r.f.key + " " + r.f.kind + " " + settingsView.valueOf(r.f) : "none"))
@@ -432,6 +434,7 @@ Window {
                 } else app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
             } else if (shot.page === "coopsettings") {
                 app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                app.sheet = ""
                 app.note("shot", "Co-op beside Play: " + coopBtn.visible + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
                 legend.check("coopbar")
                 app.openCoopSettings()
