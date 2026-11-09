@@ -1287,6 +1287,21 @@ pub struct ModFiles {
     pub files: Vec<String>,
 }
 
+/// 0.58, the game update warning: does this mod hook into the game's program (code that a game update usually
+/// breaks until its maker updates it)? Programs and libraries (.dll, .asi, .exe, .so), script extender and loader
+/// plugins, and mods that need the script loader. Plain data (textures, meshes, .esp) usually keeps working.
+pub fn may_break_on_update(files: &[String], needs_loader: bool) -> bool {
+    needs_loader
+        || files.iter().any(|f| {
+            let l = f.to_ascii_lowercase();
+            [".dll", ".asi", ".exe", ".so"].iter().any(|e| l.ends_with(e))
+                || l.contains("skse/plugins/")
+                || l.contains("f4se/plugins/")
+                || l.contains("red4ext/")
+                || l.contains("bepinex/plugins/")
+        })
+}
+
 /// Address Library for SKSE Plugins: the version database file SKSE plugins built with CommonLibSSE read, in
 /// Data/SKSE/Plugins. Special Edition's is version-<game version>.bin, Anniversary Edition's
 /// versionlib-<game version>.bin (nexusmods.com/skyrimspecialedition/mods/32444: versiondb.h reads the first,

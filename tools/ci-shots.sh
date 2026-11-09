@@ -737,6 +737,32 @@ for size in $SIZES; do
   shoot "acrefuse-$size" "$size" acrefuse "$h" --game=steam:1085660 "--selftest-import=$h/Downloads/Guardian Colors 1.0.zip"
   need "acrefuse-$size" "Anti-cheat: an online-only game refuses mods ($size)" "needs its anti-cheat to play at all"
   need "acrefuse-$size" "Anti-cheat: the refusal on screen ($size)" "Refused: tabs 1, status Needs its anti-cheat: no mods, Play shown"
+  # 0.58: Seamless Co-op settings (its own copy; the session password first), Play Seamless Co-op in the bar, and
+  # Elden Ring's saves by kind.
+  shoot "coopsettings-$size" "$size" coopsettings "$h" --game=$er "--selftest-import=$h/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Seamless Co-op settings"
+  need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
+  need "coopsettings-$size" "Play Seamless Co-op beside Play ($size)" "Bar check \(coopsettings.*co-op, Play"
+  shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
+  need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"
+done
+# 0.58: Edit settings on a mod (Right steps the number, Start saves; the edited copy goes into the game), and the
+# game update warning (A plays without mods until they update).
+for size in $SIZES; do
+  fresh "modsettings-$size"; h="$PWD/fh/modsettings-$size"
+  shoot "modsettings-$size" "$size" modsettings "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
+  need "modsettings-$size" "Edit settings in the mod menu ($size)" "Mod menu: .*Edit settings"
+  need "modsettings-$size" "Edit settings: the number setting ($size)" "Settings page: settingsedit \| [0-9]+ rows \| focus Glow number 1.5"
+  need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset · Y Plain text"
+  need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
+  need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"
+  ini=$(find "$h/.local/share/Steam/steamapps/common" -name LanternGlow.ini 2>/dev/null | head -n1)
+  if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
+  else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
+  fresh "gameupdate-$size"; h="$PWD/fh/gameupdate-$size"
+  shoot "gameupdate-$size" "$size" gameupdate "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
+  need "gameupdate-$size" "Game update warning names the mods that may break ($size)" "Game update warning: .* build 99 to 100; may break: Lantern Glow"
+  need "gameupdate-$size" "Game update warning offers Play without mods until they update ($size)" "Update sheet: msg .* updated \| Play without mods until they update, Keep my mods on"
 done
 if [ "$MODE" = 1280x800 ]; then
   fresh placestart; h="$PWD/fh/placestart"

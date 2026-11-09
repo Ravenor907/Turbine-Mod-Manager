@@ -9,6 +9,7 @@ mod health;
 mod labs;
 mod launch;
 mod log;
+mod modsettings;
 mod loot;
 mod online;
 mod pad;

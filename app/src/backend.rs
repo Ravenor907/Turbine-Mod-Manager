@@ -292,6 +292,36 @@ pub mod qobject {
         #[cxx_name = "saveProblemReport"]
         fn save_problem_report(self: &Self, screen: &QString, settings: &QString) -> QString;
 
+        /// 0.58, Edit settings: a mod's settings files ("" for the game's own): [{"rel","edited"}].
+        #[qinvokable]
+        #[cxx_name = "settingsFiles"]
+        fn settings_files(self: &Self, mod_id: &QString) -> QString;
+
+        /// One settings file for the page: {"rel","format","fields","lines","edited","error"}.
+        #[qinvokable]
+        #[cxx_name = "settingsOpen"]
+        fn settings_open(self: &Self, mod_id: &QString, rel: &QString) -> QString;
+
+        /// Saves the page's changes ({"fields":[{"id","value"}]} or {"lines":[{"line","text"}]}): {"ok","error"}.
+        #[qinvokable]
+        #[cxx_name = "settingsSave"]
+        fn settings_save(self: &Self, mod_id: &QString, rel: &QString, edits: &QString) -> QString;
+
+        /// Reset to default (the version before kept as a backup): {"ok","error"}.
+        #[qinvokable]
+        #[cxx_name = "settingsReset"]
+        fn settings_reset(self: &Self, mod_id: &QString, rel: &QString) -> QString;
+
+        /// 0.58: Elden Ring's saves, normal, modded and co-op apart, each with its backups.
+        #[qinvokable]
+        #[cxx_name = "erSavesJson"]
+        fn er_saves_json(self: &Self) -> QString;
+
+        /// Puts back one kind of Elden Ring save ("solo", "modded", "coop") from a backup.
+        #[qinvokable]
+        #[cxx_name = "restoreSaveKind"]
+        fn restore_save_kind(self: Pin<&mut Self>, kind: &QString, id: &QString);
+
         /// The text on the clipboard ("" when there is none). Never logged.
         #[qinvokable]
         #[cxx_name = "clipboardText"]
@@ -1117,7 +1147,21 @@ impl Worker {
         let links = turbine_engine::needs::links_json(&turbine_engine::needs::links(&slot.store.installed_sources()));
         let warns = mod_warns_json(slot);
         let restore = matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root());
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore}}}", &mods[..mods.len() - 1]);
+        // 0.58, the game update warning: the build changed since mods were last played, and which mods may break.
+        let update = match (slot.store.last_build(), slot.game.build.as_deref()) {
+            (Some(last), Some(now)) if last != now => {
+                let risky: Vec<String> = slot
+                    .store
+                    .mod_files()
+                    .iter()
+                    .filter(|m| m.enabled && rules::may_break_on_update(&m.files, slot.store.mods().iter().any(|x| x.id == m.id && x.needs_loader)))
+                    .map(|m| format!("{{\"id\":{},\"name\":{}}}", quote(&m.id), quote(&m.name)))
+                    .collect();
+                format!("{{\"last\":{},\"now\":{},\"risky\":[{}]}}", quote(&last), quote(now), risky.join(","))
+            }
+            _ => "null".into(),
+        };
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update}}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);

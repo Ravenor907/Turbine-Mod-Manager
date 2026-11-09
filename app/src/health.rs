@@ -17,7 +17,7 @@ fn now() -> u64 {
 }
 
 /// Where a game's save backups are kept: <data>/turbine-mod-manager/saves/<store>-<id>.
-fn backups_root(game: &Game) -> PathBuf {
+pub(crate) fn backups_root(game: &Game) -> PathBuf {
     let id: String = game.id().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
     crate::anygame::turbine_data().join("saves").join(id)
 }

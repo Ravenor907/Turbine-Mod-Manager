@@ -367,6 +367,11 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
     Ok((conflicts, refused))
 }
 
+/// 0.58: where a mod's files wait in a store (its id's folder under mods/).
+pub fn staged_dir(store_root: &Path, id: &str) -> PathBuf {
+    store_root.join("mods").join(id)
+}
+
 /// Folders Turbine created in the game (from the store's record), lowercased.
 pub fn made_dirs(store_root: &Path) -> HashSet<String> {
     Record::load(&store_root.join("deploy").join("record.json")).unwrap_or_default().dirs.iter().map(|d| d.to_lowercase()).collect()
@@ -806,7 +811,7 @@ impl Store {
     }
 
     fn mod_dir(&self, id: &str) -> PathBuf {
-        self.root.join("mods").join(id)
+        staged_dir(&self.root, id)
     }
 
     fn removed_dir(&self, id: &str) -> PathBuf {
@@ -1960,6 +1965,8 @@ impl Store {
         for m in self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id)) {
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
+                // 0.58: the player's edited copy of a config file (Edit settings) goes in place of the mod's own.
+                let source = crate::settings::effective(&self.root, &m.id, &rel, &source);
                 // A guarded game's mod with no placement (laid out by a player file's rules) may not replace.
                 let unplaced = PlaceInfo { replace: self.replace_ok.contains(&m.id), ..PlaceInfo::default() };
                 let place = place.or(if guarded { Some(&unplaced) } else { None });

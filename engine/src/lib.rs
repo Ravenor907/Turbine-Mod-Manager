@@ -32,6 +32,7 @@ pub mod rules;
 pub mod report;
 pub mod saves;
 pub mod selfupdate;
+pub mod settings;
 pub mod shortcuts;
 pub mod sha256;
 pub mod steam;

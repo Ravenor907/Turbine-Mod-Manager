@@ -331,6 +331,21 @@ def anticheat_games(home):
         "parts/am_f_9000.partsbnd.dcx": b"made-up armor",
     }, now - 3 * 86400)
     zip_file(os.path.join(home, "Downloads", "Guardian Colors 1.0.zip"), {"colors.txt": b"x"}, now - 3 * 86400)
+    # 0.58: the other two kinds of Elden Ring save (modded through me3, Seamless Co-op), and a made-up Seamless Co-op
+    # with a settings file laid out the way its own is (sections, numbered choices in the comments, a password).
+    saves = os.path.join(steam, "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing/76561190000000000")
+    write(os.path.join(saves, "TurbineModded.sl2"), "a modded save\n")
+    write(os.path.join(saves, "ER0000.co2"), "a co-op save\n")
+    zip_file(os.path.join(home, "Downloads", "Seamless Co-op 2.0.1.zip"), {
+        "SeamlessCoop/ersc.dll": b"MZ made-up",
+        "SeamlessCoop/ersc_settings.ini": (
+            "[GAMEPLAY]\r\n\r\n; Let other players invade your world. 0=FALSE 1=TRUE\r\nallow_invaders = 1\r\n\r\n"
+            "; What shows over players' heads. 0 = Normal | 1 = None | 2 = Ping\r\noverhead_player_display = 0\r\n\r\n"
+            "; Volume before a save loads. 0 = MUTE 10 = MAX\r\ndefault_boot_master_volume = 5\r\n\r\n"
+            "[SCALING]\r\n\r\n; Extra enemy health (%) per player. (Default: 35)\r\nenemy_health_scaling = 35\r\n\r\n"
+            "[PASSWORD]\r\n\r\n; Session password\r\ncooppassword = \r\n"),
+        "ersc_launcher.exe": b"MZ made-up launcher",
+    }, now - 2 * 86400)
 
 
 if __name__ == "__main__":

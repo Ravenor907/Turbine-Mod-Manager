@@ -585,3 +585,35 @@ fn removed_mods_can_be_deleted_for_good() {
     assert_eq!(s.mods().len(), 1, "mods in the list are untouched");
     assert!(w.root.join("Downloads/one.zip").exists(), "the player's archive is never touched");
 }
+
+/// 0.58, Edit settings: the player's copy of a mod's config file goes into the game in place of the mod's own, a mod
+/// update keeps the player's values, and Reset to default puts the mod's file back.
+#[test]
+fn edited_settings_reach_the_game_and_survive_updates() {
+    use turbine_engine::settings;
+    let w = world("settings");
+    let mut s = w.open();
+    let z = w.zip("Lanterns-1.0.zip", &[("lanterns.ini", "[a]\nbright = 1\nradius = 2\n")]);
+    let m = s.import_zip(&z).unwrap();
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 2\n"));
+    let staged = turbine_engine::store::staged_dir(s.root(), &m.id).join("Data/lanterns.ini");
+    assert_eq!(settings::config_files(&turbine_engine::store::staged_dir(s.root(), &m.id), 6, 40), vec!["Data/lanterns.ini".to_string()]);
+    let text = fs::read_to_string(&staged).unwrap();
+    let f = settings::parse(&text, settings::Format::Ini);
+    let edited = settings::set(&text, settings::Format::Ini, &[(f[1].id, "9".into())]).unwrap();
+    settings::save_edit(s.root(), &m.id, "Data/lanterns.ini", &staged, &edited).unwrap();
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 9\n"));
+    assert_eq!(fs::read_to_string(&staged).unwrap(), text, "the mod's own file is untouched");
+
+    // An update with a new setting: the player's radius stays.
+    write_zip(&z, &[("lanterns.ini", "[a]\nbright = 1\nradius = 2\ncolor = warm\n")]);
+    s.import_zip(&z).unwrap();
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 9\ncolor = warm\n"));
+
+    assert!(settings::reset(s.root(), &m.id, "Data/lanterns.ini").unwrap());
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 2\ncolor = warm\n"));
+}

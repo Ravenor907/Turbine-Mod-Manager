@@ -58,6 +58,8 @@ Window {
         property string antiCheatDone: "[]" // games whose anti-cheat card was shown
         property string basicIntroDone: "[]" // Basic games whose first-visit card was shown
         property string playedWarn: "[]"    // "<game>|<mods on>|<warnings>" played through with Play anyway   // the four first-run cards were seen (Settings, Help shows them again)
+        property string updateWarned: "[]"  // 0.58: "<game>|<build>": the game update warning was shown
+        property string modHold: "{}"       // 0.58: games played without mods until their mods update: {build, versions}
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
     Settings {
@@ -302,6 +304,7 @@ Window {
             // 0.57, anti-cheat games: Play asks once (Elden Ring); the mod goes into the me3 profile, and Before you
             // play; Halo's guide; an online-only game refusing mods.
             else if (["acask", "acdeploy", "acguide", "acrefuse"].indexOf(shot.page) >= 0) { app.tab = 0; app.zone = "main"; acShot.start() }
+            else if (["modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0) { app.tab = 0; app.zone = "main"; lateShot.start() }
             // 0.57: Get mods' Y pop-up and Get mods scrolled down to full screen, once the cards are in.
             else if (shot.page === "findpop" || shot.page === "fullscroll") { app.zone = "main"; app.tab = 1; findPopShot.start() }
             // 0.52: A on Before you play runs the highlighted button; the mod and game menus offer the missing loader.
@@ -351,7 +354,7 @@ Window {
     Timer {
         running: shot.on
         // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
-        interval: ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: {
             // 0.58: every picture checks the bottom bar (nothing overlaps Play or goes past the edge).
@@ -405,6 +408,39 @@ Window {
             } else {
                 app.note("shot", "Refused: tabs " + app.tabs.length + ", status " + app.statusNow.words + ", Play " + (playBtn.visible ? "shown" : "hidden"))
             }
+        }
+    }
+    // 0.58: Edit settings on a mod (Right, then Start saves), Seamless Co-op settings (the password first), the game
+    // update warning (A holds the mods), and Elden Ring's saves by kind.
+    Timer {
+        id: lateShot
+        interval: 3500
+        property int step: 0
+        onTriggered: {
+            if (shot.page === "modsettings") {
+                if (step === 0) {
+                    const m = app.mods.find(x => x.name.indexOf("Glow") >= 0)
+                    app.tab = 0; app.zone = "main"; app.modIndex = Math.max(0, app.listItems.findIndex(x => x.kind === "mod" && x.m === m))
+                    app.note("shot", "Mod menu: " + app.modMenuTitles())
+                    if (m) app.openModSettings(m)
+                    const r = settingsView.shown[settingsView.focusIndex]
+                    app.note("shot", "Settings page: " + app.sheet + " | " + settingsView.shown.length + " rows | focus " + (r && r.f ? r.f.key + " " + r.f.kind + " " + settingsView.valueOf(r.f) : "none"))
+                    app.act("right")
+                    app.note("shot", "After Right: " + (r && r.f ? settingsView.valueOf(r.f) : "") + ", " + settingsView.changes + " change; legend " + app.legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
+                    app.act("start")
+                    step = 1; restart()
+                } else app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
+            } else if (shot.page === "coopsettings") {
+                app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                app.openCoopSettings()
+                app.note("shot", "Seamless page: " + settingsView.title + " | first " + (settingsView.shown[0] && settingsView.shown[0].f ? settingsView.shown[0].f.key : "none")
+                         + " | " + settingsView.shown.filter(r => r.f).map(r => r.f.key + ":" + r.f.kind).join(", "))
+            } else if (shot.page === "gameupdate") {
+                const m = app.mods.find(x => x.name.indexOf("Glow") >= 0)
+                app.gameUpdate = { last: "99", now: "100", risky: m ? [{ id: m.id, name: m.name }] : [] }
+                app.maybeGameUpdate()
+                app.note("shot", "Update sheet: " + app.sheet + " " + (app.msgData ? app.msgData.title + " | " + app.infoButtons.map(x => x.label).join(", ") : ""))
+            } else if (shot.page === "ersaves") app.openErSaves()
         }
     }
     // findpop: Y on Get mods once the cards are in, then Down to Sort. fullscroll: Down through the cards until the
@@ -723,6 +759,147 @@ Window {
                 else { note("action", "Launch Options step: started outside Steam (Desktop Mode)"); Turbine.playOutsideSteam(o.coop === true) } } },
             { key: "b", label: "Not now", run: () => note("action", "Launch Options step: not now") }] })
     }
+    // ---------------------------------------------------------------- 0.58: Edit settings
+    property string settingsMod: ""          // the mod's id; "" for the game's own files
+    property string settingsRel: ""
+    property string settingsBack: ""         // the sheet B goes back to
+    property var settingsTypeRow: null
+    function openSettingsFile(modId, rel, title, pin, back) {
+        const d = parse(Turbine.settingsOpen(modId, rel), { error: "Couldn't open it." })
+        if (d.error) { toast.problem(d.error); return }
+        settingsMod = modId; settingsRel = rel; settingsBack = back || ""
+        settingsView.title = title
+        settingsView.sub = rel + (d.edited ? " · your version (Reset to default goes back to " + (modId === "" ? "the original" : "the mod's own") + ")" : "") + (d.fields.length > 0 ? " · " + plural(d.fields.length, "setting", "settings") : "")
+        settingsView.pinFirst = pin || []
+        settingsView.doc = d
+        settingsView.reset()
+        note("action", "Edit settings: " + title + " (" + rel + ", " + d.format + ", " + d.fields.length + " settings" + (d.edited ? ", edited" : "") + ")")
+        sheet = "settingsedit"
+    }
+    function settingsFilesOf(modId) { return parse(Turbine.settingsFiles(modId), []) }
+    // X on a mod, Edit settings: one file opens straight away; several are listed first.
+    function openModSettings(m) {
+        const files = settingsFilesOf(m.id)
+        if (files.length === 0) { toast.info(m.name + " has no settings file Turbine can edit."); return }
+        const coop = isSeamless(m)
+        if (files.length === 1 || coop) {
+            const f = coop ? (files.find(x => /ersc_settings\.ini$/i.test(x.rel)) || files[0]) : files[0]
+            openSettingsFile(m.id, f.rel, coop ? "Seamless Co-op settings" : "Settings: " + m.name, coop ? ["password"] : [], "")
+            return
+        }
+        openPick("Settings: " + m.name, plural(files.length, "settings file", "settings files"), files.map(f => ({
+            icon: "info", title: f.rel.split("/").pop(), detail: f.rel + (f.edited ? " · your version" : ""), aLabel: "Edit",
+            run: () => openSettingsFile(m.id, f.rel, "Settings: " + m.name, [], "pick") })), "modmenu")
+    }
+    // Game menu, Edit settings: the game's own settings files.
+    function openGameSettings() {
+        const files = settingsFilesOf("")
+        if (files.length === 0) { toast.info("Turbine found no settings files of " + gameTitle + "'s own to edit."); return }
+        openPick("Edit " + gameTitle + "'s settings", "Its own settings files. Turbine keeps the original and the copy before each save.", files.map(f => ({
+            icon: "info", title: f.rel.split("/").pop(), detail: f.rel + (f.edited ? " · changed by you" : ""), aLabel: "Edit",
+            run: () => openSettingsFile("", f.rel, gameTitle + ": " + f.rel.split("/").pop(), [], "") })), "gamemenu")
+    }
+    function isSeamless(m) { return !!m && m.sourceKind === "loader" && String(m.sourceId || "") === "seamless" }
+    function openCoopSettings() {
+        if (!seamlessMod) { toast.info("Get Seamless Co-op first: Game menu."); return }
+        openModSettings(seamlessMod)
+    }
+    function settingsTyped(row, text) {
+        settingsTypeRow = null
+        if (row.kind === "line") { settingsView.setLine(row.n, text); return }
+        const f = row.f
+        if (f.kind === "number") {
+            const v = parseFloat(text)
+            if (isNaN(v) || String(text).trim() === "") { toast.problem(f.key + " takes a number."); return }
+            if (f.min !== null && v < f.min || f.max !== null && v > f.max) { toast.problem(f.key + " goes from " + f.min + " to " + f.max + "."); return }
+        }
+        settingsView.setValue(f, text)
+    }
+    function settingsSaveNow() {
+        if (settingsView.changes === 0) { toast.info("Nothing changed."); return }
+        const e = settingsView.edits, le = settingsView.lineEdits
+        const body = { fields: Object.keys(e).map(id => ({ id: parseInt(id), value: e[id] })), lines: Object.keys(le).map(n => ({ line: parseInt(n), text: le[n] })) }
+        const r = parse(Turbine.settingsSave(settingsMod, settingsRel, JSON.stringify(body)), { ok: false, error: "Couldn't save it." })
+        if (!r.ok) { toast.problem(r.error); return }
+        note("action", "Edit settings saved: " + settingsRel + " (" + settingsView.changes + " changes)")
+        if (settingsMod !== "") { Turbine.applyNow(); toast.done("Saved. Your settings go into the game now and stay through mod updates.") }
+        else toast.done("Saved. The original is kept: Reset to default puts it back.")
+        openSettingsFile(settingsMod, settingsRel, settingsView.title, settingsView.pinFirst, settingsBack)
+    }
+    function settingsResetAsk() {
+        const title = settingsView.title, mod = settingsMod, rel = settingsRel, pin = settingsView.pinFirst, back = settingsBack
+        openMsg({ title: "Reset to default?", text: (mod === "" ? "Puts back " + rel + " as it was before you first changed it." : "Puts back the mod's own " + rel + ".") + " Your version is kept as a backup file.",
+                  buttons: [{ key: "a", label: "Reset", run: () => {
+                      const r = parse(Turbine.settingsReset(mod, rel), { ok: false, error: "Couldn't reset it." })
+                      if (!r.ok) { toast.problem(r.error); return }
+                      if (mod !== "") Turbine.applyNow()
+                      toast.done("Back to the default.")
+                      openSettingsFile(mod, rel, title, pin, back) } },
+                            { key: "b", label: "Cancel", run: () => { sheet = "settingsedit" } }] })
+    }
+    // ---------------------------------------------------------------- 0.58: Elden Ring's saves, each kind apart
+    function openErSaves() {
+        const v = parse(Turbine.erSavesJson(), { folders: 0, kinds: [] })
+        note("action", "Saves by kind: " + v.kinds.map(k => k.kind + " " + k.files.length + " files, " + k.backups.length + " backups").join("; "))
+        if (v.folders === 0) { toast.info("Turbine can't find " + gameTitle + "'s save folder yet. Play once, then look again."); return }
+        openPick("Saves: normal, modded and co-op", "Kept apart so a modded or co-op save never goes online. A shows each one's backups.", v.kinds.map(k => ({
+            icon: "restore", title: k.label, aLabel: "Backups",
+            detail: (k.files.length === 0 ? "No save yet" : k.files.map(f => f.rel.split("/").pop() + " · " + when(f.modified)).join(", ")) + " · " + plural(k.backups.length, "backup", "backups"),
+            run: () => openErSaveKind(k) })), "gamemenu")
+    }
+    function openErSaveKind(k) {
+        if (k.backups.length === 0) { toast.info("No backups of the " + k.label.toLowerCase() + " save yet. One is made each time you play."); return }
+        openPick(k.label + ": put back a backup", "Only this kind goes back; the others stay. The saves as they are now are kept first.", k.backups.map(b => ({
+            icon: "restore", title: when(b.when), detail: plural(b.count, "file", "files"), aLabel: "Put back",
+            run: () => { note("action", "Put back " + k.kind + " save from " + b.id); Turbine.restoreSaveKind(k.kind, b.id) } })), "gamemenu")
+    }
+    // ---------------------------------------------------------------- 0.58: the game update warning
+    property var gameUpdate: null
+    function maybeGameUpdate() {
+        if (!game || !gameUpdate || !gameUpdate.risky || gameUpdate.risky.length === 0 || page !== "game" || sheet !== "" || wheelOpen) return
+        const key = game.id + "|" + gameUpdate.now
+        let warned = parse(seen.updateWarned, [])
+        if (warned.indexOf(key) >= 0) return
+        if (!shot.on) { warned.push(key); seen.updateWarned = JSON.stringify(warned.slice(-50)) }
+        const names = gameUpdate.risky.map(r => r.name)
+        note("action", "Game update warning: " + game.name + " build " + gameUpdate.last + " to " + gameUpdate.now + "; may break: " + names.join(", "))
+        openMsg({ title: gameTitle + " updated", text: game.store === "steam" || String(game.id).indexOf("steam:") === 0
+                    ? "Steam updated " + gameTitle + " since you last played with mods. These mods hook into the game and often stop working until their makers update them: " + names.join(", ") + "."
+                    : gameTitle + " updated since you last played with mods. These mods hook into the game and often stop working until their makers update them: " + names.join(", ") + ".",
+                  buttons: [{ key: "a", label: "Play without mods until they update", run: () => holdMods() },
+                            { key: "b", label: "Keep my mods on", run: () => note("action", "Game update warning: kept the mods on") }] })
+    }
+    // Play without mods until the mods that may break are updated (or Game menu, Play with mods again).
+    readonly property var modHold: game ? (parse(seen.modHold, {})[game.id] || null) : null
+    function holdMods() {
+        if (!game || !gameUpdate) return
+        let all = parse(seen.modHold, {})
+        let versions = {}
+        for (const r of gameUpdate.risky) { const m = mods.find(x => x.id === r.id); versions[r.id] = m ? (m.version || "") : "" }
+        all[game.id] = { build: gameUpdate.now, versions: versions }
+        seen.modHold = JSON.stringify(all)
+        note("action", "Mods held until they update: " + Object.keys(versions).join(", "))
+        toast.done("Play starts " + gameTitle + " without mods until they update. Game menu, Play with mods again, ends it.")
+    }
+    function releaseHold(why) {
+        if (!game) return
+        let all = parse(seen.modHold, {})
+        if (!all[game.id]) return
+        delete all[game.id]
+        seen.modHold = JSON.stringify(all)
+        note("action", "Mods back on for Play: " + why)
+        toast.done("Play uses your mods again: " + why + ".")
+    }
+    // A held mod got an update (or went): Play uses the mods again.
+    function checkModHold() {
+        const h = modHold
+        if (!h || !modsLoaded) return
+        const moved = Object.keys(h.versions).filter(id => { const m = mods.find(x => x.id === id); return !m || (m.version || "") !== h.versions[id] })
+        if (moved.length > 0) {
+            const m = mods.find(x => x.id === moved[0])
+            releaseHold(m ? m.name + " updated" : "a held mod was removed")
+        }
+    }
     // 0.58, the launch check: the game didn't show about 20 seconds after Play.
     function openNotStarted(gameId) {
         const g = games.find(x => x.id === gameId)
@@ -1012,7 +1189,10 @@ Window {
             app.kcdRestore = v.kcdRestore === true
             app.placements = v.placements || {}
             app.guardedMods = v.guarded || {}
+            app.gameUpdate = v.gameUpdate || null
             app.modsLoaded = true
+            app.checkModHold()
+            Qt.callLater(app.maybeGameUpdate)
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
             if (keep !== "") {
                 const k = app.listItems.findIndex(x => x.kind === "mod" && x.m.id === keep)
@@ -1551,6 +1731,13 @@ Window {
         // 0.57: an anti-cheat game me3 starts: asked once before the first Play with mods.
         if (acAskNeeded()) { openAcAsk(() => startPlay(coop === true)); return }
         if (acRefused && mods.some(m => m.enabled)) { toast.problem(acInfo.refuseWords); return }
+        // 0.58: held after a game update: without mods until they update.
+        if (modHold && mods.some(m => m.enabled) && coop !== true) {
+            note("action", "Play " + game.name + " without mods (held until they update after the game update)")
+            toast.info("Playing without mods until they update. Game menu, Play with mods again, ends that.")
+            Turbine.playOriginal()
+            return
+        }
         note("action", "Play " + game.name)
         if (!shot.on) { let p = parse(seen.played, []).filter(x => x !== game.id); p.unshift(game.id); seen.played = JSON.stringify(p.slice(0, 50)) }
         if (moving) endMove()
@@ -1817,7 +2004,15 @@ Window {
         { icon: "update", title: "Get Seamless Co-op", detail: "From its GitHub release, checked. Loads through me3; keeps its own .co2 saves.", ok: true, act: "seamless" }
     ] : []).concat(acInfo && acInfo.leftover ? [
         { icon: "remove", title: "Remove the leftover file", detail: acInfo.leftover + ", left by another tool. Hold A.", ok: true, act: "acleftover" }
-    ] : []).concat(acMode === "official" ? [
+    ] : []).concat(modHold ? [
+        { icon: "play", title: "Play with mods again", detail: "Play has started it without mods since the game updated", ok: true, act: "unhold" }
+    ] : []).concat(seamlessIn ? [
+        { icon: "info", title: "Seamless Co-op settings", detail: "Session password first, then its other options", ok: true, act: "coopsettings" }
+    ] : []).concat(acMode === "me3" && acInfo.seamless ? [
+        { icon: "restore", title: "Saves: normal, modded and co-op", detail: "Each kind apart, with its backups", ok: true, act: "ersaves" }
+    ] : []).concat(acMode === "me3" || acRefused ? [] : [
+        { icon: "info", title: "Edit settings", detail: gameTitle + "'s own settings files", ok: true, act: "gamesettings" }
+    ]).concat(acMode === "official" ? [
         { icon: "info", title: "How to play " + gameTitle + " with mods", detail: "Its own Play choice without anti-cheat", ok: true, act: "acguide" }
     ] : []).concat(overlapCount > 0 ? [
         { icon: "info", title: "Overlaps: " + plural(overlapCount, "mod shares", "mods share") + " files", detail: "Which mod's copy the game gets", ok: true, act: "overlaps" }
@@ -1947,6 +2142,10 @@ Window {
         else if (item.act === "me3") { sheet = ""; Turbine.installMe3(false) }
         else if (item.act === "seamless") { sheet = ""; Turbine.installSeamless() }
         else if (item.act === "acguide") openAcGuide()
+        else if (item.act === "unhold") { sheet = ""; releaseHold("as you asked") }
+        else if (item.act === "coopsettings") openCoopSettings()
+        else if (item.act === "ersaves") openErSaves()
+        else if (item.act === "gamesettings") openGameSettings()
         else if (item.act === "acleftover") askDelete("acleftover:" + acInfo.leftover, acInfo.leftover + " was left in " + gameTitle + "'s folder by another program that used to start it without its anti-cheat. It isn't Steam's, and Steam's Verify doesn't remove it. Turbine removes only that one file; the anti-cheat starter stays as it is.")
         else if (item.act === "loader") { sheet = ""; getLoader() }
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
@@ -2104,6 +2303,11 @@ Window {
         ] : []).concat(updateMap[menuMod.id] ? [
             { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
         ] : [])
+        // 0.58: Edit settings, for any mod with a settings file (.ini, .toml, .json, .cfg, .yaml, .xml).
+        const cfgs = settingsFilesOf(menuMod.id)
+        const edit = cfgs.length === 0 ? [] : [isSeamless(menuMod)
+            ? { icon: "info", title: "Seamless Co-op settings", detail: "Session password first, then its other options", act: "settings" }
+            : { icon: "info", title: "Edit settings", detail: cfgs.length === 1 ? cfgs[0].rel.split("/").pop() + (cfgs[0].edited ? " · your version" : "") : plural(cfgs.length, "settings file", "settings files"), act: "settings" }]
         const src = menuMod.sourceKind === "nexus" && rules && rules.domain && nexusModOf(menuMod) !== "" ? "nexus"
                   : menuMod.sourceKind === "thunderstore" && menuMod.sourceId ? "thunderstore" : ""
         const page = src === "nexus" ? [{ icon: "play", title: "Its Nexus page", detail: "Opens it in Turbine", act: "page" }]
@@ -2122,7 +2326,7 @@ Window {
         .concat(placements[menuMod.id] ? [
             { icon: "move", title: "Change where it goes", detail: "Now in " + folderWords(placements[menuMod.id].to), act: "place" }
         ] : [])
-        const rows = first.concat(page).concat(check).concat(modMenuFacts.slice(0, 3)).concat(order).concat(names).concat(extras)
+        const rows = first.concat(edit).concat(page).concat(check).concat(modMenuFacts.slice(0, 3)).concat(order).concat(names).concat(extras)
             .concat(modMenuHasFacts ? [{ icon: "info", title: "Details", act: "details",
                                          detail: modWords(menuMod) || (placements[menuMod.id] ? "Where it goes and what it overlaps" : ordered ? "Its place in the order" : "What it overlaps or needs") }] : [])
         // At most 6 rows, so Uninstall (always last) is on screen at 1280 x 800: past that, the rest go under More.
@@ -2192,6 +2396,7 @@ Window {
         else if (item.act === "rename") { renameTarget = m; openAsk("rename", "Rename " + m.name, "Its name in your list. Leave it empty for its own name.", m.renamed ? m.name : "", "Name", 80, false, "Rename") }
         else if (item.act === "resetname") renameMod(m, "")
         else if (item.act === "showfiles") openModFiles(m)
+        else if (item.act === "settings") openModSettings(m)
         else if (item.act === "files") {
             const id = item.src === "nexus" ? nexusModOf(m) : String(m.sourceId).split(":")[0]
             if (sources.indexOf(item.src) >= 0) getSource = item.src
@@ -2971,6 +3176,8 @@ Window {
         if (s === "fomod") return { a: bind("Choose", k("a")), b: bind("Back a step", k("b")), start: bind("Next", k("start")) }
         if (s === "report") return { b: bind(reportView.editing ? "Done typing" : "Close", k("b")) }
         if (s === "activity") return { a: bind("", k("a")), b: bind("Close", k("b")), x: bind(activityView.full ? "What happened" : "Full log", k("x")) }
+        if (s === "settingsedit") return { a: bind(settingsView.aWord, k("a")), b: bind(settingsView.leaveArmed ? "Leave" : "Back", k("b")), x: bind("Reset", k("x")),
+                                           y: bind(settingsView.fields.length === 0 ? "" : settingsView.plain ? "Settings" : "Plain text", k("y")), start: bind("Save", k("start")) }
         return { a: bind("", k("a")), b: bind("Close", k("b")) }
     }
     function sheetAct(b) {
@@ -2980,6 +3187,7 @@ Window {
         else if (sheet === "report") reportView.handleButton(b)
         else if (sheet === "perf") perfView.handleButton(b)
         else if (sheet === "activity") activityView.handleButton(b)
+        else if (sheet === "settingsedit") settingsView.handleButton(b)
         else if (sheet === "details" || sheet === "notice") {
             if (b === "a" || b === "b" || b === "view") {
                 if (sheet === "notice") seen.notSteamOS = true
@@ -5613,6 +5821,7 @@ Window {
         else if (askPurpose === "nexusKey" && text !== "") Turbine.setNexusKey(text)
         else if (askPurpose === "newProfile" && text !== "") Turbine.profileCreate(text)
         else if (askPurpose === "putafter") putAfter(text)
+        else if (askPurpose === "settingvalue" && settingsTypeRow) settingsTyped(settingsTypeRow, text)
         else if (askPurpose === "findplugin" && text !== "") findPlugin(text)
         else if (askPurpose === "popfind") { findPop = Object.assign({}, findPop, { text: text }); findRow = 0; note("action", "Find pop-up: words \"" + text + "\"") }
         else if (askPurpose === "find") { findText = text; modIndex = 0; note("action", "Find \"" + text + "\": " + shownMods.length + " shown") }
@@ -8011,6 +8220,20 @@ Window {
         onCancelled: app.askCancelled()
     }
 
+    // 0.58: Edit settings (a mod's config files, the game's own, and Seamless Co-op's).
+    SettingsEditor {
+        id: settingsView
+        ui: kit
+        visible: app.sheet === "settingsedit"
+        onSaveClicked: app.settingsSaveNow()
+        onResetClicked: app.settingsResetAsk()
+        onCloseClicked: { app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsBack }
+        onTypeAsked: (row, value, label) => {
+            app.settingsTypeRow = row
+            const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
+            app.openAsk("settingvalue", label, help.trim(), value, label, 2000, false, "Done")
+        }
+    }
     ActivityLog {
         id: activityView
         ui: kit
@@ -8249,9 +8472,9 @@ Window {
         // rest); the ones that don't fit are left out, never squeezed under Play or past the edge.
         Item {
             id: hintsBox
-            readonly property real right: wheelBtn.visible ? wheelBtn.x - legend.gap : playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
+            readonly property real rightEdge: wheelBtn.visible ? wheelBtn.x - legend.gap : playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
             x: barRow.x + barRow.width + (app.barGame ? 0 : 0)
-            width: Math.max(0, right - x)
+            width: Math.max(0, rightEdge - x)
             height: parent.height
             clip: true
             Row {

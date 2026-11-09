@@ -249,9 +249,24 @@ function settingsRows(file) {
   return missing.map(k => file + ": the Settings row \"" + k + "\" has no handler in rowActions");
 }
 
+// 0.58: a property declared with the name of one of Item's own FINAL properties stops the whole file loading ("Cannot
+// override FINAL property"), which this reader can't know from types: check the names.
+// (Only the anchor lines: other Item names such as x or states are fine on a QtObject or a Settings.)
+const FINAL = new Set(["left", "right", "top", "bottom", "horizontalCenter", "verticalCenter", "baseline"]);
+function finalNames(file) {
+  const src = require("fs").readFileSync(file, "utf8");
+  const out = [];
+  const re = /^\s*(?:readonly\s+|required\s+|default\s+)*property\s+[\w.<>]+\s+(\w+)/gm;
+  let m;
+  while ((m = re.exec(src))) {
+    if (FINAL.has(m[1])) out.push(file + ":" + (src.slice(0, m.index).split("\n").length + 1) + ": property " + m[1] + " has the name of an Item property (Cannot override FINAL property)");
+  }
+  return out;
+}
+
 const files = process.argv.slice(2);
 let all = [];
-for (const f of files) all = all.concat(checkFile(f));
+for (const f of files) all = all.concat(checkFile(f)).concat(finalNames(f));
 for (const f of files) if (f.endsWith("Main.qml")) all = all.concat(settingsRows(f));
 for (const e of all) console.log(e);
 console.log("QML check: " + files.length + " files, " + all.length + " problems");

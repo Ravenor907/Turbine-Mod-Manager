@@ -370,3 +370,174 @@ mod tests {
         assert_eq!(stamp(1_794_000_000), "20261106-212000");
     }
 }
+
+// ---- 0.58: Elden Ring's three kinds of save ----
+//
+// The normal game keeps ER0000.sl2; Turbine's me3 profile its own TurbineModded.sl2 (anticheat::ME3_SAVEFILE); and
+// Seamless Co-op ER0000.co2. They are listed apart, and each can be put back from a backup on its own (the saves as
+// they are now are kept first), so a modded or co-op save never lands on the online one by mistake.
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Solo,
+    Modded,
+    Coop,
+}
+
+impl Kind {
+    pub fn key(self) -> &'static str {
+        match self {
+            Kind::Solo => "solo",
+            Kind::Modded => "modded",
+            Kind::Coop => "coop",
+        }
+    }
+    pub fn from_key(k: &str) -> Option<Kind> {
+        match k {
+            "solo" => Some(Kind::Solo),
+            "modded" => Some(Kind::Modded),
+            "coop" => Some(Kind::Coop),
+            _ => None,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Kind::Solo => "Normal game (online)",
+            Kind::Modded => "With mods (me3, offline)",
+            Kind::Coop => "Seamless Co-op",
+        }
+    }
+}
+
+/// Which kind a save file is, by its name (the game's own .bak copies count with their save).
+pub fn kind_of(name: &str) -> Option<Kind> {
+    let l = name.to_ascii_lowercase();
+    let l = l.strip_suffix(".bak").unwrap_or(&l);
+    if l.ends_with(".co2") {
+        Some(Kind::Coop)
+    } else if l == crate::anticheat::ME3_SAVEFILE.to_ascii_lowercase() {
+        Some(Kind::Modded)
+    } else if l.ends_with(".sl2") {
+        Some(Kind::Solo)
+    } else {
+        None
+    }
+}
+
+/// One save file now: its path inside the save folder, size and time changed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SaveFile {
+    pub rel: String,
+    pub bytes: u64,
+    pub modified: u64,
+}
+
+/// The save files of one kind in the save folders now.
+pub fn files_of(folders: &[PathBuf], kind: Kind) -> Vec<SaveFile> {
+    let mut out = Vec::new();
+    for f in folders {
+        let (lines, _) = index_of(f, MAX_FILES);
+        for line in lines {
+            let rel = line.split('\t').next().unwrap_or(&line).to_string();
+            let name = rel.rsplit('/').next().unwrap_or(&rel);
+            if kind_of(name) == Some(kind) {
+                let m = fs::metadata(f.join(&rel)).ok();
+                let modified = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
+                out.push(SaveFile { rel, bytes: m.map(|m| m.len()).unwrap_or(0), modified });
+            }
+        }
+    }
+    out
+}
+
+/// An index line's path ("0/7656/ER0000.sl2\t1234\t...").
+fn index_rel(l: &str) -> &str {
+    l.split('\t').next().unwrap_or(l)
+}
+
+/// How many files of one kind a backup holds.
+pub fn count_in(root: &Path, id: &str, kind: Kind) -> usize {
+    fs::read_to_string(root.join(id).join("index"))
+        .map(|t| t.lines().map(index_rel).filter(|l| kind_of(l.rsplit('/').next().unwrap_or(l)) == Some(kind)).count())
+        .unwrap_or(0)
+}
+
+/// Puts back only one kind's files from a backup (the saves as they are now are kept first, as a new backup).
+/// Answers how many files went back.
+pub fn restore_kind(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now: u64) -> io::Result<usize> {
+    if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a backup"));
+    }
+    let snap = root.join(id);
+    let from = sources(root, id)?;
+    for f in &from {
+        if !folders.contains(f) {
+            return Err(other(format!("{} isn't one of the game's save folders", f.display())));
+        }
+    }
+    let index = fs::read_to_string(snap.join("index"))?;
+    let wanted: Vec<&str> = index.lines().map(index_rel).filter(|l| kind_of(l.rsplit('/').next().unwrap_or(l)) == Some(kind)).collect();
+    if wanted.is_empty() {
+        return Ok(0);
+    }
+    let existing: Vec<PathBuf> = folders.iter().filter(|p| p.is_dir()).cloned().collect();
+    backup_with(&existing, root, now, free_bytes(root), &[id]).map_err(|e| other(format!("{KEEP_FAILED}: {e}")))?;
+    let mut n = 0;
+    for line in wanted {
+        let Some((i, rel)) = line.split_once('/') else { continue };
+        let Ok(i) = i.parse::<usize>() else { continue };
+        let Some(dest_root) = from.get(i) else { continue };
+        if rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
+            continue;
+        }
+        let src = snap.join(i.to_string()).join(rel);
+        let dest = dest_root.join(rel);
+        if fs::symlink_metadata(&dest).is_ok_and(|m| m.file_type().is_symlink()) {
+            continue;
+        }
+        if let Some(p) = dest.parent() {
+            fs::create_dir_all(p)?;
+        }
+        fs::copy(&src, &dest)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod kind_tests {
+    use super::*;
+
+    #[test]
+    fn kinds_apart() {
+        assert_eq!(kind_of("ER0000.sl2"), Some(Kind::Solo));
+        assert_eq!(kind_of("ER0000.sl2.bak"), Some(Kind::Solo));
+        assert_eq!(kind_of("TurbineModded.sl2"), Some(Kind::Modded));
+        assert_eq!(kind_of("ER0000.co2"), Some(Kind::Coop));
+        assert_eq!(kind_of("steam_autocloud.vdf"), None);
+        let d = std::env::temp_dir().join(format!("turbine-savekinds-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let saves = d.join("EldenRing/7656");
+        fs::create_dir_all(&saves).unwrap();
+        for (n, t) in [("ER0000.sl2", "solo1"), ("TurbineModded.sl2", "mod1"), ("ER0000.co2", "coop1")] {
+            fs::write(saves.join(n), t).unwrap();
+        }
+        let folders = vec![d.join("EldenRing")];
+        let root = d.join("backups");
+        let snap = backup_with(&folders, &root, 1_000, None, &[]).unwrap().unwrap();
+        assert_eq!(files_of(&folders, Kind::Coop).len(), 1);
+        assert_eq!(count_in(&root, &snap.id, Kind::Modded), 1);
+        for (n, t) in [("ER0000.sl2", "solo2"), ("TurbineModded.sl2", "mod2"), ("ER0000.co2", "coop2")] {
+            fs::write(saves.join(n), t).unwrap();
+        }
+        // Only the co-op save goes back; the others stay as they are now.
+        assert_eq!(restore_kind(&snap.id, Kind::Coop, &folders, &root, 2_000).unwrap(), 1);
+        assert_eq!(fs::read_to_string(saves.join("ER0000.co2")).unwrap(), "coop1");
+        assert_eq!(fs::read_to_string(saves.join("ER0000.sl2")).unwrap(), "solo2");
+        assert_eq!(fs::read_to_string(saves.join("TurbineModded.sl2")).unwrap(), "mod2");
+        // The saves from just before were kept.
+        assert_eq!(list(&root).len(), 2);
+        assert!(restore_kind("../x", Kind::Solo, &folders, &root, 3_000).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+}
