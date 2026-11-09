@@ -19,10 +19,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to main cancels the run it replaces. A release run is never cancelled (it has its own group).
+# A newer push to main cancels the push build it replaces. 0.61: every dispatched run (a release, or one of the
+# green runs for one) has a group of its own, so runs started side by side never cancel each other.
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.release && format('release-{0}', github.run_id) || format('build-{0}', github.ref) }}
-  cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.release) }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || format('build-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   # 0.6: a release of a commit that already passed every check publishes that run's checked bundle (same commit, its
