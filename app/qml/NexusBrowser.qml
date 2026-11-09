@@ -3,7 +3,7 @@ import QtWebEngine
 import Turbine
 import TurbineWeb
 
-// Nexus inside Turbine: one web page, full screen in Turbine's window, under a slim brass bar. The page is the
+// Nexus inside Turbine: one web page, full screen in Turbine's window, over a slim brass bar at the bottom. The page is the
 // player's: Turbine never clicks, fills in, hides or changes anything on it. The only clicks come from his own
 // presses (A, RT, R3 at the pointer: backend.rs and web.rs), and the D-pad's arrows go to the page's own focus ring.
 // One read-only script reads, a few times a second, whether a text field has the focus (for Steam's keyboard and the
@@ -94,13 +94,14 @@ Item {
     MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (w) => { w.accepted = true } }  // overlay-check: the page itself (layer 0), not an overlay
 
     // ---------------------------------------------------------------- the bar (40 design pixels)
+    // 0.6 (intent I20): at the bottom, like every other screen's bar (no top bar anywhere); the page fills the rest.
     Rectangle {
         id: bar
-        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
         height: nb.ui.px(40)
         color: nb.ui.c.panel
         z: 2
-        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: Math.max(1, nb.ui.px(1)); color: nb.ui.c.accentLo }
+        Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: Math.max(1, nb.ui.px(1)); color: nb.ui.c.accentLo }
         // Room for "Google sign-in": 2 with the game's name, 1 the button alone (the game's icon only), 0 none. The
         // pill gives way first (pillRoom keeps the button's room), so it hides only on the narrowest bars.
         TextMetrics { id: signinShort; font: signinText.font; text: "Google sign-in" }
@@ -110,7 +111,7 @@ Item {
                                         + (hostChip.host !== "" && !hostChip.nexus ? hostChip.width + nb.ui.px(10) : 0)
         readonly property real signinRoom: pill.x - nb.ui.px(8) - tabsEnd
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
-        // under the bar when they don't fit (pillFull).
+        // over the bar when they don't fit (pillFull).
         readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
         // The page's title keeps a little room too (a long hint in the pill used to take it all).
         readonly property real titleMin: nb.width * 0.09
@@ -288,7 +289,7 @@ Item {
     Rectangle {
         id: pillFull
         visible: pill.visible && nb.noteFresh && nb.fullFresh && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok" || nb.pillLevel === "hint")
-        anchors.top: bar.bottom; anchors.topMargin: nb.ui.px(4)
+        anchors.bottom: bar.top; anchors.bottomMargin: nb.ui.px(4)
         anchors.right: parent.right; anchors.rightMargin: nb.ui.px(10)
         width: Math.min(bar.pillWant, nb.width - nb.ui.px(20)); height: fullText.implicitHeight + nb.ui.px(12)
         radius: nb.ui.px(6)
@@ -319,7 +320,7 @@ Item {
     // ---------------------------------------------------------------- the page
     Item {
         id: pageArea
-        anchors.top: bar.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: bar.top
         visible: nb.tab === 0
         Loader {
             id: loader
@@ -495,7 +496,7 @@ Item {
 
     // ---------------------------------------------------------------- the Downloads tab
     Item {
-        anchors.top: bar.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+        anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: bar.top
         anchors.margins: nb.ui.px(14)
         visible: nb.tab === 1
         Text {
