@@ -346,7 +346,8 @@ impl GameRules {
                     r.launch_option = None;
                     r.launch_help = None;
                 }
-                if r.kind == Kind::Smapi && game.runtime == Runtime::Windows {
+                // Heroic's link starts SMAPI itself (launch_url_with, heroic_loader_exe): no Steam wording there.
+                if r.kind == Kind::Smapi && game.runtime == Runtime::Windows && game.store == Store::Steam {
                     r.launch_help = Some(
                         "This copy of Stardew Valley is the Windows version. Turbine sets SMAPI up from its Windows \
                          files, but Steam still starts the game itself: follow SMAPI's own guide at smapi.io/install \
@@ -1611,11 +1612,37 @@ fn percent_encode(s: &str) -> String {
 /// line 48 makes the same link for Heroic's own desktop shortcuts. The app name is the store ID Heroic uses (Epic app
 /// name, GOG product ID, sideload ID), which is what Turbine stores in Game::store_id.
 pub fn launch_url(game: &Game) -> Option<String> {
+    launch_url_with(game, None)
+}
+
+/// The program a Heroic game's script loader starts from, when it is in the game folder: SMAPI's
+/// StardewModdingAPI.exe for the Windows build of Stardew Valley, SKSE's skse64_loader.exe for Skyrim. Heroic then
+/// starts it in place of the game (its link's altExe), so the player sets nothing up in Heroic.
+pub fn heroic_loader_exe(game: &Game, rules: &GameRules) -> Option<PathBuf> {
+    heroic_runner(game.store)?;
+    if game.runtime != Runtime::Windows {
+        return None;
+    }
+    let name = match rules.kind {
+        Kind::Smapi => "StardewModdingAPI.exe",
+        Kind::Bethesda if game.name.to_ascii_lowercase().contains("skyrim") => "skse64_loader.exe",
+        _ => return None,
+    };
+    let p = game.install_dir.join(name);
+    p.is_file().then_some(p)
+}
+
+/// `launch_url`, with the program Heroic starts instead of the game (Heroic's `altExe`, percent-encoded; ignored for
+/// Steam games). Heroic's src/backend/protocol.ts (main) reads it from the same link's query.
+pub fn launch_url_with(game: &Game, alt_exe: Option<&Path>) -> Option<String> {
     if game.store_id.is_empty() {
         return None;
     }
     match heroic_runner(game.store) {
         None => Some(format!("steam://rungameid/{}", percent_encode(&game.store_id))),
-        Some(runner) => Some(format!("heroic://launch?appName={}&runner={runner}", percent_encode(&game.store_id))),
+        Some(runner) => {
+            let alt = alt_exe.map(|p| format!("&altExe={}", percent_encode(&p.to_string_lossy()))).unwrap_or_default();
+            Some(format!("heroic://launch?appName={}&runner={runner}{alt}", percent_encode(&game.store_id)))
+        }
     }
 }

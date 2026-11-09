@@ -178,6 +178,66 @@ pub fn scan(home: &Path, scan: &mut Scan) {
             }
         }
         fill_art(&root, scan);
+        fill_prefixes(&root, home, scan);
+    }
+}
+
+// ---- Wine and Proton prefixes (0.6) ----
+//
+// Heroic keeps each game's settings in <config>/heroic/GamesConfig/<app name>.json, under the app name:
+// "winePrefix" (the prefix folder) and "wineVersion" {"type": "wine" | "proton" | "toolkit" | ...}. A Proton
+// runner keeps Wine's registry in <winePrefix>/pfx/user.reg (Proton's own layout), any other in
+// <winePrefix>/user.reg. Without a game file, Heroic's default is <defaultWinePrefix>/<title> from config.json's
+// "defaultSettings" (~/Games/Heroic/Prefixes/default when unset). Game::prefix is the folder that holds user.reg, as
+// for Steam games, so the same DLL overrides work for Heroic games (proton.rs).
+
+fn expand_home(p: &str, home: &Path) -> PathBuf {
+    match p.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => PathBuf::from(p),
+    }
+}
+
+/// The folder holding user.reg for a Heroic prefix and its runner type.
+pub fn registry_dir(wine_prefix: &Path, wine_type: &str) -> PathBuf {
+    let pfx = wine_prefix.join("pfx");
+    let (first, second) = if wine_type.eq_ignore_ascii_case("proton") { (pfx, wine_prefix.to_path_buf()) } else { (wine_prefix.to_path_buf(), pfx) };
+    if !first.join("user.reg").is_file() && second.join("user.reg").is_file() {
+        second
+    } else {
+        first
+    }
+}
+
+/// A Heroic game's prefix (the folder that holds, or will hold, user.reg), from its GamesConfig file or Heroic's
+/// default folder. None for a native game or when Heroic has no prefix for it.
+pub fn prefix_for(root: &Path, home: &Path, app_name: &str, title: &str) -> Option<PathBuf> {
+    if app_name.is_empty() || app_name.contains('/') || app_name.contains("..") {
+        return None;
+    }
+    let mut scratch = Scan::default();
+    if let Some(v) = read_json(&root.join("GamesConfig").join(format!("{app_name}.json")), &mut scratch) {
+        if let Some(cfg) = v.get(app_name) {
+            if let Some(wp) = cfg.str_at("winePrefix").filter(|p| !p.is_empty()) {
+                let wine_type = cfg.get("wineVersion").and_then(|w| w.str_at("type")).unwrap_or("wine");
+                return Some(registry_dir(&expand_home(wp, home), wine_type));
+            }
+        }
+    }
+    let defaults = read_json(&root.join("config.json"), &mut scratch);
+    let d = defaults.as_ref().and_then(|v| v.get("defaultSettings"));
+    let base = d.and_then(|d| d.str_at("defaultWinePrefix")).map(|p| expand_home(p, home)).unwrap_or_else(|| home.join("Games/Heroic/Prefixes/default"));
+    let wine_type = d.and_then(|d| d.get("wineVersion")).and_then(|w| w.str_at("type")).unwrap_or("wine");
+    let dir = base.join(title);
+    (!title.is_empty() && !title.contains('/') && dir.is_dir()).then(|| registry_dir(&dir, wine_type))
+}
+
+fn fill_prefixes(root: &Path, home: &Path, scan: &mut Scan) {
+    for g in scan.games.iter_mut() {
+        if g.prefix.is_some() || g.store == Store::Steam || g.runtime != Runtime::Windows {
+            continue;
+        }
+        g.prefix = prefix_for(root, home, &g.store_id, &g.name);
     }
 }
 

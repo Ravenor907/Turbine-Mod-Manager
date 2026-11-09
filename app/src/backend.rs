@@ -1343,13 +1343,12 @@ fn rules_json(slot: &Slot) -> String {
 // ---------------------------------------------------------------------------------------------------- Proton
 
 /// The Proton DLL overrides this game needs for what is turned on (proton::wanted_overrides): winhttp for BepInEx
-/// once its loader is in place, winmm and version for Cyberpunk's RED4ext and Cyber Engine Tweaks. Only for Steam
-/// games run through Proton (Turbine knows their prefix). Some(prefix) with the list when there is something to set.
+/// once its loader is in place, winmm and version for Cyberpunk's RED4ext and Cyber Engine Tweaks. For Steam games
+/// run through Proton and Heroic games run through Wine or Proton. Some(prefix) with the list when there is something
+/// to set.
 fn wanted_overrides(slot: &Slot) -> Option<(Option<PathBuf>, Vec<(&'static str, &'static str)>)> {
     let g = &slot.game;
-    if g.store != turbine_engine::Store::Steam {
-        return None;
-    }
+    // 0.6: Heroic games too: their Wine or Proton prefix comes from Heroic's own game settings (heroic::prefix_for).
     if slot.rules.kind == Kind::BepInEx && !slot.rules.loader_installed(g) {
         return None;
     }
@@ -1397,6 +1396,14 @@ fn proton_checks(slot: &Slot) -> Vec<rules::Check> {
             format!("Proton makes this game's settings the first time it runs. {} Until then mods that need {what} don't load.", proton::NOT_STARTED),
         )];
     };
+    // A Heroic prefix in a folder Turbine can't reach (outside what the Flatpak may read): say which folder.
+    if slot.game.store != turbine_engine::Store::Steam && !prefix.exists() && prefix.parent().is_some_and(|p| !p.exists()) {
+        return vec![line(
+            "warn",
+            if bepinex { "BepInEx may not load".into() } else { "Mod frameworks may not load".into() },
+            format!("Turbine can't reach this game's Wine folder {} to turn {what} on. In Heroic, use a Wine prefix under ~/Games/Heroic.", prefix.display()),
+        )];
+    }
     let mut missing = Vec::new();
     for (dll, value) in &wanted {
         match proton::read_override(&prefix, dll) {
@@ -2859,7 +2866,8 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                     // A me3 game with no mods on: Steam's own command through the helper.
                     let wr: &Worker = w;
                     if wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, false)) {
-                        launch(w, &game, if wr.slots.get(&game.id()).is_some_and(|s| s.store.mods().iter().any(|m| m.enabled)) { "mods" } else { "plain" });
+                        // 0.6: a Heroic game with a script loader on starts the loader through Heroic's link.
+                        launch_with_loader(w, &game, if wr.slots.get(&game.id()).is_some_and(|s| s.store.mods().iter().any(|m| m.enabled)) { "mods" } else { "plain" });
                         watch_game(w, &game);
                     } else {
                         w.say(format!("Couldn't set {} to start normally, so it wasn't started.", game.name), "error");
@@ -3139,26 +3147,44 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
     });
 }
 
+/// Play with mods: as `launch`, but a Heroic game whose script loader is on (SMAPI, SKSE) starts the loader through
+/// Heroic's link (altExe), so nothing needs setting up in Heroic. Play original and Play without the loader keep the
+/// plain link.
+fn launch_with_loader(w: &Worker, game: &Game, how: &str) {
+    let alt = w.slots.get(&game.id()).and_then(|s| rules::heroic_loader_exe(game, &s.rules));
+    match alt.and_then(|exe| rules::launch_url_with(game, Some(&exe)).map(|u| (exe, u))) {
+        Some((exe, url)) => {
+            crate::log::line("launch", &format!("{} through {url} (Heroic starts {})", game.name, exe.display()));
+            launch_at(w, game, how, url)
+        }
+        None => launch(w, game, how),
+    }
+}
+
 /// `how`: "mods", "coop" or "plain", for the last launch Steam's menu shows.
 fn launch(w: &Worker, game: &Game, how: &str) {
     match rules::launch_url(game) {
         Some(url) => {
             crate::log::line("launch", &format!("{} through {url}", game.name));
-            // 0.6: the last launch, for Steam's menu (the watch after Play adds how it went).
-            if let Some(s) = w.slots.get(&game.id()) {
-                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                let l = turbine_engine::quick::Launch { at, how: how.to_string(), result: "started".into(), seconds: None, words: String::new() };
-                if let Err(e) = turbine_engine::quick::write_launch(s.store.root(), &l) {
-                    crate::log::line("launch", &format!("Couldn't keep the last launch for Steam's menu: {e}"));
-                }
-            }
-            // Without a window (Steam's menu), the plugin opens the link itself.
-            if let Some(h) = &w.headless {
-                *h.launch.lock().unwrap_or_else(|e| e.into_inner()) = Some(url);
-                return;
-            }
-            w.post(move |t| t.launch(QString::from(url.as_str())))
+            launch_at(w, game, how, url)
         }
         None => w.say(format!("Turbine doesn't know how to start {} yet. Start it from its launcher.", game.name), "warn"),
     }
+}
+
+fn launch_at(w: &Worker, game: &Game, how: &str, url: String) {
+    // 0.6: the last launch, for Steam's menu (the watch after Play adds how it went).
+    if let Some(s) = w.slots.get(&game.id()) {
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let l = turbine_engine::quick::Launch { at, how: how.to_string(), result: "started".into(), seconds: None, words: String::new() };
+        if let Err(e) = turbine_engine::quick::write_launch(s.store.root(), &l) {
+            crate::log::line("launch", &format!("Couldn't keep the last launch for Steam's menu: {e}"));
+        }
+    }
+    // Without a window (Steam's menu), the plugin opens the link itself.
+    if let Some(h) = &w.headless {
+        *h.launch.lock().unwrap_or_else(|e| e.into_inner()) = Some(url);
+        return;
+    }
+    w.post(move |t| t.launch(QString::from(url.as_str())))
 }
