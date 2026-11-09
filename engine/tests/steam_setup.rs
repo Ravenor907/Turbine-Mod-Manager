@@ -64,3 +64,52 @@ fn writes_only_while_steam_is_closed_with_a_backup() {
     assert_eq!(fs::read_to_string(steam_setup::original_file(&file)).unwrap(), CONFIG);
     let _ = fs::remove_dir_all(&d);
 }
+
+/// Steam writes its own copy back when it closes: each change is checked after Steam starts again, and one that
+/// didn't hold is answered to be made again.
+#[test]
+fn changes_are_checked_after_steam_starts_again() {
+    use turbine_engine::shortcuts;
+    use turbine_engine::steam_setup::SteamChange;
+    let d = std::env::temp_dir().join(format!("turbine-steamsetup-pending-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let data = d.join("data");
+    let cfg = d.join("userdata/42/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let local = cfg.join("localconfig.vdf");
+    let sc = cfg.join("shortcuts.vdf");
+    fs::write(&local, CONFIG).unwrap();
+    let tile = shortcuts::coop_tile("ELDEN RING", "steam:1245620", "io.github.ravenor907.TurbineModManager");
+    let marker = shortcuts::coop_marker("steam:1245620");
+    shortcuts::add_shortcut(&sc, &tile, &marker, false).unwrap();
+    steam_setup::write_launch_options(&local, "1245620", &line(), false).unwrap();
+    steam_setup::note_change(&data, SteamChange::Tile { file: sc.clone(), marker: marker.clone() }).unwrap();
+    steam_setup::note_change(&data, SteamChange::Options { file: local.clone(), app_id: "1245620".into(), value: line() }).unwrap();
+    assert_eq!(steam_setup::pending(&data).len(), 2);
+    // Steam was in fact running and wrote its own copies back over both.
+    let before_tile = fs::read(shortcuts::backup_file(&sc)).ok();
+    match before_tile {
+        Some(b) => fs::write(&sc, b).unwrap(),
+        None => fs::remove_file(&sc).unwrap(),
+    }
+    fs::write(&local, CONFIG).unwrap();
+    let (held, lost) = steam_setup::check_after_restart(&data);
+    assert!(held.is_empty());
+    assert_eq!(lost.len(), 2, "both to make again");
+    assert_eq!(steam_setup::pending(&data).len(), 2, "still waiting");
+    // Made again while Steam was closed: both hold, and the list empties.
+    shortcuts::add_shortcut(&sc, &tile, &marker, false).unwrap();
+    steam_setup::write_launch_options(&local, "1245620", &line(), false).unwrap();
+    let (held, lost) = steam_setup::check_after_restart(&data);
+    assert_eq!((held.len(), lost.len()), (2, 0));
+    assert!(steam_setup::pending(&data).is_empty());
+    assert!(!steam_setup::pending_file(&data).exists());
+    // A removal noted later replaces the add for the same tile.
+    steam_setup::note_change(&data, SteamChange::Tile { file: sc.clone(), marker: marker.clone() }).unwrap();
+    shortcuts::remove_shortcut(&sc, &marker, false).unwrap();
+    steam_setup::note_change(&data, SteamChange::NoTile { file: sc.clone(), marker: marker.clone() }).unwrap();
+    assert_eq!(steam_setup::pending(&data).len(), 1);
+    let (held, _) = steam_setup::check_after_restart(&data);
+    assert_eq!(held, vec![SteamChange::NoTile { file: sc, marker }]);
+    let _ = fs::remove_dir_all(&d);
+}

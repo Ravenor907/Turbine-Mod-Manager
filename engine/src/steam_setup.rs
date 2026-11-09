@@ -277,3 +277,113 @@ pub fn write_launch_options(file: &Path, app_id: &str, value: &str, steam_runnin
     fs::rename(&tmp, file).map_err(|e| e.to_string())?;
     Ok(was)
 }
+
+// ---- Changes waiting for Steam to start again ----
+//
+// Steam reads shortcuts.vdf and localconfig.vdf when it starts and writes its own copy back when it closes. A change
+// Turbine made while Steam was closed shows once Steam starts; one made while Steam was in fact running (the app's
+// check missed it) is lost when Steam closes. So each change is noted here, checked once Steam has started again,
+// and made again (while Steam is closed) when it didn't hold.
+
+/// One change Turbine made to Steam's files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SteamChange {
+    /// A tile added (shortcuts.vdf, by its marker).
+    Tile { file: PathBuf, marker: String },
+    /// A tile removed.
+    NoTile { file: PathBuf, marker: String },
+    /// A game's Launch Options set (localconfig.vdf).
+    Options { file: PathBuf, app_id: String, value: String },
+}
+
+impl SteamChange {
+    fn to_json(&self) -> String {
+        use crate::json::quote;
+        match self {
+            SteamChange::Tile { file, marker } => format!("{{\"kind\":\"tile\",\"file\":{},\"marker\":{}}}", quote(&file.to_string_lossy()), quote(marker)),
+            SteamChange::NoTile { file, marker } => format!("{{\"kind\":\"notile\",\"file\":{},\"marker\":{}}}", quote(&file.to_string_lossy()), quote(marker)),
+            SteamChange::Options { file, app_id, value } => format!(
+                "{{\"kind\":\"options\",\"file\":{},\"app\":{},\"value\":{}}}",
+                quote(&file.to_string_lossy()),
+                quote(app_id),
+                quote(value)
+            ),
+        }
+    }
+
+    fn from_json(v: &crate::json::Json) -> Option<SteamChange> {
+        let file = PathBuf::from(v.str_at("file")?);
+        Some(match v.str_at("kind")? {
+            "tile" => SteamChange::Tile { file, marker: v.str_at("marker")?.to_string() },
+            "notile" => SteamChange::NoTile { file, marker: v.str_at("marker")?.to_string() },
+            "options" => SteamChange::Options { file, app_id: v.str_at("app")?.to_string(), value: v.str_at("value")?.to_string() },
+            _ => return None,
+        })
+    }
+
+    /// Does Steam's file hold this change now?
+    pub fn holds(&self) -> bool {
+        match self {
+            SteamChange::Tile { file, marker } | SteamChange::NoTile { file, marker } => {
+                let there = fs::read(file).ok().and_then(|b| crate::shortcuts::parse(&b).ok()).is_some_and(|l| {
+                    l.iter().any(|s| crate::shortcuts::is_turbine(s) && s.launch_options.contains(marker.as_str()))
+                });
+                there == matches!(self, SteamChange::Tile { .. })
+            }
+            SteamChange::Options { file, app_id, value } => {
+                fs::read_to_string(file).ok().and_then(|t| crate::steam::launch_options_in(&t, app_id)).as_deref() == Some(value.as_str())
+            }
+        }
+    }
+}
+
+/// Turbine's list of changes waiting to be checked after Steam starts again.
+pub fn pending_file(data: &Path) -> PathBuf {
+    data.join("steam-setup").join("pending.json")
+}
+
+/// The changes waiting to be checked.
+pub fn pending(data: &Path) -> Vec<SteamChange> {
+    let Ok(t) = fs::read_to_string(pending_file(data)) else { return Vec::new() };
+    let Ok(v) = crate::json::parse(&t) else { return Vec::new() };
+    v.get("changes").map(crate::json::Json::as_array).unwrap_or(&[]).iter().filter_map(SteamChange::from_json).collect()
+}
+
+fn save_pending(data: &Path, list: &[SteamChange]) -> std::io::Result<()> {
+    let f = pending_file(data);
+    if list.is_empty() {
+        return match fs::remove_file(&f) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        };
+    }
+    fs::create_dir_all(f.parent().unwrap_or(data))?;
+    let items: Vec<String> = list.iter().map(SteamChange::to_json).collect();
+    let tmp = f.with_extension("tmp");
+    fs::write(&tmp, format!("{{\"changes\":[{}]}}\n", items.join(",")))?;
+    fs::rename(tmp, f)
+}
+
+/// Notes a change just made (a later one for the same tile or game replaces an earlier one).
+pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
+    let same = |a: &SteamChange, b: &SteamChange| match (a, b) {
+        (SteamChange::Tile { file: f1, marker: m1 } | SteamChange::NoTile { file: f1, marker: m1 }, SteamChange::Tile { file: f2, marker: m2 } | SteamChange::NoTile { file: f2, marker: m2 }) => {
+            f1 == f2 && m1 == m2
+        }
+        (SteamChange::Options { file: f1, app_id: a1, .. }, SteamChange::Options { file: f2, app_id: a2, .. }) => f1 == f2 && a1 == a2,
+        _ => false,
+    };
+    let mut list = pending(data);
+    list.retain(|c| !same(c, &change));
+    list.push(change);
+    save_pending(data, &list)
+}
+
+/// After Steam started again (`steam_started_since` from the app: Steam's start is newer than the change): the
+/// changes that held are done and leave the list; the ones that didn't are answered so the app makes them again
+/// the next time Steam is closed (and tells the player). Answers (held, lost).
+pub fn check_after_restart(data: &Path) -> (Vec<SteamChange>, Vec<SteamChange>) {
+    let (held, lost): (Vec<SteamChange>, Vec<SteamChange>) = pending(data).into_iter().partition(SteamChange::holds);
+    let _ = save_pending(data, &lost);
+    (held, lost)
+}
