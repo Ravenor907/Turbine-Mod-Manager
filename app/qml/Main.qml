@@ -4609,7 +4609,7 @@ Window {
                     addIndex = Math.max(0, addList.findIndex(d => d.name.indexOf("Brighter Lanterns") === 0)); check("Journey add: sheet add, " + addList.length + " files, A " + (binds().a ? binds().a.label : "")); pad("a") },
             () => { if (mods.length < 1 || page === "place") return false
                     check("Journey added: " + mods.map(x => x.name + (x.enabled ? " on" : " off")).join(", ") + ", sheet " + (sheet || "none")); pad("start") },
-            () => { if (sheet === "check") { const o = binds(); check("Journey Before you play: A " + (o.a ? o.a.label : "")); if (checks.some(c => c.level === "stop")) return; act("right"); pad("a"); return false }
+            () => { if (sheet === "check") { const o = binds(); check("Journey Before you play: A " + (o.a ? o.a.label : "") + " | " + checks.map(c => c.level + " " + c.title).join("; ")); if (checks.some(c => c.level === "stop")) return; act("right"); pad("a"); return false }
                     if (playAt === m.played) return false
                     check("Journey played: Play started " + game.name + " with " + mods.filter(x => x.enabled).length + " mods on") },
             () => { sheet = ""; zone = "main"; tab = 0; modIndex = Math.max(0, listItems.findIndex(x => x.kind === "mod")); m.on = focusedItem && focusedItem.m ? focusedItem.m.enabled : null; pad("a") },

@@ -908,6 +908,8 @@ for size in $SIZES; do
   need "passthrough-$size" "No click goes through a pop-up ($size)" "Pass-through \([0-9]+x[0-9]+\): [1-9][0-9]* clicks, 0 problems"
   if ran "passthrough-$size"; then grep -h "Pass-through, .*PROBLEM" "$PWD/data/passthrough-$size/turbine-mod-manager/activity.log" | head -n 5 | sed 's/^/::error title=Pass-through::/' || true; fi
   rm -rf "$PWD/fh/golden-$size"; python3 tools/fake-home.py "$PWD/fh/golden-$size" > /dev/null; h="$PWD/fh/golden-$size"
+  # A clean game for the journey: without the fixture whose master is missing on purpose (other pictures test that).
+  find "$h" -name "Lantern Paths.esp" -delete; find "$h" -name plugins.txt -exec sed -i '/Lantern Paths/d' {} +
   shoot "golden-$size" "$size" golden "$h" --game=$skyrim
   need "golden-$size" "Journey: X on an empty game opens Add from Downloads ($size)" "Journey add: sheet add, [1-9][0-9]* files, A Add"
   need "golden-$size" "Journey: A adds the mod, on ($size)" "Journey added: Brighter Lanterns[^,]* on"
