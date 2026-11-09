@@ -7975,7 +7975,8 @@ Window {
         readonly property bool wheelWord: !app.barGame || barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
         Rectangle {
             id: playBtn
-            visible: app.barGame
+            // A sheet whose own Start button is in the legend ("START Play with mods, offline"): Play steps aside.
+            visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
             anchors.right: parent.right
             anchors.rightMargin: app.px(14)
             anchors.verticalCenter: parent.verticalCenter
