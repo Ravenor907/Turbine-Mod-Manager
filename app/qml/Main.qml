@@ -5335,6 +5335,7 @@ Window {
         if (webDls.some(x => x.state === "done")) return { text: "Adding...", level: "busy", progress: -1 }
         const n = browserNoteNow
         if (n) return { text: n.text, level: n.level, progress: -1 }
+        if (signinWaitSince > 0 && signinWaitText !== "") return { text: signinWaitText, level: "busy", progress: -1 }
         const stopped = webDls.filter(x => x.state === "interrupted")
         if (stopped.length > 0) return { text: stopped[stopped.length - 1].server ? "Press Slow download on the page again" : stopped[stopped.length - 1].name + " stopped. Downloads: Try again", level: "warn", progress: -1 }
         if (browserIsFilePage && account.premium !== true)
@@ -5537,10 +5538,23 @@ Window {
         browserSay(t, "warn")
         toast.showPlain(t)
     }
+    // Waiting for the sign-in from the player's browser: the pill keeps saying so (until it comes, fails, or the
+    // helper's 15 minutes are over; then it says how to try again).
+    property double signinWaitSince: 0
+    property string signinWaitText: ""
+    Timer {
+        interval: 5000; repeat: true; running: app.signinWaitSince > 0
+        onTriggered: if (Date.now() - app.signinWaitSince > 15 * 60 * 1000) {
+            app.signinWaitSince = 0
+            app.note("browser", "Sign in with my browser: nothing came back within 15 minutes")
+            app.browserSay("The sign-in didn't come back from the browser in 15 minutes. Press Google sign-in to try again.", "warn")
+        }
+    }
     function signinStart() {
         const r = parse(Turbine.signinStart(), { how: "error", text: "Turbine couldn't start the sign-in." })
         note("browser", "Sign in with my browser: " + r.how)
         if (r.how === "nohelper" || r.how === "error") { browserSay(r.text, "warn"); toast.showPlain(r.text); return }
+        if (r.how === "desktop" || r.how === "shortcut") { signinWaitSince = Date.now(); signinWaitText = r.text }
         browserSay(r.text, r.how === "steam" ? "warn" : "hint")
         if (shot.on) return
         if (r.how === "desktop") Qt.openUrlExternally(r.url)
@@ -5548,7 +5562,18 @@ Window {
     }
     Connections {
         target: Turbine
+        function onWebSigninNote(text, level) {
+            if (level === "wait") {
+                if (app.signinWaitSince > 0) { app.signinWaitText = text; app.browserSay(text, "hint") }
+                return
+            }
+            if (level === "warn") app.signinWaitSince = 0
+            app.browserSay(text, level === "ok" ? "ok" : "warn")
+            if (level === "ok") toast.done(text)
+            else toast.problem(text)
+        }
         function onWebSignedIn(text, back) {
+            app.signinWaitSince = 0
             app.note("browser", text)
             if (app.nexusView) app.nexusView.reload()
             app.browserSay(text, "ok")

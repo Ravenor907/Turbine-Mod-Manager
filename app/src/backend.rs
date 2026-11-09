@@ -808,6 +808,12 @@ pub mod qobject {
         #[cxx_name = "webSignedIn"]
         fn web_signed_in(self: Pin<&mut Self>, text: QString, back: QString);
 
+        /// The sign-in from the player's own browser: where it is or what went wrong ("wait", "ok" or "warn"), for
+        /// the pill and a toast. Never carries a cookie or key.
+        #[qsignal]
+        #[cxx_name = "webSigninNote"]
+        fn web_signin_note(self: Pin<&mut Self>, text: QString, level: QString);
+
         /// Pages to open in the browser (free accounts): title, then JSON [{"name","url"}].
         #[qsignal]
         fn pages(self: Pin<&mut Self>, title: QString, json: QString);

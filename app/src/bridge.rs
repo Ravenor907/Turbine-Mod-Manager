@@ -1021,11 +1021,11 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
                     log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
                 }
             }
-            if let Some(id) = signin_waiting(Instant::now()) {
+            if let Some(m) = signin_waiting_message(Instant::now()) {
                 if version_older(&hv, SIGNIN_SINCE) {
                     log(&format!("Didn't ask helper {hv} for the sign-in: it is too old to know how (it needs {SIGNIN_SINCE})"));
                 } else {
-                    let sent = send(&out, OP_TEXT, signin_request_message(&id).as_bytes());
+                    let sent = send(&out, OP_TEXT, m.as_bytes());
                     log(&format!("Asked the helper for the Nexus sign-in{}", if sent { "" } else { " (it didn't take it)" }));
                 }
             }
@@ -1063,6 +1063,14 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
 // its own browser's profile. Nothing is taken without that request: a message with no request waiting, another id,
 // or an old one (SIGNIN_WAIT) is refused whole. Cookies for any other site are dropped one by one. Cookie values are
 // never logged or written anywhere but the browser's own cookie store.
+//
+// 0.59: the helper shows its own page for the request ("Turbine is waiting for you to sign in to Nexus Mods"), sees
+// the sign-in by Nexus's sign-in cookie itself (already signed in counts), and says where it is with
+// {"type":"signin.status","id","step"} (a fixed word, for the activity log). The request carries "steam":true in Game
+// Mode, so the page says how to get back to Turbine there. After Turbine took the sign-in, the player may also give
+// Turbine his Personal API Key: the helper reads it from Nexus's API Keys page on his press and sends
+// {"type":"signin.key","id","key"} for the same request (still within SIGNIN_WAIT); Turbine checks it with Nexus,
+// keeps it like a pasted key, and answers {"type":"signin.keydone","id","ok","text"}. The key is never logged.
 
 /// Nexus's sign-in page.
 pub const SIGNIN_URL: &str = "https://users.nexusmods.com/auth/sign_in";
@@ -1091,8 +1099,15 @@ pub struct SigninCookie {
     pub expires: f64,
 }
 
-/// The waiting request: its id and when it was made.
-static SIGNIN: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+/// The sign-in request: its id, when it was made, whether it is for Game Mode, and whether Turbine already took the
+/// sign-in (then only the API key may still come for it).
+struct Signin {
+    id: String,
+    at: Instant,
+    steam: bool,
+    taken: bool,
+}
+static SIGNIN: Mutex<Option<Signin>> = Mutex::new(None);
 
 /// A cookie's domain as Chrome reports it (".nexusmods.com", "users.nexusmods.com") when it is Nexus's own: the
 /// host in lower case with no leading dot. None for every other site, look-alikes included.
@@ -1128,9 +1143,9 @@ pub fn signin_id_ok(id: &str) -> bool {
     id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// {"type":"signin.request","id":...,"url":...}
-pub fn signin_request_message(id: &str) -> String {
-    format!("{{\"type\":\"signin.request\",\"id\":{},\"url\":{}}}", quote(id), quote(SIGNIN_URL))
+/// {"type":"signin.request","id":...,"url":...,"steam":...}
+pub fn signin_request_message(id: &str, steam: bool) -> String {
+    format!("{{\"type\":\"signin.request\",\"id\":{},\"url\":{},\"steam\":{steam}}}", quote(id), quote(SIGNIN_URL))
 }
 
 /// {"type":"signin.done","id":...,"ok":...,"text":...}: what the helper's panel says afterwards.
@@ -1138,26 +1153,92 @@ pub fn signin_done_message(id: &str, ok: bool, text: &str) -> String {
     format!("{{\"type\":\"signin.done\",\"id\":{},\"ok\":{ok},\"text\":{}}}", quote(id), quote(text))
 }
 
+/// {"type":"signin.keydone","id":...,"ok":...,"text":...}: Turbine checked the API key the helper read for it.
+pub fn signin_keydone_message(id: &str, ok: bool, text: &str) -> String {
+    format!("{{\"type\":\"signin.keydone\",\"id\":{},\"ok\":{ok},\"text\":{}}}", quote(id), quote(text))
+}
+
 /// The player pressed "Sign in with my browser": a new request (any older one is dropped), sent to the helper now
-/// when it is connected, otherwise right after it connects (within SIGNIN_WAIT). Returns the id.
-pub fn signin_request() -> Result<String, String> {
+/// when it is connected, otherwise right after it connects (within SIGNIN_WAIT). `steam`: Game Mode. Returns the id.
+pub fn signin_request_for(steam: bool) -> Result<String, String> {
     let id = new_token().map_err(|e| format!("no random numbers ({e})"))?[..32].to_string();
-    *SIGNIN.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.clone(), Instant::now()));
+    *SIGNIN.lock().unwrap_or_else(|e| e.into_inner()) = Some(Signin { id: id.clone(), at: Instant::now(), steam, taken: false });
     if connected() {
-        broadcast(&signin_request_message(&id));
+        broadcast(&signin_request_message(&id, steam));
     }
     Ok(id)
 }
 
-/// The waiting request's id, when there is one that is still good.
-pub fn signin_waiting(now: Instant) -> Option<String> {
-    let g = SIGNIN.lock().unwrap_or_else(|e| e.into_inner());
-    g.as_ref().filter(|(_, at)| now.saturating_duration_since(*at) <= SIGNIN_WAIT).map(|(id, _)| id.clone())
+/// The same, for the desktop.
+pub fn signin_request() -> Result<String, String> {
+    signin_request_for(false)
 }
 
-/// Ends the waiting request (signed in, or the player signed out).
+/// The waiting request's id, when there is one that is still good and its sign-in wasn't taken yet.
+pub fn signin_waiting(now: Instant) -> Option<String> {
+    let g = SIGNIN.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().filter(|s| !s.taken && now.saturating_duration_since(s.at) <= SIGNIN_WAIT).map(|s| s.id.clone())
+}
+
+/// The waiting request's message for a helper that just connected (Game Mode or not, as it was made).
+fn signin_waiting_message(now: Instant) -> Option<String> {
+    let g = SIGNIN.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().filter(|s| !s.taken && now.saturating_duration_since(s.at) <= SIGNIN_WAIT).map(|s| signin_request_message(&s.id, s.steam))
+}
+
+/// The request an API key may still come for: the latest one, taken or not, within SIGNIN_WAIT.
+pub fn signin_key_waiting(now: Instant) -> Option<String> {
+    let g = SIGNIN.lock().unwrap_or_else(|e| e.into_inner());
+    g.as_ref().filter(|s| now.saturating_duration_since(s.at) <= SIGNIN_WAIT).map(|s| s.id.clone())
+}
+
+/// Turbine took the sign-in: no more cookies for this request, but the player may still give his API key for it.
+pub fn signin_taken() {
+    if let Some(s) = SIGNIN.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        s.taken = true;
+    }
+}
+
+/// Ends the request altogether (the player signed out).
 pub fn signin_end() {
     *SIGNIN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Checks a signin.key message against the request a key may come for (`want`). Answers the key (trimmed), or why
+/// it is refused. The key itself is never in the error.
+pub fn signin_key(msg: &Json, want: Option<&str>) -> Result<String, String> {
+    if msg.str_at("type") != Some("signin.key") {
+        return Err("not an API key answer".into());
+    }
+    let Some(want) = want else { return Err("Turbine didn't ask for a sign-in (or the request is over 15 minutes old)".into()) };
+    let id = msg.str_at("id").unwrap_or("");
+    if !signin_id_ok(id) || !same_token(id, want) {
+        return Err("the API key is for another request".into());
+    }
+    let key = msg.str_at("key").unwrap_or("").trim();
+    if !turbine_engine::nexus::plausible_key(key) || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b"+/=_.-".contains(&b)) {
+        return Err("what came isn't shaped like an API key".into());
+    }
+    Ok(key.to_string())
+}
+
+/// What a signin.status message means, for the activity log (None for a step this Turbine doesn't know).
+pub fn signin_status_line(msg: &Json, want: Option<&str>) -> Option<&'static str> {
+    let id = msg.str_at("id")?;
+    if !want.is_some_and(|w| signin_id_ok(id) && same_token(id, w)) {
+        return None;
+    }
+    Some(match msg.str_at("step")? {
+        "page" => "The browser shows Turbine's sign-in page (Turbine is waiting for you to sign in to Nexus Mods)",
+        "waiting" => "The player went to Nexus's sign-in page in the browser",
+        "signedin" => "The browser is signed in to Nexus: the helper sends the sign-in",
+        "sending" => "The helper sent Nexus's sign-in",
+        "nocookies" => "The browser had no Nexus sign-in to send yet",
+        "keypage" => "The player asked to give Turbine the API key: the browser opens Nexus's API Keys page",
+        "keymissing" => "The helper couldn't find the Personal API Key on Nexus's API Keys page",
+        "keysent" => "The helper sent the Personal API Key (not logged)",
+        _ => return None,
+    })
 }
 
 /// Checks a signin.cookies message against the waiting request `want` (None: no request waits). Answers the
@@ -1906,12 +1987,51 @@ mod tests {
         assert!(signin_id_ok(ID));
         assert!(!signin_id_ok(&ID.to_uppercase()));
         assert!(!signin_id_ok(&ID[..31]));
-        let m = json::parse(&signin_request_message(ID)).unwrap();
+        let m = json::parse(&signin_request_message(ID, false)).unwrap();
         assert_eq!(m.str_at("type"), Some("signin.request"));
         assert_eq!(m.str_at("url"), Some("https://users.nexusmods.com/auth/sign_in"));
+        assert_eq!(m.get("steam").and_then(Json::as_bool), Some(false));
+        let g = json::parse(&signin_request_message(ID, true)).unwrap();
+        assert_eq!(g.get("steam").and_then(Json::as_bool), Some(true));
         let d = json::parse(&signin_done_message(ID, true, "Signed in")).unwrap();
         assert_eq!(d.str_at("type"), Some("signin.done"));
         assert_eq!(d.get("ok").and_then(Json::as_bool), Some(true));
+        let k = json::parse(&signin_keydone_message(ID, false, "Nexus didn't accept \"it\"")).unwrap();
+        assert_eq!(k.str_at("type"), Some("signin.keydone"));
+        assert_eq!(k.get("ok").and_then(Json::as_bool), Some(false));
+        assert_eq!(k.str_at("text"), Some("Nexus didn't accept \"it\""));
+    }
+
+    const KEY: &str = "QWxhZGRpbjpvcGVuIHNlc2FtZQ==--c2Vzc2lvbktleTEyMw==--a1b2c3d4e5f6";
+
+    fn key_with(id: &str, key: &str) -> Json {
+        json::parse(&format!("{{\"type\":\"signin.key\",\"id\":{},\"key\":{}}}", quote(id), quote(key))).unwrap()
+    }
+
+    #[test]
+    fn an_api_key_needs_the_request_and_a_key_shape() {
+        assert_eq!(signin_key(&key_with(ID, KEY), Some(ID)).as_deref(), Ok(KEY));
+        assert_eq!(signin_key(&key_with(ID, &format!("  {KEY} ")), Some(ID)).as_deref(), Ok(KEY), "trimmed");
+        assert!(signin_key(&key_with(ID, KEY), None).is_err(), "no request");
+        assert!(signin_key(&key_with(ID, KEY), Some("ffffffffffffffffffffffffffffffff")).is_err(), "another request");
+        for bad in ["", "short", "has a space in it 0123456789", "quote\"0123456789abcdefghij", "<script>0123456789abcdefgh", &"a1".repeat(600)] {
+            let e = signin_key(&key_with(ID, bad), Some(ID)).unwrap_err();
+            assert!(!e.contains(bad) || bad.is_empty(), "the key is never in the error");
+        }
+        let wrong = json::parse(&format!("{{\"type\":\"signin.cookies\",\"id\":{},\"key\":{}}}", quote(ID), quote(KEY))).unwrap();
+        assert!(signin_key(&wrong, Some(ID)).is_err());
+        let e = signin_key(&key_with(ID, KEY), Some("ffffffffffffffffffffffffffffffff")).unwrap_err();
+        assert!(!e.contains(KEY));
+    }
+
+    #[test]
+    fn status_steps_are_words_for_the_log() {
+        let st = |id: &str, step: &str| json::parse(&format!("{{\"type\":\"signin.status\",\"id\":{},\"step\":{}}}", quote(id), quote(step))).unwrap();
+        assert!(signin_status_line(&st(ID, "page"), Some(ID)).unwrap().contains("Turbine's sign-in page"));
+        assert!(signin_status_line(&st(ID, "keysent"), Some(ID)).unwrap().contains("not logged"));
+        assert_eq!(signin_status_line(&st(ID, "anything else"), Some(ID)), None);
+        assert_eq!(signin_status_line(&st(ID, "page"), None), None, "no request");
+        assert_eq!(signin_status_line(&st(ID, "page"), Some("ffffffffffffffffffffffffffffffff")), None, "another request");
     }
 
     #[test]
@@ -1939,6 +2059,23 @@ mod tests {
         assert_eq!(signin_waiting(Instant::now() + SIGNIN_WAIT + Duration::from_secs(1)), None);
         signin_end();
         assert_eq!(signin_waiting(Instant::now()), None);
+        assert_eq!(signin_key_waiting(Instant::now()), None);
+
+        // Taken: no more cookies for it, but the API key may still come for the same request, within the wait.
+        let id = signin_request_for(true).unwrap();
+        assert!(signin_waiting_message(Instant::now()).unwrap().contains("\"steam\":true"));
+        signin_taken();
+        assert_eq!(signin_waiting(Instant::now()), None);
+        assert_eq!(signin_waiting_message(Instant::now()), None, "a reconnecting helper isn't asked again");
+        assert_eq!(signin_key_waiting(Instant::now()).as_deref(), Some(id.as_str()));
+        assert_eq!(signin_key_waiting(Instant::now() + SIGNIN_WAIT + Duration::from_secs(1)), None);
+        // A new press starts over: a new id, waiting again, the old one gone.
+        let again = signin_request().unwrap();
+        assert_ne!(again, id);
+        assert_eq!(signin_waiting(Instant::now()).as_deref(), Some(again.as_str()));
+        assert_eq!(signin_key_waiting(Instant::now()).as_deref(), Some(again.as_str()));
+        signin_end();
+        assert_eq!(signin_key_waiting(Instant::now()), None);
     }
 
 }

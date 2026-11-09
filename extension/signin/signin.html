@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbine: sign in to Nexus Mods</title>
+<link rel="stylesheet" href="signin.css">
+</head>
+<body>
+<main>
+  <header><img src="../icons/icon48.png" alt="" width="48" height="48"><span class="brand">Turbine</span></header>
+  <div id="state" class="state wait" role="status" aria-live="polite">
+    <span class="dot" id="dot"></span>
+    <div>
+      <h1 id="title">Turbine is waiting for you to sign in to Nexus Mods</h1>
+      <p id="text">Connecting to Turbine...</p>
+      <p id="how" class="how"></p>
+    </div>
+  </div>
+  <div class="buttons" id="buttons"></div>
+  <section id="keyBox" class="key" hidden>
+    <h2>Also give Turbine your API key?</h2>
+    <p>With your Personal API Key, Turbine can check your account, find updates, and use Mod Manager Download (Nexus Premium).</p>
+    <p class="muted">If you press the button, this tab opens your Nexus API Keys page, the helper copies the Personal API Key from it, and sends it only to Turbine on this device. Turbine checks it with Nexus and keeps it in a file only you can read. Nothing is copied if you don't press it.</p>
+    <button id="keyGo" type="button" class="ghost">Give Turbine my API key too</button>
+  </section>
+  <p class="muted foot">This page belongs to Turbine's browser helper. It only works with nexusmods.com.</p>
+</main>
+<script src="../lib/protocol.js"></script>
+<script src="signin.js"></script>
+</body>
+</html>

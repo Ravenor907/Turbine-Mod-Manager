@@ -10,6 +10,12 @@
   // Sign-in pass-through: Nexus's own cookies only, at most this many, at most this long.
   const SIGNIN_URL = "https://users.nexusmods.com/auth/sign_in";
   const MAX_COOKIES = 80;
+  // Nexus's sign-in cookies (by name, the same list Turbine's own browser watches): any one of them means signed in.
+  const SIGNIN_COOKIE_NAMES = ["nexusmods_session", "nexusmods_session_refresh", "sid_develop", "member_id"];
+  // Where the Personal API Key is (Site preferences, API Keys; the key is at the bottom of the page).
+  const KEY_PAGE_URL = "https://www.nexusmods.com/settings/api-keys";
+  // What the helper tells Turbine about a sign-in while it runs (words only, never a value).
+  const SIGNIN_STEPS = ["page", "waiting", "signedin", "sending", "nocookies", "keypage", "keymissing", "keysent"];
   const KINDS = ["one", "any", "atleastone", "atmostone", "all"];
   const STATES = ["selected", "available", "required", "disabled"];
 
@@ -114,6 +120,36 @@
         sameSite: ["no_restriction", "lax", "strict", "unspecified"].includes(c.sameSite) ? c.sameSite : "unspecified",
         expirationDate: typeof c.expirationDate === "number" && isFinite(c.expirationDate) ? c.expirationDate : null,
       }));
+  }
+
+  // Is this cookie list (chrome.cookies.getAll) signed in to Nexus? One of Nexus's sign-in cookies, with a value.
+  function signedInJar(list) {
+    if (!Array.isArray(list)) return false;
+    return list.some((c) => c && SIGNIN_COOKIE_NAMES.includes(c.name) && typeof c.value === "string" && c.value !== "" && isNexusCookieDomain(c.domain));
+  }
+
+  // Nexus's sign-in page (where the helper would take the player anyway).
+  function isSigninPage(text) {
+    const u = parseUrl(text);
+    return !!u && u.protocol === "https:" && u.hostname.toLowerCase() === "users.nexusmods.com" && /^\/auth\/sign_in\/?$/.test(u.pathname);
+  }
+
+  // The API Keys page: /settings/api-keys on www (or next) nexusmods.com, or the older account page's API tab.
+  function isKeyPage(text) {
+    const u = parseUrl(text);
+    if (!u || u.protocol !== "https:") return false;
+    const host = u.hostname.toLowerCase();
+    if (host !== "www.nexusmods.com" && host !== "next.nexusmods.com" && host !== "nexusmods.com") return false;
+    if (/^\/settings\/api-keys\/?$/.test(u.pathname)) return true;
+    return /^\/users\/myaccount\/?$/.test(u.pathname) && /^api/i.test(u.searchParams.get("tab") || "");
+  }
+
+  // Looks like a Nexus API key: the same test as Turbine's (20 to 1024 printable characters, no spaces), and only
+  // the characters keys are made of (letters, digits, + / = - _ .), with some letters and some digits.
+  function plausibleKey(text) {
+    if (typeof text !== "string") return false;
+    const k = text.trim();
+    return k.length >= 20 && k.length <= 1024 && /^[A-Za-z0-9+/=_.-]+$/.test(k) && /[A-Za-z]/.test(k) && /[0-9]/.test(k);
   }
 
   function isToken(text) {
@@ -233,10 +269,14 @@
       // The player pressed "Sign in with my browser" in Turbine: send Nexus's sign-in once he has signed in here.
       case "signin.request":
         if (!isSigninId(msg.id)) return null;
-        return { type: "signin.request", id: msg.id, url: isNexusTabUrl(msg.url) || SIGNIN_URL };
+        return { type: "signin.request", id: msg.id, url: isNexusTabUrl(msg.url) || SIGNIN_URL, steam: msg.steam === true };
       case "signin.done":
         if (!isSigninId(msg.id)) return null;
         return { type: "signin.done", id: msg.id, ok: msg.ok === true, text: str(msg.text, 300) || "" };
+      // Turbine checked the API key the helper read for it (with Nexus) and kept it, or says why not.
+      case "signin.keydone":
+        if (!isSigninId(msg.id)) return null;
+        return { type: "signin.keydone", id: msg.id, ok: msg.ok === true, text: str(msg.text, 300) || "" };
       default:
         return null;
     }
@@ -276,6 +316,10 @@
     choiceCancel: (sessionId) => ({ type: "choice.cancel", sessionId }),
     // Only for a request Turbine made, and only Nexus's own cookies.
     signinCookies: (id, cookies) => (isSigninId(id) ? { type: "signin.cookies", id, cookies: nexusCookies(cookies) } : null),
+    // Where the sign-in is, for Turbine's activity log (a fixed word, nothing from the page).
+    signinStatus: (id, step) => (isSigninId(id) && SIGNIN_STEPS.includes(step) ? { type: "signin.status", id, step } : null),
+    // The Personal API Key the player chose to give Turbine, read from the API Keys page.
+    signinKey: (id, key) => (isSigninId(id) && plausibleKey(key) ? { type: "signin.key", id, key: key.trim() } : null),
   };
 
   const api = {
@@ -291,6 +335,13 @@
     isNexusCookieDomain,
     nexusCookies,
     SIGNIN_URL,
+    SIGNIN_COOKIE_NAMES,
+    KEY_PAGE_URL,
+    SIGNIN_STEPS,
+    signedInJar,
+    isSigninPage,
+    isKeyPage,
+    plausibleKey,
     isToken,
     isPort,
     parsePairingUrl,

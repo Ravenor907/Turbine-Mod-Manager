@@ -508,7 +508,7 @@ impl qobject::Turbine {
             crate::log::line("web", "Sign in with my browser: the browser helper isn't set up");
             return out("nohelper", url, "", NO_HELPER);
         }
-        match crate::bridge::signin_request() {
+        match crate::bridge::signin_request_for(*self.gamemode()) {
             Ok(_) => crate::log::line(
                 "web",
                 &format!("Sign in with my browser: asked the helper for Nexus's sign-in{}", if crate::bridge::connected() { "" } else { " (sent when it connects, within 15 minutes)" }),
@@ -546,6 +546,10 @@ impl qobject::Turbine {
                 if crate::bridge::signin_id_ok(&id) {
                     crate::bridge::broadcast(&crate::bridge::signin_done_message(&id, false, "Turbine didn't take this sign-in. Press Sign in with my browser in Turbine again."));
                 }
+                // Only for the request that is waiting (an old tab answering late says nothing in Turbine).
+                if want.as_deref().is_some_and(|w| crate::bridge::same_token(&id, w)) {
+                    self.as_mut().web_signin_note(QString::from(SIGNIN_REFUSED), QString::from("warn"));
+                }
                 return;
             }
         };
@@ -570,10 +574,12 @@ impl qobject::Turbine {
             &format!("Sign-in from the browser: {taken} Nexus cookie(s) put into Turbine's browser ({}){}", names.join(", "), if dropped > 0 { format!("; {dropped} for other sites or unreadable, dropped") } else { String::new() }),
         );
         if taken == 0 {
-            crate::bridge::broadcast(&crate::bridge::signin_done_message(&id, false, "Your browser had no Nexus sign-in to send. Sign in on Nexus there first."));
+            crate::bridge::broadcast(&crate::bridge::signin_done_message(&id, false, "Turbine couldn't use this sign-in. Sign in on Nexus here again, then press Try again."));
+            self.as_mut().web_signin_note(QString::from(SIGNIN_UNUSABLE), QString::from("warn"));
             return;
         }
-        crate::bridge::signin_end();
+        // No more cookies for this request; the API key may still come for it (the player's choice on the page).
+        crate::bridge::signin_taken();
         set_signed_in(true);
         let who = crate::bridge::signin_name(&cookies);
         let text = match &who {
@@ -584,6 +590,39 @@ impl qobject::Turbine {
         crate::bridge::broadcast(&crate::bridge::signin_done_message(&id, true, "Turbine has your Nexus sign-in. Go back to Turbine."));
         let back = self.come_back_link();
         self.as_mut().web_signed_in(QString::from(text.as_str()), QString::from(back.as_str()));
+    }
+
+    /// Where the sign-in is in the player's browser (signin.status): one line in the activity log, and the pill says
+    /// the page is up.
+    pub(crate) fn signin_status(mut self: Pin<&mut Self>, msg: &Json) {
+        let want = crate::bridge::signin_key_waiting(Instant::now());
+        let Some(line) = crate::bridge::signin_status_line(msg, want.as_deref()) else { return };
+        crate::log::line("web", &format!("Sign in with my browser: {line}"));
+        if msg.str_at("step") == Some("page") && crate::bridge::signin_waiting(Instant::now()).is_some() {
+            self.as_mut().web_signin_note(QString::from(SIGNIN_PAGE_UP), QString::from("wait"));
+        }
+    }
+
+    /// The Personal API Key the helper read on the player's press (signin.key): checked against the request here,
+    /// then with Nexus on the download lane (actions.rs), and kept like a pasted key. Never logged.
+    pub(crate) fn signin_key(self: Pin<&mut Self>, msg: &Json) {
+        let want = crate::bridge::signin_key_waiting(Instant::now());
+        let id = msg.str_at("id").unwrap_or("").to_string();
+        if let Some(k) = msg.str_at("key") {
+            crate::log::secret(k);
+        }
+        match crate::bridge::signin_key(msg, want.as_deref()) {
+            Ok(key) => {
+                crate::log::line("web", "API key from the browser helper: checking it with Nexus");
+                self.signin_key_check(id, key);
+            }
+            Err(e) => {
+                crate::log::line("web", &format!("API key from the browser refused: {e}"));
+                if crate::bridge::signin_id_ok(&id) {
+                    crate::bridge::broadcast(&crate::bridge::signin_keydone_message(&id, false, "Turbine didn't take this key. Press Sign in with my browser in Turbine again, or paste the key in Turbine (Settings, Accounts)."));
+                }
+            }
+        }
     }
 
     /// How Turbine comes back to the front in Game Mode after the player's browser: steam://rungameid of Turbine
@@ -690,6 +729,13 @@ impl qobject::Turbine {
         QString::from(said.as_str())
     }
 }
+
+/// The browser's sign-in page is up (the helper said so): what the pill says while Turbine waits.
+pub const SIGNIN_PAGE_UP: &str = "Waiting for your Nexus sign-in in the browser. Turbine signs in by itself when you're done.";
+/// The helper's sign-in was refused (an old or broken answer).
+pub const SIGNIN_REFUSED: &str = "Turbine didn't take the sign-in from the browser. Press Google sign-in to try again.";
+/// The helper's sign-in had nothing Turbine's browser could use.
+pub const SIGNIN_UNUSABLE: &str = "The browser's Nexus sign-in couldn't be used here. Press Try again on the browser's Turbine page, or Google sign-in to start over.";
 
 /// What the sign-in button says when the browser helper isn't set up (one line).
 pub const NO_HELPER: &str = "Google sign-in needs Chrome and the browser helper, set up once in Desktop Mode (Settings, Labs, Use Chrome in Game Mode; then Settings, Getting mods, Using your own browser). Email and password sign-in works right here without it.";

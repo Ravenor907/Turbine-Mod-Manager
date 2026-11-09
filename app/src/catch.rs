@@ -1152,6 +1152,9 @@ impl qobject::Turbine {
             }
             // The sign-in from the player's own browser (web.rs checks it against the waiting request).
             "signin.cookies" => self.signin_cookies(msg),
+            // Where the sign-in is in the browser (a word for the log), and the API key the player chose to give.
+            "signin.status" => self.signin_status(msg),
+            "signin.key" => self.signin_key(msg),
             "choice" | "choice.back" | "choice.cancel" => {
                 let session = msg.str_at("sessionId").unwrap_or("").to_string();
                 let step = num_of(msg, "step") as usize;

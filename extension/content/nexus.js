@@ -1,7 +1,10 @@
 // Content script for nexusmods.com: Turbine's own small panel (in a closed shadow root), the page report and nxm links.
 // It never clicks, changes or reads anything on the Nexus page except the URL and the nxm links the player clicks.
 // The URL also tells the helper when the player is back on Nexus after its sign-in page (sign-in pass-through).
-/* global chrome, TurbineProtocol, TurbineChoices */
+// While Turbine waits for the Nexus sign-in, a banner across the top of every Nexus page says so. On the API Keys
+// page, and only after the player pressed "Give Turbine my API key too", it reads the Personal API Key for Turbine
+// (lib/keyfind.js); that is the one thing it reads from a page.
+/* global chrome, TurbineProtocol, TurbineChoices, TurbineKeyFind */
 (function () {
   "use strict";
   if (window.top !== window || window.__turbineHelper) return;
@@ -351,6 +354,14 @@
       if (sk) wantOpen = true;
     }
     if (state.conn === "connected" && lastHref === "") reportPage();
+    // The banner and the key reading work whether the panel is open or not.
+    const g = state.conn === "connected" ? state.signin : null;
+    const bsig = g ? JSON.stringify(g) : "";
+    if (bsig !== bannerSig) {
+      bannerSig = bsig;
+      renderBanner(g);
+    }
+    readKeyWhenAsked(g);
     if (wantOpen && !open) {
       open = true;
       chrome.storage.local.set({ panelOpen: true });
@@ -408,10 +419,86 @@
     secSignin.replaceChildren();
     if (!g) return;
     const box = el("div", "box");
-    box.append(el("h2", "", g.ok ? "Signed in" : "Sign in for Turbine"));
+    box.append(el("h2", "", g.ok ? "Signed in. Go back to Turbine" : "Turbine is waiting for you to sign in to Nexus Mods"));
     box.append(el("div", "", g.text));
-    if (g.pending) box.append(rowOf(button("Send my sign-in to Turbine", "main", () => post({ kind: "signin.send" }))));
+    if (g.back) box.append(el("div", "muted", g.back));
+    if (g.pending && g.phase !== "expired") box.append(rowOf(button("I'm signed in. Send it to Turbine", "main", () => post({ kind: "signin.send" }))));
     secSignin.append(box);
+  }
+
+  // ---------- The sign-in banner across the top ----------
+  const bannerHost = document.createElement("turbine-banner");
+  bannerHost.style.cssText = "all:initial!important;position:fixed!important;z-index:2147483647!important;left:0;right:0;top:0;display:block!important;";
+  const bannerRoot = bannerHost.attachShadow({ mode: "closed" });
+  const bannerCss = document.createElement("style");
+  bannerCss.textContent = `
+    :host { all: initial; }
+    * { box-sizing: border-box; }
+    .ban { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 18px; background: #0B0A08; border-bottom: 3px solid #C99E52;
+      box-shadow: 0 4px 18px rgba(0,0,0,.55); font: 18px/1.35 Barlow, "Segoe UI", Roboto, Ubuntu, Arial, sans-serif; color: #EADFC6; }
+    .ban.ok { border-bottom-color: #7FA35A; } .ban.warn { border-bottom-color: #E0A33A; }
+    .name { font-family: Cinzel, Georgia, serif; font-weight: 700; color: #EDC87A; letter-spacing: .04em; }
+    .words { flex: 1; min-width: 240px; display: flex; flex-direction: column; }
+    .title { font-weight: 700; color: #EDC87A; font-size: 20px; }
+    .sub { color: #CDBE9F; font-size: 16px; }
+    .dot { width: 16px; height: 16px; border-radius: 50%; flex: none; background: #C99E52; }
+    .ok .dot { background: #7FA35A; } .warn .dot { background: #E0A33A; }
+    button { font: inherit; cursor: pointer; min-height: 44px; min-width: 44px; border-radius: 6px; padding: 0 18px; }
+    button:focus-visible { outline: 3px solid #EDC87A; outline-offset: 2px; }
+    .main { background: #C99E52; border: 1px solid #EDC87A; color: #0B0A08; font-weight: 700; }
+    .ghost { background: transparent; border: 1px solid #8C662F; color: #EDC87A; }
+  `;
+  bannerRoot.appendChild(bannerCss);
+  let bannerHidden = "";
+  let bannerSig = "";
+
+  function renderBanner(g) {
+    bannerRoot.querySelectorAll(".ban").forEach((n) => n.remove());
+    const phase = g ? g.phase : "";
+    if (!g || phase === "expired" || bannerHidden === phase) {
+      if (bannerHost.parentNode) bannerHost.parentNode.removeChild(bannerHost);
+      return;
+    }
+    const warn = phase === "failed" || phase === "key-missing" || phase === "key-failed";
+    const ban = el("div", "ban" + (g.ok && !warn ? " ok" : warn ? " warn" : ""));
+    ban.setAttribute("role", "status");
+    const words = el("div", "words");
+    words.append(el("span", "title", g.ok ? "Signed in. Go back to Turbine" : "Turbine is waiting for you to sign in to Nexus Mods"));
+    words.append(el("span", "sub", g.ok ? (phase === "ok" ? g.back : g.text) : g.text));
+    ban.append(el("span", "dot"), el("span", "name", "Turbine"), words);
+    if (g.pending) ban.append(button("I'm signed in. Send it to Turbine", "main", () => post({ kind: "signin.send" })));
+    if (phase === "key-missing" || phase === "key-failed") ban.append(button("Try again", "main", () => post({ kind: "key.start" })));
+    ban.append(button("Hide", "ghost", () => {
+      bannerHidden = phase;
+      renderBanner(g);
+    }));
+    bannerRoot.appendChild(ban);
+    if (!bannerHost.parentNode) document.documentElement.appendChild(bannerHost);
+  }
+
+  // ---------- The Personal API Key, when the player asked for it ----------
+  let keyTry = 0;
+  let keyTimer = null;
+
+  function readKeyWhenAsked(g) {
+    const asked = !!g && g.phase === "key-reading" && P.isKeyPage(location.href);
+    if (!asked) {
+      if (keyTimer) clearTimeout(keyTimer);
+      keyTimer = null;
+      keyTry = 0;
+      return;
+    }
+    if (keyTimer) return;
+    // The page draws its parts after it loads: look once a second, for up to 12 seconds.
+    const look = () => {
+      keyTimer = null;
+      const r = TurbineKeyFind.findPersonalKey(document);
+      keyTry += 1;
+      if (r.key) post({ kind: "key.found", key: r.key });
+      else if (keyTry >= 12) post({ kind: "key.missing", why: r.why });
+      else keyTimer = setTimeout(look, 1000);
+    };
+    keyTimer = setTimeout(look, 600);
   }
 
   function renderStatus() {

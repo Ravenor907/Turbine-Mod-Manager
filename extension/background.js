@@ -2,10 +2,13 @@
 // opens the Nexus page Turbine asks for in a new tab (Game Mode starts the browser through Steam, then sends it),
 // reloads itself when Turbine has put a newer helper in its folder, and (0.55) hands the player's Nexus sign-in to
 // Turbine's own browser when he asked for that in Turbine: only after a "signin.request", only nexusmods.com cookies.
-/* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads */
+// (0.59) The sign-in has its own page (signin/signin.html) that says Turbine is waiting, then "Signed in. Go back to
+// Turbine"; the helper sees the sign-in by Nexus's sign-in cookie itself (already signed in counts), and on the
+// player's press reads the Personal API Key from Nexus's API Keys page for Turbine.
+/* global importScripts, chrome, TurbineProtocol, TurbineBridge, TurbineDownloads, TurbineSave, TurbineSignin */
 "use strict";
 
-importScripts("lib/protocol.js", "lib/bridge.js", "lib/downloads.js", "lib/save.js");
+importScripts("lib/protocol.js", "lib/bridge.js", "lib/downloads.js", "lib/save.js", "lib/signin.js");
 
 const P = TurbineProtocol;
 const EXT_VERSION = chrome.runtime.getManifest().version;
@@ -13,10 +16,6 @@ const ADDED_KEEP_MS = 10 * 60 * 1000;
 
 // What the panel and popup show. Kept in session storage so a restarted worker still knows it.
 let view = { status: null, added: null, choices: null, lastError: null, signin: null };
-// The sign-in Turbine asked for: {id, at, sawAuth, changed, done}. Cookie values are never kept or stored here.
-const SIGNIN_KEEP_MS = 15 * 60 * 1000;
-let signin = null;
-let signinSent = "";
 const ports = new Set();
 
 const bridge = TurbineBridge.createBridge({
@@ -58,7 +57,10 @@ function handleTurbine(msg) {
       view.lastError = msg.text;
       break;
     case "open":
-      openTab(msg.url);
+      // Turbine also asks for Nexus's sign-in page itself: Turbine's own sign-in page takes it over (it follows
+      // right after, in the same breath).
+      if (P.isSigninPage(msg.url)) setTimeout(() => signinFlow.wantsTab() || openTab(msg.url), 1500);
+      else openTab(msg.url);
       return;
     case "reload":
       // An unpacked helper reloads from its folder on disk, where Turbine put its newer files. The worker and
@@ -66,17 +68,10 @@ function handleTurbine(msg) {
       if (chrome.runtime.reload) setTimeout(() => chrome.runtime.reload(), 100);
       return;
     case "signin.request":
-      signin = { id: msg.id, at: Date.now(), sawAuth: false, changed: false, done: false };
-      signinSent = "";
-      view.signin = { pending: true, ok: false, text: "Sign in to Nexus here (Google works too). Turbine takes the sign-in when you're done." };
-      chrome.storage.session.set({ signin });
-      break;
     case "signin.done":
-      if (!signin || msg.id !== signin.id) return;
-      if (msg.ok) signin.done = true;
-      view.signin = { pending: !msg.ok, ok: msg.ok, text: msg.text };
-      chrome.storage.session.set({ signin });
-      break;
+    case "signin.keydone":
+      signinFlow.fromTurbine(msg);
+      return;
     default:
       break;
   }
@@ -100,57 +95,18 @@ function openTab(url) {
     });
 }
 
-// ---------- Sign-in pass-through ----------
+// ---------- Sign-in for Turbine (lib/signin.js) ----------
 
-function signinLive() {
-  return !!signin && !signin.done && Date.now() - signin.at < SIGNIN_KEEP_MS;
-}
-
-// Nexus's cookies (nexusmods.com and its hosts only) to Turbine, for the request it made. Sent again only when they
-// changed (a first copy may come from before the sign-in finished).
-async function sendSignin(why) {
-  if (!signinLive() || !chrome.cookies) return false;
-  let all = [];
-  try {
-    all = await chrome.cookies.getAll({ domain: "nexusmods.com" });
-  } catch (e) {
-    return false;
-  }
-  const m = P.build.signinCookies(signin.id, all);
-  if (!m || m.cookies.length === 0) return false;
-  const key = m.cookies.map((c) => c.domain + "|" + c.name + "|" + c.value.length + "|" + c.expirationDate).join(";");
-  if (key === signinSent && why !== "button") return false;
-  if (!bridge.send(m)) return false;
-  signinSent = key;
-  view.signin = { pending: true, ok: false, text: "Sent your Nexus sign-in to Turbine..." };
-  broadcast();
-  return true;
-}
-
-// Where a Nexus tab is now (the panel's report, URL only): back on Nexus after its sign-in page means signed in.
-function onWhere(url) {
-  if (!signinLive()) return;
-  let u = null;
-  try {
-    u = new URL(url);
-  } catch (e) {
-    return;
-  }
-  if (!P.isNexusHost(u.hostname)) return;
-  if (u.hostname.toLowerCase() === "users.nexusmods.com") {
-    signin.sawAuth = true;
-    chrome.storage.session.set({ signin });
-    return;
-  }
-  if (signin.sawAuth || signin.changed) sendSignin("page");
-}
-
-if (chrome.cookies && chrome.cookies.onChanged) {
-  chrome.cookies.onChanged.addListener((info) => {
-    if (!signinLive() || !info || info.removed || !info.cookie || !P.isNexusCookieDomain(info.cookie.domain)) return;
-    signin.changed = true;
-  });
-}
+const signinFlow = TurbineSignin.createSigninFlow({
+  P,
+  chrome,
+  send: (m) => bridge.send(m),
+  pageUrl: chrome.runtime.getURL("signin/signin.html"),
+  onChange: () => {
+    updateBadge();
+    broadcast();
+  },
+});
 
 function snapshot() {
   const st = bridge.getState();
@@ -164,7 +120,7 @@ function snapshot() {
     added: view.added,
     choices: st.conn === "connected" ? view.choices : null,
     lastError: view.lastError,
-    signin: signinLive() || (view.signin && !view.signin.pending) ? view.signin : null,
+    signin: signinFlow.view(),
   };
 }
 
@@ -233,10 +189,14 @@ function handlePanel(msg, port) {
       if (P.isNxmUrl(msg.url)) bridge.send(P.build.nxm(msg.url));
       break;
     case "where":
-      if (typeof msg.url === "string") onWhere(msg.url);
+      if (typeof msg.url === "string") signinFlow.onWhere(msg.url);
       break;
     case "signin.send":
-      sendSignin("button");
+    case "signin.go":
+    case "key.start":
+    case "key.found":
+    case "key.missing":
+      signinFlow.fromPage(msg, port.sender);
       break;
     case "choice":
       if (view.choices && msg.sessionId === view.choices.sessionId && Array.isArray(msg.selected)) {
@@ -264,20 +224,41 @@ function handlePanel(msg, port) {
   }
 }
 
+// Turbine's sign-in page is this helper's own page (chrome-extension://<this id>/signin/signin.html).
+function senderIsOurs(sender) {
+  return !!sender && sender.id === chrome.runtime.id && typeof sender.url === "string" && sender.url.startsWith(chrome.runtime.getURL("signin/"));
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === "turbine-panel" && !senderIsNexus(port.sender)) {
     port.disconnect();
     return;
   }
-  if (port.name !== "turbine-panel" && port.name !== "turbine-popup") return;
+  if (port.name === "turbine-signin" && !senderIsOurs(port.sender)) {
+    port.disconnect();
+    return;
+  }
+  if (port.name !== "turbine-panel" && port.name !== "turbine-popup" && port.name !== "turbine-signin") return;
   ports.add(port);
   port.onDisconnect.addListener(() => ports.delete(port));
   port.onMessage.addListener((msg) => {
     if (port.name === "turbine-panel") handlePanel(msg, port);
+    else if (port.name === "turbine-signin") handleSigninPage(msg, port);
     else if (msg && msg.kind === "reconnect") bridge.reconnect();
     else if (msg && msg.kind === "hello") port.postMessage(snapshot());
   });
 });
+
+// Messages from Turbine's sign-in page.
+function handleSigninPage(msg, port) {
+  if (!msg || typeof msg !== "object") return;
+  if (msg.kind === "hello") {
+    bridge.nudge();
+    signinFlow.pageShown(port.sender);
+    port.postMessage(snapshot());
+  } else if (msg.kind === "reconnect") bridge.reconnect();
+  else if (["signin.send", "signin.go", "key.start"].includes(msg.kind)) signinFlow.fromPage(msg, port.sender);
+}
 
 // The pairing page content script hands over the port and token Turbine put in its URL.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
@@ -333,8 +314,8 @@ chrome.runtime.onStartup.addListener(() => bridge.nudge());
 chrome.runtime.onInstalled.addListener(() => bridge.nudge());
 
 chrome.storage.session.get(["view", "trackedDownloads", "signin"]).then((s) => {
-  if (s.view) view = Object.assign(view, s.view, { choices: null });
-  if (s.signin && P.isSigninId(s.signin.id)) signin = s.signin;
+  if (s.view) view = Object.assign(view, s.view, { choices: null, signin: null });
+  signinFlow.restore(s.signin);
   tracker.restore(s.trackedDownloads);
   updateBadge();
   broadcast();

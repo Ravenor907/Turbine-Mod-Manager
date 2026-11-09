@@ -1,0 +1,27 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: #0B0A08; color: #EADFC6; font: 20px/1.4 Barlow, "Segoe UI", Roboto, Ubuntu, Arial, sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 32px 24px 48px; display: flex; flex-direction: column; gap: 22px; }
+header { display: flex; align-items: center; gap: 14px; }
+.brand { font: 700 30px Cinzel, Georgia, serif; color: #EDC87A; letter-spacing: .05em; }
+.state { display: flex; gap: 18px; align-items: flex-start; padding: 22px 24px; background: #1A150D; border: 2px solid #C99E52; border-radius: 6px; }
+.state.ok { border-color: #7FA35A; }
+.state.warn { border-color: #E0A33A; }
+h1 { margin: 0 0 8px; font: 700 30px/1.25 Cinzel, Georgia, serif; color: #EDC87A; }
+h2 { margin: 0 0 8px; font-size: 22px; color: #EDC87A; }
+p { margin: 0 0 8px; }
+.how { color: #CDBE9F; }
+.muted { color: #A08C68; font-size: 17px; }
+.dot { width: 22px; height: 22px; margin-top: 8px; border-radius: 50%; flex: none; background: #C99E52; }
+.wait .dot { animation: pulse 1.4s ease-in-out infinite; }
+.ok .dot { background: #7FA35A; } .warn .dot { background: #E0A33A; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .wait .dot { animation: none; } }
+.buttons { display: flex; flex-wrap: wrap; gap: 14px; }
+button { min-height: 56px; min-width: 56px; padding: 0 26px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; background: #C99E52; color: #0B0A08; border: 1px solid #EDC87A; }
+button:hover { background: #EDC87A; }
+button.ghost { background: transparent; color: #EDC87A; border: 1px solid #8C662F; }
+button.ghost:hover { background: #2A2216; }
+button:focus-visible { outline: 3px solid #EDC87A; outline-offset: 3px; }
+.key { padding: 18px 22px; border: 1px solid #45381F; border-radius: 6px; }
+.key[hidden] { display: none; }
+.foot { border-top: 1px solid #45381F; padding-top: 14px; }

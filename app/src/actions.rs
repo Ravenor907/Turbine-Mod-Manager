@@ -1720,6 +1720,29 @@ impl qobject::Turbine {
         );
     }
 
+    /// The Personal API Key the browser helper read for the sign-in request `id` (web.rs checked both): checked with
+    /// Nexus and kept like a pasted key; the helper's page and Turbine both say how it went. Never logged.
+    pub(crate) fn signin_key_check(mut self: Pin<&mut Self>, id: String, key: String) {
+        crate::log::secret(&key);
+        self.as_mut().set_account_json(QString::from("{\"state\":\"checking\"}"));
+        self.net_send(
+            "Check the Nexus key from the browser",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                let (j, ok, text) = match net.set_key(&key) {
+                    Ok(j) => (j, true, "Turbine has your API key.".to_string()),
+                    Err(e) => (net.account_json("error", &e), false, e),
+                };
+                crate::log::line("net", if ok { "API key from the browser: Nexus accepted it, kept" } else { "API key from the browser: not kept" });
+                crate::bridge::broadcast(&crate::bridge::signin_keydone_message(&id, ok, &text));
+                set(qt, move |mut t| {
+                    t.as_mut().set_account_json(QString::from(j.as_str()));
+                    let words = if ok { "Turbine has your Nexus API key".to_string() } else { format!("The API key from the browser wasn't kept: {text}") };
+                    t.as_mut().web_signin_note(QString::from(words.as_str()), QString::from(if ok { "ok" } else { "warn" }));
+                });
+            }),
+        );
+    }
+
     pub fn nexus_sign_out(self: Pin<&mut Self>) {
         crate::log::line("action", "Nexus sign out");
         self.net_send(
