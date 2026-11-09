@@ -102,7 +102,7 @@ Item {
                         ActionKey { k: "a"; label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
                         ActionKey { k: "x"; label: "Try again here"; onClicked: gm.fallbackClicked("x") }
                         // A file that landed but wasn't caught can still be added from here.
-                        ActionKey { k: "y"; label: "Add from Downloads"; onClicked: gm.fallbackClicked("y") }
+                        ActionKey { k: ""; label: "Add from Downloads"; onClicked: gm.fallbackClicked("add") }
                     }
                 }
                 HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }

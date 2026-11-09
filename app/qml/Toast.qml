@@ -28,7 +28,7 @@ Rectangle {
     // A press on the toast (0.59): Main.qml stops that press reaching anything beneath it.
     signal pressedOn()
     signal pressEnded()
-    // 0.6: a toast can carry its next step as a button ("Y Undo"): a tap on it, or the key, does it.
+    // 0.6: a toast can carry its next step as a button ("R3 Undo"): a tap on it, or the key, does it.
     property string actionLabel: ""
     property string actionGlyph: ""
     signal actionClicked()

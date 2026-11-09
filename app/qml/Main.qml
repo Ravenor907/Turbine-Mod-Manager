@@ -3498,10 +3498,13 @@ Window {
     }
     // R3 with the pointer hidden: A on the focused item. The pointer stays hidden, so the triggers keep paging.
     // A hold (Delete for good, Reset) never starts from R3: it says to hold A instead.
+    // 0.61 (M6): while a toast with a next step shows ("R3 Undo"), R3 does that step instead.
     function r3Click() {
+        if (toastActionLive()) { note("pad", "R3: the toast's " + toast.actionLabel); runToastAction(); return }
         note("pad", "R3: same as A on the focus")
         act("a")
     }
+    function toastActionLive() { return !!toastAction && toast.shown && sheet === "" && !wheelOpen && page !== "browser" }
     // One tap, one action: a chip's own handler and its row's both see the same tap (the chip's comes first).
     property real lastTapAt: 0
     function tapOnce() { const now = Date.now(); if (now - lastTapAt < 150) return false; lastTapAt = now; return true }
@@ -3819,10 +3822,8 @@ Window {
     // How many rows LT and RT jump.
     readonly property int pageJump: Math.max(3, Math.floor((content.height - px(40)) / px(desktopLayout ? 44 : 58)))
     function binds() {
-        const o = bindsCore()
-        // A toast's own next step ("Y Undo") takes Y while it shows (0.6, I10).
-        if (toastAction && toast.shown && sheet === "" && !wheelOpen && page !== "browser") o.y = bind(toast.actionLabel, runToastAction)
-        return o
+        // 0.61 (M6): Y is always Find; a toast's own next step is on R3 (and a tap on the toast's button).
+        return bindsCore()
     }
     function bindsCore() {
         let o = {}
@@ -3995,7 +3996,9 @@ Window {
             if (getArea === "fallback") {
                 o.a = bind("Open on Nexus", openNexusMods)
                 o.x = bind("Try again here", retryBrowse)
-                o.y = bind("Add from Downloads", openAdd)
+                // 0.61 (I18): Y is Find here too (a search on Nexus); Add from Downloads is the card's own button
+                // and the wheel's.
+                if (sources.length > 0) o.y = bind("Find", openFindPop)
                 return o
             }
             // Y: the pop-up with Search, Sort and Category.
@@ -4017,7 +4020,8 @@ Window {
         else if (p && !p.fixed) o.a = bind(p.active ? "Turn off" : "Turn on", () => orderAct("a"))
         o.b = bind("My mods", () => { tab = 0 })
         if (p) o.x = bind("Options", openPluginMenu)
-        if (order.length > 0) o.y = bind("Find plugin", openFindPlugin)
+        // 0.61 (I18): one name for Y: Find (here it finds a plugin by name).
+        if (order.length > 0) o.y = bind("Find", openFindPlugin)
         // A page up or down, landing on a plugin that can be changed (the game's own are locked).
         o.lt = bind("", () => { orderIndex = orderLandOn(Math.max(-1, orderIndex - pageJump), -1) })
         o.rt = bind("", () => { orderIndex = orderLandOn(Math.min(order.length - 1, orderIndex + pageJump), 1) })
@@ -4298,7 +4302,7 @@ Window {
         const tail = [slot("Add from Downloads", g, openAdd, "A mod file you downloaded")].concat(common).concat([slot("Loadouts", g, openProfiles, "Save or switch sets of mods")])
         if (k === "get") return [slot("Find", sources.length > 0, openFindPop, "Search, sort and category"),
                                  slot("Recently viewed", recentViewed.length > 0, openRecentPick, recentViewed.length > 0 ? plural(recentViewed.length, "mod page", "mod pages") + " you opened" : "Mod pages you open show here")].concat(tail)
-        if (k === "order") return [slot("Find plugin", order.length > 0, openFindPlugin, "Find a plugin by name"), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }, "Put plugins in a safe order")].concat(tail)
+        if (k === "order") return [slot("Find", order.length > 0, openFindPlugin, "Find a plugin by name"), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }, "Put plugins in a safe order")].concat(tail)
         return [slot("Find", k === "mods" && mods.length > 0, openFindPop, "Find, show, sort, select several"),
                 slot(updateList.length > 0 ? "Updates (" + updateList.length + ")" : "Updates", k === "mods" && updateList.length > 0, openUpdates, updateList.length > 0 ? "Mods with a newer version" : "No updates ready")].concat(tail)
     }
@@ -4893,7 +4897,21 @@ Window {
                     m.ok(games.length === 0 && railExtra === 1 && !!o.a && o.a.label === "Show hidden games", "Hidden check: every game hidden, the rail shows " + (railExtra === 1 ? "Show hidden games" : "nothing to bring them back"))
                     pad("a") },
             () => { m.ok(games.length > 0, "Hidden check: Show hidden games put back " + plural(games.length, "game", "games"))
-                    hiddenTest = null; orderGames()
+                    hiddenTest = null; orderGames() },
+            // 12. 0.61 (M6): Y is Find even while a toast offers Undo; R3 runs the toast's Undo.
+            () => { if (!game) return false
+                    page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""; Turbine.pointerHide()
+                    if (!mods.some(x => x.enabled)) { Turbine.setEnabled(mods[0].id, true); mods = mods.map((x, i) => i === 0 ? Object.assign({}, x, { enabled: true }) : x) }
+                    m.wasOn = mods.filter(x => x.enabled).length
+                    allOff()
+                    m.ok(!!toastAction && toast.actionGlyph === glyph("r3"), "Toast check: Turn every mod off shows " + toast.actionGlyph + " " + toast.actionLabel)
+                    pad("y") },
+            () => { m.ok(sheet === "findpop" && !!toastAction, "Toast check: Y with Undo showing: " + (sheet === "findpop" ? "Find opened" : "sheet \"" + sheet + "\"") + (toastAction ? ", Undo kept" : ", Undo gone"))
+                    pad("b") },
+            () => { if (sheet !== "") return false
+                    pad("r3")
+                    const on = mods.filter(x => x.enabled).length
+                    m.ok(on === m.wasOn && sheet === "", "Toast check: R3 with Undo showing: " + plural(on, "mod", "mods") + " back on of " + m.wasOn)
                     check("Input check: " + m.bad + " problems") }
         ]
         else if (name === "nexusguard" || name === "inlinebrowser") script = [
@@ -5290,7 +5308,7 @@ Window {
         if (getArea === "fallback") {
             if (b === "a") openNexusMods()
             else if (b === "x") retryBrowse()
-            else if (b === "y") openAdd()
+            else if (b === "add") openAdd()
             else if (b === "left") { zone = "rail"; railIndex = current }
             return
         }
@@ -9735,10 +9753,11 @@ Window {
             timeout = shot.page === "newmod" ? 0 : 4000
             show(m)
         }
-        // 0.6 (I10): a toast with its next step as a button; Y (or a tap on the button) does it while it shows.
+        // 0.6 (I10): a toast with its next step as a button; R3 (0.61, M6: Y is always Find) or a tap on the
+        // button does it while it shows.
         function act(kind, m, label, run) {
             put(kind, m)
-            actionLabel = label; actionGlyph = app.glyph("y"); app.toastAction = run
+            actionLabel = label; actionGlyph = app.glyph("r3"); app.toastAction = run
             timeout = 8000; show(m)
         }
         onActionClicked: { if (!app.gate(5, "toast action")) return; app.runToastAction() }
