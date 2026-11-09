@@ -89,7 +89,19 @@ pub enum ArtOutcome {
     PlayersOwn,
     /// Turbine has no such piece in the source folder.
     NoSource,
+    /// 0.6 (break M5): Turbine's file was there and the player cleared it in Steam: not written again until the
+    /// player asks (Settings, Add).
+    Cleared,
 }
+
+/// The player's own picture for this piece in another format Steam reads (.jpg, .jpeg, .webp; Turbine only writes
+/// .png): it is the player's, whatever the .png says.
+fn players_other_format(grid: &Path, png_name: &str) -> bool {
+    let stem = png_name.trim_end_matches(".png");
+    ["jpg", "jpeg", "webp", "JPG", "PNG"].iter().any(|ext| grid.join(format!("{stem}.{ext}")).exists())
+}
+
+const CLEARED: &str = "cleared";
 
 /// Is this grid file Turbine's own (what Turbine wrote, unchanged since)?
 fn is_ours(record: &ArtRecord, file: &Path) -> bool {
@@ -100,6 +112,13 @@ fn is_ours(record: &ArtRecord, file: &Path) -> bool {
 /// Writes the pieces from `src` (<piece>.png) into `grid` for `appid`, never over the player's own art. `record`
 /// is Turbine's record file. Answers each grid file with what happened.
 pub fn add_art(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Path) -> io::Result<Vec<(PathBuf, ArtOutcome)>> {
+    add_art_opts(src, grid, appid, parts, record, false)
+}
+
+/// `again`: the player asked for Turbine's art (Settings, Add, or a new tile), so pieces the player had cleared in
+/// Steam are written again. Without it (every start) they stay cleared. Only files Turbine wrote (in its record) are
+/// ever treated as Turbine's (break L5: an identical file of the player's is never adopted).
+pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Path, again: bool) -> io::Result<Vec<(PathBuf, ArtOutcome)>> {
     let mut rec = ArtRecord::load(record);
     let mut out = Vec::new();
     for part in parts {
@@ -111,10 +130,15 @@ pub fn add_art(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Pat
             continue;
         };
         let hash = sha256::digest_hex(&bytes);
+        let other = players_other_format(grid, &name);
         let outcome = if dest.exists() {
             let now = sha256::file_hex(&dest).unwrap_or_default();
-            if sha256::same_digest(&now, &hash) && (is_ours(&rec, &dest) || rec.hash_of(&dest).is_none()) {
-                rec.set(&dest, hash);
+            if is_ours(&rec, &dest) && other {
+                // The player set a picture of their own (another format) beside Turbine's: Turbine's steps aside.
+                let _ = fs::remove_file(&dest);
+                rec.forget(&dest);
+                ArtOutcome::PlayersOwn
+            } else if is_ours(&rec, &dest) && sha256::same_digest(&now, &hash) {
                 ArtOutcome::Unchanged
             } else if is_ours(&rec, &dest) {
                 write_file(&dest, &bytes)?;
@@ -123,6 +147,12 @@ pub fn add_art(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Pat
             } else {
                 ArtOutcome::PlayersOwn
             }
+        } else if other {
+            ArtOutcome::PlayersOwn
+        } else if !again && rec.hash_of(&dest).is_some() {
+            // Turbine wrote it and it's gone: the player cleared it in Steam.
+            rec.set(&dest, CLEARED.to_string());
+            ArtOutcome::Cleared
         } else {
             write_file(&dest, &bytes)?;
             rec.set(&dest, hash);

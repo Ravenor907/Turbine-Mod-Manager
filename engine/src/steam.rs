@@ -450,3 +450,27 @@ pub fn pending_update_words(name: &str, p: &PendingUpdate) -> String {
     }
     t
 }
+
+/// 0.6 (break L7): the Steam account signed in most recently (its userdata folder name, the 32-bit account id), from
+/// config/loginusers.vdf ("MostRecent" "1"). None when it can't be told.
+pub fn signed_in_account(home: &Path) -> Option<String> {
+    for root in steam_roots(home).into_iter().chain([home.join(".local/share/Steam"), home.join(".steam/steam")]) {
+        let Ok(text) = std::fs::read_to_string(root.join("config/loginusers.vdf")) else { continue };
+        let Ok(v) = crate::vdf::parse(&text) else { continue };
+        let users = v.get("users").or_else(|| v.get("Users"));
+        for (id, u) in users.map(|u| u.entries()).unwrap_or(&[]) {
+            let recent = u.str_at(&["MostRecent"]).or_else(|| u.str_at(&["mostrecent"])) == Some("1");
+            if let (true, Ok(id64)) = (recent, id.parse::<u64>()) {
+                return id64.checked_sub(76_561_197_960_265_728).map(|a| a.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Puts the signed-in account's file first in a list of userdata/<account>/... files (the rest keep their order).
+pub fn signed_in_first(home: &Path, files: &mut [std::path::PathBuf]) {
+    let Some(acc) = signed_in_account(home) else { return };
+    let mine = |p: &std::path::PathBuf| p.components().any(|c| c.as_os_str() == acc.as_str());
+    files.sort_by_key(|p| !mine(p));
+}

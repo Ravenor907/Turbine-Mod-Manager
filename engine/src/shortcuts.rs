@@ -152,7 +152,9 @@ pub fn shortcut_files(home: &Path) -> Vec<PathBuf> {
         }
     }
     files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    files.into_iter().map(|(_, p)| p).collect()
+    let mut list: Vec<PathBuf> = files.into_iter().map(|(_, p)| p).collect();
+    crate::steam::signed_in_first(home, &mut list);
+    list
 }
 
 /// The player's Chrome-family browser among their non-Steam games, if they added one. Read only.
@@ -296,7 +298,9 @@ pub fn tile_file(home: &Path) -> Option<PathBuf> {
         }
     }
     dirs.sort_by_key(|d| std::cmp::Reverse(d.0));
-    dirs.into_iter().map(|(_, p)| p).next()
+    let mut list: Vec<PathBuf> = dirs.into_iter().map(|(_, p)| p).collect();
+    crate::steam::signed_in_first(home, &mut list);
+    list.into_iter().next()
 }
 
 /// The backup Turbine writes before each change (the file as it was just before).
@@ -436,13 +440,16 @@ pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir:
     let mut t = tile.clone();
     let appid = t.appid();
     let grid = crate::steam_art::grid_dir(file);
-    if !steam_running {
-        let done = crate::steam_art::add_art(art_dir, &grid, appid, crate::steam_art::COOP_PARTS, record).map_err(|e| format!("Couldn't add the tile's art ({e})"))?;
-        if let Some((icon, _)) = done.iter().find(|(p, o)| p.to_string_lossy().ends_with("_icon.png") && *o != crate::steam_art::ArtOutcome::NoSource) {
-            t.icon = icon.to_string_lossy().to_string();
-        }
+    // 0.6 (break L7): the tile first, then its art, so a tile that couldn't be added leaves no art behind. Its icon
+    // is where the art goes (known before it is written).
+    if let (true, Some(name)) = (art_dir.join("icon.png").is_file(), crate::steam_art::grid_name(appid, "icon")) {
+        t.icon = grid.join(name).to_string_lossy().to_string();
     }
-    add_shortcut(file, &t, marker, steam_running)
+    let r = add_shortcut(file, &t, marker, steam_running)?;
+    if !steam_running && matches!(r, TileChange::Added(_) | TileChange::Already(_)) {
+        crate::steam_art::add_art_opts(art_dir, &grid, appid, crate::steam_art::COOP_PARTS, record, true).map_err(|e| format!("Couldn't add the tile's art ({e})"))?;
+    }
+    Ok(r)
 }
 
 /// Removes the co-op tile and Turbine's own art for it.

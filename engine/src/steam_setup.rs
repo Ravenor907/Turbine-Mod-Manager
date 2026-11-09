@@ -233,7 +233,9 @@ pub fn localconfig_files(home: &Path) -> Vec<PathBuf> {
         }
     }
     files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    files.into_iter().map(|(_, p)| p).collect()
+    let mut list: Vec<PathBuf> = files.into_iter().map(|(_, p)| p).collect();
+    crate::steam::signed_in_first(home, &mut list);
+    list
 }
 
 /// The backup Turbine writes before each change (the file as it was just before).

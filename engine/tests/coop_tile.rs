@@ -211,3 +211,30 @@ fn play_coop_argument() {
     assert_eq!(a(&["turbine", "--play-coop", "epic:x"]), None);
     assert_eq!(a(&["turbine", "--play-coop", "steam:12;rm"]), None);
 }
+
+#[test]
+fn the_signed_in_account_comes_first() {
+    use std::fs;
+    let home = std::env::temp_dir().join(format!("turbine-accounts-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&home);
+    let root = home.join(".local/share/Steam");
+    for acc in ["111", "222"] {
+        let cfg = root.join("userdata").join(acc).join("config");
+        fs::create_dir_all(&cfg).unwrap();
+        fs::write(cfg.join("shortcuts.vdf"), b"\x00shortcuts\x00\x08\x08").unwrap();
+    }
+    // 222 changed last, but 111 is the account signed in (steamid64 = 76561197960265728 + 111).
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(root.join("userdata/222/config/shortcuts.vdf"), b"\x00shortcuts\x00\x08\x08").unwrap();
+    fs::create_dir_all(root.join("config")).unwrap();
+    fs::write(
+        root.join("config/loginusers.vdf"),
+        "\"users\"\n{\n\t\"76561197960265839\"\n\t{\n\t\t\"AccountName\"\t\t\"a\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n\t\"76561197960265950\"\n\t{\n\t\t\"AccountName\"\t\t\"b\"\n\t\t\"MostRecent\"\t\t\"0\"\n\t}\n}\n",
+    )
+    .unwrap();
+    assert_eq!(turbine_engine::steam::signed_in_account(&home).as_deref(), Some("111"));
+    let files = turbine_engine::shortcuts::shortcut_files(&home);
+    assert!(files[0].to_string_lossy().contains("/userdata/111/"), "{files:?}");
+    assert!(turbine_engine::shortcuts::tile_file(&home).unwrap().to_string_lossy().contains("/userdata/111/"));
+    let _ = fs::remove_dir_all(&home);
+}

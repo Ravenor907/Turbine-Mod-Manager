@@ -178,10 +178,10 @@ fn art_off_file(data: &Path) -> PathBuf {
 }
 
 /// Puts Turbine's art in its Steam entry's grid folder (never over the player's own). Answers the words.
-fn add_own_art(data: &Path) -> Result<String, String> {
+fn add_own_art(data: &Path, again: bool) -> Result<String, String> {
     let home = turbine_engine::home_dir();
     let (file, appid) = shortcuts::find_turbine_file(&home).ok_or("Turbine isn't in your Steam library yet. Add it to Steam first (Add a Non-Steam Game in Desktop Mode).")?;
-    let done = steam_art::add_art(&art_set("turbine"), &steam_art::grid_dir(&file), appid, steam_art::TURBINE_PARTS, &art_record(data)).map_err(|e| e.to_string())?;
+    let done = steam_art::add_art_opts(&art_set("turbine"), &steam_art::grid_dir(&file), appid, steam_art::TURBINE_PARTS, &art_record(data), again).map_err(|e| e.to_string())?;
     let written = done.iter().filter(|(_, o)| *o == steam_art::ArtOutcome::Written).count();
     let theirs = done.iter().filter(|(_, o)| *o == steam_art::ArtOutcome::PlayersOwn).count();
     crate::log::line("steam-setup", &format!("Steam library art for Turbine ({appid}): {written} written, {theirs} of your own kept"));
@@ -194,7 +194,7 @@ pub(crate) fn art_at_start() {
     if art_off_file(&data).exists() || shortcuts::find_turbine_file(&turbine_engine::home_dir()).is_none() {
         return;
     }
-    if let Err(e) = add_own_art(&data) {
+    if let Err(e) = add_own_art(&data, false) {
         crate::log::line("steam-setup", &format!("Steam library art: {e}"));
     }
 }
@@ -298,7 +298,7 @@ impl qobject::Turbine {
         let data = crate::backend::data_home();
         let words = if on {
             let _ = std::fs::remove_file(art_off_file(&data));
-            add_own_art(&data).unwrap_or_else(|e| e)
+            add_own_art(&data, true).unwrap_or_else(|e| e)
         } else {
             let _ = std::fs::write(art_off_file(&data), "off\n");
             match shortcuts::find_turbine_file(&turbine_engine::home_dir()) {

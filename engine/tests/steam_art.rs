@@ -108,3 +108,45 @@ fn finds_turbines_own_shortcut() {
     assert_eq!(steam_art::grid_dir(&f), file.with_file_name("grid"));
     let _ = fs::remove_dir_all(&d);
 }
+
+#[test]
+fn the_players_other_formats_and_cleared_art_are_respected() {
+    let d = std::env::temp_dir().join(format!("turbine-art-m5-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let grid = d.join("grid");
+    let record = d.join("data/steam-art.json");
+    fs::create_dir_all(&grid).unwrap();
+    let v1 = src(&d, "v1");
+    // The player's capsule is a JPEG: Turbine writes no .png beside it.
+    fs::write(grid.join("77p.jpg"), "my jpeg").unwrap();
+    let got = steam_art::add_art(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record).unwrap();
+    let outcome = |g: &Vec<(std::path::PathBuf, ArtOutcome)>, n: &str| g.iter().find(|(p, _)| p.ends_with(n)).map(|(_, o)| o.clone()).unwrap();
+    assert_eq!(outcome(&got, "77p.png"), ArtOutcome::PlayersOwn);
+    assert!(!grid.join("77p.png").exists());
+    // A JPEG set later beside Turbine's own .png: Turbine's steps aside.
+    fs::write(grid.join("77_hero.webp"), "my hero").unwrap();
+    let got = steam_art::add_art(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record).unwrap();
+    assert_eq!(outcome(&got, "77_hero.png"), ArtOutcome::PlayersOwn);
+    assert!(!grid.join("77_hero.png").exists());
+    // The player clears Turbine's wide picture in Steam: the next start doesn't bring it back...
+    assert!(grid.join("77.png").exists());
+    fs::remove_file(grid.join("77.png")).unwrap();
+    let got = steam_art::add_art(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record).unwrap();
+    assert_eq!(outcome(&got, "77.png"), ArtOutcome::Cleared);
+    let got = steam_art::add_art(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record).unwrap();
+    assert_eq!(outcome(&got, "77.png"), ArtOutcome::Cleared);
+    assert!(!grid.join("77.png").exists());
+    // ...until the player asks for Turbine's art again.
+    let got = steam_art::add_art_opts(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record, true).unwrap();
+    assert_eq!(outcome(&got, "77.png"), ArtOutcome::Written);
+    // A file of the player's that happens to equal Turbine's is never claimed (break L5): Remove leaves it.
+    let other = d.join("grid2");
+    fs::create_dir_all(&other).unwrap();
+    fs::copy(v1.join("logo.png"), other.join("9_logo.png")).unwrap();
+    let rec2 = d.join("data/rec2.json");
+    let got = steam_art::add_art(&v1, &other, 9, steam_art::TURBINE_PARTS, &rec2).unwrap();
+    assert_eq!(outcome(&got, "9_logo.png"), ArtOutcome::PlayersOwn);
+    steam_art::remove_art(&other, 9, &rec2).unwrap();
+    assert!(other.join("9_logo.png").exists());
+    let _ = fs::remove_dir_all(&d);
+}
