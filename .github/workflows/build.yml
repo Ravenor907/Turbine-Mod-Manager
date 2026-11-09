@@ -43,13 +43,28 @@ jobs:
         run: |
           run=""
           if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
-            run=$(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?head_sha=${{ github.sha }}&status=success&per_page=20" \
-                    --jq '[.workflow_runs[] | select(.head_sha == "${{ github.sha }}" and .event == "push")][0].id // empty')
-            if [ -n "$run" ]; then
-              art=$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts" --jq '[.artifacts[] | select(.name == "TurbineModManager.flatpak" and .expired == false)][0] | "\(.id) \(.digest)"')
-              if [ -z "$art" ] || [ "$art" = "null null" ]; then echo "::notice title=No bundle to reuse::run $run's artifact is gone; building again"; run=""
-              else echo "::notice title=Release reuses run $run::commit ${{ github.sha }}, artifact ${art}"; fi
-            else echo "::notice title=No green run for this commit::building and checking it in full"; fi
+            sha="${{ github.sha }}"
+            # The standing method: a release needs every check green three times on this commit (fresh runs or
+            # reruns), and ships the bundle and plugin those runs built, never a new build.
+            greens=0
+            for r in $(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?head_sha=$sha&per_page=50" \
+                         --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and .event == \"push\") | .id"); do
+              n=$(gh api "repos/${{ github.repository }}/actions/runs/$r" --jq .run_attempt)
+              for a in $(seq 1 "$n"); do
+                c=$(gh api "repos/${{ github.repository }}/actions/runs/$r/attempts/$a" --jq .conclusion)
+                if [ "$c" = success ]; then greens=$((greens + 1)); [ -z "$run" ] && run=$r; fi
+              done
+            done
+            echo "::notice title=Green runs of this commit::$greens"
+            if [ "$greens" -lt 3 ]; then
+              echo "::error title=Not green three times::commit $sha has $greens green runs; run or rerun the build until every check is green three times"
+              exit 1
+            fi
+            for name in TurbineModManager.flatpak Turbine-Decky.zip; do
+              art=$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts" --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)][0] | \"\(.id) \(.digest)\"")
+              if [ -z "$art" ] || [ "$art" = "null null" ] || [ "${art#* }" = null ]; then echo "::error title=$name is gone::run $run's artifact expired or has no digest; push a new commit and get three greens"; exit 1; fi
+              echo "::notice title=Release reuses run $run::$name, artifact $art"
+            done
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
@@ -89,6 +104,9 @@ jobs:
       - name: QML syntax (seconds here instead of minutes into the Flatpak build)
         shell: bash
         run: node tools/qml-check.js app/qml/*.qml
+      - name: Release rules (three greens, the same Flatpak and Decky zip, checksums, a pinned plugin)
+        shell: bash
+        run: python3 tools/release-check.py
       - name: Commits are the owner's
         shell: bash
         env:
@@ -192,6 +210,9 @@ jobs:
   # release). Decky's template build (rollup), its typecheck and tests, then the zip Decky installs from.
   decky:
     name: Steam menu plugin (Decky)
+    needs: [reuse]
+    # A release ships the plugin the green runs built (reuse), never a new build.
+    if: needs.reuse.outputs.run == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
@@ -202,8 +223,14 @@ jobs:
           node --version
           npm install -g pnpm@9.15.9 > /dev/null
           pnpm --version
-          # No lockfile is kept for the plugin: the versions in package.json are ranges within one major version.
-          pnpm install --no-frozen-lockfile
+          # The plugin's packages are pinned in the committed pnpm-lock.yaml; a build without it would pick new ones.
+          if [ ! -f pnpm-lock.yaml ]; then
+            pnpm install --lockfile-only > /dev/null
+            echo "LOCKFILE $(base64 -w0 pnpm-lock.yaml)"
+            echo "::error title=decky/pnpm-lock.yaml missing::Commit the lockfile (printed above as LOCKFILE) so every build uses the same packages"
+            exit 1
+          fi
+          pnpm install --frozen-lockfile
           pnpm run typecheck
           python3 -m py_compile main.py
           pnpm run test
@@ -222,12 +249,15 @@ jobs:
           # Decky shows the plugin's version from package.json: Turbine's own (one dot, as everywhere).
           node -e 'const fs=require("fs"), p=JSON.parse(fs.readFileSync(process.argv[1])); p.version=process.argv[3]; delete p.devDependencies; fs.writeFileSync(process.argv[2], JSON.stringify(p, null, 2) + "\n")' decky/package.json "$out/package.json" "$v"
           (cd decky/out && zip -qr ../../Turbine-Decky.zip Turbine)
+          sha256sum Turbine-Decky.zip | tee Turbine-Decky.zip.sha256
           unzip -l Turbine-Decky.zip
           echo "::notice title=Turbine-Decky.zip::$(stat -c %s Turbine-Decky.zip) bytes, version $v"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: Turbine-Decky.zip
-          path: Turbine-Decky.zip
+          path: |
+            Turbine-Decky.zip
+            Turbine-Decky.zip.sha256
           retention-days: 30
 
   vendor:
@@ -415,32 +445,31 @@ jobs:
     # The bundle this run built and checked, or (reuse) the one a green run of the same commit built and checked.
     if: >-
       always() && github.event_name == 'workflow_dispatch' && inputs.release &&
-      needs.rules.result == 'success' && needs.engine.result == 'success' && needs.decky.result == 'success' &&
-      (needs.reuse.outputs.run != '' || (needs.flatpak.result == 'success' && needs.checks.result == 'success'))
+      needs.reuse.result == 'success' && needs.reuse.outputs.run != '' && needs.rules.result == 'success' && needs.engine.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: read
     steps:
-      - if: needs.reuse.outputs.run == ''
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
-        with:
-          name: TurbineModManager.flatpak
-      - if: needs.reuse.outputs.run != ''
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      # Both files from the green runs of this commit (same commit, artifact digests checked when downloaded).
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: TurbineModManager.flatpak
           run-id: ${{ needs.reuse.outputs.run }}
           github-token: ${{ github.token }}
-      - name: The bundle is the one that was checked
-        shell: bash
-        run: |
-          if [ -f TurbineModManager.flatpak.sha256 ]; then sha256sum -c TurbineModManager.flatpak.sha256
-          else echo "::warning title=No checksum beside the bundle::built before 0.6"; fi
-          echo "::notice title=Releasing::$(sha256sum TurbineModManager.flatpak) from run ${{ needs.reuse.outputs.run || github.run_id }}"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: Turbine-Decky.zip
+          run-id: ${{ needs.reuse.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Both files are the ones that were checked
+        shell: bash
+        run: |
+          for f in TurbineModManager.flatpak Turbine-Decky.zip; do
+            [ -f "$f.sha256" ] || { echo "::error title=No checksum beside $f::nothing is released without it"; exit 1; }
+            sha256sum -c "$f.sha256"
+            echo "::notice title=Releasing::$(sha256sum "$f") from run ${{ needs.reuse.outputs.run }}"
+          done
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: v${{ needs.rules.outputs.version }}
