@@ -60,6 +60,7 @@ Window {
         property string playedWarn: "[]"    // "<game>|<mods on>|<warnings>" played through with Play anyway   // the four first-run cards were seen (Settings, Help shows them again)
         property string updateWarned: "[]"  // 0.58: "<game>|<build>": the game update warning was shown
         property string modHold: "{}"       // 0.58: games played without mods until their mods update: {build, versions}
+        property string playChoice: "{}"    // 0.6: per game, the last Play choice with Seamless Co-op: mods, coop or plain
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
     Settings {
@@ -128,7 +129,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -443,7 +444,7 @@ Window {
                 if (step === 0) { app.sheet = ""; step = 1; interval = 800; restart(); return }
                 if (step === 1) {
                     app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
-                    app.note("shot", "Co-op beside Play: " + coopBtn.visible + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
+                    app.note("shot", "Co-op chosen at Play: " + (app.seamlessIn && !coopBtn.visible) + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
                     legend.check("coopbar")
                     app.openCoopSettings()
                     step = 2; interval = 1200; restart(); return
@@ -758,6 +759,51 @@ Window {
         startPlay(true)
     }
     property bool playCoopNext: false
+    // ---- 0.6 (I3): with Seamless Co-op installed, Play (Start or a tap) asks one small question: Play with mods, Play
+    // Seamless Co-op, Play without mods, and Co-op settings (Y) with whether the password is set. The last choice is
+    // remembered and has the ring, so A starts it at once; B goes back.
+    readonly property string lastPlayChoice: game ? (parse(seen.playChoice, {})[game.id] || "mods") : "mods"
+    property string coopPassword: "?"     // "set", "not set" or "?" (not read yet)
+    function rememberPlay(k) { if (!game) return; let c = parse(seen.playChoice, {}); c[game.id] = k; seen.playChoice = JSON.stringify(c) }
+    function playPressed() {
+        if (!game) return
+        if (!seamlessIn || acRefused) { startPlay(); return }
+        readCoopPassword()
+        const keys = ["mods", "coop", "plain"]
+        openPick("Play " + gameTitle, "A plays the highlighted one", [
+            { icon: "play", title: "Play with mods", detail: "Solo, " + plural(mods.filter(m => m.enabled && !isSeamless(m)).length, "mod", "mods") + " on", key: "mods", run: () => { rememberPlay("mods"); startPlay() } },
+            { icon: "play", title: "Play Seamless Co-op", detail: "With friends: everyone uses the same password and settings", key: "coop", run: () => { rememberPlay("coop"); startCoopChecked() } },
+            { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", key: "plain", run: () => { rememberPlay("plain"); Turbine.playOriginal() } },
+            { icon: "info", title: "Co-op settings", detail: "Password: " + (coopPassword === "?" ? "not read yet" : coopPassword), key: "settings", aLabel: "Open", run: () => openCoopSettings() }
+        ], "")
+        pickY = { label: "Co-op settings", run: () => openCoopSettings() }
+        pickNoStart = true
+        menuIndex = Math.max(0, keys.indexOf(lastPlayChoice))
+        note("action", "Play choice: " + pickItems.map(x => x.title).join("; ") + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : ""))
+    }
+    function coopSettingsFile() {
+        if (!seamlessMod) return null
+        return settingsFilesOf(seamlessMod.id).find(x => /ersc_settings\.ini$/i.test(x.rel)) || null
+    }
+    // The password, read from Turbine's copy of ersc_settings.ini (the answer comes back through settingsLoaded).
+    function readCoopPassword() {
+        const f = coopSettingsFile()
+        if (!f) { coopPassword = "?"; return }
+        settingsWant = { mod: seamlessMod.id, rel: f.rel, title: "Seamless Co-op settings", pin: ["password"], back: "", peek: true }
+        Turbine.settingsLoad(seamlessMod.id, f.rel)
+    }
+    // Co-op Play: the session password first. Empty: its settings open on the password, and Play goes on after Save.
+    property bool coopAfterSettings: false
+    function startCoopChecked() {
+        const f = coopSettingsFile()
+        if (!f) { startCoop(); return }
+        settingsWant = { mod: seamlessMod.id, rel: f.rel, title: "Seamless Co-op settings", pin: ["password"], back: "", coop: true }
+        Turbine.settingsLoad(seamlessMod.id, f.rel)
+    }
+    function coopPasswordOf(d) {
+        const pw = (d.fields || []).find(x => /password/i.test(x.key || ""))
+        return pw ? String(pw.value || "").trim() : ""
+    }
     // Play after the check: with mods, or Seamless Co-op when that was asked.
     function playNow() {
         if (!game) return
@@ -813,6 +859,19 @@ Window {
         if (!w || d.mod !== w.mod || d.rel !== w.rel) return
         settingsWant = null
         if (d.error) { toast.problem(d.error); return }
+        // The Play choice's password line (nothing opens).
+        if (w.peek) {
+            coopPassword = coopPasswordOf(d) !== "" ? "set" : "not set"
+            if (sheet === "pick") pickItems = pickItems.map(x => x.key === "settings" ? Object.assign({}, x, { detail: "Password: " + coopPassword }) : x)
+            note("action", "Co-op password: " + coopPassword)
+            return
+        }
+        if (w.coop) {
+            if (coopPasswordOf(d) !== "") { note("action", "Co-op password set: playing"); startCoop(); return }
+            note("action", "Co-op password not set: its settings open on it")
+            coopAfterSettings = true
+            toast.info("Set the session password first. Every co-op player uses the same password and settings. Start plays once it's set.")
+        }
         settingsMod = w.mod; settingsRel = w.rel; settingsReturn = w.back
         settingsView.title = w.title
         settingsView.sub = w.rel + (d.edited ? " · your version (Reset to default goes back to " + (w.mod === "" ? "the original" : "the mod's own") + ")" : "")
@@ -848,7 +907,8 @@ Window {
     }
     function isSeamless(m) { return !!m && m.sourceKind === "loader" && String(m.sourceId || "") === "seamless" }
     function openCoopSettings() {
-        if (!seamlessMod) { toast.info("Get Seamless Co-op first: View, Game menu."); return }
+        if (!seamlessMod) { openMsg({ title: "Seamless Co-op isn't installed", text: "Get it first: Turbine downloads it from its official release and checks it.", steps: [], notes: [], footnote: "",
+                                      buttons: [{ key: "a", label: "Get Seamless Co-op", run: () => { const i = gameMenuItems.findIndex(x => x.act === "seamless"); if (i >= 0) gameMenuRun(i) } }, { key: "b", label: "Not now", run: () => {} }] }); return }
         openModSettings(seamlessMod)
     }
     function settingsTyped(row, text) {
@@ -863,8 +923,13 @@ Window {
         }
         settingsView.setValue(f, text)
     }
-    function settingsSaveNow() {
-        if (settingsView.changes === 0) { toast.info("Nothing changed."); return }
+    // 0.6 (I12): every change saves itself a moment after it is made (the copy before it is kept, Reset to default
+    // goes back), like everything else in Turbine: nothing to remember to save, and B never loses a change.
+    Timer { id: settingsAutosave; interval: 700; onTriggered: if (app.sheet === "settingsedit" && settingsView.changes > 0) app.settingsSaveNow(true) }
+    Connections { target: settingsView; function onChangesChanged() { if (settingsView.changes > 0 && app.sheet === "settingsedit") settingsAutosave.restart() } }
+    function settingsSaveNow(quiet) {
+        settingsAutosave.stop()
+        if (settingsView.changes === 0) { if (quiet !== true) toast.info("Saved already: changes save by themselves."); if (coopAfterSettings) coopGoOn(); return }
         const e = settingsView.edits, le = settingsView.lineEdits
         // Each setting by its identity and the value the page showed (the file may have changed since).
         const byId = id => settingsView.fields.find(f => f.id === parseInt(id))
@@ -873,9 +938,26 @@ Window {
         const r = parse(Turbine.settingsSave(settingsMod, settingsRel, JSON.stringify(body)), { ok: false, error: "Couldn't save it." })
         if (!r.ok) { toast.problem(r.error); return }
         note("action", "Edit settings saved: " + settingsRel + " (" + settingsView.changes + " changes)")
-        if (settingsMod !== "") { Turbine.applyNow(); toast.done("Saved. Your settings go into the game now and stay through mod updates.") }
-        else toast.done("Saved. The original is kept: Reset to default puts it back.")
-        openSettingsFile(settingsMod, settingsRel, settingsView.title, settingsView.pinFirst, settingsReturn)
+        if (settingsMod !== "") Turbine.applyNow()
+        toast.done("Saved")
+        if (quiet === true && Object.keys(le).length === 0) {
+            // The page stays where it is: the saved values become the page's own.
+            const d = settingsView.doc
+            settingsView.doc = Object.assign({}, d, { edited: true, fields: d.fields.map(f => e[f.id] !== undefined ? Object.assign({}, f, { value: e[f.id] }) : f) })
+            settingsView.edits = ({})
+        } else if (!settingsLeaving) openSettingsFile(settingsMod, settingsRel, settingsView.title, settingsView.pinFirst, settingsReturn)
+        if (coopAfterSettings && !settingsLeaving) coopGoOn()
+    }
+    // A co-op Play waiting for the password: on once it is set.
+    property bool settingsLeaving: false
+    function coopGoOn() {
+        const pw = settingsView.fields.find(x => /password/i.test(x.key || ""))
+        const v = pw ? String(settingsView.valueOf(pw)).trim() : ""
+        if (v === "") return
+        coopAfterSettings = false
+        note("action", "Co-op password set: playing")
+        sheet = ""
+        startCoop()
     }
     function settingsResetAsk() {
         const title = settingsView.title, mod = settingsMod, rel = settingsRel, pin = settingsView.pinFirst, back = settingsReturn
@@ -2180,7 +2262,7 @@ Window {
     // The danger holds stop whenever the sheet or the page changes.
     function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); clickHeld = false; disarm() }
     // (onPageChanged and onTabChanged, near the top, call it too.)
-    onModPageChanged: stopDangerHolds()
+    onModPageChanged: { stopDangerHolds(); pageSettings = false }
     readonly property var gameMenuItems: [
         { icon: "play", title: "Play without mods", detail: acMode === "me3" ? "Starts it the normal way, with its anti-cheat. Nothing is deleted." : "Starts the game with no mods. Nothing is deleted.", ok: true, act: "original" },
         // One row for both ways back: the last setup that worked, or (with more saved) the list, newest first.
@@ -2246,7 +2328,7 @@ Window {
       .sort((a, b) => gameMenuOrder.indexOf(a.act) - gameMenuOrder.indexOf(b.act))
     // 0.59 (R4): the game menu in four sections, always in this order (rows that don't apply are left out; rows that
     // apply but can't be used now are shown dimmed, and A on one says why).
-    readonly property var gameMenuOrder: ["original", "restore", "unhold", "coopsettings", "acguide", "acask", "acon",
+    readonly property var gameMenuOrder: ["coopsettings", "original", "restore", "unhold", "acguide", "acask", "acon",
         "add", "updateall", "checkupdates", "alloff", "allon", "profiles", "overlaps", "outdated", "nexusdl", "nexuslist",
         "why", "verify", "saves", "ersaves", "loader", "me3", "seamless", "acleftover", "kcdrestore", "launchundo", "reset",
         "gamesettings", "details", "activity", "help"]
@@ -2582,6 +2664,12 @@ Window {
     }
     // The details panel's "X Options:" line: the first row (often a fix), Rename, Uninstall, and how many more.
     // The menu's rows for the activity log, with what More holds.
+    // The highlighted mod's settings (My mods' panel and the mod page): its files, the button's words, and the way in.
+    readonly property var panelCfgs: menuMod && tab === 0 ? settingsFilesOf(menuMod.id) : []
+    readonly property bool panelHasSettings: showModPanel && panelCfgs.length > 0
+    readonly property string panelSettingsLabel: menuMod && isSeamless(menuMod) ? "Co-op settings" : "Edit settings"
+    function panelEditOpen() { if (!menuMod) return; note("action", "Panel: " + panelSettingsLabel + " for " + menuMod.name); openModSettings(menuMod) }
+    onPanelHasSettingsChanged: if (!panelHasSettings && zone === "panel") zone = "main"
     function modMenuTitles() { return modMenuItems.map(x => x.act === "more" ? "More (" + x.rest.map(r => r.title).join(", ") + ")" : x.act === "details" ? "Details (" + modMenuFacts.map(f => f.title).join(", ") + ")" : x.title).join("; ") }
     function optionsLine() {
         let all = []
@@ -3569,7 +3657,7 @@ Window {
         if (sheet !== "") return sheetBinds()
         if (moving || orderMoving) return { a: bind("Done", () => act("a")), b: bind("Cancel", () => act("b")), lt: bind("", () => act("lt")), rt: bind("", () => act("rt")) }
         o.view = bind("", wheelPress)
-        if (page === "game" && game) o.start = bind("", startPlay)
+        if (page === "game" && game) o.start = bind("", playPressed)
         // Nexus inside Turbine: A clicks at the pointer (or works the Downloads row), B back a page or close.
         if (page === "browser") {
             // B: back a page (held: close), or close on the first page.
@@ -3630,8 +3718,13 @@ Window {
             o.rt = bind("", () => { railIndex = Math.min(railCount - 1, railIndex + 5) })
             return o
         }
+        if (zone === "panel" && page === "game" && game && panelHasSettings) {
+            o.a = bind(panelSettingsLabel, panelEditOpen)
+            o.b = bind("Back", () => { zone = "main" })
+            return o
+        }
         if (zone === "play" && page === "game" && game) {
-            o.a = bind("Play", startPlay)
+            o.a = bind("Play", playPressed)
             o.b = bind("Back", () => { zone = "main"; note("focus", "Back from Play to the list") })
             o.lb = bind("", () => switchTab(-1))
             o.rb = bind("", () => switchTab(1))
@@ -3659,7 +3752,7 @@ Window {
         }
         if (!game) { o.a = railExtra > 0 ? bind("Show games", showHiddenGames) : bind("Look again", load); return o }
         if (modPage) {
-            o.a = bind(pageALabel, () => modPageAct("a"))
+            o.a = bind(pageSettings ? (isSeamless(pageMod) ? "Co-op settings" : "Edit settings") : pageALabel, () => modPageAct("a"))
             o.b = bind("Back", getBack)
             if (pageMenuItems.length > 0) o.x = bind("Options", () => { menuIndex = 0; openPick(detailsData && detailsData.name ? detailsData.name : "This mod", "", pageMenuItems, "") })
             // 0.59 (newbie M1): Y finds here too (the mod page closes onto the results).
@@ -3817,6 +3910,11 @@ Window {
             return
         }
         if (!game) { if (b === "left") { zone = "rail"; railIndex = 0 } return }
+        if (zone === "panel") {
+            if (b === "left") zone = "main"
+            else if (b === "up" || b === "down") { zone = "main"; navigate(b) }
+            return
+        }
         if (zone === "play") {
             if (b === "up" || b === "down") zone = "main"
             else if (b === "left") { zone = "rail"; railIndex = current }
@@ -3838,6 +3936,8 @@ Window {
         if (b === "up") { if (modIndex === 0) barsHidden = false; modIndex = Math.max(0, modIndex - 1) }
         else if (b === "down") modIndex = Math.min(listItems.length - 1, modIndex + 1)
         else if (b === "left") { zone = "rail"; railIndex = current }
+        // Right: the panel's Edit settings (0.6), when the highlighted mod has settings.
+        else if (b === "right" && panelHasSettings) zone = "panel"
     }
     function switchTab(d) {
         const t = Math.max(0, Math.min(tabs.length - 1, tab + d))
@@ -4203,6 +4303,51 @@ Window {
                 check("Legend check: " + ctxs.length + " contexts, " + problems + " problems")
                 sheet = ""
             }
+        ]
+        // 0.6 (I3): Seamless Co-op chosen at Play: the choice, the password step, the remembered choice, its settings
+        // from all three places, and a toggle, a number and the password saved into Turbine's copy of the file.
+        else if (name === "coopcheck") script = [
+            () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); pad("start") },
+            () => { if (sheet !== "pick") return false
+                    check("Co-op choice: " + pickItems.map(x => x.title).join("; ") + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " | Y " + (pickY ? pickY.label : "none"))
+                    pad("down"); m.focus = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; pad("a") },
+            () => { if (sheet !== "settingsedit") return false
+                    const r = settingsView.shown[settingsView.focusIndex]
+                    check("Co-op password step: picked " + m.focus + ", sheet " + sheet + ", focus " + (r && r.f ? r.f.key : "none") + ", waiting " + coopAfterSettings)
+                    const pw = settingsView.fields.find(x => /password/i.test(x.key)); settingsView.setValue(pw, "dragon") },
+            () => { if (sheet === "settingsedit") return false; check("Co-op after the password: sheet \"" + sheet + "\", waiting " + coopAfterSettings) },
+            () => { sheet = ""; page = "game"; zone = "main"; pad("start") },
+            () => { if (sheet !== "pick") return false
+                    check("Co-op choice remembered: focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + ", Play says " + (lastPlayChoice === "coop" ? "Co-op" : "Solo"))
+                    pad("y") },
+            () => { if (sheet !== "settingsedit") return false; check("Co-op settings from the Play choice (Y): " + settingsView.title); pad("b") },
+            () => { sheet = ""; menuIndex = gameMenuItems.findIndex(x => x.act === "coopsettings"); m.gi = menuIndex; sheet = "gamemenu"; menuIndex = m.gi; check("Game menu first row: " + (gameMenuItems[0] ? gameMenuItems[0].title : "")); pad("a") },
+            () => { if (sheet !== "settingsedit") return false; check("Co-op settings from the game menu: " + settingsView.title); pad("b") },
+            () => { sheet = ""; tab = 0; modIndex = Math.max(0, listItems.findIndex(x => x.kind === "mod" && isSeamless(x.m))); pad("x"); menuIndex = modMenuItems.findIndex(x => x.act === "settings"); check("Mod menu: " + modMenuTitles()); pad("a") },
+            () => { if (sheet !== "settingsedit") return false
+                    check("Co-op settings from the mod's X menu: " + settingsView.title)
+                    const t = settingsView.fields.find(x => x.key === "allow_invaders"), n = settingsView.fields.find(x => x.key === "enemy_health_scaling")
+                    if (t) settingsView.setValue(t, t.value === "1" ? "0" : "1")
+                    if (n) settingsView.setValue(n, "50")
+                    check("Co-op edits: allow_invaders to " + (t ? settingsView.valueOf(t) : "?") + ", enemy_health_scaling to 50") },
+            () => { if (settingsView.changes > 0) return false; check("Co-op edits saved by themselves: 0 waiting"); pad("b") }
+        ]
+        // 0.6 (I8): Edit settings on the mod's panel: a tap and Right then A open that mod's settings; no button
+        // for a mod without settings.
+        else if (name === "editbutton") script = [
+            () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0
+                    m.with = mods.find(x => settingsFilesOf(x.id).length > 0); m.without = mods.find(x => settingsFilesOf(x.id).length === 0)
+                    if (!m.with) { check("Edit button: no mod with settings"); return }
+                    modIndex = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.with.id) },
+            () => { if (!panelEdit.visible) { if (!showModPanel) { check("Edit button: the panel doesn't fit here"); scriptStep = script.length; return } return false }
+                    const p = panelEdit.mapToItem(null, panelEdit.width / 2, panelEdit.height / 2); Turbine.selftestPointer(p.x, p.y, true, 0) },
+            () => { if (sheet !== "settingsedit") return false
+                    check("Edit button tapped: sheet settingsedit for " + (settingsMod === m.with.id ? m.with.name : "another mod (" + settingsMod + ")")); Turbine.pointerHide(); pad("b") },
+            () => { if (sheet !== "") return false; modIndex = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.with.id); zone = "main"; pad("right"); check("Edit button by Right: zone " + zone + ", legend A " + (legendHints[0] ? legendHints[0][1] : "")); pad("a") },
+            () => { if (sheet !== "settingsedit") return false; check("Edit button by Right then A: sheet settingsedit for " + (settingsMod === m.with.id ? m.with.name : settingsMod)); pad("b") },
+            () => { if (sheet !== "") return false; zone = "main"
+                    if (m.without) { modIndex = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.without.id) }
+                    check("Edit button for a mod without settings (" + (m.without ? m.without.name : "none") + "): " + (panelEdit.visible ? "PROBLEM: shown" : "none")) }
         ]
         else if (name === "sheetcheck") script = [
             () => { if (mods.length < 2) return false
@@ -4929,8 +5074,18 @@ Window {
     ] : []).concat((detailsData.source || srcNow) === "nexus" && detailsData.page ? [
         { icon: "play", title: "Open on Nexus", detail: "Its page, in the browser", run: () => openNexus(detailsData.page) }
     ] : [])
+    // 0.6: the installed mod's Edit settings on its page (Left reaches it, A opens it).
+    readonly property bool pageHasSettings: modPage && !!pageMod && settingsFilesOf(pageMod.id).length > 0
+    property bool pageSettings: false
     function modPageAct(b) {
         if (b === "b") { getBack(); return }
+        if (pageSettings) {
+            if (b === "a") { note("action", "Mod page: settings of " + pageMod.name); openModSettings(pageMod) }
+            else if (b === "left") { pageSettings = false; zone = "rail"; railIndex = current }
+            else if (["right", "up", "down"].indexOf(b) >= 0) pageSettings = false
+            if (b !== "lb" && b !== "rb") return
+        }
+        if (b === "left" && pageHasSettings) { pageSettings = true; return }
         if (b === "a") {
             if (pageInline === 0) steamOpen()
             else if (pageInline === 1) alwaysSteamNow()
@@ -6414,7 +6569,7 @@ Window {
           expect: "Elden Ring starts normally with its anti-cheat; the next Play starts it with mods again." },
         { id: "coop-play", title: "Play Seamless Co-op", how: "Elden Ring with Seamless Co-op: set a session password in Seamless Co-op settings, then press Co-op beside Play.",
           expect: "Seamless Co-op starts with your password and its own .co2 save; Play alone starts the solo modded game." },
-        { id: "edit-settings", title: "Edit settings with the controller", how: "X on a mod with an .ini or .cfg file, Edit settings. Change a toggle, a number and a text (Steam keyboard), Start saves.",
+        { id: "edit-settings", title: "Edit settings with the controller", how: "X on a mod with an .ini or .cfg file, Edit settings. Change a toggle, a number and a text (Steam keyboard); each saves by itself.",
           expect: "The game uses the new values; Reset to default puts the mod's own back; a mod update keeps your values." },
         { id: "launch-check", title: "The didn't start sheet", how: "Press Play on a game that can't start (for example Elden Ring with the Launch Options text removed in Steam).",
           expect: "About 20 seconds later a sheet says it didn't start, with the Launch Options step, Play without mods and the Activity log." },
@@ -7329,10 +7484,10 @@ Window {
                             spacing: app.px(8)
                             Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
                             // Play waits for changes being saved: it says so.
-                            Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: (app.savingNow ? "Play (saving...)" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                        TapHandler { onTapped: { if (!app.gate(0, "startPlay")) return; app.startPlay() } }
+                        TapHandler { onTapped: { if (!app.gate(0, "startPlay")) return; app.playPressed() } }
                     }
                 }
 
@@ -7442,6 +7597,21 @@ Window {
                                     color: modelData.level === "warn" ? c.warn : c.accentText
                                     font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.weight: Font.DemiBold
                                 }
+                            }
+                            // 0.6 (I8, the owner's video): Edit settings right on the mod, for a mod with a settings file
+                            // (Seamless Co-op: its settings, password first). Right from the list, or a tap; nothing when
+                            // the mod has none.
+                            Rectangle {
+                                id: panelEdit
+                                objectName: "panelEdit"
+                                readonly property bool foc: app.zone === "panel" && app.sheet === ""
+                                visible: app.panelHasSettings
+                                width: Math.min(parent.width, panelEditText.implicitWidth + app.px(28)); height: app.tpx(44); radius: app.px(6)
+                                color: foc ? c.focusFill : c.raised
+                                border.color: foc ? c.accentHi : c.accent; border.width: foc ? app.px(2) : Math.max(1, app.px(1.5))
+                                Text { id: panelEditText; anchors.centerIn: parent; text: app.panelSettingsLabel; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true }
+                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                                TapHandler { onTapped: { if (!app.gate(0, "panel Edit settings")) return; app.zone = "panel"; app.panelEditOpen() } }
                             }
                         }
                         Text {
@@ -7714,6 +7884,9 @@ Window {
                         onInstallClicked: { if (!app.gate(0, "onInstallClicked")) return; app.pageIndex = 0; app.pageInline = -1; app.installFromDetails() }
                         onVersionsClicked: { if (!app.gate(0, "onVersionsClicked")) return; app.pageIndex = 1; app.openVersions() }
                         onNeedClicked: (i) => { if (!app.gate(0, "onNeedClicked")) return; app.pageIndex = i + 2; app.openNeed(i) }
+                        settingsLabel: app.pageHasSettings ? (app.isSeamless(app.pageMod) ? "Co-op settings" : "Edit settings") : ""
+                        settingsFocused: app.pageSettings && app.zone === "main" && app.sheet === ""
+                        onSettingsClicked: { if (!app.gate(0, "onSettingsClicked")) return; app.pageSettings = true; app.openModSettings(app.pageMod) }
                         // Right-click (LT with the pointer): the page's options, like X.
                         TapHandler { acceptedButtons: Qt.RightButton; onTapped: { if (!app.gate(0, "sheet (right)")) return; if (app.sheet === "" && app.pageMenuItems.length > 0) { app.zone = "main"; app.act("x") } } }
                     }
@@ -8611,7 +8784,15 @@ Window {
             visible: app.sheet === "settingsedit"
             onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return; app.settingsSaveNow() }
             onResetClicked: { if (!app.gate(2, "sheet onResetClicked")) return; app.settingsResetAsk() }
-            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsReturn }
+            onCloseClicked: {
+                if (!app.gate(2, "sheet onCloseClicked")) return
+                // Anything still waiting to save goes in first: B never loses a change.
+                app.settingsLeaving = true
+                if (changes > 0) app.settingsSaveNow(true)
+                app.settingsLeaving = false
+                if (app.coopAfterSettings) { app.coopAfterSettings = false; toast.info("Co-op waits for a session password.") }
+                app.note("action", "Edit settings closed"); app.sheet = app.settingsReturn
+            }
             onTypeAsked: (row, value, label) => { if (!app.gate(2, "sheet onTypeAsked")) return
                 app.settingsTypeRow = row
                 const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
@@ -8810,7 +8991,8 @@ Window {
             // 0.58: Play Seamless Co-op, next to Play, where Seamless Co-op is installed.
             Rectangle {
                 id: coopBtn
-                visible: app.barGame && app.seamlessIn && app.sheet === "" && !app.wheelOpen
+                // 0.6 (I3): co-op is chosen at Play; the separate button is gone.
+                visible: false
                 width: coopText.implicitWidth + app.px(24); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
                 color: c.raised; border.color: c.accent; border.width: Math.max(1, app.px(1.5))
                 opacity: Turbine.busy ? 0.55 : 1
@@ -8840,12 +9022,12 @@ Window {
                     spacing: app.px(8)
                     Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
                     // Play waits for changes being saved: it says so.
-                    Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: (app.savingNow ? "Play (saving...)" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
                 Accessible.role: Accessible.Button
                 Accessible.name: "Play"
                 HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: app.startPlay() }
+                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { if (!app.gate(3, "Play")) return; app.playPressed() } }
             }
         }
         // The quick wheel's button: View's cap (a tap opens it too).

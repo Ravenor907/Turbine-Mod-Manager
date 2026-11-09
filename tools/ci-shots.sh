@@ -757,8 +757,24 @@ for size in $SIZES; do
   shoot "coopsettings-$size" "$size" coopsettings "$h" --game=$er "--selftest-import=$h/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Co-op settings"
   need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
-  need "coopsettings-$size" "Play Seamless Co-op beside Play ($size)" "Co-op beside Play: true"
+  need "coopsettings-$size" "I3: co-op is chosen at Play, no separate button ($size)" "Co-op chosen at Play: true"
   need "coopsettings-$size" "The bar with Co-op: nothing overlaps ($size)" "Bar check \(coopbar, .*0 problems \| .*co-op, Play"
+  # 0.6 (I3): the Play choice, the password step, the remembered choice, settings from three places, saved edits.
+  rm -rf "$PWD/fh/coop-$size"; python3 tools/fake-home.py "$PWD/fh/coop-$size" --anticheat > /dev/null; hc="$PWD/fh/coop-$size"
+  shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  n="coopcheck-$size"
+  need $n "I3: Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
+  need $n "I3: no password: its settings open on it ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit, focus cooppassword, waiting true"
+  need $n "I3: with the password, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false"
+  need $n "I3: the choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"
+  need $n "I3: settings from the Play choice ($size)" "Co-op settings from the Play choice \\(Y\\): Seamless Co-op settings"
+  need $n "I3: settings first in the game menu ($size)" "Game menu first row: Co-op settings"
+  need $n "I3: settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
+  need $n "I3: settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
+  need $n "I12: edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
+  ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
+  if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"
+  else echo "::error title=I3: the ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
   shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
   need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"
 done
@@ -776,6 +792,14 @@ for size in $SIZES; do
   ini=$(find "$h" -name LanternGlow.ini -path "*Data/SKSE/Plugins/*" -not -path "*turbine-mod-manager*" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
+  # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
+  fresh "editbutton-$size"; h="$PWD/fh/editbutton-$size"
+  shoot "editbutton-$size" "$size" editbutton "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
+  if grep -q "Edit button: the panel doesn't fit here" "$PWD/data/editbutton-$size/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=I8: no panel at $size::the row's X menu has Edit settings"; else
+  need "editbutton-$size" "I8: a tap on Edit settings opens that mod's ($size)" "Edit button tapped: sheet settingsedit for Lantern Glow"
+  need "editbutton-$size" "I8: Right then A opens it ($size)" "Edit button by Right then A: sheet settingsedit for Lantern Glow"
+  need "editbutton-$size" "I8: no button for a mod without settings ($size)" "Edit button for a mod without settings \\(.*\\): none"
+  fi
   fresh "gameupdate-$size"; h="$PWD/fh/gameupdate-$size"
   shoot "gameupdate-$size" "$size" gameupdate "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
   need "gameupdate-$size" "Game update warning names the mods that may break ($size)" "Game update warning: .* build 99 to 100; may break: Lantern Glow"

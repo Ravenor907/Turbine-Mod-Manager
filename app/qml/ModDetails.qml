@@ -27,6 +27,10 @@ Item {
     signal helpClicked(int index)
     signal versionsClicked()
     signal needClicked(int index)
+    // 0.6: the installed mod's settings, under the description ("" when it has none: no button at all).
+    property string settingsLabel: ""
+    property bool settingsFocused: false
+    signal settingsClicked()
 
     readonly property bool loading: !info || info.loading === true
     readonly property int otherCount: info && info.versions ? info.versions.length : 0
@@ -157,6 +161,16 @@ Item {
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.fpx(15)
+            }
+            Rectangle {
+                objectName: "pageEdit"
+                visible: md.settingsLabel !== "" && !md.loading
+                width: pageEditText.implicitWidth + md.ui.px(28); height: md.ui.tpx(44); radius: md.ui.px(6)
+                color: md.settingsFocused ? md.ui.c.focusFill : md.ui.c.raised
+                border.color: md.settingsFocused ? md.ui.c.accentHi : md.ui.c.accent; border.width: md.settingsFocused ? md.ui.px(2) : Math.max(1, md.ui.px(1.5))
+                Text { id: pageEditText; anchors.centerIn: parent; text: md.settingsLabel; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.bold: true }
+                HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
+                TapHandler { onTapped: md.settingsClicked() }
             }
         }
         Column {

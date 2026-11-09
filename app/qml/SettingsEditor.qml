@@ -2,8 +2,8 @@ import QtQuick
 
 // 0.58, Edit settings: a mod's (or the game's) config file as a page of plain controls. Up and Down pick a setting;
 // Left and Right change it (a toggle flips, a number steps, a list moves to the next choice); A flips a toggle,
-// moves a list on, or opens Steam's keyboard for a number or text; Start saves; X is Reset to default; Y switches to
-// the plain text of the file (A there edits the line); B goes back (twice when there are changes not saved). Taps
+// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself (0.6); X is Reset to
+// default; Y switches to the plain text of the file (A there edits the line); B goes back. Taps
 // and clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
 Overlay {
     id: se
@@ -49,6 +49,20 @@ Overlay {
     // A number or text to type: the field (or line), its value now, the words for the keyboard.
     signal typeAsked(var row, string value, string label)
 
+    // 0.6: plain names ("allow_invaders" is "Allow invaders"; Seamless Co-op's own get their meaning).
+    readonly property var plainNames: ({ cooppassword: "Session password", allow_invaders: "Allow invaders", overhead_player_display: "Over other players' heads",
+        always_spectate_on_death: "Watch others after you die", default_boot_master_volume: "Volume at start", enemy_health_scaling: "Enemy health per player (%)",
+        enemy_damage_scaling: "Enemy damage per player (%)", enemy_posture_scaling: "Enemy posture per player (%)", boss_health_scaling: "Boss health per player (%)",
+        boss_damage_scaling: "Boss damage per player (%)", boss_posture_scaling: "Boss posture per player (%)", save_file_extension: "Save file extension",
+        death_debuff: "Death debuff", allow_summons: "Spirit summons", skip_splash_screens: "Skip the start-up screens", mod_language_override: "Language" })
+    function nameOf(k) {
+        const key = String(k || "")
+        if (plainNames[key.toLowerCase()]) return plainNames[key.toLowerCase()]
+        if (!/[_]/.test(key) && !/^[a-z]+$/.test(key)) return key
+        const w = key.replace(/_/g, " ").trim()
+        return w.charAt(0).toUpperCase() + w.slice(1)
+    }
+    readonly property bool coop: title.indexOf("Seamless Co-op") >= 0
     function valueOf(f) { return edits[f.id] !== undefined ? edits[f.id] : f.value }
     function setValue(f, v) {
         let e = Object.assign({}, edits)
@@ -120,10 +134,8 @@ Overlay {
         else if (b === "start") saveClicked()
         else if (b === "x") resetClicked()
         else if (b === "y") { textMode = !textMode; focusIndex = firstField() }
-        else if (b === "b") {
-            if (changes > 0 && !leaveArmed) leaveArmed = true
-            else closeClicked()
-        }
+        // 0.6: changes save themselves; B only goes back (Main.qml saves anything still waiting first).
+        else if (b === "b") closeClicked()
     }
     onShownChanged: if (focusIndex >= shown.length) focusIndex = Math.max(0, shown.length - 1)
 
@@ -154,7 +166,8 @@ Overlay {
             x: se.ui.px(20)
             width: parent.width - se.ui.px(40)
             wrapMode: Text.Wrap
-            text: (se.leaveArmed ? "Changes not saved. B again leaves without them; Start saves." : se.changes > 0 ? se.changes + (se.changes === 1 ? " change" : " changes") + " not saved yet. Start saves." : se.sub)
+            text: (se.coop ? "Every co-op player must use the same password and the same settings. " : "")
+                  + (se.changes > 0 ? "Saving..." : se.sub + " · changes save by themselves")
                   + (se.plain && se.fields.length === 0 ? "  Turbine can't read this file as settings: here it is line by line." : "")
             color: se.leaveArmed ? se.ui.c.warn : se.ui.c.soft
             font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14)
@@ -201,7 +214,7 @@ Overlay {
                     spacing: se.ui.px(2)
                     Text {
                         width: parent.width
-                        text: row.f ? row.f.key : row.modelData.kind === "line" ? "Line " + row.modelData.n : ""
+                        text: row.f ? se.nameOf(row.f.key) : row.modelData.kind === "line" ? "Line " + row.modelData.n : ""
                         elide: Text.ElideRight
                         color: se.ui.c.text
                         font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(15); font.bold: true
