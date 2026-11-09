@@ -323,13 +323,16 @@ impl SteamChange {
         })
     }
 
+    fn file(&self) -> &Path {
+        match self {
+            SteamChange::Tile { file, .. } | SteamChange::NoTile { file, .. } | SteamChange::Options { file, .. } => file,
+        }
+    }
+
     /// Does Steam's file hold this change now?
     /// Did a Steam started at `started` read this change (its file was written before then)? Unknown start: yes.
     pub fn read_by(&self, started: Option<std::time::SystemTime>) -> bool {
-        let file = match self {
-            SteamChange::Tile { file, .. } | SteamChange::NoTile { file, .. } | SteamChange::Options { file, .. } => file,
-        };
-        match (started, fs::metadata(file).and_then(|m| m.modified())) {
+        match (started, fs::metadata(self.file()).and_then(|m| m.modified())) {
             (Some(s), Ok(m)) => m <= s,
             _ => true,
         }
@@ -357,12 +360,35 @@ pub fn pending_file(data: &Path) -> PathBuf {
 
 /// The changes waiting to be checked.
 pub fn pending(data: &Path) -> Vec<SteamChange> {
-    let Ok(t) = fs::read_to_string(pending_file(data)) else { return Vec::new() };
-    let Ok(v) = crate::json::parse(&t) else { return Vec::new() };
-    v.get("changes").map(crate::json::Json::as_array).unwrap_or(&[]).iter().filter_map(SteamChange::from_json).collect()
+    pending_written(data).into_iter().map(|(c, _)| c).collect()
 }
 
-fn save_pending(data: &Path, list: &[SteamChange]) -> std::io::Result<()> {
+/// 0.61 (N1): a file's change time as text (nanoseconds since 1970), to tell a later write from Turbine's own.
+fn stamp(file: &Path) -> String {
+    fs::metadata(file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos().to_string())
+        .unwrap_or_default()
+}
+
+/// A change with its file's change time just after Turbine wrote it ("" when not known).
+type Written = (SteamChange, String);
+
+/// The changes waiting, each with its time.
+fn pending_written(data: &Path) -> Vec<Written> {
+    let Ok(t) = fs::read_to_string(pending_file(data)) else { return Vec::new() };
+    let Ok(v) = crate::json::parse(&t) else { return Vec::new() };
+    v.get("changes")
+        .map(crate::json::Json::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|j| Some((SteamChange::from_json(j)?, j.str_at("written").unwrap_or("").to_string())))
+        .collect()
+}
+
+fn save_pending(data: &Path, list: &[Written]) -> std::io::Result<()> {
     let f = pending_file(data);
     if list.is_empty() {
         return match fs::remove_file(&f) {
@@ -371,7 +397,13 @@ fn save_pending(data: &Path, list: &[SteamChange]) -> std::io::Result<()> {
         };
     }
     fs::create_dir_all(f.parent().unwrap_or(data))?;
-    let items: Vec<String> = list.iter().map(SteamChange::to_json).collect();
+    let items: Vec<String> = list
+        .iter()
+        .map(|(c, w)| {
+            let j = c.to_json();
+            format!("{},\"written\":{}}}", &j[..j.len() - 1], crate::json::quote(w))
+        })
+        .collect();
     let tmp = f.with_extension("tmp");
     fs::write(&tmp, format!("{{\"changes\":[{}]}}\n", items.join(",")))?;
     fs::rename(tmp, f)
@@ -386,9 +418,10 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
         (SteamChange::Options { file: f1, app_id: a1, .. }, SteamChange::Options { file: f2, app_id: a2, .. }) => f1 == f2 && a1 == a2,
         _ => false,
     };
-    let mut list = pending(data);
-    list.retain(|c| !same(c, &change));
-    list.push(change);
+    let mut list = pending_written(data);
+    list.retain(|(c, _)| !same(c, &change));
+    let written = stamp(change.file());
+    list.push((change, written));
     save_pending(data, &list)
 }
 
@@ -401,8 +434,14 @@ pub fn check_after_restart(data: &Path) -> (Vec<SteamChange>, Vec<SteamChange>) 
 /// 0.6 (break M3): the same, with when the running Steam started. A change only counts as held when its file was
 /// written before Steam started (Steam then read it); written after, Steam is running on the old copy and writes
 /// it back when it closes, so it is lost even though the file has it now.
+///
+/// 0.61 (N1): a file written again after Turbine's own write (its change time differs from the one noted then) was
+/// written by Steam; if it still holds the change, Steam kept it, so it is held too.
 pub fn check_after_restart_since(data: &Path, steam_started: Option<std::time::SystemTime>) -> (Vec<SteamChange>, Vec<SteamChange>) {
-    let (held, lost): (Vec<SteamChange>, Vec<SteamChange>) = pending(data).into_iter().partition(|c| c.holds() && c.read_by(steam_started));
+    let (held, lost): (Vec<Written>, Vec<Written>) = pending_written(data).into_iter().partition(|(c, w)| {
+        let rewritten = !w.is_empty() && stamp(c.file()) != *w;
+        c.holds() && (rewritten || c.read_by(steam_started))
+    });
     let _ = save_pending(data, &lost);
-    (held, lost)
+    (held.into_iter().map(|(c, _)| c).collect(), lost.into_iter().map(|(c, _)| c).collect())
 }

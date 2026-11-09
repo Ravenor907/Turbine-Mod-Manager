@@ -353,3 +353,41 @@ fn a_change_written_after_steam_started_is_lost() {
     assert!(steam_setup::pending(&data).is_empty());
     let _ = fs::remove_dir_all(&d);
 }
+
+#[test]
+fn a_change_steam_wrote_again_and_kept_is_held() {
+    use std::time::{Duration, SystemTime};
+    let d = tmp("rewritten");
+    let data = d.join("data");
+    let cfg = d.join("userdata/42/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let local = cfg.join("localconfig.vdf");
+    fs::write(&local, CONFIG).unwrap();
+    let job = Job {
+        changes: vec![Change::Options { file: local.clone(), app_id: "1245620".into(), value: "x %command%".into() }],
+        resume: String::new(),
+        what: "ELDEN RING".into(),
+        at: 1_762_700_000,
+    };
+    steam_restart::apply_job(&data, &job).unwrap();
+    // Steam started before, then saved the file itself (play time) and kept Turbine's value: held, not lost.
+    std::thread::sleep(Duration::from_millis(30));
+    let kept = fs::read_to_string(&local).unwrap();
+    fs::write(&local, kept).unwrap();
+    let f = fs::File::options().write(true).open(&local).unwrap();
+    f.set_modified(SystemTime::now() + Duration::from_secs(2)).unwrap();
+    drop(f);
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(SystemTime::now() - Duration::from_secs(60)));
+    assert_eq!((held.len(), lost.len()), (1, 0));
+    // Steam wrote it again with its own old copy: not held.
+    steam_restart::apply_job(&data, &job).unwrap();
+    std::thread::sleep(Duration::from_millis(30));
+    fs::write(&local, CONFIG).unwrap();
+    let f = fs::File::options().write(true).open(&local).unwrap();
+    f.set_modified(SystemTime::now() + Duration::from_secs(4)).unwrap();
+    drop(f);
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(SystemTime::now() - Duration::from_secs(60)));
+    assert_eq!((held.len(), lost.len()), (0, 1));
+    let _ = fs::remove_dir_all(&d);
+}
+
