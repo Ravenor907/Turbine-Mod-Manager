@@ -188,6 +188,48 @@ jobs:
           (cd engine && TURBINE_QUERY_OUT=/tmp/nexus-queries cargo +1.97.0 test --release -q --test complexity)
           sh tools/nexus-live.sh /tmp/nexus-queries
 
+  # 0.6: the optional Steam menu plugin (decky/), on its own beside the other jobs (nothing waits for it but a
+  # release). Decky's template build (rollup), its typecheck and tests, then the zip Decky installs from.
+  decky:
+    name: Steam menu plugin (Decky)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Typecheck, test and build the plugin
+        shell: bash
+        working-directory: decky
+        run: |
+          node --version
+          npm install -g pnpm@9.15.9 > /dev/null
+          pnpm --version
+          # No lockfile is kept for the plugin: the versions in package.json are ranges within one major version.
+          pnpm install --no-frozen-lockfile
+          pnpm run typecheck
+          python3 -m py_compile main.py
+          pnpm run test
+          pnpm run build
+          test -s dist/index.js || { echo "::error title=Plugin build::dist/index.js wasn't made"; exit 1; }
+      - name: Zip it the way Decky installs it
+        shell: bash
+        run: |
+          v=$(head -n1 VERSION | tr -d '\r')
+          out=decky/out/Turbine
+          rm -rf decky/out && mkdir -p "$out/dist" "$out/assets"
+          cp decky/dist/index.js "$out/dist/"
+          cp decky/main.py decky/plugin.json "$out/"
+          cp decky/assets/icon.png "$out/assets/"
+          cp LICENSE "$out/LICENSE"
+          # Decky shows the plugin's version from package.json: Turbine's own (one dot, as everywhere).
+          node -e 'const fs=require("fs"), p=JSON.parse(fs.readFileSync(process.argv[1])); p.version=process.argv[3]; delete p.devDependencies; fs.writeFileSync(process.argv[2], JSON.stringify(p, null, 2) + "\n")' decky/package.json "$out/package.json" "$v"
+          (cd decky/out && zip -qr ../../Turbine-Decky.zip Turbine)
+          unzip -l Turbine-Decky.zip
+          echo "::notice title=Turbine-Decky.zip::$(stat -c %s Turbine-Decky.zip) bytes, version $v"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: Turbine-Decky.zip
+          path: Turbine-Decky.zip
+          retention-days: 30
+
   vendor:
     name: Rust crates for the offline Flatpak build
     runs-on: ubuntu-latest
@@ -369,11 +411,11 @@ jobs:
 
   release:
     name: Release (owner approved)
-    needs: [reuse, rules, engine, flatpak, checks]
+    needs: [reuse, rules, engine, flatpak, checks, decky]
     # The bundle this run built and checked, or (reuse) the one a green run of the same commit built and checked.
     if: >-
       always() && github.event_name == 'workflow_dispatch' && inputs.release &&
-      needs.rules.result == 'success' && needs.engine.result == 'success' &&
+      needs.rules.result == 'success' && needs.engine.result == 'success' && needs.decky.result == 'success' &&
       (needs.reuse.outputs.run != '' || (needs.flatpak.result == 'success' && needs.checks.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
@@ -396,11 +438,16 @@ jobs:
           if [ -f TurbineModManager.flatpak.sha256 ]; then sha256sum -c TurbineModManager.flatpak.sha256
           else echo "::warning title=No checksum beside the bundle::built before 0.6"; fi
           echo "::notice title=Releasing::$(sha256sum TurbineModManager.flatpak) from run ${{ needs.reuse.outputs.run || github.run_id }}"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: Turbine-Decky.zip
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: v${{ needs.rules.outputs.version }}
           name: Turbine Mod Manager ${{ needs.rules.outputs.version }}
           prerelease: false
-          files: TurbineModManager.flatpak
+          files: |
+            TurbineModManager.flatpak
+            Turbine-Decky.zip
           body: |
             Test build for SteamOS handhelds. Download TurbineModManager.flatpak in Desktop Mode and open it to install.

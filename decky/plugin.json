@@ -1,0 +1,11 @@
+{
+  "name": "Turbine",
+  "author": "Ravenor907",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["mods", "games"],
+    "description": "Turbine Mod Manager in the Quick Access menu: mods on or off, Play with or without mods, and Open Turbine for the game you're in. Needs Turbine Mod Manager (Flatpak).",
+    "image": "https://raw.githubusercontent.com/Ravenor907/Turbine-Mod-Manager/main/decky/assets/icon.png"
+  }
+}
