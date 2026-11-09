@@ -166,4 +166,27 @@ fn backups_check_space_size_and_count_first() {
     let e = saves::restore_with(&first.id, std::slice::from_ref(&save), &root, 400, Some(10)).unwrap_err();
     assert!(e.to_string().contains("not enough free space"), "{e}");
     assert_eq!(fs::read(save.join("a.sav")).unwrap(), vec![8u8; 4096]);
+    // Second break test N2: the player can still put it back, without keeping the saves as they are now.
+    assert!(saves::couldnt_keep(&e));
+    saves::restore_without_keeping(&first.id, std::slice::from_ref(&save), &root).unwrap();
+    assert_eq!(fs::read(save.join("a.sav")).unwrap(), vec![7u8; 4096]);
+}
+
+#[test]
+fn restore_makes_a_deleted_save_folder_again() {
+    // Second break test N1: the whole save folder is gone; the backup goes back into it.
+    let t = TempDir::new("saves-gone");
+    let save = t.path("Saves");
+    fs::create_dir_all(&save).unwrap();
+    fs::write(save.join("a.sav"), b"kept").unwrap();
+    let root = t.path("bk");
+    let s = saves::backup(std::slice::from_ref(&save), &root, 100).unwrap().unwrap();
+    fs::remove_dir_all(&save).unwrap();
+    let before = saves::restore(&s.id, std::slice::from_ref(&save), &root, 200).unwrap();
+    assert!(before.is_none(), "nothing there to keep first");
+    assert_eq!(fs::read(save.join("a.sav")).unwrap(), b"kept");
+    // A place that isn't one of the game's save locations is still refused.
+    fs::remove_dir_all(&save).unwrap();
+    assert!(saves::restore(&s.id, &[t.path("Other")], &root, 300).is_err());
+    assert!(!save.exists());
 }

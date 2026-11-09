@@ -614,12 +614,23 @@ fn a_player_data_file_cannot_turn_protections_off() {
     let zip = t.0.join("dl/Over 1.0.zip");
     write_zip(&zip, &[("Data/brass.ini", "mod"), ("Data/steam_api64.dll", "x"), ("Data/new.esp", "p")]);
     let mut s = Store::open(&g, &t.0.join("data")).unwrap();
-    s.import_zip(&zip).unwrap();
+    let id = s.import_zip(&zip).unwrap().id;
     let r = s.apply().unwrap();
-    turbine_engine::rules::load_player_games(&files_dir.join("none"));
     assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "game file Data/brass.ini");
     assert!(!g.install_dir.join("Data/steam_api64.dll").exists());
     assert!(g.install_dir.join("Data/new.esp").exists(), "{r:?}");
+    // Second break test N3: the player sees what was left out and can let this mod replace it.
+    assert!(s.guarded_json().contains("Data/brass.ini"), "{}", s.guarded_json());
+    s.set_replace(&id, true).unwrap();
+    s.apply().unwrap();
+    assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "mod");
+    assert!(!g.install_dir.join("Data/steam_api64.dll").exists(), "the refused table still holds");
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    assert!(s.guarded_json().contains("\"replace\":true"), "kept across a restart");
+    s.set_replace(&id, false).unwrap();
+    s.apply().unwrap();
+    turbine_engine::rules::load_player_games(&files_dir.join("none"));
+    assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "game file Data/brass.ini", "the game's file comes back");
 }
 
 #[test]

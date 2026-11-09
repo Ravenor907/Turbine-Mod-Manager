@@ -41,6 +41,12 @@ pub struct Snapshot {
 
 /// The game's save folders that exist now.
 pub fn folders(game: &Game, saves: &SavesFile, home: &Path) -> Vec<PathBuf> {
+    locations(game, saves, home).into_iter().filter(|p| fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false)).collect()
+}
+
+/// Every place the game's data file says it keeps saves, there or not (a backup may go back into one the game or
+/// the player deleted).
+pub fn locations(game: &Game, saves: &SavesFile, home: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let user = game.prefix.as_ref().map(|p| p.join("drive_c").join("users").join("steamuser"));
     let native = game.runtime == Runtime::Native;
@@ -51,7 +57,7 @@ pub fn folders(game: &Game, saves: &SavesFile, home: &Path) -> Vec<PathBuf> {
         out.extend(saves.native.iter().map(|r| home.join(r)));
     }
     out.extend(saves.game.iter().map(|r| game.install_dir.join(r)));
-    out.into_iter().filter(|p| fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false)).collect()
+    out
 }
 
 fn stamp(now: u64) -> String {
@@ -292,14 +298,32 @@ fn trim(root: &Path, keep: &[&str]) -> io::Result<()> {
 
 /// Puts a snapshot back: first a snapshot of the saves as they are now (returned; trimming never removes the one
 /// being put back), then each kept folder's files copied over the folder it was taken from (files the snapshot
-/// doesn't have are left alone). Refused, with nothing changed, when a folder the snapshot came from is not one
-/// of the game's save folders now, or the snapshot is incomplete.
+/// doesn't have are left alone). `folders` are the game's save locations (`locations`): a folder that is gone is
+/// made again. Refused, with nothing changed, when a folder the snapshot came from is not one of them, is a link
+/// or a file, or the snapshot is incomplete.
 pub fn restore(id: &str, folders: &[PathBuf], root: &Path, now: u64) -> io::Result<Option<Snapshot>> {
     restore_with(id, folders, root, now, free_bytes(root))
 }
 
 /// restore with the drive's free space given (see backup_with).
 pub fn restore_with(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: Option<u64>) -> io::Result<Option<Snapshot>> {
+    put_back(id, folders, root, now, free, true)
+}
+
+/// Puts a snapshot back without first keeping the saves as they are now: only when the player asked for it
+/// after `restore` couldn't keep them (too big, too many files, no room). The saves now are replaced for good.
+pub fn restore_without_keeping(id: &str, folders: &[PathBuf], root: &Path) -> io::Result<()> {
+    put_back(id, folders, root, 0, None, false).map(|_| ())
+}
+
+/// Is this error from `restore` about keeping the current saves first (so `restore_without_keeping` could do it)?
+pub fn couldnt_keep(e: &io::Error) -> bool {
+    e.to_string().starts_with(KEEP_FAILED)
+}
+
+const KEEP_FAILED: &str = "the saves as they are now couldn't be kept first";
+
+fn put_back(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: Option<u64>, keep: bool) -> io::Result<Option<Snapshot>> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a backup"));
     }
@@ -313,18 +337,23 @@ pub fn restore_with(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: 
     }
     for (i, f) in from.iter().enumerate() {
         if !folders.contains(f) {
-            return Err(other(format!("the save folder it came from isn't there anymore: {}", f.display())));
+            return Err(other(format!("it came from a folder that isn't one of this game's save folders: {}", f.display())));
+        }
+        if fs::symlink_metadata(f).is_ok_and(|m| !m.is_dir()) {
+            return Err(other(format!("{} isn't a plain folder", f.display())));
         }
         if !snap.join(i.to_string()).is_dir() {
             return Err(other("that backup is incomplete".into()));
         }
     }
-    let before = backup_with(folders, root, now, free, &[id])?;
+    let there: Vec<PathBuf> = folders.iter().filter(|p| fs::symlink_metadata(p).map(|m| m.is_dir()).unwrap_or(false)).cloned().collect();
+    let before = if keep { backup_with(&there, root, now, free, &[id]).map_err(|e| other(format!("{KEEP_FAILED}: {e}")))? } else { None };
     if !snap.join("when").is_file() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "that backup is gone"));
     }
     for (i, f) in from.iter().enumerate() {
         let mut count = (0usize, 0u64);
+        fs::create_dir_all(f)?;
         copy_tree(&snap.join(i.to_string()), f, &mut count)
             .map_err(|e| other(format!("copying stopped partway ({e}); the saves from just before are kept as a backup")))?;
     }

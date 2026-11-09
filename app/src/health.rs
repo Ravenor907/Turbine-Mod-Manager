@@ -26,6 +26,11 @@ fn save_folders(game: &Game) -> Vec<PathBuf> {
     saves::folders(game, &GameRules::for_game(game).saves, &turbine_engine::home_dir())
 }
 
+/// Every place the game keeps saves, there now or not (a backup can go back into a folder that was deleted).
+fn save_locations(game: &Game) -> Vec<PathBuf> {
+    saves::locations(game, &GameRules::for_game(game).saves, &turbine_engine::home_dir())
+}
+
 /// Before Play: a copy of the game's saves (nothing when Turbine doesn't know where they are). When it can't be
 /// made (too big, too many files, no room), the player is told why and Play goes on.
 pub(crate) fn backup_before_play(w: &Worker, game: &Game) {
@@ -51,7 +56,7 @@ impl qobject::Turbine {
             .iter()
             .map(|s| format!("{{\"id\":{},\"when\":{},\"files\":{},\"bytes\":{}}}", quote(&s.id), s.when, s.files, s.bytes))
             .collect();
-        QString::from(format!("{{\"folders\":{},\"backups\":[{}]}}", save_folders(&game).len(), list.join(",")).as_str())
+        QString::from(format!("{{\"folders\":{},\"backups\":[{}]}}", save_locations(&game).len(), list.join(",")).as_str())
     }
 
     /// Puts a save backup back (the saves as they are now are kept first).
@@ -63,14 +68,37 @@ impl qobject::Turbine {
             "Put back saves",
             true,
             Box::new(move |w: &mut Worker| {
-                let folders = save_folders(&game);
+                let folders = save_locations(&game);
                 match saves::restore(&id, &folders, &backups_root(&game), now()) {
                     Ok(_) => {
                         crate::log::line("engine", &format!("Saves put back for {}: the backup {id} (the saves before it were kept)", game.name));
                         w.say(format!("{}'s saves are back as they were. The saves from just before are kept as a backup too.", game.name), "ok");
                     }
+                    Err(e) if saves::couldnt_keep(&e) => {
+                        crate::log::line("engine", &format!("Saves not put back for {}: {e}", game.name));
+                        let (i, why) = (id.clone(), e.to_string());
+                        w.post(move |t| t.saves_keep_failed(QString::from(i.as_str()), QString::from(why.as_str())));
+                    }
                     Err(e) => w.say(format!("Couldn't put the saves back: {e}."), "error"),
                 }
+            }),
+        );
+    }
+
+    /// Puts a save backup back without keeping the saves as they are now (the player confirmed it).
+    pub fn restore_saves_anyway(self: Pin<&mut Self>, id: &QString) {
+        let Some(game) = self.current_game() else { return };
+        let id = id.to_string();
+        self.send(
+            Some(game.id()),
+            "Put back saves",
+            true,
+            Box::new(move |w: &mut Worker| match saves::restore_without_keeping(&id, &save_locations(&game), &backups_root(&game)) {
+                Ok(()) => {
+                    crate::log::line("engine", &format!("Saves put back for {}: the backup {id} (the saves before it were not kept, as asked)", game.name));
+                    w.say(format!("{}'s saves are back as they were.", game.name), "ok");
+                }
+                Err(e) => w.say(format!("Couldn't put the saves back: {e}."), "error"),
             }),
         );
     }

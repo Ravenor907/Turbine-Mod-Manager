@@ -265,7 +265,7 @@ Item {
                             width: rib.implicitWidth + gm.ui.px(14); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
                             border.color: cell.modelData.update === true ? gm.ui.c.accent : gm.ui.c.ok
-                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
+                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "In your mods · Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.bold: true }
                         }
                         Rectangle {
                             visible: cell.modelData.code === true

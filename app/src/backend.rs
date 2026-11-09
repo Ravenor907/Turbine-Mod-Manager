@@ -201,6 +201,11 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "restoreSaves"]
         fn restore_saves(self: Pin<&mut Self>, id: &QString);
+        /// 0.57: puts a save backup back without keeping the saves as they are now (after `savesKeepFailed` and the
+        /// player's confirm).
+        #[qinvokable]
+        #[cxx_name = "restoreSavesAnyway"]
+        fn restore_saves_anyway(self: Pin<&mut Self>, id: &QString);
         /// 0.56: Why won't it start? and Check game folder (read only).
         #[qinvokable]
         #[cxx_name = "gameHealth"]
@@ -718,6 +723,12 @@ pub mod qobject {
         /// A sentence for the status line. level: "work" (in progress), "ok", "warn" or "error".
         #[qsignal]
         fn message(self: Pin<&mut Self>, text: QString, level: QString);
+
+        /// 0.57: putting a save backup back stopped because the saves as they are now couldn't be kept first: the
+        /// backup's id and why (the interface asks whether to put it back anyway).
+        #[qsignal]
+        #[cxx_name = "savesKeepFailed"]
+        fn saves_keep_failed(self: Pin<&mut Self>, id: QString, why: QString);
 
         /// The check before Play finished; the same JSON as `checkJson`.
         #[qsignal]

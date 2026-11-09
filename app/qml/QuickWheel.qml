@@ -97,7 +97,8 @@ Item {
                 readonly property bool foc: index === qw.focusIndex
                 readonly property real a: (index * 45 - 90) * Math.PI / 180
                 readonly property real mid: (pie.outer + pie.inner) / 2 + pie.outer * 0.04
-                width: pie.outer * 0.55
+                // Diagonal wedges are narrower where the label sits: a smaller width keeps it off their borders.
+                width: pie.outer * (index % 2 === 1 ? 0.42 : 0.55)
                 x: pie.outer + Math.cos(a) * mid - width / 2
                 y: pie.outer + Math.sin(a) * mid - height / 2
                 horizontalAlignment: Text.AlignHCenter

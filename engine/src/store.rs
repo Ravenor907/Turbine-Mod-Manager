@@ -398,6 +398,9 @@ pub struct Store {
     choices: HashMap<String, Vec<String>>,
     /// Basic games: where each mod's files went, by mod ID.
     placements: HashMap<String, PlaceInfo>,
+    /// Mods of a guarded game with no placement (laid out by a player file's rules) the player let replace the
+    /// game's own files (state.json "replaceOk").
+    replace_ok: HashSet<String>,
     setup_list: Vec<Setup>,
     saved: Vec<SavedSetup>,
     last_build: Option<String>,
@@ -736,6 +739,7 @@ impl Store {
             sources: HashMap::new(),
             choices: HashMap::new(),
             placements: HashMap::new(),
+            replace_ok: HashSet::new(),
             setup_list: Vec::new(),
             saved: Vec::new(),
             last_build: None,
@@ -874,6 +878,7 @@ impl Store {
                 },
             );
         }
+        self.replace_ok = v.get("replaceOk").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(String::from)).collect();
         self.last_build = v.str_at("lastBuild").map(String::from);
         self.sync_lists();
         Ok(false)
@@ -994,14 +999,17 @@ impl Store {
             .map(|(id, p)| format!("{}:{}", quote(id), p.to_json()))
             .collect();
         placements.sort();
+        let mut replace_ok: Vec<String> = self.replace_ok.iter().filter(|id| known.contains(id.as_str())).map(|id| quote(id)).collect();
+        replace_ok.sort();
         let text = format!(
-            "{{\"version\":1,\n\"mods\":[\n{}\n],\n\"removed\":[\n{}\n],\n\"setups\":[\n{}\n],\n\"sources\":{{\n{}\n}},\n\"choices\":{{\n{}\n}},\n\"placements\":{{\n{}\n}},\n\"lastBuild\":{}}}\n",
+            "{{\"version\":1,\n\"mods\":[\n{}\n],\n\"removed\":[\n{}\n],\n\"setups\":[\n{}\n],\n\"sources\":{{\n{}\n}},\n\"choices\":{{\n{}\n}},\n\"placements\":{{\n{}\n}},\n\"replaceOk\":[{}],\n\"lastBuild\":{}}}\n",
             mods.join(",\n"),
             removed.join(",\n"),
             setups.join(",\n"),
             sources.join(",\n"),
             choices.join(",\n"),
             placements.join(",\n"),
+            replace_ok.join(","),
             opt(&self.last_build)
         );
         write_atomic(&self.state_path(), &text)
@@ -1332,15 +1340,58 @@ impl Store {
         self.save()
     }
 
-    /// Lets a Basic game's mod replace the game's own files (or not, the default).
+    /// Lets a Basic game's mod replace the game's own files (or not, the default). In a game added by a player's
+    /// file, a mod laid out by that file's rules (no placement) gets the same choice.
     pub fn set_replace(&mut self, id: &str, replace: bool) -> io::Result<()> {
         match self.placements.get_mut(id) {
             Some(p) if p.replace != replace => {
                 p.replace = replace;
                 self.save()
             }
-            _ => Ok(()),
+            Some(_) => Ok(()),
+            None if self.rules.guarded() && self.mods.iter().any(|m| m.id == id) => {
+                let changed = if replace { self.replace_ok.insert(id.to_string()) } else { self.replace_ok.remove(id) };
+                if changed {
+                    self.save()
+                } else {
+                    Ok(())
+                }
+            }
+            None => Ok(()),
         }
+    }
+
+    /// For a guarded game's mods with no placement: whether each may replace the game's files, and the files it
+    /// leaves out now because the game already has them. Only mods with something to say.
+    pub fn guarded_json(&self) -> String {
+        if !self.rules.guarded() {
+            return "{}".into();
+        }
+        let record = Record::load(&self.deploy_paths().record).unwrap_or_default();
+        let ours: HashSet<String> = record.files.iter().filter(|p| p.backup.is_none()).map(|p| p.rel.to_lowercase()).collect();
+        let mut out = Vec::new();
+        for m in self.mods.iter().filter(|m| m.enabled && !self.placements.contains_key(&m.id)) {
+            let replace = self.replace_ok.contains(&m.id);
+            let skipped: Vec<String> = if replace {
+                Vec::new()
+            } else {
+                walk_files(&self.mod_dir(&m.id))
+                    .into_iter()
+                    .map(|(rel, _)| rel)
+                    .filter(|rel| !ours.contains(&rel.to_lowercase()) && rules::find_ci(&self.game.install_dir, rel).is_some())
+                    .filter(|rel| basic::refused(rel, true).is_none())
+                    .collect()
+            };
+            if replace || !skipped.is_empty() {
+                out.push(format!(
+                    "{}:{{\"replace\":{},\"skipped\":[{}]}}",
+                    quote(&m.id),
+                    replace,
+                    skipped.iter().map(|x| quote(x)).collect::<Vec<_>>().join(",")
+                ));
+            }
+        }
+        format!("{{{}}}", out.join(","))
     }
 
     /// The game's folders right in `rel`, for "Where do these files go?" (folders Turbine made are marked).
@@ -1815,7 +1866,7 @@ impl Store {
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
                 // A guarded game's mod with no placement (laid out by a player file's rules) may not replace.
-                let unplaced = PlaceInfo::default();
+                let unplaced = PlaceInfo { replace: self.replace_ok.contains(&m.id), ..PlaceInfo::default() };
                 let place = place.or(if guarded { Some(&unplaced) } else { None });
                 match place {
                     Some(p) => {
@@ -2145,11 +2196,12 @@ impl Store {
         let mut placements: Vec<String> = self.placements.iter().map(|(id, p)| format!("{}:{}", quote(id), p.to_json())).collect();
         placements.sort();
         format!(
-            "{{\"mods\":[{}],\"removed\":[{}],\"setups\":[{}],\"placements\":{{{}}},\"lastBuild\":{}}}",
+            "{{\"mods\":[{}],\"removed\":[{}],\"setups\":[{}],\"placements\":{{{}}},\"guarded\":{},\"lastBuild\":{}}}",
             mods.join(","),
             removed.join(","),
             setups.join(","),
             placements.join(","),
+            self.guarded_json(),
             opt(&self.last_build)
         )
     }

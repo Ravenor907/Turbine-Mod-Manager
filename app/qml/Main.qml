@@ -736,6 +736,7 @@ Window {
             app.modWarns = v.warns || {}
             app.kcdRestore = v.kcdRestore === true
             app.placements = v.placements || {}
+            app.guardedMods = v.guarded || {}
             app.modsLoaded = true
             app.modIndex = Math.max(0, Math.min(app.modIndex, app.listItems.length - 1))
             if (keep !== "") {
@@ -768,6 +769,11 @@ Window {
             app.addIndex = Math.max(0, Math.min(app.addIndex, app.addList.length - 1))
         }
         function onMessage(text, level) { app.say(text, level) }
+        // Putting saves back couldn't keep the saves as they are now: ask before replacing them for good.
+        function onSavesKeepFailed(id, why) {
+            app.note("action", "Saves: " + why)
+            app.askDelete("saves:" + id, "Turbine couldn't keep your saves as they are now first (" + why.replace(/^.*?first: /, "") + "). Put the backup back anyway? Your saves as they are now are replaced for good.")
+        }
         function onChecked(json) { app.checked(app.parse(json, [])) }
         function onLaunch(url) { app.playAt = Date.now(); app.playGame = app.game ? app.game.id : ""; if (!shot.on) Qt.openUrlExternally(url) }
         function onGameEnded(gameId, seconds, known) {
@@ -1154,12 +1160,16 @@ Window {
     property string confirmWhat: ""
     property string confirmText: ""
     // 2 seconds for a mod already in Removed mods; 5 for a loadout or profile.
-    readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 ? 5 : 2
+    readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 || confirmWhat.indexOf("saves:") === 0 ? 5 : 2
+    // What the confirm does, in its title and button: put saves back over the ones there, or delete for good.
+    function confirmWords() { return confirmVerb === "delete" ? "delete for good" : "replace your saves" }
+    readonly property string confirmVerb: confirmWhat.indexOf("saves:") === 0 ? "replace them" : "delete"
     function askDelete(what, text) { disarm(); confirmWhat = what; confirmText = text; confirmIndex = 0; stopReset(); sheet = "confirm" }
     property int confirmIndex: 0
     function confirmDone() {
         const w = confirmWhat
         if (w.indexOf("check:") === 0) { note("check", "Delete for good would run now"); sheet = ""; return }
+        if (w.indexOf("saves:") === 0) { note("action", "Put back saves without keeping the ones now"); sheet = ""; Turbine.restoreSavesAnyway(w.substring(6)); return }
         if (w.indexOf("profile:") === 0) {
             const n = w.substring(8)
             note("action", "Delete profile " + n)
@@ -1777,7 +1787,7 @@ Window {
         const o = overlapsMap[m.id]
         return o && o.hidden && (o.loses || []).length > 0 ? o.loses[0] : null
     }
-    readonly property bool modMenuHasFacts: !!menuMod && (modMenuFacts.length > 0 || !!placements[menuMod.id] || ordered)
+    readonly property bool modMenuHasFacts: !!menuMod && (modMenuFacts.length > 0 || !!placements[menuMod.id] || !!guardedMods[menuMod.id] || ordered)
     readonly property var modMenuItems: {
         if (!menuMod) return []
         const cov = menuMod.enabled ? coveredBy(menuMod) : null
@@ -2035,6 +2045,7 @@ Window {
     readonly property bool basicGame: !!rules && !!rules.supportLevel && rules.supportLevel !== "full"
     readonly property string supportChip: !basicGame ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
     property var placements: ({})         // mod id: {from, to, rule, replace, skipped} (Basic games)
+    property var guardedMods: ({})        // mod id: {replace, skipped} (a player file's game, mods it laid out)
     property var placeData: null          // the waiting mod: {game, gameName, pending: {name, placement, sure, conflicts, refused, tree}}
     property string placeMode: ""         // "add" (a new mod) or "move" (Change where it goes)
     property var placeMoveMod: null
@@ -2310,9 +2321,9 @@ Window {
         if (basicIntro) note("page", "First visit card: Mods for " + gameTitle)
     }
     function placementWords(m) {
-        const p = placements[m.id]
+        const p = placements[m.id] || guardedMods[m.id]
         if (!p) return []
-        return [{ icon: "info", title: "Placed in: " + folderWords(p.to), detail: p.rule === "you" ? "By you" : "By Turbine's rule " + p.rule, act: "place" }]
+        return (placements[m.id] ? [{ icon: "info", title: "Placed in: " + folderWords(p.to), detail: p.rule === "you" ? "By you" : "By Turbine's rule " + p.rule, act: "place" }] : [])
             .concat((p.skipped || []).length > 0 ? [{ icon: "info", title: "Skipped: " + plural(p.skipped.length, "file the game already has", "files the game already has"),
                                                       detail: "A lets this mod replace them (the game's own are kept)", act: "replaceon" }]
                     : p.replace ? [{ icon: "info", title: "Replaces the game's own files", detail: "A leaves them alone again", act: "replaceoff" }] : [])
@@ -2522,9 +2533,9 @@ Window {
         }
     }
     function startConfirm() {
-        if (pressTwice) { confirmTwice(deleteKey(), "delete for good", () => { holdsDone++; confirmDone() }); return }
+        if (pressTwice) { confirmTwice(deleteKey(), confirmWords(), () => { holdsDone++; confirmDone() }); return }
         if (confirmHold.running) return
-        if (!holdAllowed()) { holdHint(holdNeeded + " seconds to delete for good"); return }
+        if (!holdAllowed()) { holdHint(holdNeeded + " seconds to " + confirmWords()); return }
         confirmHeld = 0; confirmHold.start()
     }
     function stopConfirm() { confirmHold.stop(); confirmHeld = 0 }
@@ -2582,7 +2593,7 @@ Window {
         }
         if (s === "ask") return { labels: ["Clear", "Cancel", askView.doneLabel], index: askIndex, main: 2, cancel: 1, set: i => { askIndex = i }, run: i => askRun(i), scrolls: false }
         if (s === "confirm") return { labels: ["Delete", "Keep"], index: confirmIndex, main: -1, cancel: 1, set: i => { confirmIndex = i },
-                                      run: i => { if (i === 1) { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : removedMods.length > 0 ? "removed" : "" } }, scrolls: false }
+                                      run: i => { if (i === 1) { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : confirmWhat.indexOf("saves:") === 0 ? "" : removedMods.length > 0 ? "removed" : "" } }, scrolls: false }
         return null
     }
     // The build's check of the button rule: with sheetDry on, a press only says which button it would run.
@@ -2604,7 +2615,7 @@ Window {
             if (sheet === "ask" && askIndex < 0) askKeyboard()
             else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1))
             // A that isn't a held A (R3, a tap): Delete needs the hold.
-            else if (!sheetDry && !confirmHold.running && !pressTwice) holdHint(holdNeeded + " seconds to delete for good")
+            else if (!sheetDry && !confirmHold.running && !pressTwice) holdHint(holdNeeded + " seconds to " + confirmWords())
         }
         else if (b === "b") { if (bs.cancel >= 0) runIt(bs.cancel); else if (!sheetDry) sheet = "" }
         else if (b === "start" && sheetStartPlays(bs)) runIt(bs.main)
@@ -3251,7 +3262,7 @@ Window {
     }
     function wheelFire(i) {
         const s = wheelSlots[i]
-        if (!s || !s.ok) { note("action", "Quick wheel: " + (s ? s.label : i) + " is dimmed here"); return }
+        if (!s || !s.ok) { note("action", "Quick wheel: " + (s ? s.label : i) + " is dimmed here"); if (s) toast.info(s.label + " isn't available here."); return }
         closeWheel()
         note("action", "Quick wheel: " + s.label)
         s.run()
@@ -3942,12 +3953,13 @@ Window {
             if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") getIndex = Math.min(starterItems.length - 1, getIndex + 1)
             else if (b === "up") { getArea = "bar"; getIndex = 0 }
-            else if (b === "down" && getItems.length > 0) { getArea = "grid"; getIndex = 0 }
+            // Down keeps the column (the strip's 4th card goes to the grid's 4th).
+            else if (b === "down" && getItems.length > 0) { getArea = "grid"; getIndex = Math.min(getItems.length - 1, getIndex % cols) }
             else if (b === "a" && starterItems[getIndex]) openDetails(starterItems[getIndex])
         } else {
             if (b === "left") { if (getIndex % cols > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") { if (getIndex % cols < cols - 1) getIndex = Math.min(getItems.length - 1, getIndex + 1) }
-            else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = 0 } else { getArea = "bar"; getIndex = 0 } }
+            else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = Math.min(starterItems.length - 1, getIndex) } else { getArea = "bar"; getIndex = 0 } }
             else if (b === "down") getIndex = Math.min(getItems.length - 1, getIndex + cols)
             else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
             else if (b === "x" && getItems[getIndex]) { menuIndex = 0; sheet = "cardmenu" }
@@ -6070,6 +6082,17 @@ Window {
                 }
                 Rectangle { width: app.px(28); height: app.px(2); radius: 1; color: c.line; anchors.horizontalCenter: parent.horizontalCenter }
             }
+            // A tile scrolled half under the divider fades out instead of showing a cut edge.
+            Rectangle {
+                z: 2
+                anchors.top: railList.top
+                width: parent.width; height: app.px(12)
+                visible: !railList.atYBeginning
+                gradient: Gradient {
+                    GradientStop { position: 0; color: c.rail }
+                    GradientStop { position: 1; color: Qt.rgba(c.rail.r, c.rail.g, c.rail.b, 0) }
+                }
+            }
             ListView {
                 id: railList
                 anchors.top: railTop.bottom
@@ -7549,10 +7572,10 @@ Window {
         id: confirmSheet
         ui: kit
         visible: app.sheet === "confirm"
-        title: "Delete for good?"
+        title: app.confirmVerb === "delete" ? "Delete for good?" : "Replace your saves?"
         text: app.confirmText
-        buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to delete" : "Press A twice to delete")
-                                 : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to delete" },
+        buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
+                                 : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
                   { key: "", label: "Keep" }]
         focusIndex: app.confirmIndex
         // Hold mode: a tap on Delete only moves the highlight; holding a finger or the pointer on it counts like
@@ -7561,7 +7584,7 @@ Window {
             if (i !== 0) { app.confirmIndex = i; app.act("b"); return }
             if (app.pressTwice) { app.confirmIndex = 0; app.startConfirm(); return }
             app.confirmIndex = i
-            if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to delete for good")
+            if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to " + app.confirmWords())
         }
         onHeld: (i, down) => {
             if (i !== 0 || app.pressTwice) return
@@ -7807,6 +7830,9 @@ Window {
     Toast {
         id: toast
         ui: kit
+        // With the details panel open, over the list column (not the panel's edge).
+        x: app.page === "game" && app.showModPanel && modPanel.visible
+           ? Math.max(app.px(10), (rail.width + parent.width - modPanel.width - app.px(20)) / 2 - width / 2) : (parent.width - width) / 2
         function put(kind, m) {
             if (m === app.lastToast && Date.now() - app.lastToastAt < 6000 && shown) return
             app.lastToast = m; app.lastToastAt = Date.now()
