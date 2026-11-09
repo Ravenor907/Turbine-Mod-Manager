@@ -28,6 +28,7 @@ pub mod overlaps;
 pub mod plugins;
 pub mod profiles;
 pub mod proton;
+pub mod quick;
 pub mod rules;
 pub mod report;
 pub mod saves;

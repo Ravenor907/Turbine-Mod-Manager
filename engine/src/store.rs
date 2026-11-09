@@ -1995,7 +1995,62 @@ impl Store {
             self.mods[i].enabled = on;
             self.save()?;
         }
+        // 0.6: a mod turned on by hand ends Mods off (the player chose again; the old list would undo that).
+        if on {
+            self.drop_held();
+        }
         Ok(())
+    }
+
+    /// 0.6, Mods off (Steam's menu): the mods it turned off, still in the list, in their order. Empty when off isn't held.
+    pub fn held_off(&self) -> Vec<String> {
+        let held = crate::quick::read_held(&self.root);
+        self.mods.iter().filter(|m| held.contains(&m.id)).map(|m| m.id.clone()).collect()
+    }
+
+    /// 0.6, Mods off: every mod that is on goes off, and they are kept so Mods on brings back exactly those (any held
+    /// already stay held). Answers how many went off now. Apply afterwards.
+    pub fn hold_all_off(&mut self) -> io::Result<usize> {
+        let now_on: Vec<String> = self.mods.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect();
+        if now_on.is_empty() {
+            return Ok(0);
+        }
+        let mut keep = self.held_off();
+        for id in &now_on {
+            if !keep.contains(id) {
+                keep.push(id.clone());
+            }
+        }
+        crate::quick::write_held(&self.root, &keep, self.now())?;
+        for m in &mut self.mods {
+            m.enabled = false;
+        }
+        self.save()?;
+        Ok(now_on.len())
+    }
+
+    /// 0.6, Mods on: the mods Mods off turned off come back on (those still here). Answers how many. Apply afterwards.
+    pub fn release_held(&mut self) -> io::Result<usize> {
+        let held = self.held_off();
+        let mut n = 0;
+        for m in &mut self.mods {
+            if held.contains(&m.id) && !m.enabled {
+                m.enabled = true;
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.save()?;
+        }
+        self.drop_held();
+        Ok(n)
+    }
+
+    fn drop_held(&self) {
+        let p = crate::quick::held_path(&self.root);
+        if p.exists() {
+            let _ = fs::remove_file(p);
+        }
     }
 
     /// Moves a mod to a position in the order (0 = first, lowest priority). Past the end means last.
