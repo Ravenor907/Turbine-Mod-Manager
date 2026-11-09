@@ -806,13 +806,23 @@ pub fn paired() -> bool {
 /// no helper).
 pub const OPEN_WAIT: Duration = Duration::from_secs(180);
 
+/// 0.61 (integration I7e): how long a page waits for the helper. The sign-in page lives as long as its sign-in
+/// request (SIGNIN_WAIT), so a slow first browser start still gets it; other pages OPEN_WAIT.
+pub fn open_wait(url: &str) -> Duration {
+    if url == SIGNIN_URL {
+        SIGNIN_WAIT
+    } else {
+        OPEN_WAIT
+    }
+}
+
 /// {"type":"open","url":...}: the helper opens the page in a new tab.
 pub fn open_message(url: &str) -> String {
     format!("{{\"type\":\"open\",\"url\":{}}}", quote(url))
 }
 
 /// Asks the helper to open a Nexus page in a new tab. Sent now when a helper is connected (answers true); otherwise
-/// kept until one connects within OPEN_WAIT (answers false). Only nexusmods.com https pages; anything else is
+/// kept until one connects within open_wait (answers false). Only nexusmods.com https pages; anything else is
 /// refused.
 pub fn open_tab(url: &str) -> Result<bool, String> {
     if !turbine_engine::browser::nexus_tab_url(url) {
@@ -838,7 +848,7 @@ fn take_pending_open() -> Option<String> {
     let mut g = state();
     let s = g.as_mut()?;
     let (url, at) = s.pending_open.take()?;
-    (at.elapsed() <= OPEN_WAIT).then_some(url)
+    (at.elapsed() <= open_wait(&url)).then_some(url)
 }
 
 /// Sends a message to every connected extension. Connections that can't take it are dropped.
@@ -1697,6 +1707,13 @@ mod tests {
         assert!(open_tab("http://www.nexusmods.com/").is_err());
         // Nothing is connected here, so a Nexus page waits for the helper.
         assert_eq!(open_tab("https://www.nexusmods.com/skyrimspecialedition/mods/1"), Ok(false));
+    }
+
+    #[test]
+    fn the_signin_page_waits_as_long_as_its_request() {
+        assert_eq!(open_wait(SIGNIN_URL), SIGNIN_WAIT);
+        assert_eq!(open_wait("https://www.nexusmods.com/skyrimspecialedition/mods/1"), OPEN_WAIT);
+        assert!(SIGNIN_WAIT > OPEN_WAIT);
     }
 
     #[test]
