@@ -610,7 +610,8 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
             }
             Err(e) => {
                 crate::log::line("loot", &format!("LOOT sort failed: {e}"));
-                note = format!("Couldn't sort with the community list ({e}), so the game's own files go first.");
+                // T11: the reason stays in the activity log (it names the sorting library and its list).
+                note = "Couldn't sort with the community list, so the game's own files go first. The reason is in the activity log.".to_string();
             }
         }
     }
