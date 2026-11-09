@@ -238,3 +238,5 @@ footer .links { display: flex; flex-wrap: wrap; gap: 10px 24px; font-weight: 700
   .steps > li { padding-left: 64px; }
   .steps > li::before { left: 14px; }
 }
+/* A long address: wraps anywhere rather than running off a phone's screen. */
+code.addr { display: inline-block; max-width: 100%; overflow-wrap: anywhere; word-break: break-all; }
