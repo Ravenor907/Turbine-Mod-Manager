@@ -93,12 +93,18 @@ fn settings_json(game: &Game, id: &str, rel: &str) -> String {
     let fields = settings::parse(&text, fmt);
     let lines: Vec<String> = text.split('\n').take(600).map(|l| quote(l.trim_end_matches('\r'))).collect();
     let edited = if id.is_empty() { settings::game_original(&t.root, rel).exists() } else { t.now != t.default };
+    // 0.6: settings to look at again after the mod's last update (the player's file before it is kept).
+    let (look, gone) = if id.is_empty() { (Vec::new(), Vec::new()) } else { settings::review_notes(&t.root, id, rel) };
+    let review = settings::review_words("The mod", &look, &gone).unwrap_or_default();
+    let review_names: Vec<String> = look.iter().chain(gone.iter()).map(|n| quote(n)).collect();
     crate::log::line("settings", &format!("Edit settings open: {} {} ({}, {} settings{})", if id.is_empty() { game.name.as_str() } else { id }, rel, fmt.key(), fields.len(), if big { ", too big to read as settings: plain text" } else { "" }));
     format!(
-        "{{{head},\"format\":\"{}\",\"fields\":{},\"lines\":[{}],\"edited\":{edited},\"big\":{big},\"error\":\"\"}}",
+        "{{{head},\"format\":\"{}\",\"fields\":{},\"lines\":[{}],\"edited\":{edited},\"big\":{big},\"review\":{},\"reviewNames\":[{}],\"error\":\"\"}}",
         fmt.key(),
         settings::fields_json(&fields),
-        lines.join(",")
+        lines.join(","),
+        quote(&review),
+        review_names.join(",")
     )
 }
 
@@ -115,7 +121,13 @@ impl qobject::Turbine {
         } else {
             Vec::new()
         };
-        let items: Vec<String> = list.iter().map(|(r, e)| format!("{{\"rel\":{},\"edited\":{e}}}", quote(r))).collect();
+        let items: Vec<String> = list
+            .iter()
+            .map(|(r, e)| {
+                let review = !id.is_empty() && settings::review_path(&root, &id, r).is_file();
+                format!("{{\"rel\":{},\"edited\":{e},\"review\":{review}}}", quote(r))
+            })
+            .collect();
         QString::from(format!("[{}]", items.join(",")).as_str())
     }
 
@@ -187,6 +199,9 @@ impl qobject::Turbine {
         let r = if t.mod_id.is_empty() { settings::save_game_file_at(&t.root, &t.game_dir, &rel, &new, game.build.as_deref()) } else { settings::save_edit(&t.root, &t.mod_id, &rel, &t.default, &new) };
         match r {
             Ok(()) => {
+                if !t.mod_id.is_empty() {
+                    settings::clear_review(&t.root, &t.mod_id, &rel);
+                }
                 crate::log::line("settings", &format!("Edit settings saved: {} {}: {}", if id.is_empty() { game.name.as_str() } else { id.as_str() }, rel, said.join("; ")));
                 answer(true, "")
             }

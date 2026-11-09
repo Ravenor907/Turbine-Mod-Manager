@@ -866,13 +866,6 @@ pub fn set_by_key(text: &str, fmt: Format, edits: &[Edit]) -> Result<String, Str
     set(text, fmt, &ids)
 }
 
-/// The first array index in a path ("list.2.on" is in the array "list").
-fn array_prefix(section: &str) -> Option<String> {
-    let parts: Vec<&str> = section.split('.').collect();
-    let i = parts.iter().position(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))?;
-    Some(parts[..i].join("."))
-}
-
 /// The plain text fallback: one line replaced (1-based).
 pub fn set_line(text: &str, line: usize, new: &str) -> Result<String, String> {
     if new.contains('\n') {
@@ -888,42 +881,190 @@ pub fn set_line(text: &str, line: usize, new: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-/// A new default file with the player's changes carried over: every setting whose edited value differs from the old
-/// default gets that value in the new default, matched by section, name and occurrence, only where the name occurs
-/// as often in both defaults; inside a JSON or YAML array only when the array's items are the same in both. Running
-/// it again changes nothing (values are compared and written unescaped).
+/// A new default file with the player's changes carried over (`merge_report`'s text). Running it again changes
+/// nothing (values are compared and written unescaped).
 pub fn merge(fmt: Format, new_default: &str, old_default: &str, edited: &str) -> String {
+    merge_report(fmt, new_default, old_default, edited).text
+}
+
+/// What carrying the player's changes into a mod's new file did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MergeReport {
+    pub text: String,
+    /// Changed settings Turbine couldn't place for sure in the new file (the player should look at them again), as
+    /// the page names them ("[General] Volume", "list 2: on").
+    pub unsure: Vec<String>,
+    /// Changed settings the new file doesn't have any more.
+    pub gone: Vec<String>,
+}
+
+/// Keys that name a list item (its identity across versions), in the order they are tried.
+const ITEM_IDS: &[&str] = &["id", "uid", "guid", "key", "name", "title", "label", "type"];
+
+/// How the page names a setting to the player.
+pub fn setting_name(section: &str, key: &str, occ: usize) -> String {
+    let mut n = if section.is_empty() { key.to_string() } else { format!("{section}: {key}") };
+    if occ > 0 {
+        n.push_str(&format!(" (number {})", occ + 1));
+    }
+    n
+}
+
+/// For each item of `old`, the item of `new` it is in a longest common subsequence. `late`: of several equally
+/// good matches, the last one (else the first). None for items left out.
+fn align(old: &[&str], new: &[&str], late: bool) -> Vec<Option<usize>> {
+    if late {
+        let ro: Vec<&str> = old.iter().rev().copied().collect();
+        let rn: Vec<&str> = new.iter().rev().copied().collect();
+        let m = align(&ro, &rn, false);
+        return m.into_iter().rev().map(|j| j.map(|j| new.len() - 1 - j)).collect();
+    }
+    let (a, b) = (old.len(), new.len());
+    let mut dp = vec![vec![0u32; b + 1]; a + 1];
+    for i in (0..a).rev() {
+        for j in (0..b).rev() {
+            dp[i][j] = if old[i] == new[j] { dp[i + 1][j + 1] + 1 } else { dp[i + 1][j].max(dp[i][j + 1]) };
+        }
+    }
+    let mut out = vec![None; a];
+    let (mut i, mut j) = (0, 0);
+    while i < a && j < b {
+        if old[i] == new[j] && dp[i][j] == dp[i + 1][j + 1] + 1 {
+            out[i] = Some(j);
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    out
+}
+
+/// Where occurrence `occ` of a repeated setting went: matched by the old default's values in order, only when the
+/// match is the same whichever way it's read. Err(()) when that can't be told for sure.
+fn place_occurrence(old_vals: &[&str], new_vals: &[&str], occ: usize) -> Result<Option<usize>, ()> {
+    if old_vals == new_vals {
+        return Ok(Some(occ));
+    }
+    if old_vals.len() > 2000 || new_vals.len() > 2000 {
+        return Err(());
+    }
+    let early = align(old_vals, new_vals, false);
+    let late = align(old_vals, new_vals, true);
+    match (early.get(occ).copied().flatten(), late.get(occ).copied().flatten()) {
+        (Some(x), Some(y)) if x == y => Ok(Some(x)),
+        _ => Err(()),
+    }
+}
+
+/// A list item's path split around its index: ("list", 2, ".rest") for "list.2.rest".
+fn split_item(section: &str) -> Option<(String, usize, String)> {
+    let parts: Vec<&str> = section.split('.').collect();
+    let i = parts.iter().position(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))?;
+    let idx = parts[i].parse().ok()?;
+    let rest: String = parts[i + 1..].iter().map(|p| format!(".{p}")).collect();
+    Some((parts[..i].join("."), idx, rest))
+}
+
+/// The identity of item `idx` of list `prefix`: (the identity key, its value), from the first ITEM_IDS key the item
+/// has.
+fn item_identity(list: &[Field], prefix: &str, idx: usize) -> Option<(String, String)> {
+    let sec = format!("{prefix}.{idx}");
+    ITEM_IDS.iter().find_map(|k| list.iter().find(|f| f.section == sec && f.key.eq_ignore_ascii_case(k)).map(|f| (f.key.clone(), f.value.clone())))
+}
+
+/// Carries the player's changes (`edited` against `old_default`) into `new_default`. Each changed setting is
+/// matched by section, name and occurrence; a repeated name by the old default's values in order; a list item by
+/// its identity (an id or name key) when the list changed. Anything that can't be placed for sure is left as the
+/// new file has it and listed in `unsure`.
+pub fn merge_report(fmt: Format, new_default: &str, old_default: &str, edited: &str) -> MergeReport {
     let old = parse(old_default, fmt);
     let mine = parse(edited, fmt);
     let new = parse(new_default, fmt);
-    let count = |list: &[Field], s: &str, k: &str| list.iter().filter(|f| f.section == s && f.key == k).count();
+    let vals = |list: &[Field], s: &str, k: &str| -> Vec<String> { list.iter().filter(|f| f.section == s && f.key == k).map(|f| f.value.clone()).collect() };
     let items = |list: &[Field], prefix: &str| -> Vec<(String, String, String)> {
         list.iter()
             .filter(|f| f.section == prefix || f.section.starts_with(&format!("{prefix}.")))
             .map(|f| (f.section.clone(), f.key.clone(), f.value.clone()))
             .collect()
     };
-    let mut edits = Vec::new();
+    let mut report = MergeReport::default();
+    let mut edits: Vec<(usize, String)> = Vec::new();
     for m in &mine {
         let was = old.iter().find(|o| o.section == m.section && o.key == m.key && o.occ == m.occ);
-        if was.is_some_and(|w| w.value == m.value) {
+        let Some(was) = was else { continue };
+        if was.value == m.value {
             continue;
         }
-        if count(&old, &m.section, &m.key) != count(&new, &m.section, &m.key) && was.is_some() {
-            continue;
-        }
-        if let Some(prefix) = array_prefix(&m.section) {
+        let name = setting_name(&m.section, &m.key, m.occ);
+        // Where is this setting in the new file?
+        let mut section = m.section.clone();
+        let key = m.key.clone();
+        if let Some((prefix, idx, rest)) = split_item(&m.section) {
             if items(&old, &prefix) != items(&new, &prefix) {
+                let Some((id_key, id_val)) = item_identity(&old, &prefix, idx) else {
+                    report.unsure.push(name);
+                    continue;
+                };
+                if id_key.eq_ignore_ascii_case(&m.key) && rest.is_empty() {
+                    // The player changed the item's identity itself.
+                    report.unsure.push(name);
+                    continue;
+                }
+                let same: Vec<usize> = (0..10_000)
+                    .take_while(|j| new.iter().any(|f| f.section == format!("{prefix}.{j}") || f.section.starts_with(&format!("{prefix}.{j}."))))
+                    .filter(|j| item_identity(&new, &prefix, *j).is_some_and(|(k, v)| k.eq_ignore_ascii_case(&id_key) && v == id_val))
+                    .collect();
+                match same.as_slice() {
+                    [j] => section = format!("{prefix}.{j}{rest}"),
+                    [] => {
+                        report.gone.push(name);
+                        continue;
+                    }
+                    _ => {
+                        report.unsure.push(name);
+                        continue;
+                    }
+                }
+            }
+        } else if m.section.is_empty() || !m.key.bytes().all(|b| b.is_ascii_digit()) {
+            // Not an item of a list of plain values: nothing to remap.
+        } else if items(&old, &m.section) != items(&new, &m.section) {
+            // A list of plain values that changed: its items have no identity.
+            report.unsure.push(name);
+            continue;
+        }
+        let old_vals = vals(&old, &m.section, &m.key);
+        let new_vals = vals(&new, &section, &key);
+        if new_vals.is_empty() {
+            report.gone.push(name);
+            continue;
+        }
+        let ov: Vec<&str> = old_vals.iter().map(String::as_str).collect();
+        let nv: Vec<&str> = new_vals.iter().map(String::as_str).collect();
+        let occ = if section != m.section {
+            // A list item that moved: its own settings keep their occurrence inside it.
+            if old_vals.len() == new_vals.len() { Ok(Some(m.occ)) } else { place_occurrence(&ov, &nv, m.occ) }
+        } else {
+            place_occurrence(&ov, &nv, m.occ)
+        };
+        let occ = match occ {
+            Ok(Some(o)) => o,
+            Ok(None) | Err(()) => {
+                report.unsure.push(name);
                 continue;
             }
-        }
-        if let Some(n) = new.iter().find(|n| n.section == m.section && n.key == m.key && n.occ == m.occ) {
+        };
+        if let Some(n) = new.iter().find(|n| n.section == section && n.key == key && n.occ == occ) {
             if n.value != m.value {
                 edits.push((n.id, m.value.clone()));
             }
         }
     }
-    set(new_default, fmt, &edits).unwrap_or_else(|_| new_default.to_string())
+    report.text = set(new_default, fmt, &edits).unwrap_or_else(|_| new_default.to_string());
+    report
 }
 
 // ---- A mod's files: Turbine's own copies in the store ----
@@ -967,16 +1108,73 @@ pub fn effective(store_root: &Path, mod_id: &str, rel: &str, default_src: &Path)
     if let (Ok(new_default), Ok(old_default)) = (fs::read_to_string(default_src), fs::read_to_string(&base)) {
         if new_default != old_default {
             if let (Some(fmt), Ok(mine)) = (format_of(rel), fs::read_to_string(&edited)) {
-                let merged = merge(fmt, &new_default, &old_default, &mine);
+                let report = merge_report(fmt, &new_default, &old_default, &mine);
                 let _ = fs::copy(&edited, backup_path(store_root, mod_id, rel));
+                // Anything not carried over for sure: the player's whole file before the update is kept, and the
+                // settings to look at again are listed for the page.
+                let review = review_path(store_root, mod_id, rel);
+                if report.unsure.is_empty() && report.gone.is_empty() {
+                    let _ = fs::remove_file(&review);
+                } else {
+                    let _ = fs::copy(&edited, before_update_path(store_root, mod_id, rel));
+                    let lines: Vec<String> = report.unsure.iter().map(|n| format!("look\t{n}")).chain(report.gone.iter().map(|n| format!("gone\t{n}"))).collect();
+                    let _ = fs::write(&review, lines.join("\n") + "\n");
+                }
                 let tmp = with_ext(&edited, ".tmp");
-                if fs::write(&tmp, merged).and_then(|_| fs::rename(&tmp, &edited)).is_ok() {
+                if fs::write(&tmp, report.text).and_then(|_| fs::rename(&tmp, &edited)).is_ok() {
                     let _ = fs::write(&base, new_default);
                 }
             }
         }
     }
     edited
+}
+
+/// The player's file as it was before a mod update, kept when not every change could be carried over for sure.
+pub fn before_update_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
+    with_ext(&edited_path(store_root, mod_id, rel), ".before-update")
+}
+
+/// The list of settings to look at again after a mod update (one "look\t<name>" or "gone\t<name>" per line).
+pub fn review_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
+    with_ext(&edited_path(store_root, mod_id, rel), ".review")
+}
+
+/// The settings to look at again after the mod's last update: (settings Turbine couldn't place for sure, settings the
+/// new version doesn't have). Both empty when there is nothing to look at.
+pub fn review_notes(store_root: &Path, mod_id: &str, rel: &str) -> (Vec<String>, Vec<String>) {
+    let text = fs::read_to_string(review_path(store_root, mod_id, rel)).unwrap_or_default();
+    let mut look = Vec::new();
+    let mut gone = Vec::new();
+    for l in text.lines() {
+        match l.split_once('\t') {
+            Some(("look", n)) => look.push(n.to_string()),
+            Some(("gone", n)) => gone.push(n.to_string()),
+            _ => {}
+        }
+    }
+    (look, gone)
+}
+
+/// The words for the page and the mod's row: which settings need a second look after the mod updated.
+pub fn review_words(mod_name: &str, look: &[String], gone: &[String]) -> Option<String> {
+    if look.is_empty() && gone.is_empty() {
+        return None;
+    }
+    let mut t = format!("{mod_name} updated. Turbine kept your changes where it was sure.");
+    if !look.is_empty() {
+        t.push_str(&format!(" Please check these settings again, the new version moved things around: {}.", look.join(", ")));
+    }
+    if !gone.is_empty() {
+        t.push_str(&format!(" The new version no longer has: {}.", gone.join(", ")));
+    }
+    t.push_str(" Your file from before the update is kept.");
+    Some(t)
+}
+
+/// The player looked at them (or saved the page): the list goes.
+pub fn clear_review(store_root: &Path, mod_id: &str, rel: &str) {
+    let _ = fs::remove_file(review_path(store_root, mod_id, rel));
 }
 
 /// Saves the player's version of a mod's file (the copy before it kept as .backup).

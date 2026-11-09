@@ -880,6 +880,12 @@ Window {
         settingsView.pinFirst = w.pin
         settingsView.doc = d
         settingsView.reset()
+        // 0.6: after a mod update, the settings Turbine couldn't carry over for sure come first, with the words.
+        if (d.review) {
+            settingsView.sub = "Check again after the update: " + (d.reviewNames || []).join(", ") + " · " + settingsView.sub
+            toast.info(d.review)
+            note("action", "Edit settings: settings to check after the mod's update: " + (d.reviewNames || []).join(", "))
+        }
         note("action", "Edit settings: " + w.title + " (" + w.rel + ", " + d.format + ", " + d.fields.length + " settings" + (d.edited ? ", edited" : "") + (d.big ? ", too big: plain text" : "") + ")")
         sheet = "settingsedit"
     }
@@ -895,7 +901,7 @@ Window {
             return
         }
         openPick("Settings: " + m.name, plural(files.length, "settings file", "settings files"), files.map(f => ({
-            icon: "info", title: f.rel.split("/").pop(), detail: f.rel + (f.edited ? " · your version" : ""), aLabel: "Edit",
+            icon: "info", title: f.rel.split("/").pop(), detail: f.rel + (f.edited ? " · your version" : "") + (f.review ? " · check after the update" : ""), aLabel: "Edit",
             run: () => openSettingsFile(m.id, f.rel, "Settings: " + m.name, [], "pick") })), "modmenu")
     }
     // Game menu, Edit settings: the game's own settings files.
@@ -2625,7 +2631,7 @@ Window {
         const cfgs = settingsFilesOf(menuMod.id)
         const edit = cfgs.length === 0 ? [] : [isSeamless(menuMod)
             ? { icon: "info", title: "Co-op settings", detail: "Seamless Co-op: the session password, then every other option", act: "settings" }
-            : { icon: "info", title: "Edit settings", detail: cfgs.length === 1 ? cfgs[0].rel.split("/").pop() + (cfgs[0].edited ? " · your version" : "") : plural(cfgs.length, "settings file", "settings files"), act: "settings" }]
+            : { icon: "info", title: "Edit settings", detail: (cfgs.some(f => f.review) ? "Check after the update · " : "") + (cfgs.length === 1 ? cfgs[0].rel.split("/").pop() + (cfgs[0].edited ? " · your version" : "") : plural(cfgs.length, "settings file", "settings files")), act: "settings" }]
         const src = menuMod.sourceKind === "nexus" && rules && rules.domain && nexusModOf(menuMod) !== "" ? "nexus"
                   : menuMod.sourceKind === "thunderstore" && menuMod.sourceId ? "thunderstore" : ""
         const page = src === "nexus" ? [{ icon: "play", title: "Its Nexus page", detail: "Opens it in Turbine", act: "page" }]
