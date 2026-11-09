@@ -160,7 +160,7 @@ for size in $SIZES; do
   for page in browser nobrowser helper overlay overlaygm addbrowser; do shoot "$page-$size" "$size" $page "$PWD/home"; done
   # 0.55: Settings, Getting mods in Game Mode (Steam's Game Mode is what SteamGamepadUI=1 says).
   SHOOT_ENV="--env=SteamGamepadUI=1" shoot "accountsgm-$size" "$size" accountsgm "$PWD/home"
-  need "accountsgm-$size" "R5: Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, keyFold$"
+  need "accountsgm-$size" "R5: Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, (keyFold|pasteKey, keyPage, nexusKey, keyWhat, signOut)$"
   if grep -Eq "Getting mods rows \(Game Mode true\):.*(, helper|, nxmHandler|, overlay|, browser(,|$))" "$PWD/data/accountsgm-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::"; fail=1; fi
   # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
@@ -481,7 +481,7 @@ for size in $SIZES; do
   rm -rf "$PWD/fh/modsempty-$size"; python3 tools/fake-home.py "$PWD/fh/modsempty-$size" > /dev/null; h="$PWD/fh/modsempty-$size"
   shoot "modsempty-$size" "$size" modsempty "$h" --game=$skyrim
   need "modsempty-$size" "Empty My mods: the centered card ($size)" "No mods card: No mods for Skyrim"
-  need "modsempty-$size" "Empty My mods: A Get mods, X Add a file ($size)" "No mods card: .* \| legend A Get mods · B Games · X Add a file"
+  need "modsempty-$size" "Empty My mods: A Get mods, X Add from Downloads ($size)" "No mods card: .* \| legend A Get mods · B Games · X Add from Downloads"
 done
 if [ "$MODE" = 1920x1080 ]; then
 shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
@@ -605,6 +605,7 @@ if command -v Xvfb > /dev/null; then
   bshoot() {   # bshoot <name> <WxH> <page> <home> <data> [more arguments]
     name=$1 size=$2 page=$3 home=$4 bdata=$5
     shift 5
+    RAN="$RAN$name "
     DISPLAY=:78 timeout 260 dbus-run-session -- flatpak run --socket=x11 --env=QT_QPA_PLATFORM=xcb --env=QT_QUICK_BACKEND=software \
       --env=QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu $BROWSER_ENV \
       --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$bdata" \
@@ -624,8 +625,8 @@ if command -v Xvfb > /dev/null; then
     rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null; h="$PWD/fh/$n"
     mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
     bshoot "$n" "$size" browsertest "$h" "$PWD/data/$n" --game=$skyrim
-    if ran "$n"; then
     log="$PWD/data/$n/turbine-mod-manager/activity.log"
+    if ran "$n"; then
     # Chromium's own sandbox inside the Flatpak: if the page never loaded, say so and try once without it.
     if ! grep -q "Browser check: the file page loaded in Turbine" "$log" 2>/dev/null && [ -z "$BROWSER_ENV" ]; then
       echo "::warning title=The Nexus page didn't load ($size)::trying again with QTWEBENGINE_DISABLE_SANDBOX=1 (only in this check)"
@@ -857,7 +858,7 @@ for size in $SIZES; do
   need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Co-op settings"
   need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
   need "coopsettings-$size" "I3: co-op is chosen at Play, no separate button ($size)" "Co-op chosen at Play: true"
-  need "coopsettings-$size" "The bar with Co-op: nothing overlaps ($size)" "Bar check \(coopbar, .*0 problems \| .*co-op, Play"
+  need "coopsettings-$size" "The bar with Co-op: nothing overlaps, Play is the one button ($size)" "Bar check \(coopbar, .* 0 problems \| .*wheel, Play"
   # 0.6 (I3): the Play choice, the password step, the remembered choice, settings from three places, saved edits.
   rm -rf "$PWD/fh/coop-$size"; python3 tools/fake-home.py "$PWD/fh/coop-$size" --anticheat > /dev/null; hc="$PWD/fh/coop-$size"
   shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"

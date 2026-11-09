@@ -17,6 +17,15 @@ Overlay {
     property var actions: []              // [{key, label, detail}]
     property var plan: null               // a share being imported: {profile, plan:{automatic,nexus,byHand,installed}, error}
     property int focusIndex: 0
+    // The ring's row is kept in view from here, not from the rows: a row can be made again (the list changed) before
+    // a delayed call runs, and its call would then find nothing.
+    onFocusIndexChanged: Qt.callLater(ps.followFocus)
+    onVisibleChanged: if (visible) Qt.callLater(ps.followFocus)
+    function followFocus() {
+        if (typeof rowRepeater === "undefined" || !rowRepeater || typeof scroller === "undefined" || !scroller) return
+        const it = rowRepeater.itemAt(focusIndex)
+        if (it) scroller.follow(it)
+    }
     property bool premium: false          // the Nexus account can download inside Turbine
 
     signal activated(int index)
@@ -77,6 +86,7 @@ Overlay {
                 }
             }
             Repeater {
+                id: rowRepeater
                 model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the loadout", detail: ps.plan.error ? "" : "Downloads what Turbine can get, then switches to it" },
                                   { label: "Cancel", detail: "" }].slice(ps.plan.error ? 1 : 0)
                          : ps.profiles.map(p => ({ label: p.name, detail: p.on + " of " + p.mods + " mods on" + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
@@ -86,7 +96,6 @@ Overlay {
                     required property int index
                     required property var modelData
                     readonly property bool foc: ps.focusIndex === index
-                    onFocChanged: if (foc) Qt.callLater(() => scroller.follow(row))
                     readonly property bool firstAction: !ps.plan && index === ps.profiles.length
                     width: parent.width
                     height: ps.ui.px(modelData.detail ? 58 : 46) + (firstAction ? ps.ui.px(8) : 0)

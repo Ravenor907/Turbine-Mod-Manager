@@ -3807,7 +3807,7 @@ Window {
                 o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
-            // 0.58: no mods yet (any game): A Get mods, X Add a file (the centered card says the same).
+            // 0.58: no mods yet (any game): A Get mods, X Add from Downloads (the centered card says the same).
             if (mods.length === 0 && modsLoaded && !(focusedItem && (focusedItem.kind === "removed" || focusedItem.kind === "ghost"))) {
                 if (canGetMods) { o.a = bind("Get mods", () => { note("action", "No mods yet: Get mods"); tab = 1 }); o.x = bind("Add from Downloads", openAdd) }
                 else o.a = bind("Add from Downloads", openAdd)

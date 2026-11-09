@@ -12,6 +12,15 @@ Overlay {
     property string title: ""
     property var pages: []                // [{name, url, note}]
     property int focusIndex: 0
+    // The ring's row is kept in view from here, not from the rows: a row can be made again (the list changed) before
+    // a delayed call runs, and its call would then find nothing.
+    onFocusIndexChanged: Qt.callLater(pg.followFocus)
+    onVisibleChanged: if (visible) Qt.callLater(pg.followFocus)
+    function followFocus() {
+        if (typeof rowRepeater === "undefined" || !rowRepeater || typeof scroller === "undefined" || !scroller) return
+        const it = rowRepeater.itemAt(focusIndex)
+        if (it) scroller.follow(it)
+    }
     property bool gameMode: false
     property bool handlerSet: true        // Turbine is the program for Nexus links
 
@@ -69,13 +78,13 @@ Overlay {
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(14)
             }
             Repeater {
+                id: rowRepeater
                 model: pg.pages
                 Rectangle {
                     id: row
                     required property int index
                     required property var modelData
                     readonly property bool foc: pg.focusIndex === index
-                    onFocChanged: if (foc) Qt.callLater(() => scroller.follow(row))
                     width: col.width
                     height: pg.ui.px(row.modelData.note ? 62 : 50)
                     radius: pg.ui.px(6)
