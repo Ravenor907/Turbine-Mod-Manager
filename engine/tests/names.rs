@@ -23,7 +23,7 @@ fn download_names_to_clean_names() {
         ("unofficial skyrim patch.7z", "Unofficial Skyrim Patch", None),
         ("SKSE64 2.2.6.7z", "SKSE64", Some("2.2.6")),
         ("Cyber Engine Tweaks 1.32.0 (3).zip", "Cyber Engine Tweaks", Some("1.32.0")),
-        ("Mod Organizer Free Thing - Copy.zip", "Mod Organizer Free Thing", None),
+        ("Lantern Pack Extra - Copy.zip", "Lantern Pack Extra", None),
         ("RED4ext v1.25.1 2026-07-01T09-00Z k3jD9xQp.zip", "RED4ext", Some("1.25.1")),
         ("Appearance Menu Mod-790-2-6-1-1699999999.zip", "Appearance Menu Mod", Some("2.6.1")),
         ("Odd Layout 1.0.zip", "Odd Layout", Some("1.0")),

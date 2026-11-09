@@ -28,6 +28,10 @@ Rectangle {
     // A press on the toast (0.59): Main.qml stops that press reaching anything beneath it.
     signal pressedOn()
     signal pressEnded()
+    // 0.6: a toast can carry its next step as a button ("Y Undo"): a tap on it, or the key, does it.
+    property string actionLabel: ""
+    property string actionGlyph: ""
+    signal actionClicked()
 
     // show(text, strong, detail); the last two are optional.
     function show(t, s, d) {
@@ -86,7 +90,12 @@ Rectangle {
         onPressed: root.pressedOn()
         onReleased: root.pressEnded()
         onCanceled: root.pressEnded()
-        onClicked: root.hide()
+        onClicked: (m) => {
+            // A tap on the action button does the action; anywhere else dismisses.
+            const p = actionBox.mapFromItem(root, m.x, m.y)
+            if (root.actionLabel !== "" && p.x >= 0 && p.y >= -root.ui.px(8) && p.x <= actionBox.width && p.y <= actionBox.height + root.ui.px(8)) root.actionClicked()
+            else root.hide()
+        }
     }
 
     Row {
@@ -116,7 +125,7 @@ Rectangle {
         Text {
             id: mainText
             anchors.verticalCenter: parent.verticalCenter
-            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0))
+            width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0) - (actionBox.visible ? actionBox.width + parent.spacing : 0))
             text: root.escaped(root.text || "") + (root.strong !== "" ? (root.text !== "" ? " " : "") + "<b>" + root.escaped(root.strong) + "</b>" : "")
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -125,6 +134,15 @@ Rectangle {
             color: root.ui.c.text
             font.family: root.ui.bodyFont
             font.pixelSize: root.ui.fpx(15)
+        }
+        Rectangle {
+            id: actionBox
+            objectName: "toastAction"
+            visible: root.actionLabel !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            width: visible ? actionText.implicitWidth + root.ui.px(20) : 0; height: root.ui.tpx(36); radius: root.ui.px(6)
+            color: root.ui.c.raised; border.color: root.ui.c.accent; border.width: Math.max(1, root.ui.px(1.5))
+            Text { id: actionText; anchors.centerIn: parent; text: (root.actionGlyph !== "" ? root.actionGlyph + " " : "") + root.actionLabel; color: root.ui.c.text; font.family: root.ui.bodyFont; font.pixelSize: root.ui.fpx(14); font.bold: true }
         }
         Text {
             id: detailText

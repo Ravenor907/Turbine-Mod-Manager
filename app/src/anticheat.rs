@@ -362,7 +362,7 @@ pub(crate) fn normal_launch_blocked(slot: &Slot) -> Option<String> {
             ac::VERIFY_WORDS
         )),
         AcState::TurbineFilesLeft(n) => Some(format!(
-            "{n} mod files are still in {}'s folder, so Turbine didn't start it with its anti-cheat. Game menu, Reset game files, or {}",
+            "{n} mod files are still in {}'s folder, so Turbine didn't start it with its anti-cheat. {}",
             slot.game.name,
             ac::VERIFY_WORDS
         )),

@@ -1032,7 +1032,12 @@ Window {
         seen.modHold = JSON.stringify(all)
         Turbine.setModHold(true)
         note("action", "Mods held until they update: " + Object.keys(versions).join(", "))
-        toast.done("Play starts " + gameTitle + " without mods until they update. View, Game menu, Play with mods again ends it.")
+        toast.act("done", "Mods paused until they update.", "Play with them now", () => releaseHold("you asked"))
+    }
+    // The paused mods, from the status (a tap or A on it) or the game menu: one choice.
+    function openHoldChoice() {
+        openMsg({ title: "Mods paused: " + gameTitle + " updated", text: "Play starts " + gameTitle + " without mods until the mods that may break are updated.", steps: [], notes: [], footnote: "",
+                  buttons: [{ key: "a", label: "Play with mods again", run: () => releaseHold("you asked") }, { key: "b", label: "Keep them paused", run: () => {} }] })
     }
     function releaseHold(why) {
         if (!game) return
@@ -1785,6 +1790,8 @@ Window {
         if (openState === "open") return { level: slow ? "busy" : "ok", words: slow ? status.text : "Nexus is open in " + openName + ". Sign in if asked (free), press Slow download, then Steam button, Turbine.", detail: "" }
         // 0.57: an online-only anti-cheat game says so before anything else (the refused file's message is in the log).
         if (acRefused) return { level: "warn", words: "Needs its anti-cheat: no mods", detail: "" }
+        // 0.6 (I6): mods held after a game update are never a hidden state.
+        if (modHold && mods.some(m => m.enabled)) return { level: "warn", words: "Mods paused: " + gameTitle + " updated", detail: "", hold: true }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
@@ -2016,7 +2023,7 @@ Window {
         // 0.58: held after a game update: without mods until they update.
         if (modHold && mods.some(m => m.enabled)) {
             note("action", "Play " + game.name + " without mods (held until they update after the game update)")
-            toast.info("Playing without mods until they update. Game menu, Play with mods again, ends that.")
+            toast.act("info", "Mods paused until they update: playing without them.", "Play with them now", () => releaseHold("you asked"))
             Turbine.playOriginal()
             return
         }
@@ -2328,7 +2335,7 @@ Window {
       .sort((a, b) => gameMenuOrder.indexOf(a.act) - gameMenuOrder.indexOf(b.act))
     // 0.59 (R4): the game menu in four sections, always in this order (rows that don't apply are left out; rows that
     // apply but can't be used now are shown dimmed, and A on one says why).
-    readonly property var gameMenuOrder: ["coopsettings", "original", "restore", "unhold", "acguide", "acask", "acon",
+    readonly property var gameMenuOrder: ["unhold", "coopsettings", "original", "restore", "acguide", "acask", "acon",
         "add", "updateall", "checkupdates", "alloff", "allon", "profiles", "overlaps", "outdated", "nexusdl", "nexuslist",
         "why", "verify", "saves", "ersaves", "loader", "me3", "seamless", "acleftover", "kcdrestore", "launchundo", "reset",
         "gamesettings", "details", "activity", "help"]
@@ -2394,7 +2401,7 @@ Window {
         for (const id of was) Turbine.setEnabled(id, false)
         mods = mods.map(x => Object.assign({}, x, { enabled: false }))
         allOffWas = was
-        toast.done(plural(was.length, "mod", "mods") + " turned off. Game menu, Turn them back on, undoes it.")
+        toast.act("done", plural(was.length, "mod", "mods") + " turned off.", "Undo", allBackOn)
     }
     property var allOffWas: []
     function allBackOn() {
@@ -3649,6 +3656,12 @@ Window {
     // How many rows LT and RT jump.
     readonly property int pageJump: Math.max(3, Math.floor((content.height - px(40)) / px(desktopLayout ? 44 : 58)))
     function binds() {
+        const o = bindsCore()
+        // A toast's own next step ("Y Undo") takes Y while it shows (0.6, I10).
+        if (toastAction && toast.shown && sheet === "" && !wheelOpen && page !== "browser") o.y = bind(toast.actionLabel, runToastAction)
+        return o
+    }
+    function bindsCore() {
         let o = {}
         if (sheet === "tutorial") return { a: bind(tutCard < tutCount - 1 ? "Next" : "Pick a game", () => tutorialAct("a")), b: bind("Skip", () => tutorialAct("b")), start: bind("", () => tutorialAct("start")) }
         if (wheelOpen) {
@@ -4009,7 +4022,7 @@ Window {
             { icon: "play", title: "Play options", detail: "With or without mods, or another loadout", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openPlayOptions) } },
             { icon: "profile", title: "Loadouts", detail: "Save setups by name, switch, share", run: () => { current = railIndex; page = "game"; zone = "main"; Qt.callLater(openProfiles) } },
             { icon: "move", title: pinned ? "Unpin" : "Pin to the top", detail: pinned ? "Back in last played order" : "Stays at the top of the rail", run: () => setRailList("pinned", g.id, !pinned) },
-            { icon: "info", title: "Hide from the rail", detail: "For tools that aren't games. Settings, Help shows them again.", run: () => setRailList("hidden", g.id, true) }
+            { icon: "info", title: "Hide from the rail", detail: "For tools that aren't games. You can show it again.", run: () => { setRailList("hidden", g.id, true); toast.act("done", g.name + " is hidden from the rail.", "Undo", () => setRailList("hidden", g.id, false)) } }
         ].concat(g.support && g.support !== "full" ? [
             { icon: "update", title: "Nexus game", detail: "Which game on Nexus Mods this is", run: () => { current = railIndex; page = "game"; zone = "main"; nexusFound = null; Qt.callLater(openNexusPick) } }
         ] : []), "")
@@ -5291,9 +5304,9 @@ Window {
         // screen doesn't jump to it).
         browserBackground = webDls.filter(x => x.state === "requested" || x.state === "progress" || x.state === "paused").map(x => x.path)
         if (webDlsRunning > 0 && why !== "play") {
-            const t = "Still downloading " + plural(webDlsRunning, "mod", "mods") + ". It's added by itself. To watch it: View, Game menu, Nexus downloads."
+            const t = "Still downloading " + plural(webDlsRunning, "mod", "mods") + ". It's added by itself."
             note("browser", t)
-            toast.showPlain(t)
+            toast.act("info", t, "Watch it", openNexusDownloads)
         }
         // The list of pages it was opened from comes back on the next one.
         if (pagesReturn) {
@@ -6081,24 +6094,13 @@ Window {
             return
         }
         if (r.error) { note("nxm", "Link refused: " + r.error); say(r.error, "error"); if (browserOpen) browserSay(r.error, "warn"); return }
-        // Every Mod Manager Download link from Turbine's page: nothing downloads until the player says Get it.
-        if (Turbine.nxmMustAsk(link)) { nxmAsk(link, r); return }
-        // From Turbine's own Nexus page: it stays on screen, and the pill shows the download.
-        if (browserOpen && page === "browser") {
-            note("nxm", "Link for " + r.name + " (from Turbine's Nexus page)")
-            Turbine.nxmDownload(link, r.game)
-            edited()
-            return
-        }
-        const i = games.findIndex(g => g.id === r.game)
-        if (i >= 0 && i !== current) current = i
-        page = "game"; zone = "main"; tab = 0; modPage = false
-        if (sheet !== "fomod") sheet = ""
-        note("nxm", "Link for " + r.name)
-        Turbine.nxmDownload(link, r.game)
-        edited()
+        // 0.6 (I9): every Mod Manager Download link asks first, wherever it came from (Turbine's page, the
+        // browser, a second launch, the command line): nothing downloads until the player says Get it.
+        if (!(browserOpen && page === "browser")) { const gi = games.findIndex(g => g.id === r.game); if (gi >= 0 && gi !== current) current = gi; page = "game"; zone = "main"; modPage = false }
+        nxmAsk(link, r)
     }
-
+    // 0.6 (I17): after the quiet second the ring moves to Get it by itself, so A says yes (B is still Not now).
+    Timer { id: nxmRingMove; interval: 1200; onTriggered: if (app.nxmAsking && app.sheet === "pick" && app.menuIndex === 1) { app.menuIndex = 0; app.note("nxm", "The ring moved to Get it") } }
     // "Get <mod> (<file>) for <game>?", asked for every Mod Manager Download link from Turbine's page. It opens on
     // Not now and takes no input at all for its first second (a page saying "press A again" can't have the next
     // press answer it); Right (or a tap on Get it) then A gets it. One question at a time: a second link while it
@@ -6127,6 +6129,7 @@ Window {
         pickBLabel = "Not now"
         menuIndex = 1
         nxmAskAt = Date.now()
+        nxmRingMove.restart()
         keyRoot.forceActiveFocus()
     }
     function nxmAskGet() {
@@ -7485,7 +7488,7 @@ Window {
                             spacing: app.px(8)
                             Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
                             // Play waits for changes being saved: it says so.
-                            Text { text: (app.savingNow ? "Play (saving...)" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                            Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                         TapHandler { onTapped: { if (!app.gate(0, "startPlay")) return; app.playPressed() } }
@@ -7621,6 +7624,8 @@ Window {
                             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
                             text: modPanel.m ? app.glyph("x") + " Options: " + app.optionsLine() : ""
                             color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(13)
+                            // A tap opens the options too (0.6, I7: touch has every action).
+                            TapHandler { onTapped: { if (!app.gate(0, "panel options")) return; if (app.menuMod) { app.menuIndex = 0; app.sheet = "modmenu" } } }
                         }
                     }
                     ListView {
@@ -8312,7 +8317,7 @@ Window {
                 pillText: app.browserPill.text
                 pillLevel: app.browserPill.level
                 pillProgress: app.browserPill.progress
-                legend: app.sheet === "" && !app.wheelOpen && app.lastInput !== "touch" ? app.legendHints : []
+                legend: app.sheet === "" && !app.wheelOpen ? app.legendHints : []
                 glyph: app.glyph
                 padLegend: app.lastInput !== "touch"
                 signinShown: app.browserSigninShown
@@ -8855,6 +8860,7 @@ Window {
     // A tap on the status line: what is waiting (downloads, updates, the loadout), else why there is a problem.
     function statusTap() {
         note("action", "Status tapped: " + barStatus)
+        if (modHold && mods.some(m => m.enabled)) { openHoldChoice(); return }
         if (!dl.active && !browserOpen && webDlsRunning > 0) openNexusDownloads()
         else if (updateCount > 0 && !dl.active && statusNow.level === "ok") openUpdates()
         else if (pill.words.indexOf("Loadout: ") === 0 && statusNow.level === "ok") openProfiles()
@@ -8876,7 +8882,8 @@ Window {
         // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
         z: app.wheelOpen ? 80 : 40
         // The Nexus page has its legend in its own bar.
-        visible: app.sheet !== "tutorial" && (app.barGame || (app.lastInput !== "touch" && (app.page !== "browser" || app.wheelOpen || app.sheet !== "")))
+        // 0.6 (I7): the bar stays for touch too: its hints are the touch buttons.
+        visible: app.sheet !== "tutorial" && (app.barGame || app.page !== "browser" || app.wheelOpen || app.sheet !== "")
         // 0.59: on up to the quick wheel (its Close is here); the tutorial covers it.
         enabled: app.topLayer <= 3
         // The bar takes every press on it, so a tap on the bar never reaches a sheet's backdrop or a button beneath
@@ -9023,7 +9030,7 @@ Window {
                     spacing: app.px(8)
                     Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
                     // Play waits for changes being saved: it says so.
-                    Text { text: (app.savingNow ? "Play (saving...)" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
                 Accessible.role: Accessible.Button
                 Accessible.name: "Play"
@@ -9061,7 +9068,7 @@ Window {
             clip: true
             Row {
                 id: legendRow
-                visible: app.lastInput !== "touch" || !app.barGame
+                visible: true
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: app.px(16)
                 Repeater {
@@ -9187,7 +9194,7 @@ Window {
         }
     }
     function touched() {
-        if (lastInput !== "touch") note("touch", "Touch: legend hidden, pointer gone")
+        if (lastInput !== "touch") note("touch", "Touch: pointer gone (the bar's buttons stay)")
         lastInput = "touch"
         Turbine.pointerHide()
     }
@@ -9197,6 +9204,8 @@ Window {
     // already on screen; the same words aren't shown twice in a row. (Uninstall says nothing here: its row stays,
     // dimmed, and A puts it back.)
     property string lastToast: ""
+    property var toastAction: null
+    function runToastAction() { const f = toastAction; if (!f) return; note("action", "Toast: " + toast.actionLabel); toastAction = null; toast.hide(); f() }
     property real lastToastAt: 0
     Toast {
         id: toast
@@ -9208,8 +9217,18 @@ Window {
             if (m === app.lastToast && Date.now() - app.lastToastAt < 6000 && shown) return
             app.lastToast = m; app.lastToastAt = Date.now()
             toast.kind = kind
+            actionLabel = ""; app.toastAction = null
+            timeout = shot.page === "newmod" ? 0 : 4000
             show(m)
         }
+        // 0.6 (I10): a toast with its next step as a button; Y (or a tap on the button) does it while it shows.
+        function act(kind, m, label, run) {
+            put(kind, m)
+            actionLabel = label; actionGlyph = app.glyph("y"); app.toastAction = run
+            timeout = 8000; show(m)
+        }
+        onActionClicked: { if (!app.gate(5, "toast action")) return; app.runToastAction() }
+        onHidden: app.toastAction = null
         function info(m) { put("info", m) }
         function done(m) { put("done", m) }
         function problem(m) { put("problem", m) }

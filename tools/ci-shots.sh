@@ -759,7 +759,7 @@ PY
     echo "::error title=1: a link with no press got through::"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
   echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
-  pneed "10: closing midway says the download goes on" "Still downloading 1 mod. It's added by itself. To watch it: View, Game menu, Nexus downloads."
+  pneed "10 (I10): closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added by itself."
   pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
   pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
   pneed "10: ... and the screen doesn't jump to it when it lands" "New mod from a download that went on after Nexus closed: the focus stays where it is"
