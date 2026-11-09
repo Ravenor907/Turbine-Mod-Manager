@@ -198,7 +198,27 @@ pub fn download(client: &Client, release: &Release, progress: Option<Progress>) 
 /// The program and arguments that install a downloaded bundle on the host (run by the app, never through a
 /// shell). --reinstall lets a bundle replace the installed copy of the same app.
 pub fn install_args(bundle: &Path) -> Vec<String> {
-    ["flatpak-spawn", "--host", "flatpak", "install", "--user", "-y", "--reinstall", "--bundle"]
+    install_args_to(bundle, "--user")
+}
+
+/// 0.61 (integration I12): where the running Turbine is installed, from the sandbox's /.flatpak-info
+/// (`[Instance] app-path`): "--system" for the system installation (/var/lib/flatpak), "--user" otherwise.
+pub fn install_scope(flatpak_info: &str) -> &'static str {
+    let mut in_instance = false;
+    for line in flatpak_info.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_instance = line == "[Instance]";
+        } else if let (true, Some(path)) = (in_instance, line.strip_prefix("app-path=")) {
+            return if path.trim().starts_with("/var/lib/flatpak/") { "--system" } else { "--user" };
+        }
+    }
+    "--user"
+}
+
+/// The same, into the installation `scope` names (install_scope), so an update never adds a second copy.
+pub fn install_args_to(bundle: &Path, scope: &str) -> Vec<String> {
+    let scope = if scope == "--system" { "--system" } else { "--user" };
+    ["flatpak-spawn", "--host", "flatpak", "install", scope, "-y", "--reinstall", "--bundle"]
         .iter()
         .map(|s| s.to_string())
         .chain(std::iter::once(bundle.display().to_string()))

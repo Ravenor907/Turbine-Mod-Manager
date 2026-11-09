@@ -1274,7 +1274,9 @@ impl Net {
         let d = selfupdate::download(&client, release, Some(&mut cb)).map_err(err)?;
         let bundle = dir.join(selfupdate::ASSET);
         fs::rename(&d.path, &bundle).map_err(|e| format!("Couldn't keep the update ({e})."))?;
-        let args = selfupdate::install_args(&bundle);
+        // 0.61 (integration I12): into the same installation as the running Turbine (system or per user).
+        let info = fs::read_to_string("/.flatpak-info").unwrap_or_default();
+        let args = selfupdate::install_args_to(&bundle, selfupdate::install_scope(&info));
         crate::log::line("update", &format!("Installing: {}", args.join(" ")));
         let out = std::process::Command::new(&args[0])
             .args(&args[1..])
@@ -1290,6 +1292,9 @@ impl Net {
             let low = msg.to_ascii_lowercase();
             if ["summary", "remote", "could not resolve", "unable to connect", "network"].iter().any(|w| low.contains(w)) {
                 return Err("Turbine's update needs the internet to fetch a part from Flathub. Connect and try again.".into());
+            }
+            if low.contains("not allowed") || low.contains("authoriz") || low.contains("polkit") {
+                return Err("Turbine is installed for every user, so the system has to allow its update. In Desktop Mode, open Turbine and update again: the system asks for your password there.".into());
             }
             if low.contains("no space") {
                 return Err("There isn't enough free space for the update. Free some space, then try again.".into());

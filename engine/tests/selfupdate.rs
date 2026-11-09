@@ -181,3 +181,17 @@ fn checks_downloads_and_verifies() {
     serve(&dir, &r.asset_url, &bundle);
     assert!(su::download(&client, &bare, None).is_ok());
 }
+
+#[test]
+fn the_update_goes_where_turbine_is_installed() {
+    let system = "[Application]\nname=io.github.ravenor907.TurbineModManager\n\n[Instance]\ninstance-id=1\napp-path=/var/lib/flatpak/app/io.github.ravenor907.TurbineModManager/x86_64/master/abc/files\n";
+    let user = "[Instance]\napp-path=/home/deck/.local/share/flatpak/app/io.github.ravenor907.TurbineModManager/x86_64/master/abc/files\n";
+    assert_eq!(su::install_scope(system), "--system");
+    assert_eq!(su::install_scope(user), "--user");
+    assert_eq!(su::install_scope(""), "--user");
+    // app-path outside [Instance] doesn't count.
+    assert_eq!(su::install_scope("[Application]\napp-path=/var/lib/flatpak/app/x\n"), "--user");
+    let a = su::install_args_to(Path::new("/tmp/u.flatpak"), "--system");
+    assert_eq!(a[4], "--system");
+    assert_eq!(su::install_args_to(Path::new("/tmp/u.flatpak"), "anything")[4], "--user");
+}
