@@ -486,7 +486,7 @@ if command -v Xvfb > /dev/null; then
     fi
     need $n "2: WebEngine set up before the app ($size)" "WebEngine ready"
     need $n "Nexus page loaded in Turbine ($size)" "Browser check: the file page loaded in Turbine"
-    need $n "9: legend, no field: Y Keyboard and R stick Pointer, no LT ($size)" "Browser legend \(no field\): A Click · B [^·]* · X Menu · Y Keyboard · RS Pointer, 0 problems"
+    need $n "9: legend, no field: Y Keyboard and R stick Pointer, no LT ($size)" "Browser legend \(no field\): A Click · B [^·]* · X Options · Y Keyboard · RS Pointer, 0 problems"
     need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Keyboard.*, 0 problems"
     if grep -Eq "Browser legend .*LT " "$log"; then echo "::error title=9: LT Menu is still in the legend ($size)::"; fail=1; fi
     need $n "7: A after a click is a click ($size)" "Browser check: A after a click is a click: yes"
@@ -659,7 +659,7 @@ for size in $SIZES; do
   shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
   need "tucked-$size" "Rename ($size)" "Renamed .* to Lanterns of the Road"
   need "tucked-$size" "A short list keeps the header ($size)" "Short list keeps the header: true"
-  need "tucked-$size" "The tucked bar names the game ($size)" "Tucked name: Skyrim SE (shown)"
+  need "tucked-$size" "The tucked bar names the game ($size)" "Tucked name: Skyrim SE \\(shown\\)"
   need "tucked-$size" "Header slides away going down ($size)" "Header tucked: true; panel: true"
   shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"

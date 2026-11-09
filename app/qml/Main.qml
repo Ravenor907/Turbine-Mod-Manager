@@ -2962,7 +2962,7 @@ Window {
         let h = []
         for (const k of ["a", "b", "x", "y"]) if (o[k] && o[k].label) h.push([k, o[k].label, o[k].pre || ""])
         // The Nexus page: A already says Click, so the one more is Start Play after an add, otherwise how to move the
-        // pointer (the right stick). X Menu covers what LT opens too.
+        // pointer (the right stick). X Options covers what LT opens too.
         if (page === "browser" && sheet === "" && !wheelOpen) {
             if (o.start && o.start.label) h.push(["start", o.start.label, ""])
             else if (browserTab === 0 && !browserTyping && !keysLegend) h.push(["rs", "Pointer", ""])
