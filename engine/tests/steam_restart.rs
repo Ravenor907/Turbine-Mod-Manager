@@ -41,9 +41,10 @@ impl FakeSteam {
         let proc_name = format!("fs{}{tag}", std::process::id() % 100_000);
         let bin = d.join("bin");
         fs::create_dir_all(&bin).unwrap();
-        let sleep = String::from_utf8(Command::new("sh").arg("-c").arg("command -v sleep").output().unwrap().stdout).unwrap().trim().to_string();
+        // A script by that name (its process carries the script's name), not a copy of `sleep`: where `sleep` is one
+        // program for many commands, picked by the name it was started as, a renamed copy exits at once.
         let proc_bin = bin.join(&proc_name);
-        fs::copy(&sleep, &proc_bin).unwrap();
+        script(&proc_bin, "while :; do sleep 0.2; done\n");
         let trace = d.join("trace.txt");
         let steam_cmd = bin.join("steam");
         script(
