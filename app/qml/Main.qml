@@ -1483,7 +1483,7 @@ Window {
             { icon: "play", title: "Play with mods", detail: plural(mods.filter(m => m.enabled).length, "mod", "mods") + " on", run: () => startPlay() },
             { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", run: () => Turbine.playOriginal() }
         ].concat(seamlessIn ? [
-            { icon: "play", title: "Play Seamless Co-op", detail: "With your mods and Seamless Co-op; its own .co2 saves", run: () => startCoop() }
+            { icon: "play", title: "Play Seamless Co-op", detail: "With your mods and Seamless Co-op; co-op keeps its own saves, apart from solo", run: () => startCoop() }
         ] : []).concat(canSkipLoader ? [
             { icon: "play", title: "Play without " + loaderShort,
               detail: "Leaves out " + loaderShort + " and the mods that need it, this time only", run: () => { autoApply.stop(); Turbine.playWithoutLoader() } }
@@ -2413,11 +2413,11 @@ Window {
         { icon: "profile", title: "Loadouts", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
     ]).concat(acMode === "me3" && acInfo.needsAsk ? [
         acInfo.off ? { icon: "power", title: "Anti-cheat: off while mods are on", detail: "A turns it back on: mods wait until you answer again", ok: true, act: "acon" }
-                   : { icon: "info", title: acInfo.askTitle, detail: "Mods load through me3, offline only", ok: true, act: "acask" }
+                   : { icon: "info", title: acInfo.askTitle, detail: "Mods load through me3 (the free tool that loads them), offline only", ok: true, act: "acask" }
     ] : []).concat(acMode === "me3" && !acInfo.me3Ready ? [
-        { icon: "update", title: "Get me3", detail: "From its GitHub release, checked. Turbine gets it at the first Play with mods anyway.", ok: true, act: "me3" }
+        { icon: "update", title: "Get me3, the tool that loads the mods", detail: "From its makers, checked. Turbine gets it at the first Play with mods anyway.", ok: true, act: "me3" }
     ] : []).concat(acMode === "me3" && acInfo.seamless && !seamlessIn ? [
-        { icon: "update", title: "Get Seamless Co-op", detail: "From its GitHub release, checked. Loads through me3; keeps its own .co2 saves.", ok: true, act: "seamless" }
+        { icon: "update", title: "Get Seamless Co-op", detail: "From its makers, checked. Co-op keeps its own saves, apart from solo.", ok: true, act: "seamless" }
     ] : []).concat(acInfo && acInfo.leftover ? [
         { icon: "remove", title: "Remove the leftover file", detail: acInfo.leftover + ", left by another tool. Hold A.", ok: true, act: "acleftover" }
     ] : []).concat(modHold ? [
@@ -2560,7 +2560,7 @@ Window {
         else if (item.act === "checkupdates") { sheet = ""; let c = Object.assign({}, updatesChecked); c[game.id] = true; updatesChecked = c; Turbine.checkUpdates(); toast.info("Checking for updates...") }
         else if (item.act === "add") { sheet = ""; openAdd() }
         else if (item.act === "why") openWhy()
-        else if (item.act === "setup") { note("action", "Get this setup"); Turbine.listShares(); shareIndex = 0; sheet = "shares" }
+        else if (item.act === "setup") { note("action", "Get this setup"); Turbine.listShares(); shareIndex = 0; sharesBack = "gamemenu"; sheet = "shares" }
         else if (item.act === "outdated") openOutdated()
         else if (item.act === "verify") openVerify()
         else if (item.act === "saves") openSaves()
@@ -3750,9 +3750,11 @@ Window {
             if (b === "up") shareIndex = Math.max(0, shareIndex - 1)
             else if (b === "down") shareIndex = Math.min(shares.length - 1, shareIndex + 1)
             else if (b === "a" && shares[shareIndex]) { Turbine.profileImportFile(shares[shareIndex].path); sheet = "profiles" }
-            else if (b === "b") sheet = "profiles"
+            else if (b === "b") sheet = sharesBack
         }
     }
+    // Newbie L2: B on the loadout files goes back to where they were opened from (the game menu or Loadouts).
+    property string sharesBack: "profiles"
     // Turbine can fetch the loader itself (SKSE, BepInEx, SMAPI).
     readonly property bool loaderCanGet: !!rules && !!rules.loader && ["bethesda", "bepinex", "smapi"].indexOf(rules.kind) >= 0
 
@@ -6622,7 +6624,7 @@ Window {
         if (a.key === "new") openAsk("newProfile", "New loadout", "A name for the mods as they are now.", "", "Loadout name", 60, false, "Make it")
         else if (a.key === "export" && profileData) Turbine.profileExport(profileData.active)
         else if (a.key === "code" && profileData) { Turbine.profileCode(profileData.active); sheet = "code" }
-        else if (a.key === "importFile") { Turbine.listShares(); shareIndex = 0; sheet = "shares" }
+        else if (a.key === "importFile") { Turbine.listShares(); shareIndex = 0; sharesBack = "profiles"; sheet = "shares" }
         else if (a.key === "importCode") openAsk("code", "Thunderstore profile code", "The code looks like 0190a2b4-7c1d-4e8f-9a0b-1c2d3e4f5a6b.", "", "Profile code", 40, false, "Read it")
     }
 

@@ -3,7 +3,7 @@ import QtQuick.Shapes
 
 // Get mods: the mods as picture cards, four to a row (0.57: no bar over them; Y opens the pop-up with Search, Sort
 // and Category, and Add from Downloads is in the game menu): thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
-// an "Installed · On" (or Off) or "Update ready" ribbon and a "Code mod" chip where known. (Recently viewed is on the
+// an "In your mods · On" (or Off) or "Update ready" ribbon and a "Needs the mod loader" chip where known. (Recently viewed is on the
 // quick wheel.) When browsing failed (no key and Nexus refused), one big card
 // opens the game's mods on Nexus instead. Main.qml moves the focus (focusArea "recent", "grid" or "fallback"
 // with focusIndex) and passes taps through the signals.
@@ -230,15 +230,15 @@ Item {
                             width: rib.implicitWidth + gm.ui.px(14); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
                             border.color: cell.modelData.update === true ? gm.ui.c.accent : gm.ui.c.ok
-                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "In your mods · Update ready" : "Installed" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
+                            Text { id: rib; anchors.centerIn: parent; text: cell.modelData.update === true ? "In your mods · Update ready" : "In your mods" + (cell.modelData.on === true ? " · On" : cell.modelData.on === false ? " · Off" : ""); color: cell.modelData.update === true ? gm.ui.c.accentText : gm.ui.c.ok; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
                         }
                         Rectangle {
                             visible: cell.modelData.code === true
                             anchors.left: thumb.left; anchors.top: thumb.top
                             anchors.margins: gm.ui.px(6)
-                            width: codeText.implicitWidth + gm.ui.px(12); height: gm.ui.px(22); radius: gm.ui.px(4)
+                            width: Math.min(codeText.implicitWidth + gm.ui.px(12), thumb.width - gm.ui.px(12)); height: gm.ui.px(22); radius: gm.ui.px(4)
                             color: gm.ui.c.panel
-                            Text { id: codeText; anchors.centerIn: parent; text: "Code mod"; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
+                            Text { id: codeText; anchors.centerIn: parent; width: Math.min(implicitWidth, parent.width - gm.ui.px(8)); elide: Text.ElideRight; text: "Needs the mod loader"; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
                         }
                         Column {
                             x: gm.ui.px(10)
