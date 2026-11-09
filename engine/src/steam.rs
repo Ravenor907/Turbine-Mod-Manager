@@ -374,3 +374,64 @@ pub fn launch_options_in(text: &str, app_id: &str) -> Option<String> {
     let app = v.path(&["UserLocalConfigStore", "Software", "Valve", "Steam", "apps", app_id])?;
     Some(app.str_at(&["LaunchOptions"]).unwrap_or("").to_string())
 }
+
+// ---- An update waiting in Steam (0.6) ----
+
+/// Steam's app state bits (appmanifest StateFlags) that mean an update is waiting or under way: update required,
+/// running, paused, started, downloading, staging, committing.
+pub const UPDATE_FLAGS: u32 = 2 | 256 | 512 | 1024 | 1_048_576 | 2_097_152 | 4_194_304;
+
+/// An update for a game that Steam knows about but hasn't finished installing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingUpdate {
+    /// The build installed now and the one Steam is updating to (when the manifest names it).
+    pub build: Option<String>,
+    pub target: Option<String>,
+    /// Bytes Steam still has to download (0 when unknown or queued without a size yet).
+    pub bytes_left: u64,
+    /// Steam's last update result when it isn't 0 (a failed or stopped update).
+    pub result: Option<String>,
+}
+
+/// Reads a waiting update from an appmanifest's text: the update bits in StateFlags, a TargetBuildID other than
+/// the build installed, bytes still to download, or a failed update (UpdateResult not 0). None when the game is up
+/// to date.
+pub fn pending_update_in(text: &str) -> Option<PendingUpdate> {
+    let v = crate::vdf::parse(text).ok()?;
+    let app = v.get("AppState")?;
+    let num = |k: &str| app.str_at(&[k]).and_then(|s| s.trim().parse::<u64>().ok());
+    let flags = num("StateFlags").unwrap_or(4) as u32;
+    let build = app.str_at(&["buildid"]).map(str::to_string).filter(|b| b != "0");
+    let target = app.str_at(&["TargetBuildID"]).map(str::to_string).filter(|t| !t.is_empty() && t != "0");
+    let to_get = num("BytesToDownload").unwrap_or(0);
+    let got = num("BytesDownloaded").unwrap_or(0);
+    let bytes_left = to_get.saturating_sub(got);
+    let result = app.str_at(&["UpdateResult"]).map(str::to_string).filter(|r| !r.is_empty() && r != "0");
+    let newer_target = target.is_some() && target != build;
+    if flags & UPDATE_FLAGS != 0 || newer_target || bytes_left > 0 || result.is_some() {
+        Some(PendingUpdate { build, target, bytes_left, result })
+    } else {
+        None
+    }
+}
+
+/// A waiting update for an installed Steam game (its appmanifest in its library).
+pub fn pending_update(game: &Game) -> Option<PendingUpdate> {
+    if game.store != Store::Steam || !game.store_id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let f = game.library.join("steamapps").join(format!("appmanifest_{}.acf", game.store_id));
+    pending_update_in(&fs::read_to_string(f).ok()?)
+}
+
+/// The words for the game update warning when an update is waiting in Steam.
+pub fn pending_update_words(name: &str, p: &PendingUpdate) -> String {
+    let mut t = format!("An update for {name} is waiting in Steam: mods may break after it installs.");
+    if p.bytes_left > 0 {
+        t.push_str(&format!(" Steam still has {} MB to download.", p.bytes_left.div_ceil(1 << 20)));
+    }
+    if p.result.is_some() {
+        t.push_str(" Steam's last try to update it didn't finish.");
+    }
+    t
+}

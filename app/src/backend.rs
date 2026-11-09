@@ -1230,16 +1230,26 @@ impl Worker {
         // 0.58, the game update warning: the build changed since mods were last played, and which mods may break.
         // The build last played with mods (an apply alone doesn't count, so the warning isn't lost to one).
         let played = std::fs::read_to_string(slot.store.root().join("played-build")).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        // 0.6: an update still waiting in Steam (queued, downloading, or a failed one) warns too ("pending": the words).
+        let pending = turbine_engine::steam::pending_update(&slot.game).map(|p| turbine_engine::steam::pending_update_words(&slot.game.name, &p));
+        let risky = || -> String {
+            let r: Vec<String> = slot
+                .store
+                .mod_files()
+                .iter()
+                .filter(|m| m.enabled && rules::may_break_on_update(&m.files, slot.store.mods().iter().any(|x| x.id == m.id && x.needs_loader)))
+                .map(|m| format!("{{\"id\":{},\"name\":{}}}", quote(&m.id), quote(&m.name)))
+                .collect();
+            r.join(",")
+        };
+        let pending_json = pending.as_deref().map(quote).unwrap_or_else(|| "null".into());
         let update = match (played.or_else(|| slot.store.last_build()), slot.game.build.as_deref()) {
             (Some(last), Some(now)) if last != now => {
-                let risky: Vec<String> = slot
-                    .store
-                    .mod_files()
-                    .iter()
-                    .filter(|m| m.enabled && rules::may_break_on_update(&m.files, slot.store.mods().iter().any(|x| x.id == m.id && x.needs_loader)))
-                    .map(|m| format!("{{\"id\":{},\"name\":{}}}", quote(&m.id), quote(&m.name)))
-                    .collect();
-                format!("{{\"last\":{},\"now\":{},\"risky\":[{}]}}", quote(&last), quote(now), risky.join(","))
+                format!("{{\"last\":{},\"now\":{},\"risky\":[{}],\"pending\":{pending_json}}}", quote(&last), quote(now), risky())
+            }
+            (_, now) if pending.is_some() => {
+                let now = now.unwrap_or("");
+                format!("{{\"last\":{},\"now\":{},\"risky\":[{}],\"pending\":{pending_json}}}", quote(now), quote(now), risky())
             }
             _ => "null".into(),
         };

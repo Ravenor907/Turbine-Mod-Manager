@@ -1010,12 +1010,20 @@ Window {
     property var gameUpdate: null
     function maybeGameUpdate() {
         if (!game || !gameUpdate || !gameUpdate.risky || gameUpdate.risky.length === 0 || page !== "game" || sheet !== "" || wheelOpen) return
-        const key = game.id + "|" + gameUpdate.now
+        // 0.6: an update still waiting in Steam warns once too (before it installs), then again once it installed.
+        const waiting = !!gameUpdate.pending && gameUpdate.last === gameUpdate.now
+        const key = game.id + "|" + gameUpdate.now + (waiting ? "|waiting" : "")
         let warned = parse(seen.updateWarned, [])
         if (warned.indexOf(key) >= 0) return
         if (!shot.on) { warned.push(key); seen.updateWarned = JSON.stringify(warned.slice(-50)) }
         const names = gameUpdate.risky.map(r => r.name)
         note("action", "Game update warning: " + game.name + " build " + gameUpdate.last + " to " + gameUpdate.now + "; may break: " + names.join(", "))
+        if (waiting) {
+            openMsg({ title: "An update is waiting in Steam", text: gameUpdate.pending + " These mods hook into the game and often stop working until their makers update them: " + names.join(", ") + ".",
+                      buttons: [{ key: "a", label: "Play without mods until they update", run: () => holdMods() },
+                                { key: "b", label: "Keep my mods on", run: () => note("action", "Waiting update warning: kept the mods on") }] })
+            return
+        }
         openMsg({ title: gameTitle + " updated", text: game.store === "steam" || String(game.id).indexOf("steam:") === 0
                     ? "Steam updated " + gameTitle + " since you last played with mods. These mods hook into the game and often stop working until their makers update them: " + names.join(", ") + "."
                     : gameTitle + " updated since you last played with mods. These mods hook into the game and often stop working until their makers update them: " + names.join(", ") + ".",
