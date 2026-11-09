@@ -1253,6 +1253,8 @@ Window {
         const slow = status.active && !status.done && status.level === "wait" && status.text.indexOf("Slow download") >= 0
         if (openState === "opening") return { level: "busy", words: slow ? status.text : "Opening Nexus in " + openName + "...", detail: slow ? "Opening Nexus in " + openName + "..." : "" }
         if (openState === "open") return { level: slow ? "busy" : "ok", words: slow ? status.text : "Nexus is open in " + openName + ". Sign in if asked (free), press Slow download, then Steam button, Turbine.", detail: "" }
+        // 0.57: an online-only anti-cheat game says so before anything else (the refused file's message is in the log).
+        if (acRefused) return { level: "warn", words: "Needs its anti-cheat: no mods", detail: "" }
         if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
@@ -1261,7 +1263,6 @@ Window {
             return { level: "warn", words: warned.length === 1 ? warned[0].name + ": " + modWarns[warned[0].id] : plural(warned.length, "mod", "mods") + " may not work here", detail: "Before you play says why" }
         const on = mods.filter(m => m.enabled).length
         // Changes waiting to be saved show nothing (they go in by themselves); while saving, the line says Saving.
-        if (acRefused) return { level: "warn", words: "Needs its anti-cheat: no mods", detail: "" }
         return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on" + (acOffNow ? " · " + acInfo.statusRow : ""),
                  pill: updateCount > 0 ? plural(updateCount, "update", "updates") + " ready"
                        : profileData && profileList.length > 1 ? "Loadout: " + profileData.active : "" }
