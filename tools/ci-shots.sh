@@ -281,6 +281,7 @@ need $i "Move with the removed row" "Ghost check: Move with the removed row show
 need $i "A as the removed row goes" "Ghost check: A just as the removed row went: put back, the mod that slid up untouched"
 need $i "Tutorial waits" "Tutorial check: after the tutorial: sheet \"oldhelper\""
 need $i "Show hidden games" "Hidden check: every game hidden, the rail shows Show hidden games"
+need $i "Press twice: no repeat toast" "Press twice check: first A on Delete for good: the button says it, no toast"
 need $i "Toast action on R3" "Toast check: Turn every mod off shows (R3|F) Undo"
 need $i "Y is Find under a toast" "Toast check: Y with Undo showing: Find opened, Undo kept"
 need $i "R3 undoes" "Toast check: R3 with Undo showing: [1-9][0-9]* mods? back on of [1-9]"

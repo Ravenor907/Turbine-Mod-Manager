@@ -2387,8 +2387,8 @@ Window {
         if (armedKey === key && Date.now() - armedAt < 4000) { armedKey = ""; note("action", "Pressed twice: " + what); run(); return }
         armedKey = key; armedAt = Date.now()
         note("action", "First press: " + what)
-        // The game menu's row says it already (T39).
-        if (sheet !== "gamemenu") toast.info("Press A again to " + what + ".")
+        // The game menu's row and the confirm sheet's button say it already (T39): no toast over the bottom bar.
+        if (sheet !== "gamemenu" && sheet !== "confirm") toast.info("Press A again to " + what + ".")
     }
     function holdHint(what) { toast.info("Hold A for " + what + ". A tap doesn't do it.") }
     // Stops every hold and the D-pad repeat: the window going to the back, a controller going away.
@@ -4898,6 +4898,12 @@ Window {
                     pad("a") },
             () => { m.ok(games.length > 0, "Hidden check: Show hidden games put back " + plural(games.length, "game", "games"))
                     hiddenTest = null; orderGames() },
+            // 11b. 0.61 (T39): Confirm by pressing twice: the sheet's button says "Press A again", no toast repeats it.
+            () => { m.cb = look.confirmBy; look.confirmBy = "twice"; toast.hide(); askDelete("check:none", "Test") },
+            () => { if (sheet !== "confirm") return false
+                    pad("a")
+                    m.ok(sheet === "confirm" && !(toast.shown && toast.text.indexOf("Press A again") === 0), "Press twice check: first A on Delete for good: " + (toast.shown && toast.text.indexOf("Press A again") === 0 ? "a toast repeats it" : "the button says it, no toast"))
+                    disarm(); sheet = ""; look.confirmBy = m.cb },
             // 12. 0.61 (M6): Y is Find even while a toast offers Undo; R3 runs the toast's Undo.
             () => { if (!game) return false
                     page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""; Turbine.pointerHide()
