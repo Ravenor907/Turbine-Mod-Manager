@@ -658,6 +658,8 @@ done
 for size in $SIZES; do
   shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
   need "tucked-$size" "Rename ($size)" "Renamed .* to Lanterns of the Road"
+  need "tucked-$size" "A short list keeps the header ($size)" "Short list keeps the header: true"
+  need "tucked-$size" "The tucked bar names the game ($size)" "Tucked name: Skyrim SE (shown)"
   need "tucked-$size" "Header slides away going down ($size)" "Header tucked: true; panel: true"
   shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"

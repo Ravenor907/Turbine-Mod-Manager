@@ -278,7 +278,7 @@ Window {
             else if (shot.page === "slowhint") app.openNexus("https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1")
             else if (shot.page === "opening8s") { app.getArea = "fallback"; app.getAct("a"); app.openHelpNow() }
             // 0.51: the mod menu of a mod that loses a file; the closed-early prompt; the next requirement; the list bar.
-            else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; ")) }
+            else if (shot.page === "overlaps") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"; app.note("shot", "Mod menu: " + app.modMenuTitles()) }
             else if (shot.page === "quickexit" && app.game && app.mods.length > 0) {
                 // A setup from yesterday that worked, with only the first mod on.
                 app.setups = [{ id: "s1", savedAt: Math.floor(Date.now() / 1000) - 86400, modsOn: 1, played: true, on: [app.mods[0].id] }]
@@ -296,7 +296,7 @@ Window {
                 app.modIndex = Math.max(0, app.listItems.findIndex(x => x.kind === "mod" && x.m.needsLoader))
                 app.note("shot", "Game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
                 app.sheet = "modmenu"
-                app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; "))
+                app.note("shot", "Mod menu: " + app.modMenuTitles())
             }
             else if (shot.scripted) app.runScript(shot.page)
             else if (shot.page === "wheel") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.pad("view"); app.pad("up"); app.pad("right") }
@@ -317,11 +317,15 @@ Window {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0
                 app.renameMod(app.mods[0], "Lanterns of the Road")
                 app.modIndex = 1
+                // Two mods fit on one screen: Down doesn't tuck the header. The picture shows it tucked anyway.
+                app.note("shot", "Short list keeps the header: " + !app.headerTucked)
+                app.headerTucked = true
+                Qt.callLater(() => app.note("shot", "Tucked name: " + tuckTitle.text + " (" + (tuckTitle.width > 0 ? "shown" : "0 wide") + ")"))
                 app.note("shot", "Header tucked: " + app.headerTucked + "; panel: " + app.showModPanel + " (design width " + Math.round(app.designWidth) + ", " + app.width + "x" + app.height + ", tab " + app.tab + ", page " + app.page + "); row 2 line: " + app.rowLine(app.mods[1]).text)
             }
             else if (shot.page === "basicmenu") {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"
-                app.note("shot", "Mod menu: " + app.modMenuItems.map(x => x.title).join("; "))
+                app.note("shot", "Mod menu: " + app.modMenuTitles())
             }
             if (shot.page === "mods") app.note("shot", "Row warnings: " + app.mods.filter(m => !!app.modWarns[m.id]).map(m => m.name + ": " + app.modWarns[m.id]).join("; "))
         }
@@ -421,16 +425,29 @@ Window {
     property bool headerTucked: false
     readonly property bool reduceMotion: look.reduceMotion
     onHeaderTuckedChanged: note("page", "Header " + (headerTucked ? "tucked away" : "shown"))
-    function tuckFollow(now, before) {
+    // It only tucks when there is more than a screen to see: the list is taller than its view and the focused row
+    // is past the first screen. Game switches and a flick back to the top bring it back.
+    function tuckFollow(now, before, longer) {
         if (page !== "game") return
         if (now <= 0) headerTucked = false
-        else if (now > before) headerTucked = true
+        else if (now > before) { if (longer) headerTucked = true }
         else if (now < before) headerTucked = false
     }
+    function modRowPastFirstScreen(i) {
+        if (!modList || modList.contentHeight <= modList.height) return false
+        const it = modList.itemAtIndex(i)
+        return !it || it.y + it.height > modList.height - modList.topMargin
+    }
     property int tuckModBefore: 0
-    onModIndexChanged: { tuckFollow(modIndex, tuckModBefore); tuckModBefore = modIndex }
+    onModIndexChanged: { tuckFollow(modIndex, tuckModBefore, modRowPastFirstScreen(modIndex)); tuckModBefore = modIndex }
     property int tuckGetBefore: 0
-    onGetIndexChanged: { if (getArea === "grid") tuckFollow(Math.floor(getIndex / Math.max(1, gridColumns)), Math.floor(tuckGetBefore / Math.max(1, gridColumns))); else headerTucked = false; tuckGetBefore = getIndex }
+    onGetIndexChanged: {
+        const cols = Math.max(1, gridColumns), row = Math.floor(getIndex / cols)
+        // About two rows of cards fit under the header: more than that is a longer grid.
+        if (getArea === "grid") tuckFollow(row, Math.floor(tuckGetBefore / cols), Math.ceil(getItems.length / cols) > 2 && row >= 2)
+        else headerTucked = false
+        tuckGetBefore = getIndex
+    }
     onTabChanged: {
         headerTucked = false
         note("page", "Tab " + (tabs[tab] || tab))
@@ -640,11 +657,13 @@ Window {
     property string pickTitle: ""
     property string pickSub: ""
     property string pickBack: ""
-    function openPick(title, sub, items, back) { pickTitle = title; pickSub = sub; pickItems = items; pickBack = back || ""; pickBLabel = ""; menuIndex = 0; sheet = "pick" }
+    function openPick(title, sub, items, back) { pickTitle = title; pickSub = sub; pickItems = items; pickBack = back || ""; pickBLabel = ""; pickNoStart = false; menuIndex = 0; sheet = "pick" }
+    // A list that only tells (Why won't it start?): Start doesn't play from it, and rows marked info have no A.
+    property bool pickNoStart: false
     property string pickBLabel: ""          // what B says on this menu ("Not now"), when not Back or Close
     function pickRun(i) {
         const it = pickItems[i]
-        if (!it) return
+        if (!it || it.info) return
         note("action", pickTitle + ": " + it.title)
         sheet = ""
         it.run()
@@ -965,6 +984,7 @@ Window {
     onGameChanged: {
         allOffWas = []
         disarm()
+        headerTucked = false
         if (!game || sameGameReorder) return
         if (memoGame !== "" && memoGame !== game.id) saveFocus(memoGame)
         memoGame = game.id
@@ -1506,7 +1526,7 @@ Window {
         { icon: "files", title: "Add from Downloads", detail: "A mod file you downloaded", ok: true, act: "add" },
         outdatedMods.length > 0 ? { icon: "info", title: plural(outdatedMods.length, "mod may be", "mods may be") + " out of date", detail: outdatedMods.slice(0, 2).map(m => m.name).join(", "), ok: true, act: "outdated" }
                                 : null,
-        { icon: "profile", title: "Get this setup", detail: "Someone's loadout file from Downloads: their mods, in their order, as a new loadout", ok: true, act: "setup" },
+        { icon: "profile", title: "Get this setup", detail: "Use a loadout file someone shared", ok: true, act: "setup" },
         { icon: "info", title: "Why won't it start?", detail: "Checks the usual reasons, in plain words", ok: true, act: "why" },
         { icon: "info", title: "Check game folder", detail: "Are Turbine's files still all there?", ok: true, act: "verify" },
         { icon: "restore", title: "Saves: put back a backup", detail: "A copy is kept each time you play with mods", ok: true, act: "saves" },
@@ -1524,8 +1544,8 @@ Window {
     function launchFinding(h) {
         const need = (h.launch && h.launch.needed) || "", set = (h.launch && h.launch.set) || ""
         if (need === "") return null
-        if (set.indexOf(need.replace(/ ?%command%/, "").trim()) >= 0) return { icon: "power", title: "Launch Options: set", detail: "Steam has what " + gameTitle + " needs", run: () => {} }
-        return { icon: "info", title: "Launch Options: " + (set === "" ? "not set" : "different"), detail: "A copies the text. In Steam: the game's gear, Properties, Launch Options, paste.",
+        if (set.indexOf(need.replace(/ ?%command%/, "").trim()) >= 0) return { icon: "power", title: "Steam launch option: set", detail: "Steam has what " + gameTitle + " needs", info: true, run: () => {} }
+        return { icon: "info", title: set === "" ? "Steam launch option missing" : "Steam launch option is different", detail: "A copies it: " + need + "  Game page, gear, Properties, Launch Options.",
                  run: () => { Turbine.copyText(need); note("action", "Launch option copied: " + need); toast.done("Copied. Paste it in Steam: Properties, Launch Options.") } }
     }
     function openWhy() {
@@ -1535,14 +1555,15 @@ Window {
         const lf = launchFinding(h); if (lf) rows.push(lf)
         if (h.verify && (h.verify.missing.length + h.verify.changed.length) > 0)
             rows.push({ icon: "info", title: plural(h.verify.missing.length + h.verify.changed.length, "mod file is", "mod files are") + " missing or changed", detail: "A puts them back", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } })
-        for (const c of (h.copies || [])) rows.push({ icon: "info", title: "Another copy of " + gameTitle, detail: c + ". Mods go only into the one shown here.", run: () => {} })
-        if (rules && rules.antiCheat) rows.push({ icon: "info", title: "Anti-cheat: " + rules.antiCheat.name, detail: "Online play with mods can get you banned", run: () => {} })
+        for (const c of (h.copies || [])) rows.push({ icon: "info", title: "Another copy of " + gameTitle, detail: c + ". Mods go only into the one shown here.", info: true, run: () => {} })
+        if (rules && rules.antiCheat) rows.push({ icon: "info", title: "Anti-cheat: " + rules.antiCheat.name, detail: "Online play with mods can get you banned", info: true, run: () => {} })
         const on = mods.filter(m => m.enabled).length
         if (on > 0) rows.push({ icon: "play", title: "Try it without mods", detail: "Play without mods. If it starts, a mod is the cause.", run: () => { sheet = ""; Turbine.playOriginal() } })
         if (lastGood) rows.push({ icon: "restore", title: "Go back to a setup that worked", detail: "Last: " + when(lastGood.savedAt), run: () => { sheet = ""; Turbine.restoreSetup("") } })
-        if (rows.length === 0) rows.push({ icon: "power", title: "Nothing found", detail: "Turbine sees no reason it shouldn't start", run: () => {} })
+        if (rows.length === 0) rows.push({ icon: "power", title: "Nothing found", detail: "Turbine sees no reason it shouldn't start", info: true, run: () => {} })
         note("action", "Why won't it start: " + rows.map(r => r.title).join("; "))
         openPick("Why won't it start?", gameTitle, rows, "gamemenu")
+        pickNoStart = true
     }
     function openVerify() {
         const h = healthNow(), v = h.verify
@@ -1551,8 +1572,8 @@ Window {
         note("action", "Check game folder: " + v.ok + " fine, " + v.missing.length + " missing, " + v.changed.length + " changed")
         openPick("Check game folder", bad === 0 ? plural(v.ok, "mod file", "mod files") + " in place. Nothing to fix." : plural(bad, "file needs", "files need") + " fixing. A on the first row puts them back.",
             (bad > 0 ? [{ icon: "update", title: "Put them back", detail: "Puts mod files back. Game files are kept, never deleted", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } }] : [])
-            .concat(v.missing.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Missing", run: () => {} })))
-            .concat(v.changed.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Changed since Turbine put it in", run: () => {} }))), "gamemenu")
+            .concat(v.missing.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Missing", info: true, run: () => {} })))
+            .concat(v.changed.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Changed since Turbine put it in", info: true, run: () => {} }))), "gamemenu")
     }
     function openSaves() {
         const v = parse(Turbine.savesJson(), { folders: 0, backups: [] })
@@ -1774,9 +1795,7 @@ Window {
                    : src === "thunderstore" ? [{ icon: "play", title: "Its page in Turbine", detail: "Its Thunderstore page", act: "files", src: src }] : []
         const check = src !== "" && !updateMap[menuMod.id] ? [{ icon: "update", title: "Check for an update", detail: "Asks " + (src === "nexus" ? "Nexus" : "Thunderstore") + " now", act: "checkupdate" }] : []
         const order = ordered && mods.length > 1 ? [
-            { icon: "move", title: "Move", detail: "D-pad moves it, LT and RT to the top or bottom, A puts it down", act: "move" },
-            { icon: "move", title: "Move to top", detail: "Loses to every mod below it", act: "top" },
-            { icon: "move", title: "Move to bottom", detail: "Wins over every mod above it", act: "bottom" }
+            { icon: "move", title: "Move", detail: "D-pad moves it, LT and RT to the top or bottom, A puts it down", act: "move" }
         ] : []
         const names = [{ icon: "info", title: "Rename", detail: menuMod.renamed ? "Now " + menuMod.name : "A name of your own for the list", act: "rename" }]
                       .concat(menuMod.renamed ? [{ icon: "restore", title: "Reset name", detail: "Back to " + (menuMod.nexusName || tidyName(menuMod.raw, menuMod.version)), act: "resetname" }] : [])
@@ -1788,8 +1807,12 @@ Window {
         .concat(placements[menuMod.id] ? [
             { icon: "move", title: "Change where it goes", detail: "Now in " + folderWords(placements[menuMod.id].to), act: "place" }
         ] : [])
-        return first.concat(page).concat(check).concat(modMenuFacts.slice(0, 3)).concat(order).concat(names).concat(extras)
-            .concat(modMenuHasFacts ? [{ icon: "info", title: "Details", detail: [modWords(menuMod), menuMod.enabled ? "On" : "Off"].filter(x => x !== "").join(" · "), act: "details" }] : [])
+        const rows = first.concat(page).concat(check).concat(modMenuFacts.slice(0, 3)).concat(order).concat(names).concat(extras)
+            .concat(modMenuHasFacts ? [{ icon: "info", title: "Details", act: "details",
+                                         detail: modWords(menuMod) || (placements[menuMod.id] ? "Where it goes and what it overlaps" : ordered ? "Its place in the order" : "What it overlaps or needs") }] : [])
+        // At most 6 rows, so Uninstall (always last) is on screen at 1280 x 800: past that, the rest go under More.
+        const more = rows.length > 5 ? rows.slice(4) : []
+        return (more.length > 0 ? rows.slice(0, 4).concat([{ icon: "info", title: "More", detail: more.map(x => x.title).join(", "), act: "more", rest: more }]) : rows)
             .concat([{ icon: "remove", title: "Uninstall", detail: "You can put it back for 7 days.", act: "remove", danger: true }])
     }
     // Details: everything about the mod in one list (and Put it after... for ordered games).
@@ -1816,7 +1839,24 @@ Window {
         if (!item || !m) return
         note("action", "Mod menu: " + item.title + " for " + m.name)
         sheet = ""
-        if (item.act === "toggle") toggle(m)
+        modMenuDo(item, m)
+    }
+    // The details panel's "X Options:" line: the first row (often a fix), Rename, Uninstall, and how many more.
+    // The menu's rows for the activity log, with what More holds.
+    function modMenuTitles() { return modMenuItems.map(x => x.act === "more" ? "More (" + x.rest.map(r => r.title).join(", ") + ")" : x.title).join("; ") }
+    function optionsLine() {
+        let all = []
+        for (const x of modMenuItems) all = all.concat(x.act === "more" ? x.rest : [x])
+        all = all.filter(x => x.act !== "details")
+        const pick = []
+        if (all.length > 0 && all[0].act !== "rename" && all[0].act !== "remove") pick.push(all[0])
+        for (const a of ["rename", "remove"]) { const r = all.find(x => x.act === a); if (r) pick.push(r) }
+        const rest = all.length - pick.length
+        return pick.map(x => x.title).join(" · ") + (rest > 0 ? " and " + rest + " more" : "")
+    }
+    function modMenuDo(item, m) {
+        if (item.act === "more") openPick(m.name, "More options", item.rest.map(x => ({ icon: x.icon, title: x.title, detail: x.detail, run: () => modMenuDo(x, m) })), "modmenu")
+        else if (item.act === "toggle") toggle(m)
         else if (item.act === "loader") getLoader()
         else if (item.act === "check") startPlay()
         else if (item.act === "top") moveMod(m, 0)
@@ -1865,6 +1905,11 @@ Window {
             const t = n.replace(new RegExp("[ -]+[vV]?" + esc + "$"), "").trim()
             if (t.length >= 2) n = t
         }
+        // A Nexus download's file tail ("-790-2-6-1-1699999999": mod id, version, upload time), then any version
+        // left at the end ("1.2", "v2.0.1"). The version shows in the details panel instead.
+        let t = n.replace(/-\d+-[0-9A-Za-z-]*-\d{9,11}$/, "").trim()
+        t = t.replace(/[ _-]+[vV]?\d+(\.\d+){1,3}[a-z]?$/, "").trim()
+        if (t.length >= 2) n = t
         return n !== "" ? n : String(raw || "Mod")
     }
     function cleanName(raw) { return tidyName(raw, "") }
@@ -1922,6 +1967,19 @@ Window {
     }
     // The panel on the right of My mods: only on wide screens (16:9 and up), with something highlighted.
     readonly property bool showModPanel: page === "game" && !!game && tab === 0 && modsLoaded && !modPage && mods.length > 0 && width / Math.max(1, height) >= 1.5 && designWidth >= 700
+    // The details panel's first line: "Version 1.2 · On · added Nov 9 · 3 files" (and the author when known).
+    function versionOf(m) {
+        if (!m) return ""
+        if (m.version) return String(m.version).replace(/^[vV]/, "")
+        const v = String(m.raw || m.name || "").replace(/_/g, " ").match(/[ -][vV]?(\d+(\.\d+){1,3}[a-z]?)$/)
+        return v ? v[1] : ""
+    }
+    function panelLine(m) {
+        if (!m) return ""
+        const v = versionOf(m)
+        return [v !== "" ? "Version " + v : "", m.author ? "by " + m.author : "", m.enabled ? "On" : "Off",
+                m.added ? "added " + Qt.formatDate(new Date(m.added * 1000), "MMM d") : "", m.files ? plural(m.files, "file", "files") : ""].filter(x => x !== "").join(" · ")
+    }
     readonly property var modPanelFacts: {
         const m = menuMod
         if (!m) return []
@@ -2165,9 +2223,13 @@ Window {
         else if (b === "start") placeHere()
         else if ((b === "lb" || b === "rb" || b === "left" || b === "right") && placeMode === "add") {
             const want = b === "lb" || b === "left" ? 0 : 1
+            // The mod's files have no folders to pick: the focus stays where it is.
+            if (want === 1 && placeModRows.every(r => r.kind === "info")) { note("action", "Where do these files go: Mod files has no folders"); return }
             if (want !== placePane) { placePane = want; note("action", "Where do these files go: " + (want === 0 ? "Game folder" : "Mod files")) }
         }
     }
+    // B on Where do these files go?: the legend and the header button say the same.
+    readonly property string placeBLabel: (placePane === 0 ? placeGameRel : placeModRel) !== "" ? "Up a folder" : "Leave"
     readonly property string placeALabel: {
         const rows = placePane === 0 ? placeGameRows : placeModRows
         const r = rows[placePane === 0 ? placeGameIndex : placeModIndex]
@@ -2559,11 +2621,15 @@ Window {
         }
         const s = sheet
         const k = key => () => sheetAct(key)
-        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
-        if (s === "pick") return Object.assign({ a: bind(pickItems[menuIndex] && pickItems[menuIndex].aLabel ? pickItems[menuIndex].aLabel : "Choose", k("a")),
+        if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") {
+            // A says what the highlighted row does ("A Uninstall", "A Rename").
+            const row = s === "modmenu" ? modMenuItems[menuIndex] : s === "cardmenu" ? cardMenuItems[menuIndex] : null
+            return { a: bind(row && row.title.length <= 24 ? row.title : "Choose", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
+        }
+        if (s === "pick") return Object.assign({ a: bind(!pickItems[menuIndex] || pickItems[menuIndex].info ? "" : pickItems[menuIndex].aLabel ? pickItems[menuIndex].aLabel : "Choose", k("a")),
                                                  b: bind(pickBLabel !== "" ? pickBLabel : pickBack !== "" ? "Back" : "Close", k("b")) },
                                                pickY ? { y: bind(pickY.label, k("y")) } : {},
-                                               page === "game" && game ? { start: bind("Play", k("start")) } : {})
+                                               page === "game" && game && !pickNoStart ? { start: bind("Play", k("start")) } : {})
         if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
         if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
         if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
@@ -2589,7 +2655,7 @@ Window {
                 if (sheet === "notice") seen.notSteamOS = true
                 sheet = ""
             }
-        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game && !nxmAsking)) && b === "start") {
+        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game && !nxmAsking && !pickNoStart)) && b === "start") {
             // Start plays from any menu (the legend shows it while a menu covers the Play button).
             stopReset(); sheet = ""; startPlay()
         } else if (sheet === "pick" && nxmAskQuiet()) {
@@ -2724,10 +2790,10 @@ Window {
             if (browserTab === 1) {
                 o.a = bind(browserRowLabel(browserDlIndex), () => browserRowAct(browserDlIndex))
                 // X only on a row (the menu has nothing to offer with no downloads).
-                if (webDls[browserDlIndex]) o.x = bind("Menu", () => browserRowMenu(browserDlIndex))
+                if (webDls[browserDlIndex]) o.x = bind("Options", () => browserRowMenu(browserDlIndex))
                 return o
             }
-            o.x = bind("Menu", openBrowserMenu)
+            o.x = bind("Options", openBrowserMenu)
             // Google's sign-in page: Turbine's card answers A and Y.
             if (browserOnGoogle) {
                 o.a = bind("Set a password", googleSetPassword)
@@ -2754,10 +2820,11 @@ Window {
         // Where do these files go? (a full page; LB and RB switch pane).
         if (page === "place") {
             o.a = bind(placeALabel, () => placeAct("a"))
-            o.b = bind((placePane === 0 ? placeGameRel : placeModRel) !== "" ? "Up a folder" : "Leave", () => placeAct("b"))
-            o.x = bind("Menu", () => placeAct("x"))
+            o.b = bind(placeBLabel, () => placeAct("b"))
+            o.x = bind("Options", () => placeAct("x"))
             o.y = bind("Find", () => placeAct("y"))
-            o.start = bind("Put them here", () => placeAct("start"))
+            // Start puts them here too; the legend shows it only when A says something else.
+            o.start = bind(placeALabel === "Put them here" ? "" : "Put them here", () => placeAct("start"))
             o.lb = bind("", () => placeAct("lb"))
             o.rb = bind("", () => placeAct("rb"))
             o.lt = bind("", () => placeAct("lt"))
@@ -3742,7 +3809,7 @@ Window {
     })
     // Updates for your mods, on the Get mods start page.
     readonly property var updateList: Object.keys(updateMap).map(k => ({ u: updateMap[k], m: mods.find(x => x.id === k) })).filter(x => !!x.m)
-    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search " + gameTitle + " mods" },
+    readonly property var getBar: [{ key: "search", label: getText !== "" ? getText : "Search mods" },
                                    { key: "sort", label: "Sort: " + (sortNames[getSortIndex] || "") }]
         .concat(getCats.length > 0 ? [{ key: "category", label: "Category: " + (getCategory || "All") }] : [])
         .concat(sources.length > 1 ? [{ key: "source", label: "From: " + srcName(srcNow) }] : [])
@@ -3765,7 +3832,8 @@ Window {
     }
     // The one-time line over the grid for a game with no mods yet.
     readonly property bool bannerOn: !!game && modsLoaded && mods.length === 0 && parse(seen.bannerDone, []).indexOf(game.id) < 0
-    readonly property string getBanner: bannerOn ? "No mods for " + gameTitle + " yet. Pick one below, or search." : ""
+    // Not with Good first mods on screen: they say the same thing, and the banner pushed the first cards off it.
+    readonly property string getBanner: bannerOn && starterItems.length === 0 ? "No mods for " + gameTitle + " yet. Pick one below, or search." : ""
     // Entering a game with no mods lands on Get mods (once per visit).
     property string landedOn: ""
     property bool landAgain: false
@@ -3940,13 +4008,16 @@ Window {
     // X on a card: the mod page's own words (Get it on Nexus for a free account, else Install), Other files, Open on Nexus.
     readonly property var cardItem: getArea === "grid" ? getItems[getIndex] : null
     // 0.56: a card you already have offers what you can do with it, not getting it again.
-    readonly property var cardMine: cardItem && cardItem.installed && srcNow === "nexus" && installedNexus[String(cardItem.id)] !== undefined
-                                    ? mods.find(m => m.id === installedNexus[String(cardItem.id)]) || null : null
+    // Nexus cards by the Nexus mod id; Thunderstore cards by the package ("Owner-Name", with or without a version).
+    readonly property var cardMine: !cardItem || !cardItem.installed ? null
+        : srcNow === "nexus" ? (installedNexus[String(cardItem.id)] !== undefined ? mods.find(m => m.id === installedNexus[String(cardItem.id)]) || null : null)
+        : mods.find(m => m.sourceKind === srcNow && (String(m.sourceId) === String(cardItem.id) || String(m.sourceId || "").split(":")[0] === String(cardItem.id))) || null
     readonly property var cardMenuItems: !cardItem ? [] : cardMine ? [
         { icon: "info", title: "Show in My mods", detail: cardMine.name, act: "show" },
         { icon: "power", title: cardMine.enabled ? "Turn off" : "Turn on", detail: cardMine.enabled ? "On now" : "Off now", act: "toggle" }
     ].concat(updateMap[cardMine.id] ? [{ icon: "update", title: "Update to " + updateMap[cardMine.id].to, detail: "Keeps its place and on or off", act: "update" }] : [])
-     .concat([{ icon: "play", title: "Its Nexus page", detail: "Opens it in Turbine", act: "nexus" },
+     .concat([srcNow === "nexus" ? { icon: "play", title: "Its Nexus page", detail: "Opens it in Turbine", act: "nexus" }
+                                 : { icon: "play", title: "Its page", detail: "Its Thunderstore page in Turbine", act: "page" },
               { icon: "remove", title: "Uninstall", detail: "You can put it back for 7 days.", act: "remove", danger: true }]) : [
         { icon: "update", title: srcNow === "nexus" && account.premium !== true ? "Get it on Nexus" : "Install", detail: getWords(), act: "get" },
         { icon: "info", title: "Other files", detail: "Older versions and extra files, on its page", act: "files" }
@@ -3964,6 +4035,7 @@ Window {
         else if (it.act === "update" && cardMine) updateOne(cardMine)
         else if (it.act === "remove" && cardMine) uninstall(cardMine)
         else if (it.act === "nexus") openNexus("https://www.nexusmods.com/" + rules.domain + "/mods/" + c.id)
+        else if (it.act === "page") openDetails(c)
     }
     function getWords() {
         if (srcNow === "thunderstore") return "Installs it with what it needs"
@@ -6224,7 +6296,7 @@ Window {
                         anchors.verticalCenter: parent.verticalCenter
                         width: backRow.implicitWidth + app.px(20); height: app.px(32); radius: app.px(6)
                         color: c.raised
-                        Hint { id: backRow; anchors.centerIn: parent; k: "b"; label: "Back" }
+                        Hint { id: backRow; anchors.centerIn: parent; k: "b"; label: app.page === "place" ? app.placeBLabel : "Back" }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                         TapHandler { onTapped: app.act("b") }
                     }
@@ -6344,13 +6416,15 @@ Window {
                     radius: app.px(6)
                     color: c.panel
                     // With the header tucked away: the game's name at the left, so it is still clear which game this is.
+                    TextMetrics { id: tuckMetrics; font: tuckTitle.font; text: tuckTitle.text }
                     Text {
                         id: tuckTitle
                         visible: app.headerTucked
                         x: app.px(10)
-                        width: visible ? Math.min(implicitWidth, app.px(220)) : 0
+                        // A fixed width from the text itself (never from the Text's own size, which can end up 0).
+                        width: visible ? Math.min(Math.ceil(tuckMetrics.advanceWidth) + app.px(2), app.px(220)) : 0
                         anchors.verticalCenter: parent.verticalCenter
-                        text: app.gameTitle
+                        text: app.game ? app.shortGame(app.game.name) : ""
                         elide: Text.ElideRight
                         color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.px(15); font.bold: true
                     }
@@ -6546,7 +6620,7 @@ Window {
                             }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
-                                text: modPanel.m ? [modPanel.m.version ? "Version " + modPanel.m.version : "", modPanel.m.author ? "by " + modPanel.m.author : "", modPanel.m.enabled ? "on" : "off"].filter(x => x !== "").join(" · ") : ""
+                                text: app.panelLine(modPanel.m)
                                 color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(14)
                             }
                             Text {
@@ -6570,7 +6644,7 @@ Window {
                             anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                             anchors.margins: app.px(14)
                             wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                            text: modPanel.m ? app.glyph("x") + " Options: " + app.modMenuItems.filter(x => x.act !== "details").slice(0, 5).map(x => x.title).join(" · ") : ""
+                            text: modPanel.m ? app.glyph("x") + " Options: " + app.optionsLine() : ""
                             color: c.muted; font.family: app.bodyFont; font.pixelSize: app.px(13)
                         }
                     }
@@ -6582,6 +6656,8 @@ Window {
                         anchors.topMargin: listBarRow.height + moveLine.height
                         // The header sliding away or back changes the list's height: the focused row stays fully in view.
                         onHeightChanged: if (app.modIndex >= 0) positionViewAtIndex(app.modIndex, ListView.Contain)
+                        // A touch flick back to the top brings the header back.
+                        onAtYBeginningChanged: if (atYBeginning && moving) app.headerTucked = false
                         topMargin: app.px(4)
                         bottomMargin: app.px(4)
                         clip: true
@@ -7678,7 +7754,7 @@ Window {
                 anchors.centerIn: parent
                 spacing: app.px(6)
                 Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                Label { text: "Quick wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                Label { text: app.wheelOpen ? "Close" : "Quick wheel"; font.pixelSize: app.px(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
             }
             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
             TapHandler { onTapped: app.wheelPress() }
@@ -7792,7 +7868,7 @@ Window {
         return false
     }
     function pickHover() {
-        const live = hoverList.filter(x => !!x && x.visible && !((sheet !== "" || page === "browser") && inside(x, mainRow)))
+        const live = hoverList.filter(x => !!x && x.visible && !((sheet !== "" || page === "browser" || wheelOpen) && inside(x, mainRow)))
         let best = null
         for (const x of live) if (!live.some(y => y !== x && inside(y, x))) { best = x; break }
         hoverItem = best
