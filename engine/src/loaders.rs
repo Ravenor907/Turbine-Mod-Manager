@@ -119,7 +119,7 @@ pub fn skse_plan() -> InstallPlan {
     p.strip_folders = 1;
     p.skip = vec!["src".into(), "readme.txt".into(), "skse64_readme.txt".into(), "skse64_whatsnew.txt".into()];
     p.hooks.push(Hook::LauncherSwap { original: "SkyrimSELauncher.exe".into(), replacement: "skse64_loader.exe".into() });
-    p.notes.push("SKSE starts in place of Skyrim's launcher; Play original puts the launcher back for that run.".into());
+    p.notes.push("SKSE starts in place of Skyrim's launcher; Play without mods puts the launcher back for that run.".into());
     p
 }
 

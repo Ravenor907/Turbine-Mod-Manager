@@ -516,7 +516,7 @@ fn skyrim_update_with_skse_mods_stops() {
     assert_eq!(c.len(), 1);
     assert_eq!(c[0].level, "stop");
     assert_eq!(c[0].title, "Steam updated this game");
-    assert!(c[0].detail.contains("Play original is safe"));
+    assert!(c[0].detail.contains("Play without mods is safe"));
     // Without script mods it's only a warning.
     let c = pre_play_with(&g, &skyrim(), Some("100"), false, None, None, true);
     assert_eq!(c[0].level, "warn");

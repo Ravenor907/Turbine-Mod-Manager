@@ -850,10 +850,10 @@ Window {
                 msgData = Object.assign({}, msgData, { buttons: msgData.buttons.map(x => x.key === "a" ? Object.assign({}, x, { label: "Copied (copy again)" }) : x) })
                 toast.done("Copied. The steps stay here until B.") } },
             { key: "x", label: "Play without mods", run: () => { note("action", "Launch Options step: played without mods"); Turbine.playOriginal() } },
-            { key: "y", label: Turbine.gamemode ? "Activity log" : "Start outside Steam", run: () => {
-                if (Turbine.gamemode) openActivity()
-                else { note("action", "Launch Options step: started outside Steam (Desktop Mode)"); Turbine.playOutsideSteam(o.coop === true) } } },
-            { key: "b", label: "Not now", run: () => note("action", "Launch Options step: not now") }] })
+            { key: "b", label: "Not now", run: () => note("action", "Launch Options step: not now") }
+            // 0.6 (I21): Y is only ever Start outside Steam, and only in Desktop Mode (the activity log has its own place).
+            ].concat(Turbine.gamemode ? [] : [{ key: "y", label: "Start outside Steam", run: () => {
+                note("action", "Launch Options step: started outside Steam (Desktop Mode)"); Turbine.playOutsideSteam(o.coop === true) } }]) })
     }
     // ---------------------------------------------------------------- 0.58: Edit settings
     property string settingsMod: ""          // the mod's id; "" for the game's own files
@@ -2161,6 +2161,10 @@ Window {
         const lfNow = launchFinding(healthNow())
         if (lfNow ? lfNow.info === true : launchSeen()) list = list.filter(x => x.title !== launchTitle)
         list = list.filter(x => !(x.once && x.title !== launchTitle && onceSeen(x.title)))
+        // 0.6 (I14): one warning for one game update. Once its sheet was answered (Play without mods until they
+        // update, or Keep my mods on), Before you play doesn't ask again about the same update.
+        if (game && gameUpdate && (modHold || parse(seen.updateWarned, []).some(k => k.indexOf(game.id + "|" + gameUpdate.now) === 0)))
+            list = list.filter(x => !/ updated this game$/.test(String(x.title || "")))
         if (list.length === 0) list = [{ level: "ok", title: "Ready to play", detail: "Everything checks out." }]
         // 0.56: plain words. Web addresses come out of the text (Game menu, Mods for this game on Nexus, or the
         // loader's own row get there), and "Missing master" says what it means.
@@ -2202,6 +2206,8 @@ Window {
         const w = checks.find(x => x.offer && x.offer.mod && mods.some(m => m.id === x.offer.mod && m.enabled))
         if (w) return { label: w.offer.label, mod: w.offer.mod }
         if (loaderMissing && needLoader.length > 0) return { label: (loaderCanGet ? "Install " : "Get ") + loaderShort, loader: true }
+        // 0.6 (I25): low space, and Turbine is keeping removed mods: the way to free that space is one press.
+        if (removedMods.length > 0 && checks.some(x => x.title === "Low space on the game's drive")) return { label: "Free space: Removed mods", removed: true }
         return null
     }
     // Fix it, Play anyway, Play without mods, Not now. A runs the highlighted one, B is Not now, Start Play anyway.
@@ -2236,6 +2242,7 @@ Window {
             if (m && m.enabled) toggle(m, true)
             startPlay()
         } else if (o.loader) getLoader()
+        else if (o.removed) openRemoved()
     }
     // Install the missing loader (from the check, the mod menu or the game menu); where it can't be fetched, the
     // prompt says where it comes from.
@@ -3877,7 +3884,7 @@ Window {
             o.b = bind("Back", settingsBack)
             o.lb = bind("", () => settingsSection(-1))
             o.rb = bind("", () => settingsSection(1))
-            const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
+            const rows = sec === "Look" ? lookRows.length : sec === "About" ? (labsOn ? 2 : 1) : rowsNow.length
             o.lt = bind("", () => { setRow = settingsLand(Math.max(0, setRow - pageJump), -1, rows) })
             o.rt = bind("", () => { setRow = settingsLand(Math.min(rows - 1, setRow + pageJump), 1, rows) })
             return o
@@ -4026,7 +4033,7 @@ Window {
             return
         }
         if (page === "settings") {
-            const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
+            const rows = sec === "Look" ? lookRows.length : sec === "About" ? (labsOn ? 2 : 1) : rowsNow.length
             const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
             const kind = r ? r.kind : ""
             if (b === "up" || b === "down") { settingsFresh = false; settingsMove(b === "up" ? -1 : 1, rows) }
@@ -4121,7 +4128,7 @@ Window {
         const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
         const kind = r ? r.kind : ""
         if (sec === "Look") { const lr = lookRows[setRow]; if (lr.a) lr.a(); else lr.step(1) }
-        else if (sec === "About") { if (setRow === 0) labsTap(); else { page = "perf"; zone = "perf"; perfIndex = 0 } }
+        else if (sec === "About") { if (setRow === 0) labsTap(); else if (labsOn) { page = "perf"; zone = "perf"; perfIndex = 0 } }
         else if (kind === "item") labsChoose(r, ["works", "problem", ""][labsChip])
         else if (kind === "choice" || kind === "toggle") rowStep(r, 1)
         else if (kind === "action") rowRun(r)
@@ -7520,7 +7527,8 @@ Window {
                 id: railList
                 anchors.top: railTop.bottom
                 anchors.topMargin: app.px(10)
-                anchors.bottom: gear.top
+                // 0.6 (I19): the hidden-games tile sits after the last game, just above the gear, where its focus is.
+                anchors.bottom: hiddenTile.visible ? hiddenTile.top : gear.top
                 anchors.bottomMargin: app.px(10)
                 width: parent.width
                 clip: true
@@ -7641,8 +7649,8 @@ Window {
             Rectangle {
                 id: hiddenTile
                 visible: app.railExtra > 0
-                anchors.top: railTop.bottom
-                anchors.topMargin: app.px(10)
+                anchors.bottom: gear.top
+                anchors.bottomMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: app.px(60); height: app.px(66); radius: app.px(6)
                 readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length
@@ -8508,7 +8516,9 @@ Window {
                             }
                             Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
                             Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
+                            // 0.6 (I26): a test for the build's makers, so only with Labs on.
                             Rectangle {
+                                visible: app.labsOn
                                 readonly property bool foc: app.zone === "settings" && app.setRow === 1
                                 width: perfRow.implicitWidth + app.px(28); height: app.px(40); radius: app.px(8)
                                 color: foc ? c.focusFill : c.card

@@ -96,7 +96,7 @@ pub struct GameRules {
 /// One line of the check before Play.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
-    /// "ok", "warn" (Play anyway allowed) or "stop" (Play original or Wait only).
+    /// "ok", "warn" (Play anyway allowed) or "stop" (Play without mods or Wait only).
     pub level: String,
     pub title: String,
     pub detail: String,
@@ -1461,7 +1461,7 @@ pub fn pre_play_with(
                         "{} changed since your mods were last set up. Cyber Engine Tweaks and RED4ext (and the mods \
                          built on them) usually stop working after a game update until their makers release new \
                          versions. If the game crashes at start or mods are missing, update them, or use Play \
-                         original: it starts the game without mods.",
+                         without mods: it starts the game clean.",
                         game.name
                     ),
                 ));
@@ -1472,8 +1472,8 @@ pub fn pre_play_with(
                     title,
                     format!(
                         "{} changed since your mods were last set up. {loader} and the mods that use it usually stop \
-                         working after a game update until their makers release new versions. Play original is safe: \
-                         it starts the game without mods.",
+                         working after a game update until their makers release new versions. Play without mods is \
+                         safe: it starts the game clean.",
                         game.name
                     ),
                 ));
@@ -1483,7 +1483,7 @@ pub fn pre_play_with(
                     title,
                     format!(
                         "{} changed since your mods were last set up. Some mods may not work until they are updated. \
-                         Play original is safe: it starts the game without mods.",
+                         Play without mods is safe: it starts the game clean.",
                         game.name
                     ),
                 ));
@@ -1507,7 +1507,11 @@ pub fn pre_play_with(
             checks.push(check(
                 "warn",
                 "Low space on the game's drive".into(),
-                format!("Only {} MB is free. The game may fail to save or update.", free / (1024 * 1024)),
+                format!(
+                    "Only {} MB is free. The game may fail to save or update. Free some space: Steam's Settings, \
+                     Storage shows what uses it.",
+                    free / (1024 * 1024)
+                ),
             ));
         }
     }
