@@ -36,9 +36,28 @@ jobs:
         with:
           path: site
 
+  # Pages may not be turned on for the repository yet (the owner's choice): then the site is checked and packed, and
+  # the publish is skipped with a notice instead of failing.
+  pages-on:
+    name: Is GitHub Pages on?
+    runs-on: ubuntu-latest
+    permissions:
+      pages: read
+    outputs:
+      on: ${{ steps.check.outputs.on }}
+    steps:
+      - id: check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" > /dev/null 2>&1; then echo "on=true" >> "$GITHUB_OUTPUT"
+          else echo "on=false" >> "$GITHUB_OUTPUT"; echo "::notice title=GitHub Pages is off::The site was checked and packed but not published. Turn Pages on (Settings, Pages, Source: GitHub Actions) to publish it."; fi
+
   deploy:
     name: Publish to GitHub Pages
-    needs: upload
+    needs: [upload, pages-on]
+    if: needs.pages-on.outputs.on == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

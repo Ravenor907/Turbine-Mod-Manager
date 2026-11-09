@@ -3,6 +3,12 @@ name: build
 on:
   push:
     branches: [main]
+    # 0.6: words and the site alone don't need a build (pages.yml publishes site/).
+    paths-ignore:
+      - "site/**"
+      - "README.md"
+      - "**/*.md"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
     inputs:
       release:
@@ -19,6 +25,34 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'workflow_dispatch' && inputs.release) }}
 
 jobs:
+  # 0.6: a release of a commit that already passed every check publishes that run's checked bundle (same commit, its
+  # artifact's digest checked) instead of building and checking it all again. With no green run for the commit, the
+  # full build runs as before.
+  reuse:
+    name: A checked build of this commit?
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+    steps:
+      - id: find
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=""
+          if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
+            run=$(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?head_sha=${{ github.sha }}&status=success&per_page=20" \
+                    --jq '[.workflow_runs[] | select(.head_sha == "${{ github.sha }}" and .event == "push")][0].id // empty')
+            if [ -n "$run" ]; then
+              art=$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts" --jq '[.artifacts[] | select(.name == "TurbineModManager.flatpak" and .expired == false)][0] | "\(.id) \(.digest)"')
+              if [ -z "$art" ] || [ "$art" = "null null" ]; then echo "::notice title=No bundle to reuse::run $run's artifact is gone; building again"; run=""
+              else echo "::notice title=Release reuses run $run::commit ${{ github.sha }}, artifact ${art}"; fi
+            else echo "::notice title=No green run for this commit::building and checking it in full"; fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   rules:
     name: House rules
     runs-on: ubuntu-latest
@@ -181,7 +215,8 @@ jobs:
     name: Flatpak
     # Starts without waiting for the engine tests (they run beside it; a failure still fails the run and blocks
     # a release).
-    needs: [rules, vendor]
+    needs: [rules, vendor, reuse]
+    if: needs.reuse.outputs.run == ''
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
@@ -208,18 +243,24 @@ jobs:
           cat app/build-commit.txt
       # The KDE runtime and SDK, the Rust SDK extension and the Qt WebEngine BaseApp, installed once and kept (flatpak-
       # builder still updates them from Flathub when a newer build is out).
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      # 0.6: the caches are restored every run but saved only when their key is new (saving took 105 s a run).
+      # The runtimes and BaseApp, keyed on the manifest (their versions are there).
+      - id: sdkcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: |
             /var/lib/flatpak
             ~/.local/share/flatpak
           key: flatpak-sdk-${{ hashFiles('packaging/*.json') }}
           restore-keys: flatpak-sdk-
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      # flatpak-builder's state (sources, ccache, modules that didn't change), keyed on the manifest and the locked
+      # crates; a change to Turbine's own code reuses it.
+      - id: fbcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .flatpak-builder
-          key: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}-${{ github.sha }}
-          restore-keys: fb-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}-
+          key: fb2-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}
+          restore-keys: fb2-
       - name: Build Flatpak
         shell: bash
         run: |
@@ -242,6 +283,19 @@ jobs:
           mb=$(( (bytes + 524288) / 1048576 ))
           echo "::notice title=TurbineModManager.flatpak::$bytes bytes ($mb MB)"
           if [ "$bytes" -gt $((300 * 1048576)) ]; then echo "::error title=Bundle too big::$mb MB, over the 300 MB limit"; exit 1; fi
+          sha256sum TurbineModManager.flatpak | tee TurbineModManager.flatpak.sha256
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: steps.sdkcache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            /var/lib/flatpak
+            ~/.local/share/flatpak
+          key: flatpak-sdk-${{ hashFiles('packaging/*.json') }}
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: steps.fbcache.outputs.cache-hit != 'true'
+        with:
+          path: .flatpak-builder
+          key: fb2-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
@@ -251,12 +305,14 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: TurbineModManager.flatpak
-          path: TurbineModManager.flatpak
+          path: |
+            TurbineModManager.flatpak
+            TurbineModManager.flatpak.sha256
           retention-days: 30
 
   # The pictures and checks, in four parts side by side, each on the bundle the Flatpak job made.
   checks:
-    name: Checks (${{ matrix.part }})
+    name: Checks (${{ matrix.part }} ${{ matrix.shard }}/${{ matrix.shards }})
     needs: [flatpak]
     runs-on: ubuntu-latest
     container:
@@ -264,8 +320,18 @@ jobs:
       options: --privileged
     strategy:
       fail-fast: false
+      # 0.6: each size's pictures split over parallel shards (tools/ci-shots.sh plans them by run time).
       matrix:
-        part: [1280x800, 1920x1080, x11, nexus]
+        include:
+          - { part: 1280x800, shard: 0, shards: 4 }
+          - { part: 1280x800, shard: 1, shards: 4 }
+          - { part: 1280x800, shard: 2, shards: 4 }
+          - { part: 1280x800, shard: 3, shards: 4 }
+          - { part: 1920x1080, shard: 0, shards: 3 }
+          - { part: 1920x1080, shard: 1, shards: 3 }
+          - { part: 1920x1080, shard: 2, shards: 3 }
+          - { part: x11, shard: 0, shards: 1 }
+          - { part: nexus, shard: 0, shards: 1 }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
@@ -273,36 +339,63 @@ jobs:
           name: TurbineModManager.flatpak
           path: .
       # The KDE runtime the bundle runs on, installed once and kept (not Turbine itself, installed fresh each time).
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      # The KDE runtime: one cache for every shard, saved only when the manifest changes.
+      - id: rtcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: |
             ~/.local/share/flatpak
             !~/.local/share/flatpak/app/io.github.ravenor907.TurbineModManager
-          key: flatpak-runtime-${{ matrix.part }}-${{ hashFiles('packaging/*.json') }}
-          restore-keys: flatpak-runtime-${{ matrix.part }}-
+          key: flatpak-runtime-${{ matrix.part == 'x11' && 'x11' || matrix.part == 'nexus' && 'nexus' || 'pics' }}-${{ hashFiles('packaging/*.json') }}
+          restore-keys: flatpak-runtime-${{ matrix.part == 'x11' && 'x11' || matrix.part == 'nexus' && 'nexus' || 'pics' }}-
       - name: Pictures and checks (${{ matrix.part }})
         shell: bash
         run: |
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          bash tools/ci-shots.sh "${{ matrix.part }}"
+          bash tools/ci-shots.sh "${{ matrix.part }}" "${{ matrix.shard }}" "${{ matrix.shards }}"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: steps.rtcache.outputs.cache-hit != 'true' && matrix.shard == 0
+        with:
+          path: |
+            ~/.local/share/flatpak
+            !~/.local/share/flatpak/app/io.github.ravenor907.TurbineModManager
+          key: flatpak-runtime-${{ matrix.part == 'x11' && 'x11' || matrix.part == 'nexus' && 'nexus' || 'pics' }}-${{ hashFiles('packaging/*.json') }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with:
-          name: screenshots-${{ matrix.part }}
+          name: screenshots-${{ matrix.part }}-${{ matrix.shard }}
           path: shots
           retention-days: 14
 
   release:
     name: Release (owner approved)
-    needs: [rules, engine, flatpak, checks]
-    if: github.event_name == 'workflow_dispatch' && inputs.release
+    needs: [reuse, rules, engine, flatpak, checks]
+    # The bundle this run built and checked, or (reuse) the one a green run of the same commit built and checked.
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && inputs.release &&
+      needs.rules.result == 'success' && needs.engine.result == 'success' &&
+      (needs.reuse.outputs.run != '' || (needs.flatpak.result == 'success' && needs.checks.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+      - if: needs.reuse.outputs.run == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           name: TurbineModManager.flatpak
+      - if: needs.reuse.outputs.run != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: TurbineModManager.flatpak
+          run-id: ${{ needs.reuse.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: The bundle is the one that was checked
+        shell: bash
+        run: |
+          if [ -f TurbineModManager.flatpak.sha256 ]; then sha256sum -c TurbineModManager.flatpak.sha256
+          else echo "::warning title=No checksum beside the bundle::built before 0.6"; fi
+          echo "::notice title=Releasing::$(sha256sum TurbineModManager.flatpak) from run ${{ needs.reuse.outputs.run || github.run_id }}"
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2.6.2
         with:
           tag_name: v${{ needs.rules.outputs.version }}

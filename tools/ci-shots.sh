@@ -4,7 +4,12 @@
 # Each part installs the Flatpak bundle the build made (TurbineModManager.flatpak in the working folder), takes its
 # pictures (printed into the log as "SHOT <name> <base64>" too) and fails on any check that fails.
 set -eo pipefail
-MODE=${1:?"tools/ci-shots.sh 1280x800|1920x1080|x11|nexus"}
+MODE=${1:?"tools/ci-shots.sh 1280x800|1920x1080|x11|nexus [shard shards]"}
+# 0.6: the pictures of one size split over parallel jobs: this job takes its share (shard of shards). Each picture
+# goes to a shard by its run time (tools/ci-shards.txt, measured; a guess by its kind otherwise), the longest first
+# onto the least loaded shard, the same way in every job; checks only read pictures their own shard took.
+SHARD=${2:-0}
+SHARDS=${3:-1}
 case "$MODE" in
   1280x800|1920x1080) SIZES=$MODE ;;
   x11|nexus) SIZES="" ;;
@@ -44,9 +49,44 @@ cp engine/tests/data/*.json engine/tests/data/*.html samples/
 cp tools/selftest-data/* samples/
 fail=0
 hung=0
+# The shard plan: every picture name this run can take, with its weight, from a dry pass over this script.
+guess() {   # seconds a picture takes, by its kind
+  case "$1" in
+    inputcheck*) echo 70 ;;
+    browsertest*|browserpersist*|regress*) echo 200 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
+    findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
+    loot*|nxm*|getmodsback*) echo 13 ;;
+    *) echo 9 ;;
+  esac
+}
+declare -A ASSIGN
+if [ "$SHARDS" -gt 1 ]; then
+  names=$(grep -oE '^\s*(SHOOT_ENV="[^"]*" )?shoot "[^"]+"' "$0" | sed -E 's/.*shoot "([^"]+)"/\1/' | sed -E 's/\$size/'"$MODE"'/g; s/\$\{p\/modpage\/modpage-\}/modpage-x/g' | grep -v "$( [ "$MODE" = 1280x800 ] && echo 1920x1080 || echo 1280x800 )" | grep -v '\$' | sort -u)
+  declare -A W
+  for n in $names; do W[$n]=$(guess "$n"); done
+  if [ -f tools/ci-shards.txt ]; then while read -r n w; do [ -n "$n" ] && [ "${n:0:1}" != "#" ] && W[$n]=$w; done < tools/ci-shards.txt; fi
+  declare -a LOAD; for ((k = 0; k < SHARDS; k++)); do LOAD[$k]=0; done
+  for n in $(for k in "${!W[@]}"; do echo "${W[$k]} $k"; done | sort -k1,1nr -k2,2 | awk '{print $2}'); do
+    best=0; for ((k = 1; k < SHARDS; k++)); do [ "${LOAD[$k]}" -lt "${LOAD[$best]}" ] && best=$k; done
+    ASSIGN[$n]=$best; LOAD[$best]=$(( LOAD[$best] + W[$n] ))
+  done
+  echo "Shard $SHARD of $SHARDS: planned load ${LOAD[$SHARD]} s of $(( $(IFS=+; echo "${LOAD[*]}") )) s"
+fi
+mine() {   # is this picture this shard's?
+  [ "$SHARDS" -le 1 ] && return 0
+  local b=${ASSIGN[$1]:-}
+  [ -z "$b" ] && b=$(( $(printf %s "$1" | cksum | cut -d' ' -f1) % SHARDS ))
+  [ "$b" = "$SHARD" ]
+}
+RAN=" "
+ran() { [[ "$RAN" == *" $1 "* ]]; }
 shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
   name=$1 size=$2 page=$3 home=$4
   shift 4
+  mine "$name" || return 0
+  RAN="$RAN$name "
+  local t0=$SECONDS
   out="$PWD/shots/$name.png"
   # Each picture gets its own mod store, so imports never pile up between pictures.
   timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software $SHOOT_ENV \
@@ -60,8 +100,10 @@ shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
   if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
   # The engine answers "not ready" while parts of it are unfinished; say so without failing the build.
   if grep -q "not yet implemented" "shots/$name.log"; then echo "::warning title=Engine not finished::$name"; fi
+  echo "SHOTTIME $name $(( SECONDS - t0 ))"
 }
 need() {   # need <shot> <title> <grep -E pattern>
+  ran "$1" || return 0
   if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"
   else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet\|focus\|Rail " "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 60 || true); fail=1; fi
 }
@@ -277,24 +319,34 @@ fresh "listbar"; h="$PWD/fh/listbar"
 shoot "listbar-1280x800" 1280x800 listbar "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 need listbar-1280x800 "My mods: Y opens the pop-up with Find, Show, Sort" "Find pop-up \\(My mods\\): field, Show 6, Sort 3$"
 need listbar-1280x800 "My mods pop-up legend (0.59: B is Done, X Clear all)" "My mods pop-up legend: A Choose · B Done · X Clear all · Y Keyboard$"
+if ran "getmods-cyberpunk-1280x800"; then
 log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
+fi
+if ran "getmods-start-1280x800"; then
 log="$PWD/data/getmods-start-1280x800/turbine-mod-manager/activity.log"
 if grep -q "categories" "$log"; then echo "::notice title=Get mods categories::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=No categories in Get mods::"; fail=1; fi
+fi
+if ran "overlaps-1280x800"; then
 log="$PWD/data/overlaps-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Mod menu: .*Loses 1 file to Lantern Colors" "$log"; then echo "::notice title=Who wins::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=The mod menu didn't say which mod wins the shared file::"; (grep -h "Mod menu\|shot" "$log" | tail -n 5 || true); fail=1; fi
+fi
+if ran "quickexit-1280x800"; then
 log="$PWD/data/quickexit-1280x800/turbine-mod-manager/activity.log"
 if grep -q "closed after 12 seconds: offering a way back" "$log"; then echo "::notice title=Closed early::offered"
 else echo "::error title=No closed-early prompt::"; fail=1; fi
 fi
+fi
 for size in $SIZES; do
+  if ran "check-kcd2-$size"; then
   log="$PWD/data/check-kcd2-$size/turbine-mod-manager/activity.log"
   if grep -Eq "KCD1.* is made for Kingdom Come: Deliverance(;|$)" "$log"; then
     echo "::notice title=KCD II check $size::$(grep -h 'Check before Play' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=KCD II check didn't flag the first game's mod ($size)::"; (grep -h "Check before Play\|Add " "$log" | tail -n 5 || true); fail=1; fi
+  fi
 done
 if [ "$MODE" = 1280x800 ]; then
 # Controls: hold Start (Play options), R3 Find on My mods, Select several.
@@ -303,9 +355,11 @@ for p in playoptions findmods selectmods; do
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim \
     "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 done
+if ran "playoptions-1280x800"; then
 log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Play options open: true" "$log"; then echo "::notice title=Hold Start::Play options opened"
 else echo "::error title=Holding Start didn't open Play options::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
+fi
 # 0.52: A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
 # offer the missing script extender; KCD II rows say a first-game mod may not work; Witcher's clash offers
 # turning off the newer mod; Interface size stops at the largest that fits.
@@ -313,40 +367,54 @@ fresh "checkfocus"; h="$PWD/fh/checkfocus"
 shoot "checkfocus-1280x800" 1280x800 checkfocus "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
 fresh "menuskse"; h="$PWD/fh/menuskse"
 shoot "menuskse-1280x800" 1280x800 menuskse "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
+if ran "checkfocus-1280x800"; then
 log="$PWD/data/checkfocus-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Check before Play: Not now" "$log" && ! grep -q "Check before Play: Play anyway" "$log" && grep -q 'After A: sheet ""' "$log"; then
   echo "::notice title=Before you play::$(grep -h 'Check focus on\|After A' "$log" | head -n2 | tr '\n' ' ' | cut -c1-200)"
 else echo "::error title=A on Before you play didn't run the highlighted button::"; (grep -h "Check\|shot" "$log" | tail -n 10 || true); fail=1; fi
+fi
+if ran "menuskse-1280x800"; then
 log="$PWD/data/menuskse-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Mod menu: Get SKSE" "$log" && grep -Eq "Game menu: .*(Install|Get) SKSE" "$log"; then
   echo "::notice title=SKSE way back::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=No way back to SKSE in the mod or game menu::"; (grep -h "menu:" "$log" | tail -n 4 || true); fail=1; fi
 fi
+fi
 for size in $SIZES; do
+  if ran "mods-kcd2-$size"; then
   log="$PWD/data/mods-kcd2-$size/turbine-mod-manager/activity.log"
   if grep -q "Row warnings: .*Fast Travel KCD1: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=KCD II row has no warning for the first game's mod ($size)::"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
+  fi
+  if ran "check-witcher-$size"; then
   log="$PWD/data/check-witcher-$size/turbine-mod-manager/activity.log"
   if grep -q "Check before Play buttons: .*Turn off Faster Roach" "$log"; then echo "::notice title=Witcher clash $size::$(grep -h 'Check before Play buttons' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
+  fi
 done
 # 0.53: Game Mode's browser through Steam: with no shortcuts.vdf the check finds nothing and says so, and
 # Add Chrome to Steam shows.
 for size in $SIZES; do
+  if ran "addbrowser-$size"; then
   log="$PWD/data/addbrowser-$size/turbine-mod-manager/activity.log"
   if grep -q "Recheck: no Chrome-family browser among Steam's non-Steam games" "$log" && grep -q "Showing Add Chrome to Steam" "$log"; then
     echo "::notice title=Add Chrome to Steam $size::$(grep -h 'Recheck:' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=Add Chrome to Steam didn't show ($size)::"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
+  fi
 done
 # 0.54: Labs > Activity log shows the log's lines.
 for size in $SIZES; do
+  if ran "activity-$size"; then
   log="$PWD/data/activity-$size/turbine-mod-manager/activity.log"
   if grep -Eq "Activity log open: [1-9][0-9]* lines" "$log"; then echo "::notice title=Activity log $size::$(grep -h 'Activity log open' "$log" | head -n1)"
   else echo "::error title=The activity log sheet showed no lines ($size)::"; (grep -h "labs\|shot" "$log" | tail -n 6 || true); fail=1; fi
+  fi
   # Opening a file page on a free account says to press Slow download.
+  if ran "slowhint-$size"; then
   log="$PWD/data/slowhint-$size/turbine-mod-manager/activity.log"
   if grep -q "Status: press Slow download on the page" "$log"; then echo "::notice title=Slow download hint $size::shown"
   else echo "::error title=Opening a Nexus file page didn't say to press Slow download ($size)::"; (grep -h "catch\|browser" "$log" | tail -n 6 || true); fail=1; fi
+  fi
 done
 # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
 # 0.58: Interface size 50% to 150% with no cap: each input makes it smaller (D-pad Left, the - button clicked with the
@@ -414,31 +482,39 @@ shoot "tv-1920x1080" 1920x1080 tv "$PWD/home" --game=$skyrim --layout=tv --exter
 fi
 # The 0.5 checks in the activity logs.
 for size in $SIZES; do
+  if ran "getmods-fallback-$size"; then
   log="$PWD/data/getmods-fallback-$size/turbine-mod-manager/activity.log"
   if grep -q "Nexus browse without a key failed" "$log"; then
     echo "::notice title=Keyless fallback $size::$(grep -h 'Nexus browse without a key failed' "$log" | head -n1 | cut -c1-200)"
   else
     echo "::error title=No fallback line in the activity log ($size)::"; (tail -n 20 "$log" || true); fail=1
   fi
+  fi
+  if ran "getmods-back-$size"; then
   log="$PWD/data/getmods-back-$size/turbine-mod-manager/activity.log"
   if grep -q 'Back from the mod page: search "lantern", card 5' "$log"; then
     echo "::notice title=Get mods back $size::same search, card 5"
   else
     echo "::error title=B didn't come back to the same search and card ($size)::"; (grep -h "shot\|action" "$log" | tail -n 20 || true); fail=1
   fi
+  fi
+  if ran "newmod-$size"; then
   log="$PWD/data/newmod-$size/turbine-mod-manager/activity.log"
   if grep -q "New mod All Quest Objectives On Map" "$log"; then
     echo "::notice title=New mod $size::$(grep -h 'New mod ' "$log" | head -n1 | cut -c1-160)"
   else
     echo "::error title=The new mod wasn't named cleanly or focused ($size)::"; (grep -h "New mod\|Add " "$log" | tail -n 10 || true); fail=1
   fi
+  fi
 done
 # 0.55: the nxm scheme and WebEngine are set up before the application exists, in every run.
 for p in $( [ -n "$SIZES" ] && echo "game-$SIZES settings-$SIZES" ); do
+  if ran "$p"; then
   log="$PWD/data/$p/turbine-mod-manager/activity.log"
   a=$(grep -n "nxm scheme registered" "$log" | head -n1 | cut -d: -f1); b=$(grep -n "WebEngine ready" "$log" | head -n1 | cut -d: -f1)
   if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then echo "::notice title=WebEngine set up ($p)::nxm scheme line $a, WebEngine ready line $b"
   else echo "::error title=WebEngine wasn't set up before the app ($p)::"; (grep -h "web\]" "$log" | head -n 10 || true); fail=1; fi
+  fi
 done
 if [ "$MODE" = x11 ]; then
 # Words that must never be on screen any more.
@@ -447,18 +523,22 @@ if [ -n "$hits" ]; then echo "::error title=Old words still in the interface::";
 fi
 # The pointer's events really reached Turbine's interface: the click turned the mod off, the wheel scrolled.
 for size in $SIZES; do
+  if ran "pointer-$size"; then
   log="$PWD/data/pointer-$size/turbine-mod-manager/activity.log"
   if grep -q "Left click (RT)" "$log" && grep -Eq "Turn (on|off) " "$log"; then
     echo "::notice title=Pointer click $size::$(grep -Eh 'Turn (on|off) ' "$log" | head -n1 | cut -c1-160)"
   else
     echo "::error title=Pointer click didn't reach the mod ($size)::"; (grep -h "pad\|action" "$log" | tail -n 20 || true); fail=1
   fi
+  fi
+  if ran "pointerscroll-$size"; then
   log="$PWD/data/pointerscroll-$size/turbine-mod-manager/activity.log"
   moved=$(grep -ho "the list moved [0-9]* px" "$log" 2>/dev/null | grep -o "[0-9][0-9]*" | head -n1 || true)
   if [ -n "$moved" ] && [ "$moved" -gt 0 ]; then
     echo "::notice title=Pointer wheel $size::The list moved $moved px"
   else
     echo "::error title=Wheel steps didn't scroll the list ($size)::"; (grep -h "pad" "$log" | tail -n 20 || true); fail=1
+  fi
   fi
 done
 if [ "$MODE" = x11 ]; then
@@ -535,6 +615,7 @@ if command -v Xvfb > /dev/null; then
     rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null; h="$PWD/fh/$n"
     mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
     bshoot "$n" "$size" browsertest "$h" "$PWD/data/$n" --game=$skyrim
+    if ran "$n"; then
     log="$PWD/data/$n/turbine-mod-manager/activity.log"
     # Chromium's own sandbox inside the Flatpak: if the page never loaded, say so and try once without it.
     if ! grep -q "Browser check: the file page loaded in Turbine" "$log" 2>/dev/null && [ -z "$BROWSER_ENV" ]; then
@@ -544,6 +625,7 @@ if command -v Xvfb > /dev/null; then
       rm -rf "$PWD/fh/$n" "$PWD/data/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null
       mkdir -p "$h/Downloads/Game Mods/$sky" && cp "$h/Downloads/Lantern Colors 1.1.zip" "$h/Downloads/Game Mods/$sky/Dupe Test 1.0.zip"
       bshoot "$n" "$size" browsertest "$h" "$PWD/data/$n" --game=$skyrim
+    fi
     fi
     need $n "2: WebEngine set up before the app ($size)" "WebEngine ready"
     need $n "Nexus page loaded in Turbine ($size)" "Browser check: the file page loaded in Turbine"
@@ -748,10 +830,12 @@ for size in $SIZES; do
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
   g="$h/.local/share/Steam/steamapps/common/ELDEN RING"
+  if ran "acdeploy-$size"; then
   inprofile=$(find "$h" "$PWD/data/acdeploy-$size" -path "*me3-profile/mods/parts/am_f_9000.partsbnd.dcx" 2>/dev/null | head -n1)
   if [ -n "$inprofile" ] && [ ! -e "$g/Game/parts/am_f_9000.partsbnd.dcx" ] && [ "$(find "$g" -type f | wc -l)" -eq 4 ]; then
     echo "::notice title=Anti-cheat: the mod is in the me3 profile, the game folder untouched ($size)::$inprofile"
   else echo "::error title=Anti-cheat: the mod isn't only in the me3 profile ($size)::profile: ${inprofile:-none}"; find "$g" -type f; fail=1; fi
+  fi
   shoot "acguide-$size" "$size" acguide "$h" --game=steam:976730
   need "acguide-$size" "Anti-cheat: Halo's own switch in the game menu ($size)" "Game menu: .*How to play Halo MCC with mods"
   need "acguide-$size" "Anti-cheat: Halo's guide ($size)" "Anti-cheat guide: Halo MCC"
@@ -778,9 +862,11 @@ for size in $SIZES; do
   need $n "I3: settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
   need $n "I3: settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
   need $n "I12: edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
+  if ran "coopcheck-$size"; then
   ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"
   else echo "::error title=I3: the ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
+  fi
   shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
   need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"
 done
@@ -795,9 +881,11 @@ for size in $SIZES; do
   need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset to default · Y As text"
   need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
   need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"
+  if ran "modsettings-$size"; then
   ini=$(find "$h" -name LanternGlow.ini -path "*Data/SKSE/Plugins/*" -not -path "*turbine-mod-manager*" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
+  fi
   # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
   fresh "editbutton-$size"; h="$PWD/fh/editbutton-$size"
   shoot "editbutton-$size" "$size" editbutton "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
@@ -819,9 +907,11 @@ if [ "$MODE" = 1280x800 ]; then
   SHOOT_ENV="$NG" shoot overwriteskip 1280x800 overwriteskip "$h" --game=$bp "--selftest-import=$h/Downloads/Pier Fix 1.0.zip"
   need overwriteskip "Any game: Skip those files" "Skipped existing .*Data/pier.txt"
   need overwriteskip "Any game: the game's program is never placed" "Refused BrassPier.exe"
+  if ran "overwriteskip"; then
   if [ "$(cat "$g/Data/pier.txt")" = "the game's own pier" ] && [ ! -s "$g/BrassPier.exe" ] && [ -f "$g/Data/pier2.txt" ]; then
     echo "::notice title=Any game: the game's own files are untouched::pier.txt and BrassPier.exe as they were; pier2.txt added"
   else echo "::error title=Any game: the game's own files changed::"; ls -la "$g" "$g/Data"; fail=1; fi
+  fi
 fi
 if [ "$MODE" = 1920x1080 ]; then
   # 5: no sheet opened without a press when Nexus is slow to show.
