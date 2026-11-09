@@ -319,7 +319,8 @@ fn refused_targets() {
 
     // In the store: even with Replace them, refused files never go in, and the game's own exe stays.
     let t = TempDir::new("refused");
-    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe", "EasyAntiCheat/eac.cfg"]);
+    // (No anti-cheat in the game folder: 0.59 refuses mods for an unlisted game that has it.)
+    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe"]);
     let zip = t.0.join("dl/Overwrite 1.0.zip");
     write_zip(&zip, &[("BrassPier.exe", "mod exe"), ("steam_api64.dll", "x"), ("EasyAntiCheat/eac.cfg", "y"), ("Data/new.txt", "new")]);
     let mut s = Store::open(&g, &t.0.join("data")).unwrap();
@@ -336,7 +337,7 @@ fn refused_targets() {
     assert!(done.notes.iter().any(|n| n.starts_with("Refused BrassPier.exe")));
     s.apply().unwrap();
     assert_eq!(fs::read_to_string(g.install_dir.join("BrassPier.exe")).unwrap(), "game file BrassPier.exe");
-    assert_eq!(fs::read_to_string(g.install_dir.join("EasyAntiCheat/eac.cfg")).unwrap(), "game file EasyAntiCheat/eac.cfg");
+    assert!(!g.install_dir.join("EasyAntiCheat/eac.cfg").exists());
     assert!(!g.install_dir.join("steam_api64.dll").exists());
     assert_eq!(fs::read_to_string(g.install_dir.join("Data/new.txt")).unwrap(), "new");
 }
@@ -428,7 +429,7 @@ fn change_placement_moves_staged_files() {
 #[test]
 fn sure_placement_adds_at_once() {
     let t = TempDir::new("sure");
-    let g = game_at(&t.0, "Lantern Hollow", "LanternHollow", "3999901", &["Lantern/Content/Paks/", "Lantern/Binaries/Win64/Lantern.exe", "EasyAntiCheat/"]);
+    let g = game_at(&t.0, "Lantern Hollow", "LanternHollow", "3999901", &["Lantern/Content/Paks/", "Lantern/Binaries/Win64/Lantern.exe"]);
     let zip = t.0.join("dl/Wand Glow 1.0.zip");
     write_zip(&zip, &[("WandGlow_P.pak", "p"), ("readme.txt", "r")]);
     let mut s = Store::open(&g, &t.0.join("data")).unwrap();
@@ -439,8 +440,6 @@ fn sure_placement_adds_at_once() {
         }
         other => panic!("{other:?}"),
     }
-    let ix = GameIndex::build(&g.install_dir);
-    assert_eq!(ix.anti_cheat(), Some("Easy Anti-Cheat"));
 }
 
 #[test]
@@ -671,4 +670,17 @@ fn a_swap_cut_off_halfway_is_put_back_on_open() {
     fs::rename(root.join("mods").join(&id), root.join("tmp").join(format!("{id}.old"))).unwrap();
     let s = Store::open(&g, &data).unwrap();
     assert_eq!(fs::read_to_string(s.root().join("mods").join(&id).join("A/x/one.bin")).unwrap(), "1");
+}
+
+/// 0.59 (I4): a game Turbine has no data file for, with anti-cheat in its folder, gets no mods at all.
+#[test]
+fn unlisted_anti_cheat_game_refuses_mods() {
+    let t = TempDir::new("unlisted-ac");
+    let g = game_at(&t.0, "Lantern Hollow", "LanternHollow", "3999901", &["Lantern/Content/Paks/", "Lantern/Binaries/Win64/Lantern.exe", "EasyAntiCheat/"]);
+    assert_eq!(GameIndex::build(&g.install_dir).anti_cheat(), Some("Easy Anti-Cheat"));
+    let rules = GameRules::for_game(&g);
+    let ac = rules.anti_cheat.as_ref().expect("anti-cheat found");
+    assert_eq!((ac.name.as_str(), ac.level.as_str(), ac.mode.as_str()), ("Easy Anti-Cheat", "refuse", "refuse"));
+    let g2 = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe"]);
+    assert!(GameRules::for_game(&g2).anti_cheat.is_none());
 }

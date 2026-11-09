@@ -354,11 +354,12 @@ Window {
     Timer {
         running: shot.on
         // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
-        interval: ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: shot.page === "splashmid" ? 520 : shot.page === "splashafter" ? 2400 : ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: {
             // 0.58: every picture checks the bottom bar (nothing overlaps Play or goes past the edge).
             legend.check(shot.page)
+            if (shot.page.indexOf("splash") === 0) app.note("check", "Splash check (" + shot.page + "): shown " + splash.shown + ", icon opacity " + splashIcon.opacity.toFixed(2) + ", scale " + splashIcon.scale.toFixed(2) + ", rail icon none")
             ;(shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
         }
     }
@@ -727,14 +728,19 @@ Window {
     function openAcAsk(then) {
         if (!acInfo) return
         note("action", "Anti-cheat question: " + acInfo.askTitle)
-        openMsg({ title: acInfo.askTitle, text: acInfo.askText, buttons: [
+        // 0.59 (I2): the first modded Play of a me3 game is one question and one press. What would have been sheets
+        // of their own (the game update warning, me3 coming down) is said here; A plays.
+        const upd = gameUpdate && gameUpdate.risky && gameUpdate.risky.length > 0 ? gameUpdate.risky.map(r => r.name) : []
+        if (upd.length > 0 && game && !shot.on) { let w = parse(seen.updateWarned, []); w.push(game.id + "|" + gameUpdate.now); seen.updateWarned = JSON.stringify(w.slice(-50)) }
+        const extra = (acInfo.me3Ready ? "" : " Turbine gets me3 (the free tool that loads the mods) now, once.")
+            + (upd.length > 0 ? " " + gameTitle + " updated since mods were last on; these may not work until they update: " + upd.join(", ") + "." : "")
+        openMsg({ title: acInfo.askTitle, text: acInfo.askText + extra, buttons: [
             { key: "a", label: "Play with mods, offline", run: () => {
                 let a = Object.assign({}, acAnswered); a[game.id] = true; acAnswered = a
                 Turbine.antiCheatOff(true)
                 note("action", "Anti-cheat: off while mods are on")
                 if (then) then()
             } },
-            { key: "x", label: "Play without mods", run: () => { note("action", "Anti-cheat: played without mods"); Turbine.playOriginal() } },
             { key: "b", label: "Not now", run: () => note("action", "Anti-cheat: not now (mods wait)") }] })
     }
     function openAcGuide() {
@@ -3199,6 +3205,8 @@ Window {
     // The back grips (L4 L5 R4 R5) send nothing in Steam's default layout; when a layout sends them: L4/R4 are LT/RT,
     // L5 is Y and R5 is View. They are never in the legend.
     function press(b) {
+        // The start-up splash: any press skips it and does nothing else.
+        if (splash.shown) { splash.finish("press " + b); ignoredRelease = b; return }
         inputCount++; lastInputAt = Date.now(); lastInputName = b
         if (lastInput === "touch") lastInput = "pad"
         const grip = { l4: "lt", r4: "rt", l5: "y", r5: "view" }
@@ -6938,40 +6946,8 @@ Window {
                 anchors.topMargin: app.px(10)
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: app.px(10)
-                // The app icon (the simpler small one under 64 physical pixels); a plain "T" if it can't be loaded.
-                // In Labs mode, holding it for 7 seconds saves a screenshot and a report.
-                Image {
-                    id: logo
-                    readonly property bool small: app.px(44) * Screen.devicePixelRatio < 64
-                    width: app.px(44); height: app.px(44)
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    source: small ? app.iconSmall : app.iconFull
-                    sourceSize.width: app.px(88)
-                    smooth: true
-                    mipmap: true
-                    visible: status === Image.Ready
-                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                    TapHandler {
-                        onPressedChanged: pressed ? (app.gate(0, "rail icon hold") ? app.holdStart("the rail icon") : null) : app.holdStop()
-                    }
-                }
-                Rectangle {
-                    visible: logo.status !== Image.Ready
-                    width: app.px(44); height: app.px(44); radius: width / 2
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    gradient: Gradient {
-                        GradientStop { position: 0; color: c.accentHi }
-                        GradientStop { position: 1; color: c.accent }
-                    }
-                    Text {
-                        anchors.centerIn: parent
-                        text: "T"
-                        color: c.onAccent
-                        font.family: app.titleFont
-                        font.pixelSize: app.fpx(24)
-                        font.bold: true
-                    }
-                }
+                // 0.59: no app icon here (the owner's room for the games); Turbine shows itself once, at start (splash),
+                // and in Settings, About.
                 Rectangle { width: app.px(28); height: app.px(2); radius: 1; color: c.line; anchors.horizontalCenter: parent.horizontalCenter }
             }
             // A tile scrolled half under the divider fades out instead of showing a cut edge.
@@ -9026,6 +9002,64 @@ Window {
         // The new-mod picture keeps its toast up (it arrives a few seconds before the picture).
         timeout: shot.page === "newmod" ? 0 : 4000
     }
+    // ---------------------------------------------------------------- 0.59: the start-up splash
+    // The only branding: Turbine's icon in the middle, zooming in as it fades in, then out as it fades out, about
+    // 1.2 s in all (a plain short fade with Reduce motion). Once per launch, never when coming back from a game or the
+    // background; any press, tap or click skips it. Everything loads underneath while it plays.
+    Item {
+        id: splash
+        objectName: "splash"
+        anchors.fill: parent
+        z: 90000
+        property bool shown: (!shot.on || shot.page.indexOf("splash") === 0) && !app.splashDone
+        visible: shown
+        readonly property int inMs: app.reduceMotion ? 150 : 450
+        readonly property int holdMs: app.reduceMotion ? 300 : 250
+        readonly property int outMs: app.reduceMotion ? 150 : 500
+        property real started: 0
+        function finish(why) {
+            if (!shown) return
+            app.splashDone = true
+            app.note("app", "Splash done (" + why + ") after " + Math.round(Date.now() - started) + " ms")
+        }
+        Component.onCompleted: { started = Date.now(); if (shown) { splashAnim.start(); app.note("app", "Splash: start") } }
+        Rectangle { anchors.fill: parent; color: c.ground; opacity: splashIcon.opacity }
+        Image {
+            id: splashIcon
+            anchors.centerIn: parent
+            width: Math.min(parent.width, parent.height) * 0.28; height: width
+            source: app.iconFull
+            sourceSize.width: 256
+            smooth: true; mipmap: true
+            opacity: 0
+            scale: app.reduceMotion ? 1 : 0.7
+        }
+        SequentialAnimation {
+            id: splashAnim
+            ParallelAnimation {
+                NumberAnimation { target: splashIcon; properties: "opacity"; from: 0; to: 1; duration: splash.inMs; easing.type: Easing.OutCubic }
+                NumberAnimation { target: splashIcon; properties: "scale"; from: app.reduceMotion ? 1 : 0.7; to: 1; duration: splash.inMs; easing.type: Easing.OutCubic }
+            }
+            PauseAnimation { duration: splash.holdMs }
+            ParallelAnimation {
+                NumberAnimation { target: splashIcon; properties: "opacity"; to: 0; duration: splash.outMs; easing.type: Easing.InCubic }
+                NumberAnimation { target: splashIcon; properties: "scale"; to: app.reduceMotion ? 1 : 1.25; duration: splash.outMs; easing.type: Easing.InCubic }
+            }
+            ScriptAction { script: splash.finish("played") }
+        }
+        // A tap or click skips it and goes nowhere else.
+        MouseArea {  // overlay-check: the splash takes every press while it plays
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            onWheel: (w) => { w.accepted = true; splash.finish("wheel") }
+            onPressed: { app.coverPress(100000); splash.finish("tap") }
+            onReleased: app.coverEnd()
+            onCanceled: app.coverEnd()
+        }
+    }
+    property bool splashDone: false
+
     // The build's input check: a plain mouse area over everything, to see the left button go down and up.
     MouseArea { id: inputProbe; anchors.fill: parent; z: 100000; visible: app.probeOn; enabled: app.probeOn; acceptedButtons: Qt.LeftButton }  // overlay-check: the build's input probe only
     // Labs: the brass ring that fills around the rail icon while View (or the icon) is held for a report.
@@ -9033,8 +9067,9 @@ Window {
         id: holdRing
         visible: app.holdShown
         readonly property real r: app.px(28)
-        x: rail.width / 2 - r - app.px(3)
-        y: app.px(10) + app.px(22) - r - app.px(3)
+        // Labs' report hold: in the middle of the window (0.59: the rail icon it went round is gone).
+        x: app.width / 2 - r - app.px(3)
+        y: app.height / 2 - r - app.px(3)
         width: (r + app.px(3)) * 2; height: width
         preferredRendererType: Shape.CurveRenderer
         ShapePath {

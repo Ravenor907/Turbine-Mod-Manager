@@ -368,6 +368,18 @@ rm -rf "$PWD/fh/modsempty-1024"; python3 tools/fake-home.py "$PWD/fh/modsempty-1
 shoot "modsempty-1024x700" 1024x700 modsempty "$h" --game=$skyrim
 need modsempty-1024x700 "Empty My mods card at 1024 wide" "No mods card: No mods for Skyrim"
 fi
+# 0.59: the start-up splash, mid-way and after; the first frame isn't later with it.
+for size in $SIZES; do
+  shoot "splashmid-$size" "$size" splashmid "$PWD/home"
+  shoot "splashafter-$size" "$size" splashafter "$PWD/home"
+  need "splashmid-$size" "Splash: the icon shows while it plays ($size)" "Splash check \(splashmid\): shown true, icon opacity 0\.[1-9]|Splash check \(splashmid\): shown true, icon opacity 1"
+  need "splashafter-$size" "Splash: gone after about 1.2 s ($size)" "Splash check \(splashafter\): shown false"
+  need "splashafter-$size" "Splash: played through ($size)" "Splash done \(played\) after (1[0-9]{3}|[5-9][0-9]{2}) ms"
+  a=$(grep -ho "First frame drawn [0-9]* ms" "$PWD/data/game-$size/turbine-mod-manager/activity.log" 2>/dev/null | head -n1 | grep -o "[0-9]*" || true)
+  b=$(grep -ho "First frame drawn [0-9]* ms" "$PWD/data/splashafter-$size/turbine-mod-manager/activity.log" 2>/dev/null | head -n1 | grep -o "[0-9]*" || true)
+  echo "::notice title=First frame with and without the splash ($size)::without ${a:-?} ms, with ${b:-?} ms"
+  if [ -n "$a" ] && [ -n "$b" ] && [ "$b" -gt $((a + 400)) ]; then echo "::warning title=The splash made the first frame later ($size)::$a ms to $b ms"; fi
+done
 # 0.58: every size reflows instead of clipping: pictures at 50% and 150%, each with the bar check.
 for size in $SIZES; do
   for u in 50 150; do
@@ -694,8 +706,8 @@ for size in $SIZES; do
   need "basicmenu-$size" "Any game: Change where it goes ($size)" "Mod menu: .*Change where it goes"
   fresh "checkbasic-$size"; h="$PWD/fh/checkbasic-$size"
   SHOOT_ENV="$NG" shoot "checkbasic-$size" "$size" check "$h" --game=$lh "--selftest-import=$h/Downloads/Wand Glow 1.0.zip"
-  need "checkbasic-$size" "Any game: unreal-paks rule ($size)" "Placed by rule unreal-paks: Lantern/Content/Paks/~mods"
-  need "checkbasic-$size" "Any game: anti-cheat before Play ($size)" "Check before Play: .*Anti-cheat"
+  # 0.59 (I4): anti-cheat in a game with no data file means no mods (the unreal-paks rule is in the engine tests).
+  need "checkbasic-$size" "I4: an unlisted anti-cheat game refuses mods ($size)" "needs its anti-cheat to play at all"
 done
 # 0.56 and 0.57, layout: a renamed mod, the bars hidden with the details panel; no top bar, the game's name, tabs
 # and Play in the bottom bar; the Y pop-up on Get mods; Get mods scrolled to full screen and back.
@@ -724,7 +736,7 @@ for size in $SIZES; do
   er=steam:1245620
   shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| .* · Mods offline$"
-  need "acask-$size" "Anti-cheat: asked once before Play ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Play without mods, Not now"
+  need "acask-$size" "I2: one question before the first modded Play, A plays ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Not now$"
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
   g="$h/.local/share/Steam/steamapps/common/ELDEN RING"

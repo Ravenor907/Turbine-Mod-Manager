@@ -370,7 +370,14 @@ impl GameRules {
                 launch_help: None,
                 family: Family::Standard,
                 support_level: Support::Basic,
-                anti_cheat: None,
+                // 0.59 (I4): anti-cheat found in a game Turbine has no data file for means no mods at all, the same
+                // as the listed online-only games (a data file can allow one later, after research).
+                anti_cheat: crate::basic::GameIndex::cached(&game.install_dir).anti_cheat().map(|name| AntiCheat {
+                    name: name.into(),
+                    level: "refuse".into(),
+                    mode: "refuse".into(),
+                    ..Default::default()
+                }),
                 layout: Vec::new(),
                 nexus: None,
                 thunderstore: None,
