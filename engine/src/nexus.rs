@@ -959,13 +959,18 @@ pub struct ModStamp {
     pub updated: u64,
     /// Nexus's number for the game (for the files query).
     pub game_id: u64,
+    /// 0.6 (intent I16): the mod's own words, so a mod added from a file gets its Nexus name, author, summary and
+    /// picture without a key ("" when not given).
+    pub author: String,
+    pub summary: String,
+    pub picture: String,
 }
 
 /// `legacyModsByDomain(ids: [{gameDomain, modId}])` answers with those mods (checked live without a key in the
 /// build's Nexus check, Nov 7 2026).
 pub fn by_id_body(domain: &str, ids: &[u64]) -> String {
     let list: Vec<String> = ids.iter().map(|id| format!("{{gameDomain: {}, modId: {id}}}", quote(domain))).collect();
-    let q = format!("{{ legacyModsByDomain(ids: [{}]) {{ nodes {{ modId name version updatedAt gameId }} }} }}", list.join(", "));
+    let q = format!("{{ legacyModsByDomain(ids: [{}]) {{ nodes {{ modId name version updatedAt gameId author summary thumbnailUrl }} }} }}", list.join(", "));
     format!("{{\"query\":{}}}", quote(&q))
 }
 
@@ -987,6 +992,9 @@ pub fn parse_by_id(text: &str) -> Result<Vec<ModStamp>, String> {
                 version: s(m, "version"),
                 updated: iso_secs(&s(m, "updatedAt")),
                 game_id: n(m.get("gameId")) as u64,
+                author: clean_text(&s(m, "author"), 200),
+                summary: clean_text(&s(m, "summary"), 2000),
+                picture: browser_url(&s(m, "thumbnailUrl")).unwrap_or_default(),
             })
         })
         .collect())

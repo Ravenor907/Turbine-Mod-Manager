@@ -1741,7 +1741,15 @@ Window {
             if (app.importData && app.sheet === "") { app.profIndex = 0; app.sheet = "profiles" }
             if (app.importData) app.profIndex = 0
         }
-        function onUpdatesJsonChanged() { app.updatesData = app.parse(Turbine.updatesJson, null) }
+        function onUpdatesJsonChanged() {
+            app.updatesData = app.parse(Turbine.updatesJson, null)
+            // 0.6 (intent I16): Nexus's own name, author, summary and picture for mods added from a file.
+            const names = app.updatesData && app.updatesData.names && app.game && app.updatesData.game === app.game.id ? app.updatesData.names : {}
+            for (const id in names) {
+                const m = app.mods.find(x => x.id === id), w = names[id]
+                if (m && w && w.name && !(app.nexusInfo[app.nameKey(id)] || {}).name) app.rememberNexus(m, w.name, w.author, w.summary, w.picture)
+            }
+        }
         function onAccountJsonChanged() { app.account = app.parse(Turbine.accountJson, { state: "none" }) }
         function onCodeJsonChanged() {
             app.codeData = app.parse(Turbine.codeJson, null)

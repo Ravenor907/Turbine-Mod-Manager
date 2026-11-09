@@ -48,6 +48,12 @@ fn update_checks_without_a_key() {
     let stamps = nexus::parse_by_id(answer).unwrap();
     assert_eq!((stamps[0].mod_id, stamps[0].version.as_str(), stamps[0].game_id), (12604, "6.9", 1704));
     assert_eq!(stamps[1].updated, nexus::iso_secs("2026-08-27T15:30:29Z"));
+    // 0.6: the words for the list come with it (a mod added from a file is named by Nexus).
+    assert!(q.contains("author summary thumbnailUrl"), "{q}");
+    let words = nexus::parse_by_id(r#"{"data":{"legacyModsByDomain":{"nodes":[{"modId":3,"name":"SkyUI","version":"6.9","author":"schlangster","summary":"Elegant menus.","thumbnailUrl":"https://staticdelivery.nexusmods.com/mods/1704/images/thumbnails/12604/x.jpg","gameId":1704}]}}}"#).unwrap();
+    assert_eq!((words[0].author.as_str(), words[0].summary.as_str()), ("schlangster", "Elegant menus."));
+    assert!(words[0].picture.starts_with("https://"));
+    assert_eq!(stamps[0].author, "");
     assert!(nexus::parse_by_id(r#"{"errors":[{"message":"Mod not found"}],"data":null}"#).unwrap_err().contains("Mod not found"));
 
     let after = nexus::iso_secs("2026-06-01T00:00:00Z");

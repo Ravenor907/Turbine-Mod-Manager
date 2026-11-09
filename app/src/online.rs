@@ -1090,6 +1090,9 @@ impl Net {
         let installed = game.installed();
         let mut found: Vec<updates::Update> = Vec::new();
         let mut notes = Vec::new();
+        // 0.6 (intent I16): Nexus's own name, author, summary and picture for each installed Nexus mod, from the same
+        // lookup, so a mod added from a file shows as Nexus names it.
+        let mut names: Vec<String> = Vec::new();
         if let Some(c) = game.community.clone() {
             if installed.iter().any(|m| m.kind == "thunderstore") {
                 match self.index(&c, false) {
@@ -1113,6 +1116,19 @@ impl Net {
                 };
                 match stamps {
                     Ok(stamps) => {
+                        for st in stamps.iter().filter(|st| !st.name.is_empty()) {
+                            let mine = game.have.iter().find(|h| nexus::source_mod(&h.source).is_some_and(|(hd, hm)| (hd == domain || hd.is_empty()) && hm == st.mod_id));
+                            if let Some(h) = mine {
+                                names.push(format!(
+                                    "{}:{{\"name\":{},\"author\":{},\"summary\":{},\"picture\":{}}}",
+                                    quote(&h.mod_id),
+                                    quote(&st.name),
+                                    quote(&st.author),
+                                    quote(&st.summary),
+                                    quote(&st.picture)
+                                ));
+                            }
+                        }
                         for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
                             match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
                                 Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
@@ -1153,7 +1169,13 @@ impl Net {
             })
             .collect();
         crate::log::line("net", &format!("Update check for {}: {} found{}", game.name, items.len(), if notes.is_empty() { String::new() } else { format!("; {}", notes.join("; ")) }));
-        Ok(format!("{{\"game\":{},\"items\":[{}],\"note\":{}}}", quote(&game.id), items.join(","), quote(&notes.join(" "))))
+        Ok(format!(
+            "{{\"game\":{},\"items\":[{}],\"note\":{},\"names\":{{{}}}}}",
+            quote(&game.id),
+            items.join(","),
+            quote(&notes.join(" ")),
+            names.join(",")
+        ))
     }
 
     /// Downloads one update (`kind`, `target` as check_updates gave them) for mod `mod_id`.
