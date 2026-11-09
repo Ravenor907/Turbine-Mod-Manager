@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turbine Mod Manager: mods for SteamOS handhelds</title>
+<meta name="description" content="Turbine is a controller-first mod manager for Steam and Heroic games on SteamOS handhelds. Pick a game, add a mod, press Play.">
+<meta name="color-scheme" content="dark">
+<meta property="og:title" content="Turbine Mod Manager">
+<meta property="og:description" content="Mods for your Steam and Heroic games on a SteamOS handheld, with the controller, in Game Mode.">
+<meta property="og:image" content="https://ravenor907.github.io/Turbine-Mod-Manager/img/hero.jpg">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="apple-touch-icon" href="img/icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+
+<header class="hero">
+  <div class="wrap">
+    <img class="logo" src="img/logo.png" width="634" height="194" alt="Turbine Mod Manager">
+    <p class="lead">Mods for your Steam and Heroic games on a SteamOS handheld. With the controller, in Game Mode.
+      Pick a game, add a mod, press Play.</p>
+    <p class="actions">
+      <a class="button" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest">Download the latest release</a>
+      <a class="button ghost" href="#install">How to install</a>
+    </p>
+    <p class="small">Free and open source (GPL 3.0 or later). For SteamOS on the Steam Deck, Legion Go, ROG Ally and
+      other handhelds.</p>
+  </div>
+</header>
+
+<nav class="toc" aria-label="On this page">
+  <div class="wrap">
+    <a href="#what">What it is</a>
+    <a href="#install">Install</a>
+    <a href="#features">Features</a>
+    <a href="#games">Games</a>
+    <a href="#anticheat">Anti-cheat</a>
+    <a href="#helper">Browser helper</a>
+    <a href="#decky">Decky</a>
+    <a href="#faq">Questions</a>
+    <a href="#help">Help</a>
+  </div>
+</nav>
+
+<main id="main">
+
+<section id="what" class="wrap">
+  <h2>What Turbine is</h2>
+  <p>Turbine is a mod manager made for a handheld, not a desktop with a mouse. Every screen works with the controller
+    and with touch, the next step is always on screen, and the common thing is one press. Mods go into the game by
+    themselves a few seconds after your last change, so there is no Save to remember.</p>
+  <div class="shots">
+    <figure>
+      <img src="img/shot-mods-skyrim.png" width="1280" height="800" loading="lazy"
+           alt="My mods: two mods turned on, with the selected mod's details on the right and Play at the bottom right.">
+      <figcaption>My mods: turn each mod on or off with A. Play is always bottom right.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/shot-getmods-start.png" width="1280" height="800" loading="lazy"
+           alt="Get mods: a grid of mod cards with pictures, likes and downloads, and good first mods along the top.">
+      <figcaption>Get mods: browse Nexus Mods by the game, with good first mods at the top.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/shot-check.png" width="1280" height="800" loading="lazy"
+           alt="Before you play: Turbine lists what is missing, with Install, Play without mods and Not now.">
+      <figcaption>Before you play: Turbine checks the game first and offers the fix as a button.</figcaption>
+    </figure>
+    <figure>
+      <img src="img/shot-acrefuse.png" width="1280" height="800" loading="lazy"
+           alt="A game that needs its anti-cheat: Turbine explains it won't add mods, so the account stays safe.">
+      <figcaption>Games that need their anti-cheat online never get mods. Turbine says why.</figcaption>
+    </figure>
+  </div>
+  <p class="small">Pictures from Turbine's automatic checks, with made-up sample mods.</p>
+</section>
+
+<section id="install" class="wrap">
+  <h2>Install on SteamOS</h2>
+  <p>You do this once, in Desktop Mode. After that Turbine lives in your Steam library and keeps itself up to date.</p>
+  <ol class="steps">
+    <li>
+      <h3>Switch to Desktop Mode</h3>
+      <p>Press the Steam button, then Power, then <b>Switch to Desktop</b>.</p>
+    </li>
+    <li>
+      <h3>Download Turbine</h3>
+      <p>Open the <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest">latest release</a> in a
+        browser and download <b>TurbineModManager.flatpak</b>. It goes to your Downloads folder.</p>
+    </li>
+    <li>
+      <h3>Install it</h3>
+      <p>Open Downloads and double-click <b>TurbineModManager.flatpak</b>. Discover opens; press <b>Install</b>. The
+        first install also downloads the parts Turbine runs on from Flathub, so give it a few minutes.</p>
+      <details>
+        <summary>Prefer a terminal?</summary>
+        <pre><code>flatpak install --user ~/Downloads/TurbineModManager.flatpak</code></pre>
+      </details>
+    </li>
+    <li>
+      <h3>Add it to Steam</h3>
+      <p>Open the app launcher (bottom left), find <b>Turbine Mod Manager</b>, right-click it and choose
+        <b>Add to Steam</b>. Or in Steam: Games, Add a Non-Steam Game to My Library, tick Turbine Mod Manager, and
+        press Add Selected Programs.</p>
+    </li>
+    <li>
+      <h3>Go back to Game Mode</h3>
+      <p>Double-click <b>Return to Gaming Mode</b> on the desktop. Turbine is in your Library under
+        <b>Non-Steam</b>. Start it like any game.</p>
+    </li>
+  </ol>
+  <p class="note">The first time it starts, Turbine shows a short tour of the buttons. Settings, Help, Beginner
+    tutorial brings it back any time.</p>
+</section>
+
+<section id="features" class="wrap">
+  <h2>Features</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>One press to play</h3>
+      <p>Start is Play on every game screen. Turbine checks the game, puts your mods in and starts it. If something
+        needs a decision, it asks once, with the fix as the first button.</p>
+    </div>
+    <div class="card">
+      <h3>Get mods from Nexus Mods</h3>
+      <p>Browse by game with pictures, likes and downloads. With Premium, a mod installs with one press. Free
+        accounts get Nexus's own download page inside Turbine; press Slow download and the mod is added and turned
+        on.</p>
+    </div>
+    <div class="card">
+      <h3>Mods apply themselves</h3>
+      <p>Changes go into the game 3 seconds after your last edit, when you leave Turbine and when it closes. Order
+        mods where order matters; Turbine suggests a sort for games that need one.</p>
+    </div>
+    <div class="card">
+      <h3>Script loaders handled</h3>
+      <p>Turbine knows when a mod needs a loader (like SKSE for Skyrim, BepInEx or SMAPI) and offers to install it
+        before you play.</p>
+    </div>
+    <div class="card">
+      <h3>Every way back is one press</h3>
+      <p>Play without mods, go back to a setup that worked, or turn every mod off with Undo. Uninstalled mods stay in
+        Removed mods for 7 days.</p>
+    </div>
+    <div class="card">
+      <h3>Safe by design</h3>
+      <p>Turbine only removes files it placed itself, backs up any game file a mod replaces, and never runs anything
+        from a mod archive. For games it knows, it keeps a copy of your saves before a modded Play.</p>
+    </div>
+    <div class="card">
+      <h3>Any game</h3>
+      <p>Games Turbine knows get their full rules. Every other Steam and Heroic game gets Basic support: each mod goes
+        where its files say, and Turbine asks once, with its best guess ready, when it can't tell.</p>
+    </div>
+    <div class="card">
+      <h3>Made for your hands</h3>
+      <p>Controller first, touch just as good. Interface size from 50% to 150%. Text entry uses Steam's on-screen
+        keyboard. A press never goes through a pop-up to the screen behind it.</p>
+    </div>
+  </div>
+
+  <h3 class="sub">The buttons</h3>
+  <table class="keys">
+    <tbody>
+      <tr><th scope="row">A</th><td>Select, or the main action (turn a mod on or off)</td></tr>
+      <tr><th scope="row">B</th><td>Back one step, everywhere</td></tr>
+      <tr><th scope="row">X</th><td>Options for the selected thing</td></tr>
+      <tr><th scope="row">Y</th><td>Find: search, sort and categories</td></tr>
+      <tr><th scope="row">LB / RB</th><td>Tabs (My mods, Get mods)</td></tr>
+      <tr><th scope="row">LT / RT</th><td>Page up and down</td></tr>
+      <tr><th scope="row">View</th><td>The quick wheel</td></tr>
+      <tr><th scope="row">Start</th><td>Play (hold it for Play options: with or without mods)</td></tr>
+      <tr><th scope="row">Right stick</th><td>A pointer, for anything you'd rather point at</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="games" class="wrap">
+  <h2>Games and stores</h2>
+  <p>Turbine finds your games from <b>Steam</b> and from <b>Heroic</b> (Epic Games Store and GOG), on internal
+    storage and SD cards. Mods come from <b>Nexus Mods</b>, from <b>Thunderstore</b> for the games that use it, or
+    from zip, 7z and rar files you already downloaded.</p>
+  <div class="cols">
+    <div class="card">
+      <h3>Full rules</h3>
+      <p class="small">Where every file goes, load order, loaders and checks before Play.</p>
+      <ul>
+        <li>Skyrim Special Edition</li>
+        <li>Cyberpunk 2077</li>
+        <li>The Witcher 3</li>
+        <li>Stardew Valley</li>
+        <li>Valheim</li>
+        <li>Lethal Company</li>
+        <li>Risk of Rain 2</li>
+        <li>Kingdom Come: Deliverance</li>
+        <li>Kingdom Come: Deliverance II</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Offline mods, game folder untouched</h3>
+      <p class="small">These run mods offline through me3. Turbine asks once before the first modded Play and says
+        plainly what the risk is.</p>
+      <ul>
+        <li>Elden Ring (with Seamless Co-op as a choice at Play)</li>
+        <li>Elden Ring Nightreign</li>
+        <li>Armored Core VI</li>
+        <li>Dark Souls III</li>
+        <li>Sekiro</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Basic support</h3>
+      <p class="small">Every other Steam and Heroic game. Mods go where their files say they belong; Turbine asks
+        once when it can't tell.</p>
+      <ul>
+        <li>Hogwarts Legacy and any game Turbine doesn't know yet</li>
+        <li>Halo: The Master Chief Collection, with a guide to its own anti-cheat switch</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="anticheat" class="wrap">
+  <h2>Anti-cheat policy</h2>
+  <div class="callout">
+    <p><b>Turbine never adds mods to a game that needs its anti-cheat to play online.</b> Changing those games' files
+      can get your account banned, so the Get mods tab isn't there, Play with a mod on is refused, and the game's
+      status says why. A file you downloaded for it stays in Downloads.</p>
+  </div>
+  <p>That includes Apex Legends, Dead by Daylight, Destiny 2, Fall Guys, Fortnite, PUBG: Battlegrounds, Rainbow Six
+    Siege, The Finals, and any game where Turbine finds an anti-cheat it has no safe rule for.</p>
+  <p>Games with a safe offline way (the me3 games above, Halo's own Anti-Cheat Disabled mode) get it, explained once in
+    plain words. Turbine always puts the anti-cheat starter back exactly as it was.</p>
+</section>
+
+<section id="helper" class="wrap">
+  <h2>The browser helper (Chrome)</h2>
+  <p>Nexus opens inside Turbine, and that is all most people need. The optional browser helper is a small extension
+    for Chrome, Brave, Edge, Chromium or Vivaldi that:</p>
+  <ul>
+    <li><b>Signs Turbine in with your browser.</b> Google and some other sign-ins don't work inside an app. Press
+      <b>Sign in with my browser</b> in Turbine, sign in to Nexus in Chrome, and the helper hands Turbine your Nexus
+      sign-in (nexusmods.com only, and only after you pressed the button).</li>
+    <li>Sends mods you download from Nexus in Chrome straight to the right game in Turbine.</li>
+    <li>Shows what Turbine is doing in a small panel on Nexus pages.</li>
+  </ul>
+  <h3 class="sub">Set it up once, in Desktop Mode</h3>
+  <ol>
+    <li>In Turbine, open Settings, Getting mods, and choose <b>Set up</b> on Browser helper. Turbine puts the helper's
+      folder in Downloads and shows the steps.</li>
+    <li>In Chrome, open <code>chrome://extensions</code> and turn on <b>Developer mode</b> (top right).</li>
+    <li>Press <b>Load unpacked</b> and pick that folder.</li>
+    <li>Back in Turbine, choose <b>Pair</b>. The helper says "Paired with Turbine". Done; it updates itself after
+      this.</li>
+  </ol>
+  <p class="small">The helper only talks to Turbine on your own device (127.0.0.1), never clicks anything on Nexus,
+    and only reads Nexus's own pages.</p>
+</section>
+
+<section id="decky" class="wrap">
+  <h2>Decky plugin (optional)</h2>
+  <p>If you already use Decky Loader, the Turbine plugin adds Turbine to the Quick Access menu: what Turbine is
+    doing, and the game's quick choices without leaving the game. Turbine works fully without it. Find it with the
+    release files on the <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest">Releases
+    page</a>.</p>
+</section>
+
+<section id="faq" class="wrap">
+  <h2>Questions</h2>
+  <details>
+    <summary>Do I need a Nexus Mods account?</summary>
+    <p>For mods from Nexus, yes, a free account is enough. Thunderstore mods and files you already downloaded need no
+      account. Premium only skips Nexus's download page.</p>
+  </details>
+  <details>
+    <summary>Will it break my game?</summary>
+    <p>Turbine only removes files it placed itself and backs up any game file a mod replaces. Play without mods
+      starts the game clean without deleting anything, and the game menu can put back the last setup that worked.</p>
+  </details>
+  <details>
+    <summary>Can I get banned?</summary>
+    <p>Turbine refuses mods for games that need their anti-cheat online. For games with a safe offline way it uses that
+      way and tells you the risk first. Don't take a save you modded offline into online play.</p>
+  </details>
+  <details>
+    <summary>Does it work on Windows or other Linux systems?</summary>
+    <p>No. Turbine is made for SteamOS on handhelds, in Game Mode and Desktop Mode.</p>
+  </details>
+  <details>
+    <summary>How does it update?</summary>
+    <p>Turbine checks the Releases page and updates itself. In Game Mode it closes when the update is ready, and you
+      start it again from Steam.</p>
+  </details>
+  <details>
+    <summary>How do I uninstall it?</summary>
+    <p>For me3 games (Elden Ring and others), first use Settings, Help, <b>Undo the launch options change</b>, and
+      paste back what it shows in Steam. Then turn every mod off so the games are back to normal, and remove Turbine
+      in Discover.</p>
+  </details>
+</section>
+
+<section id="help" class="wrap">
+  <h2>Troubleshooting and help</h2>
+  <div class="cols two">
+    <div class="card">
+      <h3>A game won't start</h3>
+      <ul>
+        <li>Hold Start for Play options and play without mods. If that starts, a mod is the cause.</li>
+        <li>Press View, then <b>Game menu</b>, then <b>Why won't it start?</b> It checks the usual causes and offers
+          each fix.</li>
+        <li><b>Go back to a setup that worked</b>, in the same Game menu, puts back the last mods that played
+          fine.</li>
+        <li>After a game update, a loader can need its own update; Turbine says so before Play.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Report a problem</h3>
+      <ol>
+        <li>In Turbine, open Settings, Help, and choose <b>Save report</b> on Report a problem. It saves one text
+          file in Downloads: what Turbine did lately, its settings and your games. No keys or passwords.</li>
+        <li><a href="https://github.com/Ravenor907/Turbine-Mod-Manager/issues/new">Open a new issue</a>, say what
+          happened, and attach that file.</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p class="links">
+      <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases">Releases</a>
+      <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/issues">Issues</a>
+      <a href="https://github.com/Ravenor907/Turbine-Mod-Manager">Source code</a>
+    </p>
+    <p class="small">Turbine Mod Manager is made by Ravenor907. Free software under the GNU GPL, version 3 or later.
+      Not made by or affiliated with Valve, Nexus Mods or any game's publisher. This page has no trackers and sets no
+      cookies.</p>
+  </div>
+</footer>
+</body>
+</html>
