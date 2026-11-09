@@ -5,6 +5,7 @@
 use crate::actions::Qt;
 use crate::backend::{qobject, Slot, Worker};
 use crate::online::Net;
+use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
