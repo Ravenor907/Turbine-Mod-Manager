@@ -3,6 +3,13 @@
 //! the game's saves are never changed, except when the player puts a backup back, and that first takes a snapshot
 //! of the saves as they are. Links are never followed and nothing outside the save folders is read.
 //!
+//! Every snapshot keeps the path each folder came from (`from`, one per line, the folder named "0" is line one),
+//! and a putting back goes only to that same path. A snapshot is whole or not there at all: it is copied into a
+//! hidden `.part` folder first and only renamed into place when every file made it, and a failed copy is removed.
+//! Before copying, the size is measured: a save that is too big or has too many files is refused with a plain
+//! reason (never cut off), and so is a copy the drive has no room for. Nothing is copied when the saves haven't
+//! changed since the newest snapshot. Trimming never removes the snapshot just taken or the one being put back.
+//!
 //! Where a game keeps its saves comes from its data file (`saves`: under Proton, relative to the prefix's user
 //! folder; native builds, relative to the home folder; or inside the game folder).
 
@@ -16,8 +23,12 @@ use std::path::{Path, PathBuf};
 pub const KEEP: usize = 10;
 /// The most all of a game's snapshots may take together.
 pub const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-/// Files copied per snapshot at most (a runaway folder is cut off, and the snapshot says so).
-const MAX_FILES: usize = 20_000;
+/// The most one snapshot may take (half the total, so a new one never pushes out every older one).
+pub const MAX_ONE: u64 = MAX_BYTES / 2;
+/// Files one snapshot may hold at most. Over this, nothing is copied and the player is told why.
+pub const MAX_FILES: usize = 20_000;
+/// Room left free on the drive after a snapshot.
+const SPARE: u64 = 256 * 1024 * 1024;
 
 /// One snapshot: its folder name (the time it was taken, "20261108-213012"), and its size.
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +39,7 @@ pub struct Snapshot {
     pub files: usize,
 }
 
-/// The game's save folders that exist now, with the name each is kept under in a snapshot ("0", "1", ...).
+/// The game's save folders that exist now.
 pub fn folders(game: &Game, saves: &SavesFile, home: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let user = game.prefix.as_ref().map(|p| p.join("drive_c").join("users").join("steamuser"));
@@ -63,7 +74,11 @@ fn civil(z: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + i64::from(m <= 2), m, d)
 }
 
-/// Copies `from` into `to` (made fresh): plain files and folders only, links skipped. Returns (files, bytes).
+fn other(msg: String) -> io::Error {
+    io::Error::other(msg)
+}
+
+/// Copies `from` into `to` (made if needed): plain files and folders only, links skipped. Adds (files, bytes).
 fn copy_tree(from: &Path, to: &Path, count: &mut (usize, u64)) -> io::Result<()> {
     fs::create_dir_all(to)?;
     for e in fs::read_dir(from)? {
@@ -73,9 +88,6 @@ fn copy_tree(from: &Path, to: &Path, count: &mut (usize, u64)) -> io::Result<()>
         if ft.is_dir() {
             copy_tree(&e.path(), &dest, count)?;
         } else if ft.is_file() {
-            if count.0 >= MAX_FILES {
-                return Ok(());
-            }
             count.1 += fs::copy(e.path(), &dest)?;
             count.0 += 1;
         }
@@ -83,46 +95,151 @@ fn copy_tree(from: &Path, to: &Path, count: &mut (usize, u64)) -> io::Result<()>
     Ok(())
 }
 
-fn size_of(dir: &Path) -> (usize, u64) {
-    let mut n = (0usize, 0u64);
-    let mut todo = vec![dir.to_path_buf()];
-    while let Some(d) = todo.pop() {
+/// Every plain file under `dir` (links not followed), as "relative path\tsize\tmodified" lines, sorted. Stops
+/// early once over `cap` files.
+fn index_of(dir: &Path, cap: usize) -> (Vec<String>, u64) {
+    let mut out = Vec::new();
+    let mut bytes = 0u64;
+    let mut todo = vec![(dir.to_path_buf(), String::new())];
+    while let Some((d, rel)) = todo.pop() {
         let Ok(rd) = fs::read_dir(&d) else { continue };
         for e in rd.flatten() {
             let Ok(m) = fs::symlink_metadata(e.path()) else { continue };
+            let name = e.file_name().to_string_lossy().into_owned();
+            let r = if rel.is_empty() { name } else { format!("{rel}/{name}") };
             if m.is_dir() {
-                todo.push(e.path());
+                todo.push((e.path(), r));
             } else if m.is_file() {
-                n.0 += 1;
-                n.1 += m.len();
+                let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+                out.push(format!("{r}\t{}\t{t}", m.len()));
+                bytes += m.len();
+                if out.len() > cap {
+                    return (out, bytes);
+                }
             }
         }
     }
-    n
+    out.sort();
+    (out, bytes)
 }
 
-/// Every snapshot in `root`, newest first.
+fn size_of(dir: &Path) -> (usize, u64) {
+    let (files, bytes) = index_of(dir, usize::MAX);
+    (files.len(), bytes)
+}
+
+/// Every snapshot in `root`, newest first (half-made `.part` folders are not snapshots).
 pub fn list(root: &Path) -> Vec<Snapshot> {
     let Ok(rd) = fs::read_dir(root) else { return Vec::new() };
     let mut out: Vec<Snapshot> = rd
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
         .filter_map(|e| {
             let id = e.file_name().to_string_lossy().into_owned();
             let when = fs::read_to_string(e.path().join("when")).ok()?.trim().parse().ok()?;
             let (files, bytes) = size_of(&e.path());
-            Some(Snapshot { id, when, bytes, files })
+            // The snapshot's own small files ("when", "from", "index") aren't saves.
+            let own: Vec<u64> = ["when", "from", "index"].iter().filter_map(|f| fs::metadata(e.path().join(f)).ok()).map(|m| m.len()).collect();
+            Some(Snapshot { id, when, bytes: bytes - own.iter().sum::<u64>(), files: files - own.len() })
         })
         .collect();
     out.sort_by(|a, b| b.when.cmp(&a.when).then(b.id.cmp(&a.id)));
     out
 }
 
+/// The save folders a snapshot was taken from, in order (line i is kept in the snapshot's folder "i").
+pub fn sources(root: &Path, id: &str) -> io::Result<Vec<PathBuf>> {
+    let from = fs::read_to_string(root.join(id).join("from"))?;
+    Ok(from.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect())
+}
+
+/// Free space (bytes) on the drive holding `path` (or the nearest folder above it that exists). None where it
+/// can't be read.
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+pub fn free_bytes(path: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int};
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        // The C library's statvfs. On 64-bit Linux its struct starts with f_bsize, f_frsize, f_blocks, f_bfree,
+        // f_bavail, all 64-bit; the buffer below is larger than the whole struct (112 bytes).
+        fn statvfs(path: *const c_char, buf: *mut u64) -> c_int;
+    }
+    let at = path.ancestors().find(|p| p.exists())?;
+    let c = CString::new(at.as_os_str().as_bytes()).ok()?;
+    let mut buf = [0u64; 32];
+    // SAFETY: c is a valid C string and buf is 256 bytes, more than struct statvfs needs.
+    let r = unsafe { statvfs(c.as_ptr(), buf.as_mut_ptr()) };
+    if r != 0 {
+        return None;
+    }
+    Some(buf[1].saturating_mul(buf[4]))
+}
+
+#[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+pub fn free_bytes(_path: &Path) -> Option<u64> {
+    None
+}
+
+fn gb(bytes: u64) -> String {
+    format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+}
+
 /// Takes a snapshot of `folders` into `root` (a new folder named for `now`), then trims old ones. None when there
-/// are no save folders (nothing to keep).
+/// are no save folders (nothing to keep). When the saves haven't changed since the newest snapshot, that snapshot
+/// is returned and nothing is copied. Refused (an error saying why, nothing copied) when the saves are too big or
+/// have too many files to keep, or the drive has no room.
 pub fn backup(folders: &[PathBuf], root: &Path, now: u64) -> io::Result<Option<Snapshot>> {
+    backup_with(folders, root, now, free_bytes(root), &[])
+}
+
+/// backup with the drive's free space given (None: unknown, not checked) and snapshots trimming must keep.
+pub fn backup_with(folders: &[PathBuf], root: &Path, now: u64, free: Option<u64>, protect: &[&str]) -> io::Result<Option<Snapshot>> {
     if folders.is_empty() {
         return Ok(None);
+    }
+    fs::create_dir_all(root)?;
+    // Half-made snapshots left by a crash are never snapshots: clear them.
+    if let Ok(rd) = fs::read_dir(root) {
+        for e in rd.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with('.') && n.ends_with(".part") {
+                let _ = fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    // Measure first: nothing is copied when it can't all be copied.
+    let mut index = String::new();
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    for (i, f) in folders.iter().enumerate() {
+        let (lines, b) = index_of(f, MAX_FILES);
+        files += lines.len();
+        bytes += b;
+        if files > MAX_FILES {
+            return Err(other(format!("the saves have too many files to back up (more than {MAX_FILES})")));
+        }
+        for l in lines {
+            index.push_str(&format!("{i}/{l}\n"));
+        }
+    }
+    if bytes > MAX_ONE {
+        return Err(other(format!("the saves are too big to back up ({}; the most is {})", gb(bytes), gb(MAX_ONE))));
+    }
+    let from = folders.iter().map(|f| f.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    // Unchanged since the newest snapshot: that one already holds these saves.
+    if let Some(newest) = list(root).into_iter().next() {
+        let same_from = fs::read_to_string(root.join(&newest.id).join("from")).map(|s| s == from).unwrap_or(false);
+        let same_files = fs::read_to_string(root.join(&newest.id).join("index")).map(|s| s == index).unwrap_or(false);
+        if same_from && same_files {
+            return Ok(Some(newest));
+        }
+    }
+    if let Some(free) = free {
+        if free < bytes.saturating_add(SPARE) {
+            return Err(other(format!("not enough free space to back up the saves ({} needed, {} free)", gb(bytes + SPARE), gb(free))));
+        }
     }
     let mut id = stamp(now);
     let mut n = 1;
@@ -132,24 +249,37 @@ pub fn backup(folders: &[PathBuf], root: &Path, now: u64) -> io::Result<Option<S
     }
     let dir = root.join(&id);
     let tmp = root.join(format!(".{id}.part"));
-    let _ = fs::remove_dir_all(&tmp);
-    let mut count = (0usize, 0u64);
-    for (i, f) in folders.iter().enumerate() {
-        copy_tree(f, &tmp.join(i.to_string()), &mut count)?;
-    }
-    fs::write(tmp.join("when"), now.to_string())?;
-    fs::write(tmp.join("from"), folders.iter().map(|f| f.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n"))?;
-    fs::rename(&tmp, &dir)?;
-    trim(root, &id)?;
+    let made = (|| -> io::Result<(usize, u64)> {
+        let mut count = (0usize, 0u64);
+        for (i, f) in folders.iter().enumerate() {
+            copy_tree(f, &tmp.join(i.to_string()), &mut count)?;
+        }
+        fs::write(tmp.join("when"), now.to_string())?;
+        fs::write(tmp.join("from"), &from)?;
+        fs::write(tmp.join("index"), &index)?;
+        fs::rename(&tmp, &dir)?;
+        Ok(count)
+    })();
+    let count = match made {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+    };
+    let mut keep = vec![id.as_str()];
+    keep.extend_from_slice(protect);
+    trim(root, &keep)?;
     Ok(Some(Snapshot { id, when: now, bytes: count.1, files: count.0 }))
 }
 
-/// Keeps the newest KEEP snapshots, and drops the oldest while all together are over MAX_BYTES (never `keep`).
-fn trim(root: &Path, keep: &str) -> io::Result<()> {
+/// Keeps the newest KEEP snapshots, and drops the oldest while all together are over MAX_BYTES (never one in
+/// `keep`).
+fn trim(root: &Path, keep: &[&str]) -> io::Result<()> {
     let all = list(root);
     let mut total: u64 = all.iter().map(|s| s.bytes).sum();
     for (i, s) in all.iter().enumerate().rev() {
-        if s.id == keep {
+        if keep.contains(&s.id.as_str()) {
             continue;
         }
         if i >= KEEP || total > MAX_BYTES {
@@ -160,10 +290,16 @@ fn trim(root: &Path, keep: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Puts a snapshot back: first a snapshot of the saves as they are now (returned), then each kept folder's files
-/// copied over the save folder (files the snapshot doesn't have are left alone). The folders must be the ones the
-/// snapshot was taken from, in the same order.
+/// Puts a snapshot back: first a snapshot of the saves as they are now (returned; trimming never removes the one
+/// being put back), then each kept folder's files copied over the folder it was taken from (files the snapshot
+/// doesn't have are left alone). Refused, with nothing changed, when a folder the snapshot came from is not one
+/// of the game's save folders now, or the snapshot is incomplete.
 pub fn restore(id: &str, folders: &[PathBuf], root: &Path, now: u64) -> io::Result<Option<Snapshot>> {
+    restore_with(id, folders, root, now, free_bytes(root))
+}
+
+/// restore with the drive's free space given (see backup_with).
+pub fn restore_with(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: Option<u64>) -> io::Result<Option<Snapshot>> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a backup"));
     }
@@ -171,13 +307,26 @@ pub fn restore(id: &str, folders: &[PathBuf], root: &Path, now: u64) -> io::Resu
     if !snap.join("when").is_file() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "that backup is gone"));
     }
-    let before = backup(folders, root, now)?;
-    for (i, f) in folders.iter().enumerate() {
-        let kept = snap.join(i.to_string());
-        if kept.is_dir() {
-            let mut count = (0usize, 0u64);
-            copy_tree(&kept, f, &mut count)?;
+    let from = sources(root, id).map_err(|_| other("that backup doesn't say where its saves came from".into()))?;
+    if from.is_empty() {
+        return Err(other("that backup has no saves in it".into()));
+    }
+    for (i, f) in from.iter().enumerate() {
+        if !folders.contains(f) {
+            return Err(other(format!("the save folder it came from isn't there anymore: {}", f.display())));
         }
+        if !snap.join(i.to_string()).is_dir() {
+            return Err(other("that backup is incomplete".into()));
+        }
+    }
+    let before = backup_with(folders, root, now, free, &[id])?;
+    if !snap.join("when").is_file() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "that backup is gone"));
+    }
+    for (i, f) in from.iter().enumerate() {
+        let mut count = (0usize, 0u64);
+        copy_tree(&snap.join(i.to_string()), f, &mut count)
+            .map_err(|e| other(format!("copying stopped partway ({e}); the saves from just before are kept as a backup")))?;
     }
     Ok(before)
 }

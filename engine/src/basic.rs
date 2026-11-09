@@ -31,7 +31,7 @@ pub const INDEX_CAP: usize = 20_000;
 /// Longest the index may take to read.
 pub const INDEX_TIME: Duration = Duration::from_millis(300);
 
-/// A game folder's folders and files, down to `INDEX_DEPTH`, names only (links are listed, never followed).
+/// A game folder's folders and files, down to `INDEX_DEPTH`, names only (links are kept apart, never followed).
 #[derive(Debug, Default, Clone)]
 pub struct GameIndex {
     /// Game-relative folders, as on disk.
@@ -42,6 +42,8 @@ pub struct GameIndex {
     exe_sizes: HashMap<String, u64>,
     dirs_lc: HashMap<String, String>,
     files_lc: HashMap<String, String>,
+    /// Links (to folders or files), lowercase: never counted as the game's folders or files, never gone through.
+    links_lc: HashSet<String>,
     /// The cap or the time limit stopped the walk early.
     pub capped: bool,
 }
@@ -65,6 +67,10 @@ impl GameIndex {
                 let name = e.file_name().to_string_lossy().into_owned();
                 let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
                 let Ok(ft) = e.file_type() else { continue };
+                if ft.is_symlink() {
+                    ix.links_lc.insert(r.to_lowercase());
+                    continue;
+                }
                 if ft.is_dir() {
                     ix.dirs_lc.insert(r.to_lowercase(), r.clone());
                     ix.dirs.push(r.clone());
@@ -119,6 +125,22 @@ impl GameIndex {
 
     pub fn has_file(&self, rel: &str) -> bool {
         self.files_lc.contains_key(&rel.to_lowercase())
+    }
+
+    /// Is this game path (or a folder on the way to it) a link?
+    pub fn through_link(&self, rel: &str) -> bool {
+        let lc = rel.to_lowercase();
+        let mut acc = String::new();
+        for part in lc.split('/') {
+            if !acc.is_empty() {
+                acc.push('/');
+            }
+            acc.push_str(part);
+            if self.links_lc.contains(&acc) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Folder or file directly in the game folder?
@@ -402,6 +424,10 @@ fn decide(ctx: &Ctx, es: Vec<E>, from: String, depth: usize) -> Placement {
     // 6. Every top entry is also at the game's top.
     let mut top_names: Vec<String> = tops.clone();
     top_names.extend(top_files.iter().map(|e| e.parts[0].clone()));
+    // A top entry that is a link in the game folder: files would land outside the game, so the player decides.
+    if top_names.iter().any(|n| ix.through_link(n)) {
+        return Placement::Ask { suggest_to: ix.main_exe_folder() };
+    }
     if !top_names.is_empty() && top_names.iter().all(|n| ix.at_top(n)) {
         let rule = if tops.iter().any(|t| t.eq_ignore_ascii_case("data")) { "data-folder" } else { "mirrors-game" };
         return Placement::Sure { from, to: String::new(), rule };

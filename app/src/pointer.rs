@@ -43,7 +43,8 @@ pub struct Sticks {
 }
 
 /// The quick wheel's wedge angle for the left stick: degrees from Up, clockwise (0..359), or None while the stick
-/// is near the middle (pushed less than half way), so letting go keeps the wedge last pointed at.
+/// is near the middle (pushed less than half way). The wheel keeps the wedge last picked; a centred stick reads -1,
+/// so pushing at the same wedge again (after the D-pad moved on) picks it again.
 pub fn wedge_angle(lx: f64, ly: f64) -> Option<i32> {
     if (lx * lx + ly * ly).sqrt() < 0.5 {
         return None;
@@ -180,6 +181,12 @@ impl Pointer {
             self.left = Left::Spent;
         }
         held
+    }
+
+    /// The left stick is ignored until it has been back in the middle (under `LET_GO`): the quick wheel just
+    /// closed while the stick may still be pushed at a wedge, and that push must not become a D-pad press.
+    pub fn hold_off(&mut self) {
+        self.left = Left::Spent;
     }
 
     /// One look at the sticks, `dt_ms` after the last one, in a window `w` x `h`.
@@ -359,6 +366,27 @@ mod tests {
         assert_eq!(wedge_angle(-1.0, 0.0), Some(270), "left");
         assert_eq!(wedge_angle(0.7, -0.7), Some(45), "up-right");
         assert_eq!(wedge_angle(0.2, 0.2), None, "near the middle");
+    }
+
+    #[test]
+    fn a_stick_still_held_when_the_wheel_closes_is_not_a_press() {
+        // Hold View, push the stick at a wedge, let go of View: the wheel closes with the stick still pushed.
+        let mut p = Pointer::default();
+        p.dpad_only = true;
+        p.tick(&Sticks::default(), 16.0, W, H);
+        p.dpad_only = false;
+        p.hold_off();
+        let pushed = Sticks { lx: 0.0, ly: -1.0, ..Sticks::default() };
+        let mut pressed = false;
+        for _ in 0..20 {
+            pressed |= p.tick(&pushed, 16.0, W, H).press.is_some();
+        }
+        assert!(!pressed, "the push that picked the wedge never lands in the sheet it opened");
+        p.tick(&Sticks::default(), 16.0, W, H);
+        for _ in 0..10 {
+            pressed |= p.tick(&pushed, 16.0, W, H).press.is_some();
+        }
+        assert!(pressed, "a new push after centring is a press again");
     }
 
     fn run(p: &mut Pointer, s: Sticks, ms: f64) -> Tick {

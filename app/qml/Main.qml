@@ -673,7 +673,7 @@ Window {
         openPick(n, inUse ? "In use now" : "Loadout", [
             { icon: "info", title: "Rename", detail: "Give it a new name", run: () => { sheet = "profiles"; openAsk("renameProfile:" + n, "Rename " + n, "A new name for this loadout.", n, "Loadout name", 60, false, "Rename") } }
         ].concat(inUse ? [] : [
-            { icon: "remove", title: "Delete", detail: "Hold A to delete it for good", danger: true, run: () => askDelete("profile:" + n, "Delete the loadout " + n + " for good? Its mods stay installed.") }
+            { icon: "remove", title: "Delete", detail: pressTwice ? "Press A twice to delete it for good" : "Hold A to delete it for good", danger: true, run: () => askDelete("profile:" + n, "Delete the loadout " + n + " for good? Its mods stay installed.") }
         ]), "profiles")
     }
     // Load order: the mod that placed a plugin.
@@ -964,6 +964,7 @@ Window {
     }
     onGameChanged: {
         allOffWas = []
+        disarm()
         if (!game || sameGameReorder) return
         if (memoGame !== "" && memoGame !== game.id) saveFocus(memoGame)
         memoGame = game.id
@@ -1134,7 +1135,7 @@ Window {
     property string confirmText: ""
     // 2 seconds for a mod already in Removed mods; 5 for a loadout or profile.
     readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 ? 5 : 2
-    function askDelete(what, text) { confirmWhat = what; confirmText = text; confirmIndex = 0; stopReset(); sheet = "confirm" }
+    function askDelete(what, text) { disarm(); confirmWhat = what; confirmText = text; confirmIndex = 0; stopReset(); sheet = "confirm" }
     property int confirmIndex: 0
     function confirmDone() {
         const w = confirmWhat
@@ -1147,8 +1148,8 @@ Window {
             return
         }
         sheet = removedMods.length > (w === "all" ? removedMods.length : 1) ? "removed" : ""
-        if (w === "all") { Turbine.purgeAllRemoved(); toast.done("Removed mods deleted for good.") }
-        else { const m = removedMods.find(x => x.id === w); Turbine.purgeRemoved(w); toast.done((m ? m.name : "The mod") + " deleted for good.") }
+        if (w === "all") { forgetNames(removedMods.map(x => x.id)); Turbine.purgeAllRemoved(); toast.done("Removed mods deleted for good.") }
+        else { const m = removedMods.find(x => x.id === w); forgetNames([w]); Turbine.purgeRemoved(w); toast.done((m ? m.name : "The mod") + " deleted for good.") }
         removedIndex = Math.min(removedIndex, Math.max(0, removedMods.length - 1))
     }
     function putBack(id) {
@@ -1445,8 +1446,15 @@ Window {
     function holdAllowed() { return aHeld || clickHeld }
     // 0.56, Confirm by: Press twice: the first press says what a second one does; a second within 4 seconds does it.
     readonly property bool pressTwice: look.confirmBy === "twice"
+    // The first press arms one exact thing (the reset of one game, or the delete of one item) on one screen; any
+    // move, sheet, page, tab or game change clears it, so a second press can only ever do what the first said.
     property string armedKey: ""
     property real armedAt: 0
+    function disarm() { if (armedKey !== "") { armedKey = ""; note("action", "Press twice cleared") } }
+    function resetKey() { return "reset|" + (game ? game.id : "") }
+    function deleteKey() { return "delete|" + sheet + "|" + confirmWhat }
+    onMenuIndexChanged: disarm()
+    onConfirmIndexChanged: disarm()
     function confirmTwice(key, what, run) {
         if (armedKey === key && Date.now() - armedAt < 4000) { armedKey = ""; note("action", "Pressed twice: " + what); run(); return }
         armedKey = key; armedAt = Date.now()
@@ -1464,7 +1472,7 @@ Window {
         if (was) note("pad", "Holds stopped (" + why + ")")
     }
     // The danger holds stop whenever the sheet or the page changes.
-    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); clickHeld = false }
+    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); clickHeld = false; disarm() }
     // (onPageChanged and onTabChanged, near the top, call it too.)
     onModPageChanged: stopDangerHolds()
     readonly property var gameMenuItems: [
@@ -1476,7 +1484,7 @@ Window {
           ok: lastGood !== null }
     ].concat(canReset ? [
         { icon: "restore", title: "Reset game files", act: "reset", danger: true, ok: true,
-          detail: pressTwice ? (armedKey === "reset" ? "Press A again to reset" : "Press A twice. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off.")
+          detail: pressTwice ? (armedKey === resetKey() ? "Press A again to reset" : "Press A twice. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off.")
                   : resetHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(5 - resetHeld)) + "..."
                   : "Hold A for 5 seconds. Takes every mod file out and puts the game's own files back. Mods stay listed, turned off." }
     ] : []).concat(loaderMissing ? [
@@ -1542,9 +1550,9 @@ Window {
         const bad = v.missing.length + v.changed.length
         note("action", "Check game folder: " + v.ok + " fine, " + v.missing.length + " missing, " + v.changed.length + " changed")
         openPick("Check game folder", bad === 0 ? plural(v.ok, "mod file", "mod files") + " in place. Nothing to fix." : plural(bad, "file needs", "files need") + " fixing. A on the first row puts them back.",
-            (bad > 0 ? [{ icon: "update", title: "Put them back", detail: "Only Turbine's own files are touched", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } }] : [])
+            (bad > 0 ? [{ icon: "update", title: "Put them back", detail: "Puts mod files back. Game files are kept, never deleted", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } }] : [])
             .concat(v.missing.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Missing", run: () => {} })))
-            .concat(v.changed.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Changed by something else (left alone)", run: () => {} }))), "gamemenu")
+            .concat(v.changed.slice(0, 20).map(f => ({ icon: "info", title: f, detail: "Changed since Turbine put it in", run: () => {} }))), "gamemenu")
     }
     function openSaves() {
         const v = parse(Turbine.savesJson(), { folders: 0, backups: [] })
@@ -1596,7 +1604,7 @@ Window {
         else if (item.act === "alloff") { sheet = ""; allOff() }
         else if (item.act === "allon") { sheet = ""; allBackOn() }
         else if (item.act === "reset") {
-            if (pressTwice) confirmTwice("reset", "reset the game files", () => {
+            if (pressTwice) confirmTwice(resetKey(), "reset the game files", () => {
                 sheet = ""; holdsDone++
                 if (shot.page === "inputcheck") note("check", "Reset would run now"); else Turbine.resetGame() })
             else if (resetHold.running) stopReset()
@@ -1878,6 +1886,18 @@ Window {
         namesSet.nexus = JSON.stringify(all)
         nexusInfo = all
         mods = mods.map(x => x.id === m.id ? withNames(Object.assign({}, x, { name: x.raw || x.name })) : x)
+    }
+    // A mod deleted for good: its name and Nexus words go too, so a later mod given the same id starts fresh.
+    function forgetNames(ids) {
+        let r = Object.assign({}, renamedMap), x = Object.assign({}, nexusInfo), changed = false
+        for (const id of ids) {
+            const k = nameKey(id)
+            if (k in r) { delete r[k]; changed = true }
+            if (k in x) { delete x[k]; changed = true }
+        }
+        if (!changed) return
+        namesSet.renamed = JSON.stringify(r); renamedMap = r
+        namesSet.nexus = JSON.stringify(x); nexusInfo = x
     }
     function renameMod(m, text) {
         const k = nameKey(m.id)
@@ -2440,7 +2460,7 @@ Window {
         }
     }
     function startConfirm() {
-        if (pressTwice) { confirmTwice("delete", "delete for good", () => { holdsDone++; confirmDone() }); return }
+        if (pressTwice) { confirmTwice(deleteKey(), "delete for good", () => { holdsDone++; confirmDone() }); return }
         if (confirmHold.running) return
         if (!holdAllowed()) { holdHint(holdNeeded + " seconds to delete for good"); return }
         confirmHeld = 0; confirmHold.start()
@@ -2522,7 +2542,7 @@ Window {
             if (sheet === "ask" && askIndex < 0) askKeyboard()
             else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1))
             // A that isn't a held A (R3, a tap): Delete needs the hold.
-            else if (!sheetDry && !confirmHold.running) holdHint(holdNeeded + " seconds to delete for good")
+            else if (!sheetDry && !confirmHold.running && !pressTwice) holdHint(holdNeeded + " seconds to delete for good")
         }
         else if (b === "b") { if (bs.cancel >= 0) runIt(bs.cancel); else if (!sheetDry) sheet = "" }
         else if (b === "start" && sheetStartPlays(bs)) runIt(bs.main)
@@ -3145,7 +3165,11 @@ Window {
         target: Turbine
         function onWheelAngleChanged() {
             if (!app.wheelOpen || Turbine.wheelAngle < 0) return
-            const i = Math.round(Turbine.wheelAngle / 45) % 8
+            const a = Turbine.wheelAngle, cur = app.wheelSlot
+            // A little give at the edges: the wedge picked stays until the stick is 6 degrees past its border, so a
+            // stick resting on a border doesn't flicker between two.
+            const off = cur >= 0 ? Math.abs(((a - cur * 45) % 360 + 540) % 360 - 180) : 999
+            const i = off <= 22.5 + 6 ? cur : Math.round(a / 45) % 8
             if (i !== app.wheelSlot) app.wheelSlot = i
             app.wheelPicked = true
         }
@@ -7451,13 +7475,20 @@ Window {
         visible: app.sheet === "confirm"
         title: "Delete for good?"
         text: app.confirmText
-        buttons: [{ key: "", label: confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to delete" },
+        buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to delete" : "Press A twice to delete")
+                                 : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to delete" },
                   { key: "", label: "Keep" }]
         focusIndex: app.confirmIndex
-        // A tap on Delete only moves the highlight; holding a finger or the pointer on it counts like holding A.
-        onActivated: (i) => { app.confirmIndex = i; if (i !== 0) app.act("b"); else if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to delete for good") }
+        // Hold mode: a tap on Delete only moves the highlight; holding a finger or the pointer on it counts like
+        // holding A. Press twice mode: a tap counts like a press of A.
+        onActivated: (i) => {
+            if (i !== 0) { app.confirmIndex = i; app.act("b"); return }
+            if (app.pressTwice) { app.confirmIndex = 0; app.startConfirm(); return }
+            app.confirmIndex = i
+            if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to delete for good")
+        }
         onHeld: (i, down) => {
-            if (i !== 0) return
+            if (i !== 0 || app.pressTwice) return
             app.confirmIndex = 0
             app.clickHeld = down
             if (down) app.startConfirm(); else app.stopConfirm()

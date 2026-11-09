@@ -454,3 +454,210 @@ fn folder_lists_for_the_page() {
     let tree = basic::archive_tree_json(&files(&["M/a.txt", "M/sub/b.txt", "c.txt"]));
     assert!(tree.contains("{\"path\":\"\",\"files\":3}") && tree.contains("{\"path\":\"M\",\"files\":2}"), "{tree}");
 }
+
+// Break test of 0.56 (B1, M1, M2, M4, L6): each reproduces what the tester found.
+
+#[test]
+fn fomod_in_a_basic_game_gets_placement_and_protections() {
+    let t = TempDir::new("fomod");
+    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe", "game.ini"]);
+    let zip = t.0.join("dl/Fomod Mod 1.0.zip");
+    let xml = r#"<config><moduleName>Fixed</moduleName><requiredInstallFiles><file source="a.ini" destination="game.ini"/><file source="b.dll" destination="steam_api64.dll"/><file source="c.exe" destination="BrassPier.exe"/></requiredInstallFiles></config>"#;
+    write_zip(&zip, &[("fomod/ModuleConfig.xml", xml), ("a.ini", "modded"), ("b.dll", "dll"), ("c.exe", "evil exe")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    let r = s.import_archive(&zip, Default::default()).unwrap();
+    let p = match r {
+        Import::NeedsPlace(p) => p,
+        Import::Added(_) => panic!("added without a question"),
+        Import::NeedsChoices(_) => panic!("no choices in this installer"),
+    };
+    // Even if the player says Replace them, the game's program and Steam's library never go in.
+    let (from, to) = match &p.placement {
+        Placement::Sure { from, to, .. } | Placement::Guess { from, to, .. } => (from.clone(), to.clone()),
+        Placement::Ask { suggest_to } => (String::new(), suggest_to.clone()),
+    };
+    let done = s.finish_place(*p, &from, &to, true).unwrap();
+    assert!(done.placed.is_some(), "a FOMOD mod in a Basic game has a placement");
+    s.apply().unwrap();
+    assert_eq!(fs::read_to_string(g.install_dir.join("BrassPier.exe")).unwrap(), "game file BrassPier.exe");
+    assert!(!g.install_dir.join("steam_api64.dll").exists());
+    // Without the player's say (nobody to ask: import_zip), the game's files are left alone.
+    let t2 = TempDir::new("fomod2");
+    let g2 = game_at(&t2.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe", "game.ini"]);
+    let zip2 = t2.0.join("dl/Fomod Mod 1.0.zip");
+    write_zip(&zip2, &[("fomod/ModuleConfig.xml", xml), ("a.ini", "modded"), ("b.dll", "dll"), ("c.exe", "evil exe")]);
+    let mut s2 = Store::open(&g2, &t2.0.join("data")).unwrap();
+    assert!(s2.import_zip(&zip2).is_err(), "where it goes isn't sure, and nobody is here to ask");
+    s2.apply().unwrap();
+    assert_eq!(fs::read_to_string(g2.install_dir.join("game.ini")).unwrap(), "game file game.ini");
+    assert_eq!(fs::read_to_string(g2.install_dir.join("BrassPier.exe")).unwrap(), "game file BrassPier.exe");
+    assert!(!g2.install_dir.join("steam_api64.dll").exists());
+}
+
+#[test]
+fn fomod_data_files_in_a_basic_game_go_under_data() {
+    let t = TempDir::new("fomod-data");
+    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/Brass.esm", "Data/Textures/", "Data/Meshes/", "BrassPier.exe"]);
+    let zip = t.0.join("dl/Lamps 1.0.zip");
+    let xml = r#"<config><moduleName>Lamps</moduleName><requiredInstallFiles><folder source="core" destination=""/></requiredInstallFiles></config>"#;
+    write_zip(&zip, &[("fomod/ModuleConfig.xml", xml), ("core/Meshes/lamp.nif", "p"), ("core/Textures/lamp.dds", "t")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    match s.import_archive(&zip, Default::default()).unwrap() {
+        Import::Added(d) => assert_eq!(d.placed.unwrap().to, "Data"),
+        Import::NeedsPlace(p) => {
+            let to = match &p.placement {
+                Placement::Sure { to, .. } | Placement::Guess { to, .. } => to.clone(),
+                Placement::Ask { suggest_to } => suggest_to.clone(),
+            };
+            assert_eq!(to, "Data", "{:?}", p.placement);
+        }
+        Import::NeedsChoices(_) => panic!(),
+    }
+}
+
+#[test]
+fn an_earlier_replace_them_is_not_undone_by_a_later_mod() {
+    let t = TempDir::new("two");
+    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/brass.ini", "BrassPier.exe"]);
+    let z1 = t.0.join("dl/First 1.0.zip");
+    write_zip(&z1, &[("Data/brass.ini", "first")]);
+    let z2 = t.0.join("dl/Second 1.0.zip");
+    write_zip(&z2, &[("Data/brass.ini", "second")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    let p1 = match s.import_archive(&z1, Default::default()).unwrap() {
+        Import::NeedsPlace(p) => p,
+        other => panic!("{other:?}"),
+    };
+    s.finish_place(*p1, "", "", true).unwrap();
+    s.apply().unwrap();
+    assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "first");
+    // The second mod is asked about the file (it is still the game's file underneath).
+    let p2 = match s.import_archive(&z2, Default::default()).unwrap() {
+        Import::NeedsPlace(p) => p,
+        Import::Added(_) => panic!("second added without asking"),
+        _ => panic!(),
+    };
+    assert_eq!(p2.conflicts, vec!["Data/brass.ini".to_string()]);
+    s.finish_place(*p2, "", "", false).unwrap();
+    s.apply().unwrap();
+    assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "first", "First's consent still holds");
+}
+
+#[test]
+fn a_file_the_game_replaced_since_is_left_alone() {
+    let t = TempDir::new("upd");
+    let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe"]);
+    let zip = t.0.join("dl/Newfile 1.0.zip");
+    write_zip(&zip, &[("Data/new.bin", "mod")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    assert!(matches!(s.import_archive(&zip, Default::default()).unwrap(), Import::Added(_)));
+    s.apply().unwrap();
+    let target = g.install_dir.join("Data/new.bin");
+    fs::remove_file(&target).unwrap();
+    fs::write(&target, "GAME UPDATE VERSION").unwrap();
+    let r = s.apply().unwrap();
+    assert_eq!(fs::read_to_string(&target).unwrap(), "GAME UPDATE VERSION");
+    assert_eq!(r.skipped_existing, vec!["Data/new.bin".to_string()]);
+    let r = s.apply().unwrap();
+    assert_eq!(fs::read_to_string(&target).unwrap(), "GAME UPDATE VERSION", "and again");
+    assert_eq!(r.added, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_in_the_game_folder_does_not_block_applies() {
+    let t = TempDir::new("link");
+    let g = game_at(&t.0, "Link Game", "LinkGame", "3999920", &["LinkGame.exe", "Other/"]);
+    let outside = t.0.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, g.install_dir.join("Saves")).unwrap();
+    let zip = t.0.join("dl/Linky 1.0.zip");
+    write_zip(&zip, &[("Saves/x.txt", "x")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    match s.import_archive(&zip, Default::default()).unwrap() {
+        Import::NeedsPlace(p) => {
+            assert!(!matches!(p.placement, Placement::Sure { rule: "mirrors-game", .. }), "{:?}", p.placement);
+            // The player puts it at the top anyway: that file is left out and said why, and apply still works.
+            s.finish_place(*p, "", "", false).unwrap();
+            assert!(s.refused_files().iter().any(|(r, _)| r == "Saves/x.txt"));
+        }
+        Import::Added(d) => panic!("added at {:?}", d.placed),
+        Import::NeedsChoices(_) => panic!(),
+    }
+    s.apply().unwrap();
+    assert!(!outside.join("x.txt").exists());
+}
+
+#[test]
+fn import_zip_never_drops_an_ask_mod_in_the_exe_folder() {
+    let t = TempDir::new("auto");
+    let g = game_at(&t.0, "Odd Game", "Odd", "3999911", &["Bin/Odd.exe", "stuff/"]);
+    let zip = t.0.join("dl/Mystery 1.0.zip");
+    write_zip(&zip, &[("mystery.dll", "1"), ("dxgi.dll", "2")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    assert!(s.import_zip(&zip).is_err(), "nobody to ask where it goes: not added");
+    s.apply().unwrap();
+    assert_eq!(fs::read_dir(g.install_dir.join("Bin")).unwrap().count(), 1);
+}
+
+#[test]
+fn a_player_data_file_cannot_turn_protections_off() {
+    // Break test M3: a player's file says "bethesda", so Turbine's Basic detection isn't used. Its mods still
+    // may not replace the game's files or place a refused file.
+    let t = TempDir::new("custom-kind");
+    let files_dir = t.0.join("games");
+    fs::create_dir_all(&files_dir).unwrap();
+    fs::write(files_dir.join("pier.json"), r#"{"schema":1,"name":"Custom Pier","ids":{"steam":["3999977"]},"kind":"bethesda","modRoot":"Data"}"#).unwrap();
+    assert!(turbine_engine::rules::load_player_games(&files_dir).is_empty());
+    let g = game_at(&t.0, "Custom Pier", "CustomPier", "3999977", &["Data/brass.ini", "CustomPier.exe"]);
+    assert_eq!(GameRules::for_game(&g).support_level, Support::Custom);
+    let zip = t.0.join("dl/Over 1.0.zip");
+    write_zip(&zip, &[("Data/brass.ini", "mod"), ("Data/steam_api64.dll", "x"), ("Data/new.esp", "p")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    s.import_zip(&zip).unwrap();
+    let r = s.apply().unwrap();
+    turbine_engine::rules::load_player_games(&files_dir.join("none"));
+    assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "game file Data/brass.ini");
+    assert!(!g.install_dir.join("Data/steam_api64.dll").exists());
+    assert!(g.install_dir.join("Data/new.esp").exists(), "{r:?}");
+}
+
+#[test]
+fn moving_a_mod_out_of_a_non_ascii_folder_keeps_its_paths() {
+    // Break test L1: "İ" lowercases to a longer string; paths are compared by parts.
+    let t = TempDir::new("move-utf");
+    let g = game_at(&t.0, "Odd Game", "Odd", "3999911", &["Odd.exe", "İtems/", "B/"]);
+    let zip = t.0.join("dl/Mover 1.0.zip");
+    write_zip(&zip, &[("x/one.bin", "1")]);
+    let mut s = Store::open(&g, &t.0.join("data")).unwrap();
+    let pending = match s.import_archive(&zip, Default::default()).unwrap() {
+        Import::NeedsPlace(p) => p,
+        other => panic!("{other:?}"),
+    };
+    let id = s.finish_place(*pending, "", "İtems", false).unwrap().item.id;
+    s.change_placement(&id, "B").unwrap();
+    assert_eq!(fs::read_to_string(s.root().join("mods").join(&id).join("B/x/one.bin")).unwrap(), "1");
+}
+
+#[test]
+fn a_swap_cut_off_halfway_is_put_back_on_open() {
+    // Break test L2: the power goes out between the two renames of a mod's folder.
+    let t = TempDir::new("swap-crash");
+    let g = game_at(&t.0, "Odd Game", "Odd", "3999911", &["Odd.exe", "A/"]);
+    let zip = t.0.join("dl/Mover 1.0.zip");
+    write_zip(&zip, &[("x/one.bin", "1")]);
+    let data = t.0.join("data");
+    let id = {
+        let mut s = Store::open(&g, &data).unwrap();
+        let pending = match s.import_archive(&zip, Default::default()).unwrap() {
+            Import::NeedsPlace(p) => p,
+            other => panic!("{other:?}"),
+        };
+        s.finish_place(*pending, "", "A", false).unwrap().item.id
+    };
+    let root = Store::open(&g, &data).unwrap().root().to_path_buf();
+    fs::create_dir_all(root.join("tmp")).unwrap();
+    fs::rename(root.join("mods").join(&id), root.join("tmp").join(format!("{id}.old"))).unwrap();
+    let s = Store::open(&g, &data).unwrap();
+    assert_eq!(fs::read_to_string(s.root().join("mods").join(&id).join("A/x/one.bin")).unwrap(), "1");
+}

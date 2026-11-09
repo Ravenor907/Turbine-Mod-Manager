@@ -107,6 +107,12 @@ pub trait ModRules: Send {
     fn place(&self, _files: &[String], _mod_name: &str, _game: &Game) -> Option<Result<Placement, String>> {
         None
     }
+    /// Turbine has no rules of its own for this game (Basic, or a player's data file): its mods never replace the
+    /// game's own files unless the player said so for that mod, and never place a file in the refused table
+    /// (basic::refused), however the files were laid out. False for rules made for tests.
+    fn guarded(&self) -> bool {
+        false
+    }
 }
 
 impl ModRules for GameRules {
@@ -143,6 +149,9 @@ impl ModRules for GameRules {
         }
         let index = basic::GameIndex::cached(&game.install_dir);
         Some(basic::place(files, mod_name, game, self, &index))
+    }
+    fn guarded(&self) -> bool {
+        self.support_level != rules::Support::Full
     }
 }
 
@@ -196,6 +205,8 @@ pub struct PendingPlace {
     target: Target,
     unpacked: PathBuf,
     notes: Vec<String>,
+    /// An installer's choices (when the files came from one), kept for the mod's next update once it is added.
+    choices: Option<Vec<String>>,
 }
 
 impl PendingPlace {
@@ -285,6 +296,33 @@ struct Target {
 }
 
 
+/// Does a game path go through a link (a folder on the way that is a link to somewhere else)?
+fn through_link(game: &Path, rel: &str) -> bool {
+    let parts: Vec<&str> = rel.split('/').collect();
+    let mut dir = game.to_path_buf();
+    for part in &parts[..parts.len().saturating_sub(1)] {
+        dir.push(part);
+        match fs::symlink_metadata(&dir) {
+            Ok(m) if m.file_type().is_symlink() => return true,
+            Ok(m) if m.is_dir() => {}
+            _ => return false,
+        }
+    }
+    false
+}
+
+/// Where an installer's files land, each once (the last mention wins), in order.
+fn unique_dests(map: &[(String, String)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (_, to) in map {
+        if let Some(i) = out.iter().position(|d| d.eq_ignore_ascii_case(to)) {
+            out.remove(i);
+        }
+        out.push(to.clone());
+    }
+    out
+}
+
 /// `Store::place_conflicts` for a store kept in `store_root` (the interface asks while the store is busy elsewhere).
 pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str, to: &str) -> Result<Conflicts, String> {
     if !(to.is_empty() || crate::gamedata::safe_path(to)) {
@@ -292,7 +330,9 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
     }
     let map = basic::map_placement(files, from, to)?;
     let record = Record::load(&store_root.join("deploy").join("record.json")).unwrap_or_default();
-    let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
+    // A file Turbine put over a game file (another mod, with the player's consent) still counts as the game's:
+    // replacing it needs this mod's own consent too.
+    let ours: HashSet<String> = record.files.iter().filter(|p| p.backup.is_none()).map(|p| p.rel.to_lowercase()).collect();
     let mut conflicts = Vec::new();
     let mut refused = Vec::new();
     for (_, dest) in map {
@@ -671,6 +711,19 @@ impl Store {
         for d in ["mods", "removed", "deploy"] {
             fs::create_dir_all(root.join(d))?;
         }
+        // A swap of a mod's folder that stopped halfway (the power went out between its two renames): the mod's
+        // files are still in tmp as "<id>.old". Put them back before tmp is cleared.
+        if let Ok(rd) = fs::read_dir(root.join("tmp")) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if let Some(id) = name.strip_suffix(".old") {
+                    let dir = root.join("mods").join(id);
+                    if !id.is_empty() && !id.contains(['/', '\\']) && !dir.exists() {
+                        fs::rename(e.path(), &dir)?;
+                    }
+                }
+            }
+        }
         remove_dir(&root.join("tmp"))?;
         let mut s = Store {
             root: root.to_path_buf(),
@@ -1030,14 +1083,7 @@ impl Store {
         match self.import_archive(archive, source)? {
             Import::Added(done) => Ok(done.item),
             Import::NeedsChoices(p) => self.finish_install(*p).map(|d| d.item),
-            // No one to ask: the suggested folder, the game's own files left alone.
-            Import::NeedsPlace(p) => {
-                let (from, to) = match &p.placement {
-                    Placement::Sure { from, to, .. } | Placement::Guess { from, to, .. } => (from.clone(), to.clone()),
-                    Placement::Ask { suggest_to } => (String::new(), suggest_to.clone()),
-                };
-                self.finish_place(*p, &from, &to, false).map(|d| d.item)
-            }
+            Import::NeedsPlace(p) => self.place_unasked(*p).map(|d| d.item),
         }
     }
 
@@ -1067,8 +1113,37 @@ impl Store {
         self.sources.get(id).cloned().unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..SourceInfo::default() })
     }
 
-    /// Stages the files an installer's choices pick and adds (or updates) the mod.
+    /// Stages the files an installer's choices pick and adds (or updates) the mod. In a game Turbine places by
+    /// looking at the files (Basic support), the installer's output goes through the same placement and
+    /// protections as any other mod; when the player would be asked, nobody is here to answer, so it goes to the
+    /// suggested folder and never replaces the game's own files (use `finish_install_import` to ask).
     pub fn finish_install(&mut self, pending: Pending) -> Result<Installed, String> {
+        match self.finish_install_import(pending)? {
+            Import::Added(done) => Ok(done),
+            Import::NeedsChoices(p) => {
+                self.cancel_install(*p);
+                Err("The installer still has choices to make.".into())
+            }
+            Import::NeedsPlace(p) => self.place_unasked(*p),
+        }
+    }
+
+    /// A Basic game's waiting mod with no one to ask: where detection put it, never replacing the game's own
+    /// files. When detection couldn't tell where it goes, it isn't added (the player adds it from Turbine).
+    fn place_unasked(&mut self, p: PendingPlace) -> Result<Installed, String> {
+        let (from, to) = match &p.placement {
+            Placement::Sure { from, to, .. } | Placement::Guess { from, to, .. } => (from.clone(), to.clone()),
+            Placement::Ask { .. } => {
+                let e = format!("{} couldn't be added: Turbine can't tell where its files go. Add it in Turbine to choose.", p.target.shown);
+                self.cancel_place(p);
+                return Err(e);
+            }
+        };
+        self.finish_place(p, &from, &to, false)
+    }
+
+    /// `finish_install` that hands back "Where do these files go?" (Import::NeedsPlace) in a Basic game.
+    pub fn finish_install_import(&mut self, pending: Pending) -> Result<Import, String> {
         let Pending { session, target, unpacked, .. } = pending;
         let fail = |what: String| format!("{} couldn't be added: {what}.", target.shown);
         let result = (|| {
@@ -1086,17 +1161,45 @@ impl Store {
                 ));
             }
             let choices = session.choices();
-            let mut out = self.stage_and_commit(&unpacked, &map, &target, notes)?;
-            if choices.is_empty() {
-                self.choices.remove(&out.item.id);
-            } else {
-                self.choices.insert(out.item.id.clone(), choices);
+            let dests = unique_dests(&map);
+            if self.rules.place(&dests, &target.name, &self.game).is_some() {
+                // Basic support: lay the installer's output out as an archive of its own, then place it like
+                // any other mod (placement, the refused table and the overwrite question all apply).
+                let out = unpacked.with_extension("output");
+                let _ = remove_dir(&out);
+                let laid = (|| -> io::Result<()> {
+                    for (from, to) in &map {
+                        let src = unpacked.join(zip::safe_relative(from).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?);
+                        let dest = out.join(zip::safe_relative(to).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?);
+                        if !src.is_file() {
+                            continue;
+                        }
+                        if let Some(p) = dest.parent() {
+                            fs::create_dir_all(p)?;
+                        }
+                        let _ = fs::remove_file(&dest);
+                        fs::copy(&src, &dest)?;
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = laid {
+                    let _ = remove_dir(&out);
+                    return Err(fail(format!("couldn't read or write a file ({e})")));
+                }
+                remove_dir(&unpacked).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
+                fs::rename(&out, &unpacked).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
+                let files: Vec<String> = walk_files(&unpacked).into_iter().map(|(rel, _)| rel).collect();
+                return self.place_or_ask(&unpacked.clone(), &files, &target, &unpacked, notes, Some(choices)).unwrap_or_else(|| Err(fail("its files have nowhere to go".into())));
             }
+            let mut out = self.stage_and_commit(&unpacked, &map, &target, notes)?;
+            self.keep_choices(&out.item.id, Some(choices));
             self.save().map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
             out.notes.retain(|n| !n.is_empty());
-            Ok(out)
+            Ok(Import::Added(out))
         })();
-        let _ = remove_dir(&unpacked);
+        if !matches!(result, Ok(Import::NeedsPlace(_))) {
+            let _ = remove_dir(&unpacked);
+        }
         result
     }
 
@@ -1159,7 +1262,9 @@ impl Store {
                 _ => "you".to_string(),
             };
             let info = PlaceInfo { from: from.to_string(), to: to.to_string(), rule, replace, skipped: Vec::new() };
-            self.place_and_commit(&pending.unpacked, &pending.files, &pending.target, info, conflicts, refused, pending.notes.clone())
+            let out = self.place_and_commit(&pending.unpacked, &pending.files, &pending.target, info, conflicts, refused, pending.notes.clone())?;
+            self.keep_choices(&out.item.id, pending.choices.clone());
+            Ok(out)
         })();
         let _ = remove_dir(&pending.unpacked);
         result
@@ -1190,21 +1295,13 @@ impl Store {
         let staged = tmp.join(format!("{id}.moving"));
         remove_dir(&staged)?;
         fs::create_dir_all(&staged)?;
-        let old = info.to.to_lowercase();
+        let old: Vec<String> = info.to.split('/').filter(|p| !p.is_empty()).map(str::to_lowercase).collect();
         let moved = (|| -> io::Result<()> {
             for (rel, src) in walk_files(&dir) {
-                let lc = rel.to_lowercase();
-                let rest = if old.is_empty() {
-                    Some(rel.as_str())
-                } else if lc.starts_with(&format!("{old}/")) {
-                    Some(&rel[old.len() + 1..])
-                } else {
-                    None
-                };
-                let new_rel = match rest {
-                    Some(r) => join_rel(to, r),
-                    None => rel.clone(),
-                };
+                // Compared part by part (never by byte length: a lowercased name can be longer or shorter).
+                let parts: Vec<&str> = rel.split('/').collect();
+                let under = parts.len() > old.len() && parts.iter().zip(&old).all(|(a, b)| a.to_lowercase() == *b);
+                let new_rel = if under { join_rel(to, &parts[old.len()..].join("/")) } else { rel.clone() };
                 if !deploy::safe_rel(&new_rel) {
                     return Err(bad(format!("{new_rel} isn't a plain path inside the game folder")));
                 }
@@ -1383,57 +1480,13 @@ impl Store {
                         return Ok(Import::NeedsChoices(Box::new(pending)));
                     }
                     // No steps: only fixed files.
-                    return self.finish_install(pending).map(Import::Added);
+                    return self.finish_install_import(pending);
                 }
             }
 
             // Basic support: where the files go is worked out from the files and the game folder (or asked).
-            if let Some(answer) = self.rules.place(&files, &target.name, &self.game) {
-                let answer = answer.map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
-                let remembered = target
-                    .existing
-                    .and_then(|i| self.placements.get(&self.mods[i].id))
-                    .filter(|p| basic::archive_has_folder(&files, &p.from))
-                    .cloned();
-                let name = if target.keep_name { self.mods[target.existing.unwrap_or(0)].name.clone() } else { target.name.clone() };
-                let (from, to, rule, replace) = match (&remembered, &answer) {
-                    (Some(p), _) => (p.from.clone(), p.to.clone(), p.rule.clone(), Some(p.replace)),
-                    (None, Placement::Sure { from, to, rule }) => (from.clone(), to.clone(), rule.to_string(), None),
-                    _ => {
-                        if let Some(p) = &remembered {
-                            notes.push(format!("{} is laid out differently from last time, so Turbine asks where it goes again.", p.from));
-                        }
-                        let pending = PendingPlace {
-                            name,
-                            placement: answer,
-                            sure: false,
-                            conflicts: Vec::new(),
-                            refused: Vec::new(),
-                            files: files.clone(),
-                            target: target.clone(),
-                            unpacked: unpacked.clone(),
-                            notes,
-                        };
-                        return Ok(Import::NeedsPlace(Box::new(pending)));
-                    }
-                };
-                let (conflicts, refused) = self.place_conflicts(&files, &from, &to).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
-                if replace.is_none() && !conflicts.is_empty() {
-                    let pending = PendingPlace {
-                        name,
-                        placement: Placement::Sure { from, to, rule: leak_rule(&rule) },
-                        sure: true,
-                        conflicts,
-                        refused,
-                        files: files.clone(),
-                        target: target.clone(),
-                        unpacked: unpacked.clone(),
-                        notes,
-                    };
-                    return Ok(Import::NeedsPlace(Box::new(pending)));
-                }
-                let info = PlaceInfo { from, to, rule, replace: replace.unwrap_or(false), skipped: Vec::new() };
-                return self.place_and_commit(&work, &files, &target, info, conflicts, refused, notes).map(Import::Added);
+            if let Some(r) = self.place_or_ask(&work, &files, &target, &unpacked, notes.clone(), None) {
+                return r;
             }
             let map = self.rules.map_archive(&files, &folder_safe(&target.name)).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
             notes.extend(self.rules.install_notes(&files));
@@ -1445,6 +1498,84 @@ impl Store {
             let _ = remove_dir(&unpacked);
         }
         result
+    }
+
+    /// Basic support's placement for files in `work` (paths `files`): the remembered placement of the mod being
+    /// updated, or detection's sure answer, or the player is asked ("Where do these files go?", or only whether it
+    /// may replace the game's files). None when the game has rules of its own for where files go.
+    fn place_or_ask(
+        &mut self,
+        work: &Path,
+        files: &[String],
+        target: &Target,
+        unpacked: &Path,
+        notes: Vec<String>,
+        choices: Option<Vec<String>>,
+    ) -> Option<Result<Import, String>> {
+        let fail = |what: String| format!("{} couldn't be added: {what}.", target.shown);
+        let answer = self.rules.place(files, &target.name, &self.game)?;
+        Some((|| {
+            let answer = answer.map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            let remembered = target
+                .existing
+                .and_then(|i| self.placements.get(&self.mods[i].id))
+                .filter(|p| basic::archive_has_folder(files, &p.from))
+                .cloned();
+            let name = if target.keep_name { self.mods[target.existing.unwrap_or(0)].name.clone() } else { target.name.clone() };
+            let (from, to, rule, replace) = match (&remembered, &answer) {
+                (Some(p), _) => (p.from.clone(), p.to.clone(), p.rule.clone(), Some(p.replace)),
+                (None, Placement::Sure { from, to, rule }) => (from.clone(), to.clone(), rule.to_string(), None),
+                _ => {
+                    let pending = PendingPlace {
+                        name,
+                        placement: answer,
+                        sure: false,
+                        conflicts: Vec::new(),
+                        refused: Vec::new(),
+                        files: files.to_vec(),
+                        target: target.clone(),
+                        unpacked: unpacked.to_path_buf(),
+                        notes,
+                        choices,
+                    };
+                    return Ok(Import::NeedsPlace(Box::new(pending)));
+                }
+            };
+            let (conflicts, refused) = self.place_conflicts(files, &from, &to).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
+            if replace.is_none() && !conflicts.is_empty() {
+                let pending = PendingPlace {
+                    name,
+                    placement: Placement::Sure { from, to, rule: leak_rule(&rule) },
+                    sure: true,
+                    conflicts,
+                    refused,
+                    files: files.to_vec(),
+                    target: target.clone(),
+                    unpacked: unpacked.to_path_buf(),
+                    notes,
+                    choices,
+                };
+                return Ok(Import::NeedsPlace(Box::new(pending)));
+            }
+            let info = PlaceInfo { from, to, rule, replace: replace.unwrap_or(false), skipped: Vec::new() };
+            let out = self.place_and_commit(work, files, target, info, conflicts, refused, notes)?;
+            self.keep_choices(&out.item.id, choices);
+            Ok(Import::Added(out))
+        })())
+    }
+
+    /// Remembers an installer's choices for the mod's next update (None: it had no installer).
+    fn keep_choices(&mut self, id: &str, choices: Option<Vec<String>>) {
+        match choices {
+            None => {}
+            Some(c) if c.is_empty() => {
+                self.choices.remove(id);
+            }
+            Some(c) => {
+                self.choices.insert(id.to_string(), c);
+            }
+        }
+        let _ = self.save();
     }
 
     /// Moves the mapped files from `work` into the mod's folder (replacing an earlier copy) and records the mod.
@@ -1678,14 +1809,18 @@ impl Store {
     fn wanted_except(&self, skip: &[String]) -> Vec<Wanted> {
         let record = Record::load(&self.deploy_paths().record).unwrap_or_default();
         let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
+        let guarded = self.rules.guarded();
         let mut out = Vec::new();
         for m in self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id)) {
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
+                // A guarded game's mod with no placement (laid out by a player file's rules) may not replace.
+                let unplaced = PlaceInfo::default();
+                let place = place.or(if guarded { Some(&unplaced) } else { None });
                 match place {
                     Some(p) => {
                         let exists_not_ours = !ours.contains(&rel.to_lowercase()) && rules::find_ci(&self.game.install_dir, &rel).is_some();
-                        if basic::refused(&rel, exists_not_ours).is_some() {
+                        if basic::refused(&rel, exists_not_ours).is_some() || through_link(&self.game.install_dir, &rel) {
                             continue;
                         }
                         out.push(Wanted { rel, source, may_replace: p.replace });
@@ -1702,11 +1837,14 @@ impl Store {
         let record = Record::load(&self.deploy_paths().record).unwrap_or_default();
         let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
         let mut out = Vec::new();
-        for m in self.mods.iter().filter(|m| m.enabled && self.placements.contains_key(&m.id)) {
+        let guarded = self.rules.guarded();
+        for m in self.mods.iter().filter(|m| m.enabled && (guarded || self.placements.contains_key(&m.id))) {
             for (rel, _) in walk_files(&self.mod_dir(&m.id)) {
                 let exists_not_ours = !ours.contains(&rel.to_lowercase()) && rules::find_ci(&self.game.install_dir, &rel).is_some();
                 if let Some(why) = basic::refused(&rel, exists_not_ours) {
                     out.push((rel, why));
+                } else if through_link(&self.game.install_dir, &rel) {
+                    out.push((rel, "goes through a link in the game folder, so it would land outside the game"));
                 }
             }
         }

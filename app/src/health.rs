@@ -26,16 +26,20 @@ fn save_folders(game: &Game) -> Vec<PathBuf> {
     saves::folders(game, &GameRules::for_game(game).saves, &turbine_engine::home_dir())
 }
 
-/// Before Play: a copy of the game's saves (nothing when Turbine doesn't know where they are).
-pub(crate) fn backup_before_play(game: &Game) {
+/// Before Play: a copy of the game's saves (nothing when Turbine doesn't know where they are). When it can't be
+/// made (too big, too many files, no room), the player is told why and Play goes on.
+pub(crate) fn backup_before_play(w: &Worker, game: &Game) {
     let folders = save_folders(game);
     if folders.is_empty() {
         return;
     }
-    match saves::backup(&folders, &backups_root(game), now()) {
+    let root = backups_root(game);
+    let newest = saves::list(&root).first().map(|s| s.id.clone());
+    match saves::backup(&folders, &root, now()) {
+        Ok(Some(s)) if Some(&s.id) == newest.as_ref() => crate::log::line("engine", &format!("Saves unchanged since the last backup: {}", game.name)),
         Ok(Some(s)) => crate::log::line("engine", &format!("Saves backed up before Play: {} ({} files)", game.name, s.files)),
         Ok(None) => {}
-        Err(e) => crate::log::line("engine", &format!("Couldn't back up {}'s saves before Play: {e}", game.name)),
+        Err(e) => w.say(format!("{}'s saves weren't backed up before Play: {e}.", game.name), "warn"),
     }
 }
 
@@ -65,7 +69,7 @@ impl qobject::Turbine {
                         crate::log::line("engine", &format!("Saves put back for {}: the backup {id} (the saves before it were kept)", game.name));
                         w.say(format!("{}'s saves are back as they were. The saves from just before are kept as a backup too.", game.name), "ok");
                     }
-                    Err(e) => w.say(format!("Couldn't put the saves back: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't put the saves back: {e}."), "error"),
                 }
             }),
         );

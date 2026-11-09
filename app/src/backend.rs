@@ -1521,14 +1521,18 @@ impl qobject::Turbine {
         // after Turbine comes back to the front (releases still go through).
         let mut events = events;
         let dpad = *self.stick_dpad();
+        let was = self.rust().pointer.dpad_only;
         self.as_mut().rust_mut().pointer.dpad_only = dpad;
+        if was && !dpad {
+            // The wheel just closed, maybe with the stick still pushed at a wedge: that push isn't a D-pad press.
+            self.as_mut().rust_mut().pointer.hold_off();
+        }
         // The quick wheel is open: the left stick points at a wedge by its angle instead of pressing the D-pad.
         let mut sticks = sticks;
         if dpad {
-            if let Some(a) = crate::pointer::wedge_angle(sticks.lx, sticks.ly) {
-                if *self.wheel_angle() != a {
-                    self.as_mut().set_wheel_angle(a);
-                }
+            let a = crate::pointer::wedge_angle(sticks.lx, sticks.ly).unwrap_or(-1);
+            if *self.wheel_angle() != a {
+                self.as_mut().set_wheel_angle(a);
             }
             sticks.lx = 0.0;
             sticks.ly = 0.0;
@@ -2273,7 +2277,7 @@ impl qobject::Turbine {
                     return;
                 }
                 // 0.56: a copy of the saves first, so a mod that breaks them can't take them with it.
-                crate::health::backup_before_play(&game);
+                crate::health::backup_before_play(w, &game);
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
                 crate::actions::sync_order(w, &game);
                 if result.is_ok() {

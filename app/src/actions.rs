@@ -365,9 +365,15 @@ fn installer_next(w: &mut Worker, game: &Game, mut p: turbine_engine::store::Pen
         Ok(true) => Some(p),
         Ok(false) => {
             let name = p.name.clone();
-            let r = w.slot(game).and_then(|s| s.store.finish_install(p));
+            let r = w.slot(game).and_then(|s| s.store.finish_install_import(p));
             match r {
-                Ok(done) => {
+                // A Basic game: the installer's files go through "Where do these files go?" like any other mod.
+                Ok(Import::NeedsPlace(pp)) => {
+                    w.say(if pp.sure { format!("{} has files {} already has", pp.name, game.name) } else { format!("Where do {}'s files go?", pp.name) }, "work");
+                    crate::anygame::queue_place(w, game, *pp);
+                }
+                Ok(Import::NeedsChoices(_)) => w.say(format!("{name} couldn't be added: its installer stopped early."), "error"),
+                Ok(Import::Added(done)) => {
                     for n in &done.notes {
                         crate::log::line("engine", &format!("{name}: {n}"));
                     }
@@ -1543,7 +1549,16 @@ impl qobject::Turbine {
             "Get a profile's mods",
             false,
             Box::new(move |w: &mut Worker| {
-                let Some((_, share)) = w.share.clone() else { return };
+                let Some((gid, share)) = w.share.clone() else { return };
+                // The game the share was read for, not whichever game is showing now (LB/RB may have moved on).
+                let game = if gid == game.id() {
+                    game
+                } else {
+                    match w.slots.get(&gid).map(|s| s.game.clone()) {
+                        Some(g) => g,
+                        None => return w.say("That setup is for another game. Switch to that game and open it again.", "error"),
+                    }
+                };
                 let plan = match w.slot(&game).and_then(|s| profiles::plan_import(&share, &s.store)) {
                     Ok(p) => p,
                     Err(e) => return w.say(e, "error"),

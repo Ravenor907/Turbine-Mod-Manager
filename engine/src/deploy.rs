@@ -1119,32 +1119,56 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     clean_link_tests(&paths.game);
     let mut record = load_record(paths, &mut report)?;
     let placed: HashMap<String, &Placed> = record.files.iter().map(|p| (lower(&p.rel), p)).collect();
-    let mut list: Vec<(String, PathBuf)> = Vec::with_capacity(wanted.len());
-    // Later entries win: a guarded file is only skipped when it is the one that would land.
-    let mut last: HashMap<String, usize> = HashMap::new();
+    // Later entries win. When the one that would land may not replace what is there (a game file, or a file
+    // Turbine put over a game file with another mod's consent, or one the game has replaced since), the latest
+    // earlier mod that may replace it wins instead; with none, the path is left as it is (`skipped_existing`).
+    let mut order: Vec<String> = Vec::new();
+    let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, w) in wanted.iter().enumerate() {
-        last.insert(lower(&w.rel), i);
+        let k = lower(&w.rel);
+        if !by_key.contains_key(&k) {
+            order.push(k.clone());
+        }
+        by_key.entry(k).or_default().push(i);
     }
-    for (i, w) in wanted.iter().enumerate() {
-        if !w.may_replace && last.get(&lower(&w.rel)) == Some(&i) {
-            let skip = match placed.get(&lower(&w.rel)) {
-                // Placed over a game file before: comes out, the game's file goes back.
-                Some(p) => p.backup.is_some(),
-                None => safe_rel(&w.rel) && game_has(&paths.game, &w.rel),
-            };
-            if skip {
-                if !report.skipped_existing.iter().any(|x| x.eq_ignore_ascii_case(&w.rel)) {
-                    report.skipped_existing.push(w.rel.clone());
-                }
-                continue;
+    let mut upto: HashMap<String, usize> = HashMap::new();
+    let mut skipped: HashSet<String> = HashSet::new();
+    for k in &order {
+        let idxs = &by_key[k];
+        let last = *idxs.last().unwrap_or(&0);
+        let w = &wanted[last];
+        if w.may_replace {
+            continue;
+        }
+        let blocked = match placed.get(k) {
+            Some(p) => {
+                let target = paths.game.join(&p.rel);
+                let edited_settings = p.copy && p.backup.is_none() && config_like(&p.rel) && is_file(&target);
+                // Over a game file before (with consent then), or the game put its own file here since.
+                p.backup.is_some() || (!is_ours(p, &target) && !edited_settings && exists(&target))
+            }
+            None => safe_rel(&w.rel) && game_has(&paths.game, &w.rel),
+        };
+        if !blocked {
+            continue;
+        }
+        match idxs.iter().rev().find(|&&j| wanted[j].may_replace) {
+            Some(&j) => {
+                upto.insert(k.clone(), j);
+            }
+            None => {
+                skipped.insert(k.clone());
+                report.skipped_existing.push(w.rel.clone());
             }
         }
-        list.push((w.rel.clone(), w.source.clone()));
     }
-    // A skipped path drops every earlier mod's file for it too: the game's own file stays.
-    if !report.skipped_existing.is_empty() {
-        let skipped: HashSet<String> = report.skipped_existing.iter().map(|r| lower(r)).collect();
-        list.retain(|(rel, _)| !skipped.contains(&lower(rel)));
+    let mut list: Vec<(String, PathBuf)> = Vec::with_capacity(wanted.len());
+    for (i, w) in wanted.iter().enumerate() {
+        let k = lower(&w.rel);
+        if skipped.contains(&k) || upto.get(&k).is_some_and(|&j| i > j) {
+            continue;
+        }
+        list.push((w.rel.clone(), w.source.clone()));
     }
     drop(placed);
     let plan = plan(paths, &record, &list)?;
