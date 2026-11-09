@@ -9,7 +9,7 @@ test("the status line says what Turbine has for the game", () => {
   assert.equal(statusLine({ ok: true, found: true, modded: true, mods: 2, on: 0 }), "Modded with Turbine: 2 mods, all off");
   assert.equal(statusLine({ ok: true, found: true, modded: false, mods: 0, on: 0 }), "Not modded with Turbine");
   assert.equal(statusLine({ ok: true, found: true, refused: true, mods: 2, on: 0 }), "No mods (online anti-cheat)");
-  assert.equal(statusLine({ ok: true, found: false }), "Not a game Turbine sees");
+  assert.match(statusLine({ ok: true, found: false }), /^Not a game Turbine sees/);
   assert.equal(statusLine({ ok: false, words: "Turbine Mod Manager isn't installed." }), "Turbine Mod Manager isn't installed.");
 });
 

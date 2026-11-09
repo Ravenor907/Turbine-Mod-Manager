@@ -156,6 +156,8 @@ function Content() {
       } else {
         setWords(a.words || "");
         if (after) await after(a);
+        // Turbine is open and does it there: read again once it has had time to.
+        if (a.sent) setTimeout(() => void refresh(), 4000);
       }
     } catch (e) {
       setWords("Turbine's panel couldn't ask Turbine: " + String(e));

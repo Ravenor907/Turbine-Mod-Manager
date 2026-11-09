@@ -35,7 +35,7 @@ function count(n: number, one: string, many: string): string {
 /** The line under the game's name. */
 export function statusLine(s: Status): string {
   if (!s.ok) return s.words || "Turbine didn't answer.";
-  if (s.found === false) return "Not a game Turbine sees";
+  if (s.found === false) return "Not a game Turbine sees (Turbine itself, or a game it can't find)";
   if (s.refused) return "No mods (online anti-cheat)";
   const mods = s.mods ?? 0;
   const on = s.on ?? 0;
