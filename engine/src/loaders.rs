@@ -355,6 +355,8 @@ fn loader_source(id: &str, version: &str, url: &str, sha: &str) -> SourceInfo {
         url: Some(url.into()),
         sha256: Some(sha.into()),
         needs: Vec::new(),
+        title: None,
+        picture: None,
     }
 }
 

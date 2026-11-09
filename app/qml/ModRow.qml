@@ -66,7 +66,7 @@ Rectangle {
     implicitWidth: ui.px(600)
     property bool compact: false          // Desktop layout: 38 px rows
     property int ticked: -1               // Select several: -1 no box, 0 empty box, 1 ticked
-    implicitHeight: ui.px(compact ? 38 : 54)
+    implicitHeight: Math.max(ui.px(compact ? 38 : 54), rowWords.implicitHeight + ui.px(12))
     radius: ui.px(6)
     color: ui.c.card
 
@@ -218,6 +218,7 @@ Rectangle {
     }
 
     Column {
+        id: rowWords
         anchors.left: leftPart.right
         anchors.leftMargin: root.ui.px(12)
         anchors.right: rightPart.left
@@ -227,7 +228,8 @@ Rectangle {
         Text {
             width: parent.width
             text: root.name || ""
-            elide: Text.ElideRight
+            // 0.6: a name is never cut mid-word: it wraps (the line under it gives way first).
+            wrapMode: Text.WordWrap
             // Off rows are dimmer but stay readable (muted keeps at least 4.5:1 on every theme).
             color: root.isOn ? root.ui.c.text : root.focused ? root.ui.c.soft : root.ui.c.muted
             font.family: root.ui.bodyFont

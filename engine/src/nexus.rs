@@ -1229,6 +1229,8 @@ pub fn source_info(domain: &str, mod_id: u64, file: &FileInfo, sha256: Option<St
         url: Some(mod_page_url(domain, mod_id)),
         sha256,
         needs: Vec::new(),
+        title: None,
+        picture: None,
     }
 }
 
@@ -1611,7 +1613,12 @@ pub fn best_md5_match(matches: &[Md5Match], size: u64) -> Option<&Md5Match> {
 /// The record for a file identified by its MD5: a proper Nexus source, so it gets the mod's name, version and update
 /// checks like a file added through Mod Manager Download.
 pub fn md5_source_info(m: &Md5Match, sha256: Option<String>) -> SourceInfo {
-    source_info(&m.domain, m.mod_info.mod_id, &m.file, sha256)
+    // 0.6: named by its Nexus title, with its picture.
+    SourceInfo {
+        title: (!m.mod_info.name.trim().is_empty()).then(|| m.mod_info.name.trim().to_string()),
+        picture: (!m.mod_info.picture_url.is_empty()).then(|| m.mod_info.picture_url.clone()),
+        ..source_info(&m.domain, m.mod_info.mod_id, &m.file, sha256)
+    }
 }
 
 impl Nexus {

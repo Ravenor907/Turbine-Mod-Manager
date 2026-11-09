@@ -490,32 +490,128 @@ fn looks_like_version(s: &str) -> bool {
 
 /// A readable name and version from a download's file name: "SkyUI_5_2_SE-12604-5-2SE-1573517013.zip" becomes
 /// ("SkyUI 5 2 SE", Some("5.2SE")), "Author-Cool_Mod-1.2.3.zip" becomes ("Author-Cool Mod", Some("1.2.3")).
+/// 0.6: Nexus's newer download names too (since June 2026): "Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z
+/// gn8dtBhTy (2).zip" and "SeamlessCoop_2.0.2_trg5df.zip" become "Seamless Co-op" and "SeamlessCoop" with the
+/// version apart. Copy markers ("(2)"), Nexus ids, dates and times and random tails go; underscores and a name
+/// made of hyphenated words become spaces; an all-lowercase name gets capitals. A mod matched to Nexus is named by
+/// Nexus's own title instead (SourceInfo.title).
 pub fn clean_name(file_name: &str) -> (String, Option<String>) {
     let stem = match file_name.rsplit_once('.') {
         Some((s, ext)) if ext.eq_ignore_ascii_case("zip") || ext.eq_ignore_ascii_case("7z") || ext.eq_ignore_ascii_case("rar") => s,
         _ => file_name,
     };
+    let stem = strip_copy_marks(stem.trim());
+    let (name, version) = split_name(&stem);
+    let name = tidy_words(&name);
+    let name = if name.is_empty() { stem.replace('_', " ").trim().to_string() } else { name };
+    (if name.is_empty() { "Mod".into() } else { name }, version)
+}
+
+/// " (2)", "(3)" and " - Copy" at the end, as browsers and file managers add them.
+fn strip_copy_marks(stem: &str) -> String {
+    let mut s = stem.trim().to_string();
+    loop {
+        let t = s.trim_end();
+        let cut = if let Some(open) = t.strip_suffix(')').and_then(|x| x.rfind('(').map(|i| (i, x))) {
+            let (i, x) = open;
+            let inner = &x[i + 1..];
+            (!inner.is_empty() && inner.len() <= 3 && all_digits(inner) && i > 0).then_some(i)
+        } else if t.len() > 7 && t.to_ascii_lowercase().ends_with(" - copy") {
+            Some(t.len() - 7)
+        } else {
+            None
+        };
+        match cut {
+            Some(i) => s = t[..i].trim_end().to_string(),
+            None => return t.to_string(),
+        }
+    }
+}
+
+/// Nexus's version-like tokens: "2.0.2", "v2.0.2", "v2", "1.5a".
+fn version_token(t: &str) -> Option<String> {
+    let v = t.strip_prefix(['v', 'V']).unwrap_or(t);
+    let parts: Vec<&str> = v.split('.').collect();
+    let num = |p: &str| !p.is_empty() && p.chars().next().is_some_and(|c| c.is_ascii_digit()) && p.chars().all(|c| c.is_ascii_alphanumeric()) && p.len() <= 8;
+    if parts.len() >= 2 && parts.iter().all(|p| num(p)) && parts[..parts.len() - 1].iter().all(|p| all_digits(p)) {
+        return Some(v.to_string());
+    }
+    (t != v && all_digits(v) && !v.is_empty() && v.len() <= 4).then(|| v.to_string())
+}
+
+/// A date or a time Nexus puts in a name: "2026-10-27", "2026-10-27T14-30Z", "14-30Z", "1730039400".
+fn date_token(t: &str) -> bool {
+    let b = t.as_bytes();
+    let ymd = b.len() >= 10 && b[..4].iter().all(u8::is_ascii_digit) && b[4] == b'-' && b[5..7].iter().all(u8::is_ascii_digit) && b[7] == b'-' && b[8..10].iter().all(u8::is_ascii_digit);
+    ymd || (all_digits(t) && t.len() >= 9 && t.len() <= 11) || (t.ends_with('Z') && t.len() <= 8 && t.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ':' || c == 'Z'))
+}
+
+/// A random tail ("gn8dtBhTy", "trg5df"): letters and digits mixed, no spaces, after the version.
+fn slug_token(t: &str) -> bool {
+    (5..=16).contains(&t.len())
+        && t.chars().all(|c| c.is_ascii_alphanumeric())
+        && t.chars().any(|c| c.is_ascii_digit())
+        && t.chars().any(|c| c.is_ascii_lowercase())
+}
+
+/// Everything after the name: ids, versions, dates and random tails, nothing else.
+fn junk_tail(tokens: &[&str]) -> bool {
+    tokens.iter().all(|t| all_digits(t) || version_token(t).is_some() || date_token(t) || slug_token(t))
+}
+
+/// The name and version of a cleaned stem, by the shape of its tail.
+fn split_name(stem: &str) -> (String, Option<String>) {
+    // Nexus's old shape: name-<mod id>-<version parts>-<upload time>.
     let parts: Vec<&str> = stem.split('-').collect();
-    let mut keep = parts.len();
-    let mut version = None;
-    // Nexus Mods style: name-<mod id>-<version parts>-<upload time>.
     let last = parts.len().saturating_sub(1);
     if parts.len() >= 3 && all_digits(parts[last]) && parts[last].len() >= 9 {
         if let Some(i) = (1..last).find(|&i| all_digits(parts[i])) {
-            keep = i;
             let v = parts[i + 1..last].join(".");
-            if !v.is_empty() {
-                version = Some(v);
+            return (parts[..i].join("-"), (!v.is_empty()).then_some(v));
+        }
+    }
+    // Words with a version, then only Nexus's tail: "Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z gn8dtBhTy".
+    let words: Vec<&str> = stem.split_whitespace().collect();
+    if let Some(i) = (1..words.len()).find(|&i| version_token(words[i]).is_some()) {
+        if junk_tail(&words[i + 1..]) {
+            return (words[..i].join(" "), version_token(words[i]));
+        }
+    }
+    // "{FileName}_{Version}_{UniqueSlug}" (and without the slug).
+    let under: Vec<&str> = stem.split('_').collect();
+    if under.len() >= 2 {
+        if let Some(i) = (1..under.len()).find(|&i| version_token(under[i]).is_some()) {
+            if junk_tail(&under[i + 1..]) {
+                return (under[..i].join(" "), version_token(under[i]));
             }
         }
-    } else if parts.len() >= 2 && looks_like_version(parts[last]) {
-        keep = last;
-        version = Some(parts[last].trim_start_matches(['v', 'V']).to_string());
     }
-    let base = parts[..keep].join("-").replace('_', " ");
-    let name = base.split_whitespace().collect::<Vec<_>>().join(" ");
-    let name = if name.is_empty() { stem.replace('_', " ").trim().to_string() } else { name };
-    (if name.is_empty() { "Mod".into() } else { name }, version)
+    // A version at the end after a hyphen or a space: "Author-Cool_Mod-1.2.3", "Brighter Lanterns 1.2".
+    if parts.len() >= 2 && looks_like_version(parts[last]) {
+        return (parts[..last].join("-"), Some(parts[last].trim_start_matches(['v', 'V']).to_string()));
+    }
+    if words.len() >= 2 && version_token(words[words.len() - 1]).is_some() {
+        return (words[..words.len() - 1].join(" "), version_token(words[words.len() - 1]));
+    }
+    (stem.to_string(), None)
+}
+
+/// Underscores to spaces; a name made only of hyphenated words ("better-torches-main-file") gets spaces; an
+/// all-lowercase name gets capitals.
+fn tidy_words(name: &str) -> String {
+    let mut n = name.replace('_', " ");
+    if !n.contains(' ') && n.matches('-').count() >= 2 {
+        n = n.replace('-', " ");
+    }
+    let n = n.split_whitespace().collect::<Vec<_>>().join(" ");
+    let n = n.trim_matches(|c: char| c == '-' || c == '.' || c == ' ').to_string();
+    if n.chars().any(|c| c.is_ascii_lowercase()) && !n.chars().any(|c| c.is_uppercase()) {
+        return n.split(' ').map(|w| {
+            let mut c = w.chars();
+            match c.next() { Some(f) => f.to_uppercase().collect::<String>() + c.as_str(), None => String::new() }
+        }).collect::<Vec<_>>().join(" ");
+    }
+    n
 }
 
 /// A Nexus download's mod ID and version from its file name ("Fast Travel from Anywhere-324-1-0-5-1699999999.zip"
@@ -644,19 +740,23 @@ fn source_from(v: &Json) -> SourceInfo {
         url: v.str_at("url").map(String::from),
         sha256: v.str_at("sha256").map(String::from),
         needs: v.get("needs").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|n| n.as_str().map(String::from)).collect(),
+        title: v.str_at("title").map(String::from),
+        picture: v.str_at("picture").map(String::from),
     }
 }
 
 /// A source as JSON (also used by share files).
 pub fn source_json(s: &SourceInfo) -> String {
     format!(
-        "{{\"kind\":{},\"id\":{},\"version\":{},\"url\":{},\"sha256\":{},\"needs\":[{}]}}",
+        "{{\"kind\":{},\"id\":{},\"version\":{},\"url\":{},\"sha256\":{},\"needs\":[{}],\"title\":{},\"picture\":{}}}",
         quote(&s.kind),
         quote(&s.id),
         opt(&s.version),
         opt(&s.url),
         opt(&s.sha256),
-        s.needs.iter().map(|n| quote(n)).collect::<Vec<_>>().join(",")
+        s.needs.iter().map(|n| quote(n)).collect::<Vec<_>>().join(","),
+        opt(&s.title),
+        opt(&s.picture)
     )
 }
 
@@ -772,6 +872,7 @@ impl Store {
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
+        dirty |= s.clean_names();
         if dirty {
             s.save()?;
         }
@@ -972,6 +1073,29 @@ impl Store {
 
     /// Purges old Recently removed items and picks up mod folders the state doesn't know (a stop right after
     /// unpacking). Returns true when something changed.
+    /// 0.6: mods added before clean names (or before Nexus's new download names) get them once: the page's title
+    /// when Turbine knows it, else the cleaned file name. The player's own Rename is the app's and stays.
+    fn clean_names(&mut self) -> bool {
+        let mut changed = false;
+        for i in 0..self.mods.len() {
+            let src = self.sources.get(&self.mods[i].id).cloned().unwrap_or_default();
+            let (name, version) = match src.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+                Some(t) => (t.to_string(), None),
+                None => clean_name(&self.mods[i].name),
+            };
+            let m = &mut self.mods[i];
+            if !name.is_empty() && name != m.name {
+                m.name = name;
+                changed = true;
+            }
+            if m.version.is_none() && version.is_some() {
+                m.version = version;
+                changed = true;
+            }
+        }
+        changed
+    }
+
     fn tidy(&mut self) -> io::Result<bool> {
         let mut changed = false;
         let now = self.now();
@@ -1504,7 +1628,10 @@ impl Store {
         if source.version.is_some() {
             version = source.version.clone();
         }
-        if source.kind == "thunderstore" && !source.id.is_empty() {
+        // 0.6: a mod matched to its page is named by the page's title (Nexus's "Seamless Co-op").
+        if let Some(t) = source.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            name = t.to_string();
+        } else if source.kind == "thunderstore" && !source.id.is_empty() {
             // "Owner-Package_Name": the package part reads better.
             name = source.id.rsplit_once('-').map(|(_, n)| n).unwrap_or(&source.id).replace('_', " ");
         }
@@ -2297,7 +2424,14 @@ impl Store {
             .iter()
             .map(|m| {
                 let src = self.source_of(&m.id);
-                format!("{{{},\"sourceKind\":{},\"sourceId\":{}}}", mod_json(m), quote(&src.kind), quote(&src.id))
+                format!(
+                    "{{{},\"sourceKind\":{},\"sourceId\":{},\"sourceTitle\":{},\"picture\":{}}}",
+                    mod_json(m),
+                    quote(&src.kind),
+                    quote(&src.id),
+                    opt(&src.title),
+                    opt(&src.picture)
+                )
             })
             .collect();
         let removed: Vec<String> = self

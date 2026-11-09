@@ -1075,6 +1075,8 @@ impl Net {
             url: Some(anticheat::SEAMLESS_URL.into()),
             sha256: Some(d.sha256.clone()),
             needs: Vec::new(),
+            title: Some("Seamless Co-op".into()),
+            picture: None,
         };
         crate::log::line("net", &format!("{label} from {} (SHA-256 checked)", anticheat::SEAMLESS_URL));
         let path = rename(&d, &label, "zip");

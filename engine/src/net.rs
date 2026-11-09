@@ -22,6 +22,10 @@ pub struct SourceInfo {
     pub sha256: Option<String>,
     /// Dependency ids.
     pub needs: Vec<String>,
+    /// 0.6: the mod's own title where it came from (Nexus's "Seamless Co-op"); the mod is named by it.
+    pub title: Option<String>,
+    /// 0.6: its picture there, for the list and the panel.
+    pub picture: Option<String>,
 }
 
 /// Why a request failed, worded for the status line.

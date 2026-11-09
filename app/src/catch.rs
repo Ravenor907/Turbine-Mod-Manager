@@ -94,6 +94,8 @@ fn hint_source(r: &bridge::NexusRef, version: Option<String>) -> SourceInfo {
         url: Some(nexus::mod_page_url(&r.domain, r.mod_id)),
         sha256: None,
         needs: Vec::new(),
+        title: None,
+        picture: None,
     }
 }
 

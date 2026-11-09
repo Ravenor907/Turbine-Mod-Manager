@@ -172,9 +172,9 @@ fn names_come_from_the_file_name() {
     assert_eq!(clean_name("Cool_Mod-1234-5-6-1700000000.zip"), ("Cool Mod".into(), Some("5.6".into())));
     assert_eq!(clean_name("Cool_Mod-1234-1700000000.zip"), ("Cool Mod".into(), None));
     assert_eq!(clean_name("Author-Cool_Mod-1.2.3.zip"), ("Author-Cool Mod".into(), Some("1.2.3".into())));
-    assert_eq!(clean_name("Better Lights v2.zip"), ("Better Lights v2".into(), None));
+    assert_eq!(clean_name("Better Lights v2.zip"), ("Better Lights".into(), Some("2".into())));
     assert_eq!(clean_name("Better_Lights-v2.ZIP"), ("Better Lights".into(), Some("2".into())));
-    assert_eq!(clean_name("plain.zip"), ("plain".into(), None));
+    assert_eq!(clean_name("plain.zip"), ("Plain".into(), None));
     assert_eq!(clean_name("__.zip").0, "Mod");
 }
 

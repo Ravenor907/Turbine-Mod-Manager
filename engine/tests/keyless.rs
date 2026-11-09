@@ -236,7 +236,7 @@ fn nexus_download_names_are_cleaned() {
     assert_eq!(clean_name("Fast Travel from Anywhere-324-1-0-5-1699999999.zip"), ("Fast Travel from Anywhere".into(), Some("1.0.5".into())));
     assert_eq!(clean_name("All_Quest_Objectives_On_Map-5-1-0-5-1699999999.7z"), ("All Quest Objectives On Map".into(), Some("1.0.5".into())));
     assert_eq!(clean_name("SkyUI_5_2_SE-12604-5-2SE-1573517013.zip").0, "SkyUI 5 2 SE");
-    assert_eq!(clean_name("Better Torches 1.0.zip").0, "Better Torches 1.0");
+    assert_eq!(clean_name("Better Torches 1.0.zip"), ("Better Torches".into(), Some("1.0".into())));
     assert_eq!(nexus_ids_from_name("Fast Travel from Anywhere-324-1-0-5-1699999999.zip"), Some((324, "1.0.5".into())));
     assert_eq!(nexus_ids_from_name("Better Torches 1.0.zip"), None);
     assert_eq!(nexus_ids_from_name("Mod-1-2.zip"), None);

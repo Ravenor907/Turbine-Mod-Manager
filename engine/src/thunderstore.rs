@@ -729,6 +729,8 @@ pub fn source_info(pick: &Pick, sha256: Option<String>) -> SourceInfo {
         url: Some(pick.download_url.clone()),
         sha256,
         needs: pick.needs.clone(),
+        title: None,
+        picture: None,
     }
 }
 

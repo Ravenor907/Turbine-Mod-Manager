@@ -2746,9 +2746,10 @@ Window {
     function cleanName(raw) { return tidyName(raw, "") }
     function withNames(m) {
         const k = nameKey(m.id), nx = nexusInfo[k]
-        const shown = renamedMap[k] || (nx && nx.name) || tidyName(m.name, m.version)
+        // 0.6: the player's own name, else the page's title (Nexus), else the cleaned file name.
+        const shown = renamedMap[k] || (nx && nx.name) || m.sourceTitle || tidyName(m.name, m.version)
         return Object.assign({}, m, { raw: m.name, name: shown, renamed: !!renamedMap[k], author: nx ? nx.author || "" : "",
-                                      summary: nx ? nx.summary || "" : "", picture: nx ? nx.icon || "" : "", nexusName: nx ? nx.name || "" : "",
+                                      summary: nx ? nx.summary || "" : "", picture: (nx && nx.icon) || m.picture || "", nexusName: nx ? nx.name || "" : (m.sourceTitle || ""),
                                       gone: !!(nx && nx.gone) })
     }
     // Words from Nexus for an installed mod (from a card or its page); the list shows them at once.
