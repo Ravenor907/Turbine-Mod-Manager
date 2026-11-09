@@ -2739,7 +2739,11 @@ Window {
         // A mod another one covers: what to do about it comes first.
         const fix = cov ? (ordered ? [{ icon: "move", title: "Make this one win", detail: "Moves it just after " + cov.name, act: "win", other: cov }]
                                    : [{ icon: "power", title: "Turn it off", detail: cov.name + " covers all its files, so it does nothing now", act: "toggle" }]) : []
-        const first = fix.concat(menuMod.needsLoader && loaderMissing ? [
+        // 0.6 (I24): what it still needs stays one press away (also after Later on the requirements).
+        const missing = menuMod.enabled ? missingNeeds(menuMod) : []
+        const first = fix.concat(missing.length > 0 ? [
+            { icon: "update", title: "Get what it needs: " + (missing[0].name || missing[0]), detail: missing.length > 1 ? "And " + plural(missing.length - 1, "more mod", "more mods") + "; finds it in Get mods" : "Finds it in Get mods", act: "needs", need: missing[0].name || missing[0] }
+        ] : []).concat(menuMod.needsLoader && loaderMissing ? [
             { icon: "update", title: "Get " + loaderShort, detail: loaderCanGet ? "This mod needs it. Turbine gets it from its official page." : "This mod needs it. Shows where it comes from.", act: "loader" }
         ] : []).concat(updateMap[menuMod.id] ? [
             { icon: "update", title: "Update to " + updateMap[menuMod.id].to, detail: (updateMap[menuMod.id].from ? "You have " + updateMap[menuMod.id].from + ". " : "") + "Keeps its place and on or off", act: "update" }
@@ -2824,6 +2828,11 @@ Window {
         if (item.act === "more") openPick(m.name, "More options", item.rest.map(x => ({ icon: x.icon, title: x.title, detail: x.detail, run: () => modMenuDo(x, m) })), "modmenu")
         else if (item.act === "toggle") toggle(m)
         else if (item.act === "loader") getLoader()
+        else if (item.act === "needs") {
+            note("action", "Get what it needs: " + item.need)
+            sheet = ""; page = "game"; modPage = false; history = []; tab = 1; zone = "main"
+            getText = String(item.need); getCategory = ""; browseNow()
+        }
         else if (item.act === "check") startPlay()
         else if (item.act === "top") moveMod(m, 0)
         else if (item.act === "bottom") moveMod(m, mods.length - 1)
@@ -5282,6 +5291,10 @@ Window {
         { icon: "info", title: "Show in My mods", detail: cardMine.name, act: "show" },
         { icon: "power", title: cardMine.enabled ? "Turn off" : "Turn on", detail: cardMine.enabled ? "On now" : "Off now", act: "toggle" }
     ].concat(updateMap[cardMine.id] ? [{ icon: "update", title: "Update to " + updateMap[cardMine.id].to, detail: "Keeps its place and on or off", act: "update" }] : [])
+     // 0.6 (I23): the mod's own actions, the same as on its row in My mods.
+     .concat(settingsFilesOf(cardMine.id).length > 0 ? [{ icon: "info", title: isSeamless(cardMine) ? "Co-op settings" : "Edit settings", detail: "Its settings file", act: "m:settings" }] : [])
+     .concat(ordered && mods.length > 1 ? [{ icon: "move", title: "Move", detail: "In My mods: Up and Down move it, A puts it down", act: "m:move" }] : [])
+     .concat([{ icon: "info", title: "Rename", detail: cardMine.renamed ? "Now " + cardMine.name : "A name of your own for the list", act: "m:rename" }])
      .concat([srcNow === "nexus" ? { icon: "play", title: "Its Nexus page", detail: "Opens it in Turbine", act: "nexus" }
                                  : { icon: "play", title: "Its Thunderstore page", detail: "Opens in Turbine", act: "page" },
               { icon: "remove", title: "Uninstall", detail: "You can put it back for 7 days.", act: "remove", danger: true }]) : [
@@ -5302,6 +5315,12 @@ Window {
         else if (it.act === "remove" && cardMine) uninstall(cardMine)
         else if (it.act === "nexus") openNexus("https://www.nexusmods.com/" + rules.domain + "/mods/" + c.id)
         else if (it.act === "page") openDetails(c)
+        else if (it.act.indexOf("m:") === 0 && cardMine) {
+            const m = cardMine, a = it.act.slice(2)
+            // Move happens in the list itself: My mods, on this mod, then Move.
+            if (a === "move") { tab = 0; zone = "main"; modPage = false; history = []; goToMod(m.id); Qt.callLater(() => modMenuDo({ act: "move" }, m)) }
+            else modMenuDo({ act: a }, m)
+        }
     }
     function getWords() {
         if (srcNow === "thunderstore") return "Installs it with what it needs"
@@ -9443,7 +9462,9 @@ Window {
                 Accessible.role: Accessible.Button
                 Accessible.name: "Play"
                 HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { if (!app.gate(3, "Play")) return; app.playPressed() } }
+                // 0.6 (I22): a long press is Play options, as holding Start is (the wheel's Play options slot shows it too).
+                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { if (!app.gate(3, "Play")) return; app.playPressed() }
+                             onLongPressed: { if (!app.gate(3, "Play")) return; app.note("touch", "Play held: Play options"); app.openPlayOptions() } }
             }
         }
         // The quick wheel's button: View's cap (a tap opens it too).
