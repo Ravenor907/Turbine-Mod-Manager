@@ -1,9 +1,0 @@
-/* The site's look: Turbine's brass theme. */
-body { margin: 0; background: #0B0A08; color: #EADFC6; font: 18px/1.5 system-ui, sans-serif; }
-header, main, footer { max-width: 760px; margin: 0 auto; padding: 24px; }
-h1 { color: #EDC87A; font-size: 40px; margin-bottom: 4px; }
-h2 { color: #EDC87A; font-size: 24px; }
-.lead { font-size: 21px; color: #CDBE9F; }
-a { color: #EDC87A; }
-.button { display: inline-block; padding: 10px 20px; border-radius: 8px; background: #C99E52; color: #0B0A08; font-weight: 700; text-decoration: none; }
-footer { color: #AC9873; font-size: 15px; }

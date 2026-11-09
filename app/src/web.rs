@@ -10,7 +10,7 @@
 use crate::backend::qobject;
 use crate::browse;
 use core::pin::Pin;
-use cxx_qt::CxxQtType;
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -503,6 +503,39 @@ impl qobject::Turbine {
         let out = |how: &str, url: &str, steam: &str, text: &str| {
             QString::from(format!("{{\"how\":{},\"url\":{},\"steam\":{},\"text\":{}}}", quote(how), quote(url), quote(steam), quote(text)).as_str())
         };
+        // 0.6: Nexus's own sign-in (single sign-on) when Turbine has its slug: Nexus's approval page opens in Turbine's
+        // page from the list it gives, and the key comes back by itself. Otherwise the browser helper, as before.
+        if let crate::nexus_sso::Method::Sso { .. } = crate::nexus_sso::method() {
+            crate::log::line("web", "Sign in: through Nexus's own approval page (single sign-on)");
+            let qt = self.qt_thread();
+            std::thread::spawn(move || {
+                let cancel = AtomicBool::new(false);
+                let q = qt.clone();
+                let mut progress = |p: crate::nexus_sso::Progress| -> Result<(), String> {
+                    if let crate::nexus_sso::Progress::OpenPage(page) = p {
+                        let json = format!(
+                            "[{{\"name\":\"Nexus's approval page\",\"url\":{},\"note\":\"Press Authorise. Turbine signs in by itself.\"}}]",
+                            quote(&page)
+                        );
+                        q.queue(move |t| t.pages(QString::from("Sign in to Nexus Mods"), QString::from(json.as_str())))
+                            .map_err(|_| "Turbine couldn't show the page".to_string())?;
+                    }
+                    Ok(())
+                };
+                let r = crate::nexus_sso::sign_in(&mut progress, &cancel);
+                let _ = qt.queue(move |t| match r {
+                    Ok(key) => {
+                        crate::log::line("web", "Sign in through Nexus: approved; checking the key");
+                        t.set_nexus_key(&QString::from(key.as_str()));
+                    }
+                    Err(e) => {
+                        crate::log::line("web", &format!("Sign in through Nexus stopped: {}", e.plain()));
+                        t.message(QString::from(e.plain().as_str()), QString::from("error"));
+                    }
+                });
+            });
+            return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine. Turbine signs in by itself.");
+        }
         let url = crate::bridge::SIGNIN_URL;
         if !crate::bridge::paired() {
             crate::log::line("web", "Sign in with my browser: the browser helper isn't set up");
