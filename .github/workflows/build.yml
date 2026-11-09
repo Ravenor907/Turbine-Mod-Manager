@@ -109,6 +109,8 @@ jobs:
           OUT_DIR=/tmp/bridge rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
           rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/tests
           /tmp/bridge/tests
+          # Turbine's end of Sign in with my browser, from the same bridge.rs, for the helper's whole-handshake check.
+          rustc +1.97.0 --edition 2021 tools/signin-standin.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/signin-standin
       - name: Test the controller pointer (app/src/pointer.rs needs only the standard library)
         shell: bash
         run: |
@@ -129,6 +131,9 @@ jobs:
         run: |
           node --version
           cd extension && node test/test.js
+          # Sign in with my browser end to end: the helper's service worker against Turbine's real bridge server,
+          # with a mocked Nexus sign-in and API Keys page.
+          TURBINE_STANDIN=/tmp/bridge/signin-standin node test/handshake.js
 
   nexus:
     name: Nexus without a key (live)

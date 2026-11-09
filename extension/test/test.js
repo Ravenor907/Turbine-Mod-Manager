@@ -501,7 +501,7 @@ test("Only Nexus's own cookies pass the domain filter", () => {
 });
 
 test("Sign-in messages are checked both ways", () => {
-  assert.deepEqual(P.validateIncoming({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" }), { type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" });
+  assert.deepEqual(P.validateIncoming({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" }), { type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in", steam: false });
   // A page that isn't Nexus's: the sign-in page instead.
   assert.equal(P.validateIncoming({ type: "signin.request", id: SID, url: "https://evil.example/" }).url, P.SIGNIN_URL);
   assert.equal(P.validateIncoming({ type: "signin.request", id: "short" }), null);
@@ -538,9 +538,13 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
     { name: "SID", value: "google", domain: ".google.com", path: "/", secure: true },
   ];
   const pick = (store, keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).filter((k) => k in store).map((k) => [k, store[k]]));
+  const tabUrls = new Map();
+  const tabUpdates = [];
+  const moved = [];
   const chrome = {
     runtime: {
       id: "ourid",
+      getURL: (p) => "chrome-extension://ourid/" + p,
       getManifest: () => JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8")),
       reload: () => reloads++,
       onConnect: on("connect"),
@@ -568,12 +572,26 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
     tabs: {
       create: async (o) => {
         tabsMade.push(o);
-        return { id: 5, windowId: 3 };
+        const id = 5 + tabsMade.length - 1;
+        tabUrls.set(id, o.url);
+        return { id, windowId: 3 };
       },
+      get: async (id) => {
+        if (!tabUrls.has(id)) throw new Error("no tab");
+        return { id, windowId: 3, url: tabUrls.get(id) };
+      },
+      update: async (id, o) => {
+        tabUpdates.push([id, o]);
+        if (o.url) tabUrls.set(id, o.url);
+        return { id, windowId: 3 };
+      },
+      move: async (id, o) => moved.push([id, o]),
+      onRemoved: on("tabRemoved"),
     },
     windows: {
       update: async (id, o) => windowsFocused.push([id, o]),
       create: async () => {},
+      onCreated: on("windowCreated"),
     },
     cookies: {
       onChanged: on("cookieChanged"),
@@ -674,32 +692,55 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
 
   // Sign-in pass-through: nothing is sent before Turbine asks.
   fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/" });
+  fire("windowCreated", { id: 4, type: "normal" });
   fire("panelMsg", { kind: "signin.send" });
   await sleep(100);
   assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 0, "no cookies without a request");
   assert.equal(cookieQueries.length, 0, "cookies aren't even read without a request");
-  // Turbine asks; the player is on the sign-in page, then back on Nexus: the cookies go, Nexus's only.
-  fake.send({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in" });
-  await until(() => panelMsgs.some((m) => m.signin && m.signin.pending), 2000, "sign-in shown on the panel");
-  fire("panelMsg", { kind: "where", url: "https://users.nexusmods.com/auth/sign_in" });
-  fire("cookieChanged", { removed: false, cookie: { name: "nexusmods_session", domain: ".nexusmods.com" } });
-  fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/" });
+  // Turbine asks (Game Mode: it also asks for Nexus's sign-in page, which Turbine's own sign-in page takes over).
+  const before = tabsMade.length;
+  fake.send({ type: "open", url: "https://users.nexusmods.com/auth/sign_in" });
+  fake.send({ type: "signin.request", id: SID, url: "https://users.nexusmods.com/auth/sign_in", steam: true });
+  await until(() => tabsMade.length === before + 1, 2000, "Turbine's sign-in page opened");
+  assert.equal(JSON.stringify(tabsMade[before]), JSON.stringify({ url: "chrome-extension://ourid/signin/signin.html", active: true }));
+  const pageTab = 5 + before;
+  // This browser is already signed in to Nexus: the cookies go at once, Nexus's only.
   const sent = await fake.waitFor((m) => m.type === "signin.cookies");
   assert.equal(sent.id, SID);
   assert.deepEqual(sent.cookies.map((c) => c.domain), [".nexusmods.com"]);
   assert.equal(cookieQueries[0].domain, "nexusmods.com");
+  await until(() => panelMsgs.some((m) => m.signin && m.signin.pending), 2000, "sign-in shown on the panel");
+  await sleep(1700);
+  assert.equal(tabsMade.length, before + 1, "Nexus's sign-in page didn't open in a second tab");
+  // Turbine's sign-in page connects (only from this helper's own page) and tells Turbine it is up.
+  const pageMsgs = [];
+  let refused = false;
+  fire("connect", { name: "turbine-signin", sender: { id: "otherid", url: "chrome-extension://otherid/signin/signin.html" }, disconnect: () => (refused = true), onDisconnect: on("x"), onMessage: on("y"), postMessage: () => {} });
+  assert.ok(refused, "another extension's page is turned away");
+  fire("connect", { name: "turbine-signin", sender: { id: "ourid", url: "chrome-extension://ourid/signin/signin.html", tab: { id: pageTab } }, postMessage: (m) => pageMsgs.push(m), disconnect: () => {}, onDisconnect: on("pageGone"), onMessage: on("pageMsg") });
+  fire("pageMsg", { kind: "hello" });
+  await until(() => pageMsgs.some((m) => m.signin && m.signin.phase === "sent"), 2000, "the page shows the sign-in going");
   // The same cookies aren't sent again by themselves; the panel's button sends them again on purpose.
   fire("panelMsg", { kind: "where", url: "https://www.nexusmods.com/skyrimspecialedition" });
   await sleep(100);
   assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 1);
   fire("panelMsg", { kind: "signin.send" });
   await until(() => fake.received.filter((m) => m.type === "signin.cookies").length === 2, 2000, "button sends again");
-  // Turbine took it: the request is over and nothing more goes.
+  // Turbine took it: the request is over, nothing more goes, and the page says Signed in. Go back to Turbine.
   fake.send({ type: "signin.done", id: SID, ok: true, text: "Turbine has your Nexus sign-in. Go back to Turbine." });
   await until(() => panelMsgs.some((m) => m.signin && m.signin.ok), 2000, "signed in shown");
+  await until(() => pageMsgs.some((m) => m.signin && m.signin.phase === "ok" && /Steam button/.test(m.signin.back)), 2000, "page says how to go back");
+  assert.ok(tabUpdates.some(([id, o]) => id === pageTab && o.url === "chrome-extension://ourid/signin/signin.html"));
   fire("panelMsg", { kind: "signin.send" });
   await sleep(100);
   assert.equal(fake.received.filter((m) => m.type === "signin.cookies").length, 2, "nothing after the request ended");
+  // The panel can't hand a key in from a page that isn't the API Keys page.
+  fire("pageMsg", { kind: "key.start" });
+  await sleep(50);
+  fire("panelMsg", { kind: "key.found", key: "QWxhZGRpbjpvcGVuIHNlc2FtZQ==--c2Vzc2lvbktleTEyMw==" });
+  await sleep(100);
+  assert.equal(fake.received.filter((m) => m.type === "signin.key").length, 0);
+  assert.ok(!JSON.stringify(session).includes("QWxhZGRpbjpvcGVuIHNlc2FtZQ"), "no key in session storage");
 
   // Pairing: only accepted from the pairing page itself, then stored.
   const NEW = "c".repeat(64);
@@ -789,3 +830,4 @@ test("The welcome game list keeps each game's folder", () => {
   const w = P.validateIncoming({ type: "welcome", turbineVersion: "0.5", games: [{ id: "steam:292030", name: "The Witcher 3", domain: "witcher3", folder: "The Witcher 3" }] });
   assert.equal(w.games[0].folder, "The Witcher 3");
 });
+require("./signin-tests.js");
