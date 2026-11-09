@@ -5030,8 +5030,8 @@ Window {
             { name: "tries", after: 9000, act: () => { check("Browser check: no press, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no (" + webDls.map(x => x.name).join(", ") + ")"))
                                                          // M5: a link on mod 1's page to another mod's page that goes to its nxm link by itself.
                                                          btClick(700, 512) } },
-            { name: "another mod asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
-              act: () => { const o = binds(); check("Browser check: another mod's link asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
+            { name: "another mod asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && Date.now() - nxmAskAt > 1300,
+              act: () => { check("Browser check: another mod's link asks: " + nxmAskWords()); pad("b") } },
             { name: "auto page again", after: 600, act: () => { check("Browser check: Not now closed it: " + (sheet === "" ? "yes" : "no")); nexusView.load(browserAddress(btFiles + "&links=1")) } },
             // H1b: A on a link to an outside site that sends the view straight back to a Nexus page that goes to its
             // Mod Manager Download link by itself (after the page's own tries are over).
@@ -5041,8 +5041,8 @@ Window {
             // H1c: an outside page read for a while; a tap on it sends the view to mod 1's page that does the same.
             { name: "outside page", after: 300, act: () => nexusView.load("http://127.0.0.1:47801/tapme") },
             { name: "tap outside", max: 15000, wait: () => pageIs(/tapme/), after: 800, act: () => btClick(190, 80) },
-            { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && Date.now() - nxmAskAt > 1100,
-              act: () => { const o = binds(); check("Browser check: a tap off Nexus asks: " + pickTitle + ", A " + o.a.label + ", B " + o.b.label); pad("b") } },
+            { name: "tap off nexus asks", max: 15000, wait: () => nxmAsking && menuIndex === 0 && Date.now() - nxmAskAt > 1300,
+              act: () => { check("Browser check: a tap off Nexus asks: " + nxmAskWords()); pad("b") } },
             { name: "slow", max: 15000, wait: () => sheet === "" && pageIs(/file_id=56/), after: 600,
               act: () => { check("Browser check: after Not now, nothing downloaded: " + (webDls.length === 0 && !dl.active ? "yes" : "no")); bt.pressAt = Date.now(); btClick(160, 188) } },
             // The page closes while the download runs (the bounce left pages to go back to, so it closes outright).
@@ -6505,6 +6505,14 @@ Window {
         nxmAskAt = Date.now()
         nxmRingMove.restart()
         keyRoot.forceActiveFocus()
+        // The build's checks read what the question offered the moment it opened (not after the quiet second, when
+        // the ring has moved to Get it): its A and B, and whether input was still off.
+        Qt.callLater(() => { const o = binds(); nxmAskFirst = { a: o.a ? o.a.label : "", b: o.b ? o.b.label : "", quiet: nxmAskQuiet(), ring: menuIndex } })
+    }
+    property var nxmAskFirst: null
+    function nxmAskWords() {
+        const f = nxmAskFirst || {}, o = binds()
+        return pickTitle + ", at first A " + f.a + ", B " + f.b + (f.quiet ? ", input off" : ", input ON") + "; after the quiet second A " + (o.a ? o.a.label : "") + ", B " + (o.b ? o.b.label : "")
     }
     function nxmAskGet() {
         const link = nxmAskLink, r = nxmAskInfo
