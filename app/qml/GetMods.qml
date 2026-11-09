@@ -149,13 +149,21 @@ Item {
                     border.color: gm.ui.c.accent
                     border.width: foc ? gm.ui.px(2) : 0
                     Thumb { id: rthumb; x: gm.ui.px(4); y: gm.ui.px(4); width: gm.ui.px(78); height: parent.height - gm.ui.px(8); src: rc.modelData.icon || ""; name: rc.modelData.name || "" }
-                    Text {
+                    Column {
                         x: rthumb.x + rthumb.width + gm.ui.px(8)
                         width: parent.width - x - gm.ui.px(6)
                         anchors.verticalCenter: parent.verticalCenter
-                        text: (rc.modelData.name || "") + (rc.modelData.what ? "\n" + rc.modelData.what : "")
-                        wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                        color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
+                        Text {
+                            width: parent.width; elide: Text.ElideRight
+                            text: rc.modelData.name || ""
+                            color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
+                        }
+                        Text {
+                            visible: text !== ""
+                            width: parent.width; elide: Text.ElideRight
+                            text: rc.modelData.what || ""
+                            color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(12)
+                        }
                     }
                     HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
                     TapHandler { onTapped: gm.recentClicked(rc.index) }

@@ -317,7 +317,7 @@ Window {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0
                 app.renameMod(app.mods[0], "Lanterns of the Road")
                 app.modIndex = 1
-                app.note("shot", "Header tucked: " + app.headerTucked + "; panel: " + app.showModPanel + "; row 2 line: " + app.rowLine(app.mods[1]).text)
+                app.note("shot", "Header tucked: " + app.headerTucked + "; panel: " + app.showModPanel + " (design width " + Math.round(app.designWidth) + ", " + app.width + "x" + app.height + ", tab " + app.tab + ", page " + app.page + "); row 2 line: " + app.rowLine(app.mods[1]).text)
             }
             else if (shot.page === "basicmenu") {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0; app.sheet = "modmenu"
@@ -1901,7 +1901,7 @@ Window {
         return id !== "" && rules && rules.domain ? "https://www.nexusmods.com/" + rules.domain + "/mods/" + id : ""
     }
     // The panel on the right of My mods: only on wide screens (16:9 and up), with something highlighted.
-    readonly property bool showModPanel: page === "game" && !!game && tab === 0 && modsLoaded && !modPage && mods.length > 0 && width / Math.max(1, height) >= 1.5 && designWidth >= 1000
+    readonly property bool showModPanel: page === "game" && !!game && tab === 0 && modsLoaded && !modPage && mods.length > 0 && width / Math.max(1, height) >= 1.5 && designWidth >= 700
     readonly property var modPanelFacts: {
         const m = menuMod
         if (!m) return []
@@ -3102,7 +3102,7 @@ Window {
                                      slot("Forward", !!nexusView && nexusView.canGoForward, () => nexusView.forward(), "The page you came back from"), slot("Reload", !!nexusView, () => nexusView.reload(), "Load this page again"),
                                      slot("Game menu", g, () => { menuIndex = 0; sheet = "gamemenu" }, "Everything for this game"), slot("Settings", true, openSettings, "Look, controls and accounts"),
                                      slot("Downloads", true, () => { browserTab = 1 }, "What Nexus is sending"), slot("Zoom out", true, () => browserZoomBy(-0.1), "Smaller page")]
-        const common = [slot("Play options", g, openPlayOptions, "Play original, Play with mods, launch options"), slot("Game menu", g, () => { menuIndex = 0; sheet = "gamemenu" }, "Everything for this game"),
+        const common = [slot("Play options", g, openPlayOptions, "Play without mods, launch options"), slot("Game menu", g, () => { menuIndex = 0; sheet = "gamemenu" }, "Everything for this game"),
                         slot("Settings", true, openSettings, "Look, controls and accounts"), slot("Games", games.length > 0, openGamesPick, "Every game, last played first")]
         if (k === "get") return [slot("Search", sources.length > 0, () => { if (modPage) getBack(); getBarRun(Math.max(0, getBar.findIndex(x => x.key === "search"))) }, "Find mods by name"),
                                  slot("Sort", sources.length > 0, () => pickBar("sort"), "Trending, Newest, Most liked"),
