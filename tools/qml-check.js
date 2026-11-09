@@ -17,6 +17,8 @@ function checkFile(file) {
   const n = src.length;
   const lineAt = (pos) => src.slice(0, pos).split("\n").length;
   const fail = (pos, msg) => errors.push(file + ":" + lineAt(pos) + ": " + msg);
+  // Ids must be unique in a file (an inline component has its own).
+  const idScopes = [new Set()];
 
   function skipSpace(stopAtNewline) {
     for (;;) {
@@ -187,7 +189,10 @@ function checkFile(file) {
         skipSpace(true);
         const t = ident();
         skipSpace(true);
+        // An inline component has ids of its own.
+        idScopes.push(new Set());
         object(t);
+        idScopes.pop();
         continue;
       }
       if (word === "enum") { const e = src.indexOf("}", i); i = e + 1; continue; }
@@ -198,7 +203,14 @@ function checkFile(file) {
       if (src[i] === "{" && /^[A-Z]/.test(word.split(".").pop())) { object(word); continue; }
       if (src[i] === ":") {
         i++;
-        if (word === "id") { skipSpace(true); if (!ident()) fail(i, "id with no name"); continue; }
+        if (word === "id") {
+          skipSpace(true);
+          const at = i, name = ident();
+          if (!name) fail(i, "id with no name");
+          else if (idScopes[idScopes.length - 1].has(name)) fail(at, "id " + name + " is not unique");
+          else idScopes[idScopes.length - 1].add(name);
+          continue;
+        }
         value(/^on[A-Z]/.test(word.split(".").pop()));
         continue;
       }

@@ -6473,7 +6473,7 @@ Window {
                         anchors.right: parent.right
                         anchors.rightMargin: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
-                        width: playRow.implicitWidth + app.px(24); height: app.px(38); radius: app.px(8)
+                        width: pagePlayRow.implicitWidth + app.px(24); height: app.px(38); radius: app.px(8)
                         opacity: Turbine.busy ? 0.7 : 1
                         // The focus ring when Play has the focus (a mod just arrived, or Up from the top).
                         border.color: c.text
@@ -6483,7 +6483,7 @@ Window {
                             GradientStop { position: 1; color: c.accent }
                         }
                         Row {
-                            id: playRow
+                            id: pagePlayRow
                             anchors.centerIn: parent
                             spacing: app.px(8)
                             Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
