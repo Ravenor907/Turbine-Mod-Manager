@@ -47,3 +47,24 @@ fn a_game_with_a_waiting_update_is_still_listed_and_found() {
     assert_eq!(steam::pending_update(g).unwrap().target.as_deref(), Some("26000001"));
     let _ = fs::remove_dir_all(&d);
 }
+
+#[test]
+fn a_steam_library_turbine_cant_read_is_named() {
+    use turbine_engine::steam;
+    let root = std::env::temp_dir().join(format!("turbine-unseen-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("steamapps")).unwrap();
+    std::fs::write(
+        root.join("steamapps/libraryfolders.vdf"),
+        "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"/mnt/games-drive/SteamLibrary\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"/run/media/deck/SD/SteamLibrary\"\n\t}\n}\n",
+    )
+    .unwrap();
+    let mut scan = turbine_engine::games::Scan::default();
+    let libs = steam::libraries(&root, &mut scan);
+    assert_eq!(libs.len(), 1, "only the root is readable");
+    // A drive outside the allowed folders is named, with why; a removable drive that isn't in is not.
+    assert_eq!(scan.problems.len(), 1, "{:?}", scan.problems);
+    assert!(scan.problems[0].starts_with(steam::UNSEEN_LIBRARY) && scan.problems[0].contains("/mnt/games-drive/SteamLibrary"), "{:?}", scan.problems);
+    assert!(scan.problems[0].contains(steam::UNSEEN_WHY));
+    let _ = std::fs::remove_dir_all(&root);
+}

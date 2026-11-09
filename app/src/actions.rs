@@ -1816,6 +1816,37 @@ impl qobject::Turbine {
         );
     }
 
+    pub fn allow_folder(&self, folder: &QString) -> QString {
+        let folder = folder.to_string();
+        let p = Path::new(&folder);
+        // Only a plain absolute folder, never a flatpak keyword or anything with its own options.
+        let plain = p.is_absolute() && !folder.contains(['\n', '\0', ';', '=']) && !folder.starts_with('-') && folder.len() < 1024;
+        if !plain {
+            return QString::from("That folder can't be allowed from here.");
+        }
+        crate::log::line("action", &format!("Allow Turbine to read {folder}"));
+        let out = std::process::Command::new("flatpak-spawn")
+            .args(["--host", "flatpak", "override", "--user"])
+            .arg(format!("--filesystem={folder}"))
+            .arg(APP_ID)
+            .stdin(std::process::Stdio::null())
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                crate::log::line("action", &format!("Turbine may read {folder} from its next start"));
+                QString::default()
+            }
+            Ok(o) => {
+                crate::log::line("action", &format!("Allowing {folder} failed: {}", String::from_utf8_lossy(&o.stderr).trim()));
+                QString::from("Turbine couldn't allow that folder. The reason is in the activity log.")
+            }
+            Err(e) => {
+                crate::log::line("action", &format!("Allowing {folder} failed: {e}"));
+                QString::from("Turbine couldn't allow that folder. The reason is in the activity log.")
+            }
+        }
+    }
+
     pub fn restart(self: Pin<&mut Self>) {
         crate::log::line("update", "Restarting into the new version");
         let mut cmd = if Path::new("/.flatpak-info").exists() {

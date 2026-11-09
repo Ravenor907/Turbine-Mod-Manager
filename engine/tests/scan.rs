@@ -34,7 +34,7 @@ fn fake_home() -> Home {
     write(
         &sapps.join("libraryfolders.vdf"),
         &format!(
-            "\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{}\"\n}}\n\"2\"\n{{\n\"path\" \"/nowhere/missing card\"\n}}\n}}\n",
+            "\"libraryfolders\"\n{{\n\"0\"\n{{\n\"path\" \"{}\"\n}}\n\"1\"\n{{\n\"path\" \"{}\"\n}}\n\"2\"\n{{\n\"path\" \"/run/media/deck/missing card\"\n}}\n}}\n",
             steam.display(),
             sd.display()
         ),

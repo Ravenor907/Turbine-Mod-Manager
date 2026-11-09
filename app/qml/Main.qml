@@ -6754,7 +6754,11 @@ Window {
         { kind: "action", key: "steamart", title: "Steam library art", how: steamArt.on ? "Turbine's pictures in your Steam library (your own pictures are never replaced)" : "Off: Steam shows its own pictures for Turbine", action: steamArt.on ? "Remove" : "Add" }
     ] : []).concat(hiddenIds.length > 0 ? [
         { kind: "action", key: "unhide", title: "Games hidden from the rail: " + hiddenIds.length, how: "Puts them back on the rail", action: "Show them" }
-    ] : [])
+    ] : []).concat(unseenFolders.map(f => (
+        // 0.6 (integration I5): a Steam library Turbine isn't allowed to read, with the one press that allows it.
+        { kind: "action", key: "allowfolder", folder: f, title: "Turbine can't see " + f, how: "Your games there don't show. Allow lets Turbine read that folder (it restarts once).", action: "Allow" })))
+    // Steam libraries the scan found but isn't allowed to read (engine steam.rs, UNSEEN_LIBRARY).
+    readonly property var unseenFolders: String(Turbine.problems || "").split("\n").map(l => (l.match(/^Can't see the Steam library at (.*) \(Turbine isn't allowed to read that folder\)$/) || [])[1]).filter(x => !!x)
     // 0.6: the optional Steam menu plugin (decky/): Turbine's panel in the Quick Access menu, through Decky Loader.
     // Whether Decky and the plugin are on this device is read on the host when Help opens and when the row is pressed.
     property var decky: ({ checked: false })
@@ -6911,6 +6915,12 @@ Window {
         signinMine: () => signinStart(),
         tutorial: () => openTutorial(0),
         unhide: () => { if (!shot.on) railSet.hidden = "[]"; orderGames(); toast.done("Every game is back on the rail.") },
+        allowfolder: r => {
+            const why = shot.on ? "" : Turbine.allowFolder(r.folder)
+            if (why !== "") { toast.problem(why); return }
+            openMsg({ title: "Turbine can read " + r.folder + " now", text: "It sees the games there after it starts again.",
+                      buttons: [{ key: "a", label: "Restart Turbine", run: () => { Turbine.restart(); Qt.quit() } }, { key: "b", label: "Later", run: () => {} }] })
+        },
         addChrome: () => showAddBrowser("noshortcut"),
         nxmHandler: () => Turbine.handlerSet(),
         browser: () => { if (browserFound) Turbine.browserCheck(); else noBrowser() },

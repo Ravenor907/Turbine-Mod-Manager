@@ -52,6 +52,18 @@ fn read_vdf(path: &Path, scan: &mut Scan) -> Option<Vdf> {
 }
 
 /// Library folders listed by Steam, with Steam's own folder first. Missing ones (an SD card that's out) are skipped.
+/// The start of the scan problem for a Steam library Turbine isn't allowed to read (the app offers to allow it).
+pub const UNSEEN_LIBRARY: &str = "Can't see the Steam library at ";
+pub const UNSEEN_WHY: &str = "Turbine isn't allowed to read that folder";
+
+/// Is this folder outside the ones Turbine's Flatpak may read (Steam's own folder, removable drives, ~/Games)? A
+/// library there that isn't visible may be there all the same; one under /run/media is a drive that isn't in.
+pub fn outside_allowed(p: &Path) -> bool {
+    let home = crate::home_dir();
+    let allowed = [home.join(".local/share/Steam"), home.join(".steam"), home.join("Games"), PathBuf::from("/run/media")];
+    !allowed.iter().any(|a| p.starts_with(a))
+}
+
 pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
     let mut out = vec![root.to_path_buf()];
     let file = root.join("steamapps/libraryfolders.vdf");
@@ -69,6 +81,9 @@ pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
                     if !out.contains(&real) {
                         out.push(real);
                     }
+                } else if outside_allowed(&p) {
+                    // 0.6 (integration I5): a library in a folder the Flatpak may not read is never silent.
+                    scan.problems.push(format!("{UNSEEN_LIBRARY}{} ({UNSEEN_WHY})", p.display()));
                 }
             }
         }

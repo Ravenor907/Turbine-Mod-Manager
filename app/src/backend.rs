@@ -598,6 +598,12 @@ pub mod qobject {
         /// Starts the newly installed Turbine; QML quits right after.
         #[qinvokable]
         fn restart(self: Pin<&mut Self>);
+        /// 0.6 (integration I5): lets Turbine's Flatpak read a folder (a Steam library it can't see), on the player's
+        /// press: `flatpak override --user --filesystem=<folder>` on the host, fixed arguments. "" when it worked, else
+        /// the plain reason.
+        #[qinvokable]
+        #[cxx_name = "allowFolder"]
+        fn allow_folder(self: &Self, folder: &QString) -> QString;
 
         // ------------------------------------------------ Nexus inside Turbine (web.rs, browse.rs)
 
