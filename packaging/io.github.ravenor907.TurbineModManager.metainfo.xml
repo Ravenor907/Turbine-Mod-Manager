@@ -15,6 +15,21 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.6" date="2026-11-09" type="development">
+      <description>
+        <p>Easier, clearer and checked on every screen:</p>
+        <ul>
+          <li>Elden Ring and other me3 games start with mods from Steam's Play; Turbine can set up Steam for you with one restart</li>
+          <li>Seamless Co-op chosen at Play, its settings one press away, and an optional Co-op tile in the Steam library</li>
+          <li>Taps never go through pop-ups; A selects and B goes back everywhere</li>
+          <li>Search, sort and categories take effect at once and always show the results</li>
+          <li>Simple mod names with the Nexus picture, and Edit settings right on the mod</li>
+          <li>Sign in to Nexus through Chrome that tells you what is happening</li>
+          <li>Plain errors with a next step, Steam library art, and a start-up animation</li>
+          <li>Optional Steam menu plugin (Decky)</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.58" date="2026-11-09" type="development">
       <description>
         <p>Modded launches through Steam, Edit settings and a roomier bar:</p>
