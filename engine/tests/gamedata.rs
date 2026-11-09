@@ -267,7 +267,8 @@ fn old_rules(store: Store, id: &str, runtime: Runtime) -> (Kind, String, bool, b
         option = None;
         help = None;
     }
-    if def.kind == Kind::Smapi && runtime == Runtime::Windows {
+    // 0.6: Heroic starts SMAPI through its own link (rules::launch_url_with), so the Steam wording is for Steam only.
+    if def.kind == Kind::Smapi && runtime == Runtime::Windows && store == Store::Steam {
         help = Some("This copy of Stardew Valley is the Windows version. Turbine sets SMAPI up from its Windows files, but Steam still starts the game itself: follow SMAPI's own guide at smapi.io/install for the Launch Option that starts StardewModdingAPI.exe instead.".into());
     }
     (def.kind, def.mod_root.into(), def.plugins, def.ordered, loader, def.short_name.map(Into::into), swap, option, help, def.family)
