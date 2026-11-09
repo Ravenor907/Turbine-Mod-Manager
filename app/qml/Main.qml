@@ -3699,6 +3699,11 @@ Window {
             stopReset(); sheet = ""; startPlay()
         } else if (sheet === "pick" && nxmAskQuiet(actStamp)) {
             note("nxm", "Press " + b + " ignored: made " + Math.round(actStamp - nxmShownAt) + " ms after the question showed")
+        } else if (sheet === "pick" && nxmAsking && b === "a" && nxmRingMoved && actStamp < nxmShownAt + nxmRingMove.interval) {
+            // 0.61 (break N3): an A made while the ring was still on Not now, handled after the timer moved it (a
+            // stalled window): it meant Not now.
+            note("nxm", "A made at " + Math.round(actStamp - nxmShownAt) + " ms, before the ring moved: Not now")
+            menuIndex = 1; pickRun(1)
         } else if (sheet === "pick" && nxmAsking && (b === "left" || b === "right" || b === "up" || b === "down")) {
             // Right (or Up) to Get it, Left (or Down) back to Not now. The player chose: the ring never moves by
             // itself after this (break M1).
@@ -4660,7 +4665,13 @@ Window {
                 () => { if (since() < 1050) return false; pad("right"); pad("left") },
                 () => { if (since() < 1700) return false; const o = binds()
                         check("Guard Left at about 1 s: ring on " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " at " + Math.round(since()) + " ms, A " + (o.a ? o.a.label : ""))
-                        pad("a"); check("Guard A then: " + (nxmAsking ? "still asking" : sheet === "" && nxmAskLink === "" ? "closed, nothing downloaded" : "other")) }
+                        pad("a"); check("Guard A then: " + (nxmAsking ? "still asking" : sheet === "" && nxmAskLink === "" ? "closed, nothing downloaded" : "other")) },
+                // 0.61 (N3): an A made at 1.1 s (ring still on Not now) but handled after the ring moved: Not now.
+                () => { if (sheet !== "") return false; ask() },
+                () => { if (since() < 1400) return false
+                        m.gets = nxmGets; m.ring = pickItems[menuIndex] ? pickItems[menuIndex].title : ""
+                        Turbine.selftestPadAged("a", Math.round(since() - 1100))
+                        check("Guard stalled A: made at 1100 ms, ring on " + m.ring + ", handled at " + Math.round(since()) + " ms: " + (nxmAsking ? "still asking" : nxmGets === m.gets && sheet === "" ? "Not now, nothing downloaded" : "GOT IT")) }
             ]
         }
         // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
@@ -6508,7 +6519,9 @@ Window {
     }
     // 0.6 (I17): after the quiet second the ring moves to Get it by itself, so A says yes (B is still Not now).
     // Started from the question's first frame on screen (nxmShown); a press of a direction or a tap stops it.
-    Timer { id: nxmRingMove; interval: 1200; onTriggered: if (app.nxmAsking && app.sheet === "pick" && app.menuIndex === 1) { app.menuIndex = 0; app.note("nxm", "The ring moved to Get it") } }
+    Timer { id: nxmRingMove; interval: 1200; onTriggered: if (app.nxmAsking && app.sheet === "pick" && app.menuIndex === 1) { app.menuIndex = 0; app.nxmRingMoved = true; app.note("nxm", "The ring moved to Get it") } }
+    property bool nxmRingMoved: false
+    property int nxmGets: 0
     // 0.6 (break M2): the quiet second and the ring's move count from the first frame that shows the question.
     property real nxmShownAt: 0
     property bool nxmWaitFrame: false
@@ -6517,6 +6530,7 @@ Window {
         nxmWaitFrame = false
         if (!nxmAsking) return
         nxmShownAt = Turbine.monoMs()
+        nxmRingMoved = false
         nxmRingMove.restart()
         note("nxm", "The question is on screen (" + how + ")")
     }
@@ -6594,6 +6608,7 @@ Window {
         const link = nxmAskLink, r = nxmAskInfo
         nxmAskLink = ""; nxmAskInfo = null
         if (link === "" || !r) return
+        nxmGets++
         note("nxm", "Get it: " + r.name)
         if (browserOpen && page === "browser") { Turbine.nxmDownload(link, r.game); edited(); return }
         const i = games.findIndex(g => g.id === r.game)

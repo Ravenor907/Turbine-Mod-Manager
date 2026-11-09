@@ -932,6 +932,7 @@ for size in $SIZES; do
   need "mmdguard-$size" "M8: after the quiet second the ring is on Get it ($size)" "Guard after the quiet second: ring on Get it, A Get it"
   need "mmdguard-$size" "M1: Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
   need "mmdguard-$size" "M1: then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
+  need "mmdguard-$size" "N3: an A made before the ring moved, handled after, is Not now ($size)" "Guard stalled A: made at 1100 ms, ring on Get it, handled at [0-9]+ ms: Not now, nothing downloaded"
   # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
   rm -rf "$PWD/fh/heldcheck-$size"; python3 tools/fake-home.py "$PWD/fh/heldcheck-$size" > /dev/null; h="$PWD/fh/heldcheck-$size"
   shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
