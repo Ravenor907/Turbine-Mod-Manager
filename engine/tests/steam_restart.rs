@@ -307,3 +307,49 @@ fn apply_command_and_args() {
     let a = steam_restart::script_args(Path::new("/d"), true, "steam://rungameid/1", &["x".into()]);
     assert_eq!(a, ["/d", "gamemode", "steam://rungameid/1", "--", "x"]);
 }
+
+#[test]
+fn steam_back_before_the_change_is_written_is_not_counted() {
+    if !tools_there() {
+        return;
+    }
+    // Game Mode's session starts Steam again while the change is still being made (the apply starts it itself here).
+    let d = tmp("toosoon");
+    let fake = FakeSteam::new(&d, "t");
+    fake.start();
+    let data = d.join("data");
+    let apply = d.join("bin/apply");
+    script(&apply, &format!("'{}'\nsleep 0.5\necho 'Launch Options for 1245620 set'\n", fake.steam_cmd.display()));
+    let (state, words) = fake.run(&data, "gamemode", "", &apply);
+    assert_eq!(state, "failed", "{words}");
+    assert!(words.contains("too soon"), "{words}");
+    let log = fs::read_to_string(steam_restart::log_file(&data)).unwrap();
+    assert!(log.contains("Steam started again before the change was written"), "{log}");
+    fake.stop();
+}
+
+#[test]
+fn a_change_written_after_steam_started_is_lost() {
+    use std::time::{Duration, SystemTime};
+    let d = tmp("since");
+    let data = d.join("data");
+    let cfg = d.join("userdata/42/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let local = cfg.join("localconfig.vdf");
+    fs::write(&local, CONFIG).unwrap();
+    let job = Job {
+        changes: vec![Change::Options { file: local.clone(), app_id: "1245620".into(), value: "x %command%".into() }],
+        resume: String::new(),
+        what: "ELDEN RING".into(),
+        at: 1_762_700_000,
+    };
+    steam_restart::apply_job(&data, &job).unwrap();
+    // Steam started a minute before the file was written: it runs on the old copy, so the change is lost.
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(SystemTime::now() - Duration::from_secs(60)));
+    assert_eq!((held.len(), lost.len()), (0, 1));
+    // Steam started after the write: it read it, so it held (and leaves the list).
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(SystemTime::now() + Duration::from_secs(5)));
+    assert_eq!((held.len(), lost.len()), (1, 0));
+    assert!(steam_setup::pending(&data).is_empty());
+    let _ = fs::remove_dir_all(&d);
+}

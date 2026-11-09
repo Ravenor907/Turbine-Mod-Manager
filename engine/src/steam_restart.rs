@@ -306,6 +306,13 @@ if out=$("$@" 2>&1); then
   say "Changed: $out"
   state="done"
   words=""
+  # 0.6 (break M3): Steam must still be closed now, or it may have read its old settings before the change landed
+  # (Game Mode's session starts it again quickly). Then it isn't counted: Turbine offers it again.
+  if steam_up; then
+    say "Steam started again before the change was written"
+    state="failed"
+    words="Steam started again too soon, so the change may not hold. Turbine offers it again."
+  fi
 else
   say "The change failed: $out"
   state="failed"

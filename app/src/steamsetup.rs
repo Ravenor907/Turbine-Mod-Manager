@@ -266,7 +266,7 @@ impl qobject::Turbine {
         if steam_setup::pending(&data).is_empty() || Job::load(&data).is_some() {
             return QString::from("{\"lost\":[]}");
         }
-        let (held, lost) = steam_setup::check_after_restart(&data);
+        let (held, lost) = steam_setup::check_after_restart_since(&data, steam_started());
         let names: Vec<String> = lost
             .iter()
             .map(|c| match c {
@@ -326,4 +326,28 @@ impl qobject::Turbine {
             Err(e) => crate::log::line("labs", &format!("Couldn't change the Proton log setting: {e}")),
         }
     }
+}
+
+/// 0.6 (break M3): when the running Steam started (its oldest process, asked on the host), or None when that can't
+/// be told (no Steam, or no answer): then a change that is in the file counts as held.
+fn steam_started() -> Option<std::time::SystemTime> {
+    use std::process::{Command, Stdio};
+    let host = |args: &[&str]| {
+        let mut c = if std::path::Path::new("/.flatpak-info").exists() {
+            let mut c = Command::new("flatpak-spawn");
+            c.arg("--host").args(args);
+            c
+        } else {
+            let mut c = Command::new(args[0]);
+            c.args(&args[1..]);
+            c
+        };
+        c.stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let pid = host(&["pgrep", "-o", "-x", "steam"])?;
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let secs: u64 = host(&["ps", "-o", "etimes=", "-p", &pid])?.trim().parse().ok()?;
+    std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(secs + 1))
 }

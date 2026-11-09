@@ -322,6 +322,17 @@ impl SteamChange {
     }
 
     /// Does Steam's file hold this change now?
+    /// Did a Steam started at `started` read this change (its file was written before then)? Unknown start: yes.
+    pub fn read_by(&self, started: Option<std::time::SystemTime>) -> bool {
+        let file = match self {
+            SteamChange::Tile { file, .. } | SteamChange::NoTile { file, .. } | SteamChange::Options { file, .. } => file,
+        };
+        match (started, fs::metadata(file).and_then(|m| m.modified())) {
+            (Some(s), Ok(m)) => m <= s,
+            _ => true,
+        }
+    }
+
     pub fn holds(&self) -> bool {
         match self {
             SteamChange::Tile { file, marker } | SteamChange::NoTile { file, marker } => {
@@ -379,11 +390,17 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
     save_pending(data, &list)
 }
 
-/// After Steam started again (`steam_started_since` from the app: Steam's start is newer than the change): the
-/// changes that held are done and leave the list; the ones that didn't are answered so the app makes them again
-/// the next time Steam is closed (and tells the player). Answers (held, lost).
+/// After Steam started again: the changes that held are done and leave the list; the ones that didn't are answered
+/// so the app makes them again the next time Steam is closed (and tells the player). Answers (held, lost).
 pub fn check_after_restart(data: &Path) -> (Vec<SteamChange>, Vec<SteamChange>) {
-    let (held, lost): (Vec<SteamChange>, Vec<SteamChange>) = pending(data).into_iter().partition(SteamChange::holds);
+    check_after_restart_since(data, None)
+}
+
+/// 0.6 (break M3): the same, with when the running Steam started. A change only counts as held when its file was
+/// written before Steam started (Steam then read it); written after, Steam is running on the old copy and writes
+/// it back when it closes, so it is lost even though the file has it now.
+pub fn check_after_restart_since(data: &Path, steam_started: Option<std::time::SystemTime>) -> (Vec<SteamChange>, Vec<SteamChange>) {
+    let (held, lost): (Vec<SteamChange>, Vec<SteamChange>) = pending(data).into_iter().partition(|c| c.holds() && c.read_by(steam_started));
     let _ = save_pending(data, &lost);
     (held, lost)
 }
