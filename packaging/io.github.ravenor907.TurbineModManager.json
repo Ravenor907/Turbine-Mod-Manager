@@ -45,6 +45,7 @@
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager.metainfo.xml /app/share/metainfo/io.github.ravenor907.TurbineModManager.metainfo.xml",
                 "mkdir -p /app/share/turbine-mod-manager/extension && cd extension && for f in *; do if [ \"$f\" != test ]; then cp -r \"$f\" /app/share/turbine-mod-manager/extension/; fi; done",
                 "install -Dm644 packaging/io.github.ravenor907.TurbineModManager-small.png /app/share/turbine-mod-manager/icon-small.png",
+                "for s in turbine coop; do install -Dm644 -t /app/share/turbine-mod-manager/steam-art/$s packaging/steam-art/$s/*.png; done",
                 "for n in 128 256 512; do install -Dm644 packaging/io.github.ravenor907.TurbineModManager-$n.png /app/share/icons/hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineModManager.png; done"
             ],
             "sources": [

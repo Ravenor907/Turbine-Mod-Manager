@@ -37,6 +37,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod sha256;
 pub mod steam;
+pub mod steam_art;
 pub mod store;
 pub mod thunderstore;
 pub mod updates;

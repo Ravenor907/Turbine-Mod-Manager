@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="430" viewBox="0 0 920 430">
+<defs>
+  <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#E6C67E"/><stop offset="0.55" stop-color="#C99E52"/><stop offset="1" stop-color="#8F6A2C"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#C99E52" stop-opacity="0.22"/><stop offset="1" stop-color="#C99E52" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#141109"/><stop offset="1" stop-color="#0B0A08"/>
+  </linearGradient>
+  <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#C99E52" stop-opacity="0"/><stop offset="0.5" stop-color="#C99E52"/><stop offset="1" stop-color="#C99E52" stop-opacity="0"/>
+  </linearGradient>
+  
+</defs>
+<rect width="920" height="430" fill="url(#ground)"/>
+<circle cx="700" cy="215" r="260" fill="url(#glow)"/>
+<mask id="m" maskUnits="userSpaceOnUse" x="560" y="15" width="400" height="400">
+  <image href="../src-mark-mask.png" x="560" y="15" width="400" height="400" transform="rotate(0 760.0 215.0)"/>
+</mask>
+<rect x="560" y="15" width="400" height="400" fill="url(#brass)" mask="url(#m)" opacity="0.14"/>
+<text x="70" y="185" font-family="Barlow" font-weight="600" font-size="64" letter-spacing="6" text-anchor="start" fill="#EADFC6" opacity="1">ELDEN RING</text>
+<rect x="70" y="212" width="400" height="2" fill="url(#rule)"/>
+<text x="66" y="305" font-family="Cinzel" font-weight="700" font-size="88" letter-spacing="12" text-anchor="start" fill="url(#brass)" opacity="1">CO-OP</text>
+<mask id="s" maskUnits="userSpaceOnUse" x="72" y="345" width="32" height="32">
+  <image href="../src-mark-mask.png" x="72" y="345" width="32" height="32" transform="rotate(0 88.0 361.0)"/>
+</mask>
+<rect x="72" y="345" width="32" height="32" fill="url(#brass)" mask="url(#s)" opacity="1.0"/>
+<text x="112" y="369" font-family="Cinzel" font-weight="700" font-size="20" letter-spacing="3" text-anchor="start" fill="#CDBE9F" opacity="1">TURBINE</text>
+<rect x="12" y="12" width="896" height="406" fill="none" stroke="#C99E52" stroke-opacity="0.35" stroke-width="2"/>
+</svg>

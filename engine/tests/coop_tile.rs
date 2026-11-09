@@ -2,7 +2,7 @@
 //! own tile, with a backup first, only while Steam is closed, and never with a second copy of the tile.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use turbine_engine::shortcuts::{self, TileChange};
 use turbine_engine::vdf;
 
@@ -165,22 +165,37 @@ fn tile_in_a_new_file_and_renumbering() {
 }
 
 #[test]
-fn art_is_named_by_the_appid() {
+fn tile_with_its_art_and_icon() {
     let d = tmp("art");
-    let art = d.join("art");
+    let art = d.join("coop");
     fs::create_dir_all(&art).unwrap();
-    fs::write(art.join("cover.png"), "c").unwrap();
-    fs::write(art.join("hero.jpg"), "h").unwrap();
-    let file = d.join("config/shortcuts.vdf");
-    let got = shortcuts::copy_tile_art(&art, &file, 3_871_208_806).unwrap();
-    let names: Vec<String> = got.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
-    assert_eq!(names, ["3871208806p.png", "3871208806_hero.jpg"]);
-    assert!(Path::new(&d.join("config/grid/3871208806p.png")).is_file());
-    fs::write(d.join("config/grid/other.png"), "x").unwrap();
-    shortcuts::remove_tile_art(&file, 3_871_208_806);
-    assert!(!d.join("config/grid/3871208806p.png").exists());
-    assert!(d.join("config/grid/other.png").exists(), "only Turbine's own names");
-    assert!(shortcuts::copy_tile_art(&d.join("none"), &file, 1).unwrap().is_empty());
+    for p in ["capsule", "wide", "hero", "logo", "icon"] {
+        fs::write(art.join(format!("{p}.png")), p).unwrap();
+    }
+    let file = d.join("userdata/9/config/shortcuts.vdf");
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, steam_file()).unwrap();
+    let record = d.join("data/steam-art.json");
+    let tile = shortcuts::coop_tile("ELDEN RING", "steam:1245620", "io.github.ravenor907.TurbineModManager");
+    let marker = shortcuts::coop_marker("steam:1245620");
+    // Steam running: neither the tile nor its art.
+    assert!(shortcuts::add_tile_with_art(&file, &tile, &marker, &art, &record, true).is_err());
+    assert!(!d.join("userdata/9/config/grid").exists());
+    assert_eq!(shortcuts::add_tile_with_art(&file, &tile, &marker, &art, &record, false).unwrap(), TileChange::Added(3_871_208_806));
+    let grid = d.join("userdata/9/config/grid");
+    for n in ["3871208806p.png", "3871208806.png", "3871208806_hero.png", "3871208806_logo.png", "3871208806_icon.png"] {
+        assert!(grid.join(n).is_file(), "{n}");
+    }
+    let doc = vdf::parse_binary(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(doc.str_at(&["shortcuts", "2", "icon"]), Some(grid.join("3871208806_icon.png").to_str().unwrap()));
+    // Turbine's own shortcut is never taken for the tile, and the tile never for Turbine.
+    assert!(shortcuts::find_turbine_file(&d).is_none());
+    // Remove: the tile and Turbine's art go; the player's own picture for it stays.
+    fs::write(grid.join("3871208806_hero.png"), "the player's own").unwrap();
+    assert_eq!(shortcuts::remove_tile_with_art(&file, &marker, &record, false).unwrap(), TileChange::Removed(3_871_208_806));
+    assert!(!grid.join("3871208806p.png").exists());
+    assert!(!grid.join("3871208806_icon.png").exists());
+    assert_eq!(fs::read_to_string(grid.join("3871208806_hero.png")).unwrap(), "the player's own");
     let _ = fs::remove_dir_all(&d);
 }
 

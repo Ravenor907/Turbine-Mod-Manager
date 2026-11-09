@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400">
+<defs>
+  <linearGradient id="brass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#E6C67E"/><stop offset="0.55" stop-color="#C99E52"/><stop offset="1" stop-color="#8F6A2C"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#C99E52" stop-opacity="0.22"/><stop offset="1" stop-color="#C99E52" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#141109"/><stop offset="1" stop-color="#0B0A08"/>
+  </linearGradient>
+  <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#C99E52" stop-opacity="0"/><stop offset="0.5" stop-color="#C99E52"/><stop offset="1" stop-color="#C99E52" stop-opacity="0"/>
+  </linearGradient>
+  
+</defs>
+
+<text x="6" y="150" font-family="Barlow" font-weight="600" font-size="132" letter-spacing="12" text-anchor="start" fill="#EADFC6" opacity="1">ELDEN RING</text>
+<text x="0" y="330" font-family="Cinzel" font-weight="700" font-size="170" letter-spacing="20" text-anchor="start" fill="url(#brass)" opacity="1">CO-OP</text>
+</svg>

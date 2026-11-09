@@ -189,7 +189,7 @@ pub fn find_turbine(home: &Path) -> Option<(u32, String)> {
             continue;
         }
         let Ok(list) = parse(&bytes) else { continue };
-        if let Some(s) = list.iter().find(|s| is_turbine(s)) {
+        if let Some(s) = list.iter().find(|s| is_turbine(s) && !s.launch_options.contains("--play-coop")) {
             return Some((s.appid, s.name.clone()));
         }
     }
@@ -224,6 +224,8 @@ pub struct NewShortcut {
     /// The Flatpak's id when the program is `flatpak run <id>` (Steam's own "Add a non-Steam game" fills it the same
     /// way); empty otherwise.
     pub flatpak_id: String,
+    /// The icon file Steam shows for it (the co-op tile's own icon in the grid folder); empty for none.
+    pub icon: String,
 }
 
 impl NewShortcut {
@@ -249,6 +251,7 @@ pub fn coop_tile(game_name: &str, game_id: &str, flatpak_id: &str) -> NewShortcu
         start_dir: "\"/usr/bin/\"".into(),
         launch_options: format!("run --branch=stable --arch=x86_64 {flatpak_id} {}", coop_marker(game_id)),
         flatpak_id: flatpak_id.into(),
+        icon: String::new(),
     }
 }
 
@@ -386,7 +389,7 @@ pub fn add_shortcut(file: &Path, s: &NewShortcut, marker: &str, steam_running: b
             I::text("AppName", &s.name),
             I::text("Exe", &s.exe),
             I::text("StartDir", &s.start_dir),
-            I::text("icon", ""),
+            I::text("icon", &s.icon),
             I::text("ShortcutPath", ""),
             I::text("LaunchOptions", &s.launch_options),
             I::int("IsHidden", 0),
@@ -425,44 +428,42 @@ pub fn remove_shortcut(file: &Path, marker: &str, steam_running: bool) -> Result
     Ok(TileChange::Removed(appid))
 }
 
-/// The library art Steam shows for a shortcut, by the names Turbine's art folder uses and the names Steam's grid
-/// folder wants: (art name, grid file name before the extension).
-pub fn art_names(appid: u32) -> [(&'static str, String); 5] {
-    [
-        ("cover", format!("{appid}p")),
-        ("wide", format!("{appid}")),
-        ("hero", format!("{appid}_hero")),
-        ("logo", format!("{appid}_logo")),
-        ("icon", format!("{appid}_icon")),
-    ]
-}
-
-/// Copies the tile's art (cover/wide/hero/logo/icon .png or .jpg in `art_dir`) into the grid folder next to the
-/// shortcuts file, named by the shortcut's appid. Missing pieces are skipped. Answers the files written.
-pub fn copy_tile_art(art_dir: &Path, file: &Path, appid: u32) -> Result<Vec<PathBuf>, String> {
-    let grid = file.with_file_name("grid");
-    let mut out = Vec::new();
-    for (src, dst) in art_names(appid) {
-        for ext in ["png", "jpg"] {
-            let from = art_dir.join(format!("{src}.{ext}"));
-            if from.is_file() {
-                std::fs::create_dir_all(&grid).map_err(|e| e.to_string())?;
-                let to = grid.join(format!("{dst}.{ext}"));
-                std::fs::copy(&from, &to).map_err(|e| format!("Couldn't copy {}: {e}", from.display()))?;
-                out.push(to);
-                break;
-            }
+/// Adds the co-op tile with its art: the art (capsule, wide, hero, logo, icon from `art_dir`, see
+/// steam_art::COOP_PARTS) goes into the grid folder by the tile's appid first, never over the player's own, and the
+/// tile's icon is the icon there. `record`: Turbine's art record.
+pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir: &Path, record: &Path, steam_running: bool) -> Result<TileChange, String> {
+    let mut t = tile.clone();
+    let appid = t.appid();
+    let grid = crate::steam_art::grid_dir(file);
+    if !steam_running {
+        let done = crate::steam_art::add_art(art_dir, &grid, appid, crate::steam_art::COOP_PARTS, record).map_err(|e| format!("Couldn't add the tile's art ({e})"))?;
+        if let Some((icon, _)) = done.iter().find(|(p, o)| p.to_string_lossy().ends_with("_icon.png") && *o != crate::steam_art::ArtOutcome::NoSource) {
+            t.icon = icon.to_string_lossy().to_string();
         }
     }
-    Ok(out)
+    add_shortcut(file, &t, marker, steam_running)
 }
 
-/// Removes the art `copy_tile_art` put in the grid folder for this appid (only those names).
-pub fn remove_tile_art(file: &Path, appid: u32) {
-    let grid = file.with_file_name("grid");
-    for (_, dst) in art_names(appid) {
-        for ext in ["png", "jpg"] {
-            let _ = std::fs::remove_file(grid.join(format!("{dst}.{ext}")));
+/// Removes the co-op tile and Turbine's own art for it.
+pub fn remove_tile_with_art(file: &Path, marker: &str, record: &Path, steam_running: bool) -> Result<TileChange, String> {
+    let r = remove_shortcut(file, marker, steam_running)?;
+    if let TileChange::Removed(appid) = r {
+        crate::steam_art::remove_art(&crate::steam_art::grid_dir(file), appid, record).map_err(|e| format!("Couldn't remove the tile's art ({e})"))?;
+    }
+    Ok(r)
+}
+
+/// Turbine's own shortcut with the shortcuts.vdf it is in (read only): for its library art.
+pub fn find_turbine_file(home: &Path) -> Option<(PathBuf, u32)> {
+    for f in shortcut_files(home) {
+        let Ok(bytes) = std::fs::read(&f) else { continue };
+        if bytes.len() > 16 << 20 {
+            continue;
+        }
+        let Ok(list) = parse(&bytes) else { continue };
+        if let Some(s) = list.iter().find(|s| is_turbine(s) && !s.launch_options.contains("--play-coop")) {
+            return Some((f, s.appid));
         }
     }
+    None
 }
