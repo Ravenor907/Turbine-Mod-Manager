@@ -363,7 +363,7 @@ shoot "mods-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim "--selftest-impor
 shoot "mods-desktop-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim --layout=desktop "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
 need mods-1024x700 "Bar at 1024 wide: nothing overlaps Play or the edge" "Bar check \(mods, 1024x700, size [0-9]+%\): [0-9]+ items, 0 problems"
 need mods-desktop-1024x700 "Bar at 1024 wide, Desktop layout" "Bar check \(mods, 1024x700, size [0-9]+%\): [0-9]+ items, 0 problems"
-fresh "modsempty-1024"; h="$PWD/fh/modsempty-1024"
+rm -rf "$PWD/fh/modsempty-1024"; python3 tools/fake-home.py "$PWD/fh/modsempty-1024" > /dev/null; h="$PWD/fh/modsempty-1024"
 shoot "modsempty-1024x700" 1024x700 modsempty "$h" --game=$skyrim
 need modsempty-1024x700 "Empty My mods card at 1024 wide" "No mods card: No mods for Skyrim"
 fi
@@ -382,10 +382,10 @@ for size in $SIZES; do
   need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"/home/deck/.*/steam-launch/turbine-launch.sh %command%\""
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
   need "notstarted-$size" "Launch check: didn't start, with the fixes ($size)" "Launch check sheet: .* didn't start \| Play without mods; Activity log; Why won't it start\?"
-  fresh "modsempty-$size"; h="$PWD/fh/modsempty-$size"
+  rm -rf "$PWD/fh/modsempty-$size"; python3 tools/fake-home.py "$PWD/fh/modsempty-$size" > /dev/null; h="$PWD/fh/modsempty-$size"
   shoot "modsempty-$size" "$size" modsempty "$h" --game=$skyrim
   need "modsempty-$size" "Empty My mods: the centered card ($size)" "No mods card: No mods for Skyrim"
-  need "modsempty-$size" "Empty My mods: A Get mods, X Add a file ($size)" "Bar check \(modsempty, .*0 problems.*hint A, hint B, hint X"
+  need "modsempty-$size" "Empty My mods: A Get mods, X Add a file ($size)" "No mods card: .* \| legend A Get mods · B Games · X Add a file"
 done
 if [ "$MODE" = 1920x1080 ]; then
 shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=desktop \
@@ -742,7 +742,8 @@ for size in $SIZES; do
   shoot "coopsettings-$size" "$size" coopsettings "$h" --game=$er "--selftest-import=$h/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Seamless Co-op settings"
   need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
-  need "coopsettings-$size" "Play Seamless Co-op beside Play ($size)" "Bar check \(coopsettings.*co-op, Play"
+  need "coopsettings-$size" "Play Seamless Co-op beside Play ($size)" "Co-op beside Play: true"
+  need "coopsettings-$size" "The bar with Co-op: nothing overlaps ($size)" "Bar check \(coopbar, .*0 problems \| .*co-op, Play"
   shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
   need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"
 done
@@ -756,7 +757,7 @@ for size in $SIZES; do
   need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset · Y Plain text"
   need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
   need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"
-  ini=$(find "$h/.local/share/Steam/steamapps/common" -name LanternGlow.ini 2>/dev/null | head -n1)
+  ini=$(find "$h" -name LanternGlow.ini -path "*Data/SKSE/Plugins/*" -not -path "*turbine-mod-manager*" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
   fresh "gameupdate-$size"; h="$PWD/fh/gameupdate-$size"

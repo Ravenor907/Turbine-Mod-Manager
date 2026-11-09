@@ -261,6 +261,13 @@ function finalNames(file) {
   while ((m = re.exec(src))) {
     if (FINAL.has(m[1])) out.push(file + ":" + (src.slice(0, m.index).split("\n").length + 1) + ": property " + m[1] + " has the name of an Item property (Cannot override FINAL property)");
   }
+  // A property with the name of a function in the same file hides the function ("is not a function" at run time).
+  // (The root object's own, four spaces in.)
+  const fns = new Set([...src.matchAll(/^    function\s+(\w+)\s*\(/gm)].map(x => x[1]));
+  const re2 = /^    (?:readonly\s+|required\s+|default\s+)*property\s+[\w.<>]+\s+(\w+)/gm;
+  while ((m = re2.exec(src))) {
+    if (fns.has(m[1])) out.push(file + ":" + (src.slice(0, m.index).split("\n").length + 1) + ": property " + m[1] + " has the name of a function in this file");
+  }
   return out;
 }
 

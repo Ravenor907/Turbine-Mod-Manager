@@ -428,10 +428,12 @@ Window {
                     app.act("right")
                     app.note("shot", "After Right: " + (r && r.f ? settingsView.valueOf(r.f) : "") + ", " + settingsView.changes + " change; legend " + app.legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     app.act("start")
-                    step = 1; restart()
+                    step = 1; interval = 1500; restart()
                 } else app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
             } else if (shot.page === "coopsettings") {
                 app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                app.note("shot", "Co-op beside Play: " + coopBtn.visible + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
+                legend.check("coopbar")
                 app.openCoopSettings()
                 app.note("shot", "Seamless page: " + settingsView.title + " | first " + (settingsView.shown[0] && settingsView.shown[0].f ? settingsView.shown[0].f.key : "none")
                          + " | " + settingsView.shown.filter(r => r.f).map(r => r.f.key + ":" + r.f.kind).join(", "))
@@ -743,7 +745,7 @@ Window {
     function openLaunchSetup(o) {
         launchSetupData = o
         note("action", "Launch Options step for " + o.name + ": needs \"" + o.option + "\", set \"" + o.set + "\"")
-        const steps = ["A copies the text below.",
+        const steps = ["A copies the text above.",
                        "In Steam: " + o.name + ", the gear, Properties, General, Launch Options.",
                        o.set !== "" ? "Replace what is there now (" + o.set + ") with it: paste, or type it." : "Paste it there, or type it.",
                        "Close Properties, come back to Turbine and press Play.",
@@ -762,12 +764,12 @@ Window {
     // ---------------------------------------------------------------- 0.58: Edit settings
     property string settingsMod: ""          // the mod's id; "" for the game's own files
     property string settingsRel: ""
-    property string settingsBack: ""         // the sheet B goes back to
+    property string settingsReturn: ""         // the sheet B goes back to
     property var settingsTypeRow: null
     function openSettingsFile(modId, rel, title, pin, back) {
         const d = parse(Turbine.settingsOpen(modId, rel), { error: "Couldn't open it." })
         if (d.error) { toast.problem(d.error); return }
-        settingsMod = modId; settingsRel = rel; settingsBack = back || ""
+        settingsMod = modId; settingsRel = rel; settingsReturn = back || ""
         settingsView.title = title
         settingsView.sub = rel + (d.edited ? " · your version (Reset to default goes back to " + (modId === "" ? "the original" : "the mod's own") + ")" : "") + (d.fields.length > 0 ? " · " + plural(d.fields.length, "setting", "settings") : "")
         settingsView.pinFirst = pin || []
@@ -824,10 +826,10 @@ Window {
         note("action", "Edit settings saved: " + settingsRel + " (" + settingsView.changes + " changes)")
         if (settingsMod !== "") { Turbine.applyNow(); toast.done("Saved. Your settings go into the game now and stay through mod updates.") }
         else toast.done("Saved. The original is kept: Reset to default puts it back.")
-        openSettingsFile(settingsMod, settingsRel, settingsView.title, settingsView.pinFirst, settingsBack)
+        openSettingsFile(settingsMod, settingsRel, settingsView.title, settingsView.pinFirst, settingsReturn)
     }
     function settingsResetAsk() {
-        const title = settingsView.title, mod = settingsMod, rel = settingsRel, pin = settingsView.pinFirst, back = settingsBack
+        const title = settingsView.title, mod = settingsMod, rel = settingsRel, pin = settingsView.pinFirst, back = settingsReturn
         openMsg({ title: "Reset to default?", text: (mod === "" ? "Puts back " + rel + " as it was before you first changed it." : "Puts back the mod's own " + rel + ".") + " Your version is kept as a backup file.",
                   buttons: [{ key: "a", label: "Reset", run: () => {
                       const r = parse(Turbine.settingsReset(mod, rel), { ok: false, error: "Couldn't reset it." })
@@ -2833,7 +2835,7 @@ Window {
     readonly property bool canGetMods: !!rules && (!!rules.domain || sources.length > 0)
     // An empty My mods: the centered card (any game, after a Basic game's first-visit card).
     readonly property bool emptyMods: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && !acRefused && !basicIntro && !modPage
-    onEmptyModsChanged: if (emptyMods) note("page", "No mods card: No mods for " + gameTitle + " yet")
+    onEmptyModsChanged: if (emptyMods) Qt.callLater(() => note("page", "No mods card: No mods for " + gameTitle + " yet | legend " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · ")))
     readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame && !acRefused
                                        && (introSeen || []).indexOf(game.id) < 0
     onBasicIntroChanged: {
@@ -6043,6 +6045,17 @@ Window {
     }
     // Things to confirm on the device: what the build server can't check. title, how to try it, what should happen.
     readonly property var labsItems: [
+        // 0.58: modded launches through Steam, Seamless Co-op, Edit settings, the bar.
+        { id: "steam-me3", title: "Elden Ring with mods in Game Mode", how: "Game Mode, Elden Ring with a mod on: press Play. Do the one-time Launch Options step it shows (A copies the text; paste it in Steam, Properties, Launch Options), then press Play again.",
+          expect: "The game shows in Game Mode (not Steam's blank launching screen) with the mod, offline. Steam's own Play button starts it with mods too; with every mod off it starts normally online." },
+        { id: "steam-plain", title: "Play without mods after the step", how: "With the Launch Options set and mods on, Play options, Play without mods.",
+          expect: "Elden Ring starts normally with its anti-cheat; the next Play starts it with mods again." },
+        { id: "coop-play", title: "Play Seamless Co-op", how: "Elden Ring with Seamless Co-op: set a session password in Seamless Co-op settings, then press Co-op beside Play.",
+          expect: "Seamless Co-op starts with your password and its own .co2 save; Play alone starts the solo modded game." },
+        { id: "edit-settings", title: "Edit settings with the controller", how: "X on a mod with an .ini or .cfg file, Edit settings. Change a toggle, a number and a text (Steam keyboard), Start saves.",
+          expect: "The game uses the new values; Reset to default puts the mod's own back; a mod update keeps your values." },
+        { id: "launch-check", title: "The didn't start sheet", how: "Press Play on a game that can't start (for example Elden Ring with the Launch Options text removed in Steam).",
+          expect: "About 20 seconds later a sheet says it didn't start, with the Launch Options step, Play without mods and the Activity log." },
         // 0.57: anti-cheat games.
         { id: "ac-me3", title: "Elden Ring with mods through me3", how: "Elden Ring (or Nightreign, Armored Core VI): add a mod, press Play, answer Turn it off for mods. Turbine gets me3 the first time.",
           expect: "The game starts offline with the mod, without the anti-cheat. The game folder has no new files; your normal save is untouched (a separate save is used)." },
@@ -6074,7 +6087,7 @@ Window {
           expect: "No Save box; the file lands in Downloads, Game Mods, the game's folder, and Turbine adds it to that game." },
         { id: "desktop-pad", title: "Controller in Desktop Mode", how: "Desktop Mode with Steam running: use Turbine with the controller.",
           expect: "Buttons work (as Steam's mouse and keyboard if Turbine sees no pad itself), and no line says no controller was found." },
-        { id: "text-size", title: "Interface size in Game Mode", how: "In Game Mode, look at every page at Interface size 80% to 150%.",
+        { id: "text-size", title: "Interface size in Game Mode", how: "In Game Mode, look at every page at Interface size 50% to 150% (tap - and +, D-pad Left and Right, or A for the list).",
           expect: "Everything is readable; nothing is cut off or overlapping." },
         { id: "add-downloads", title: "Add mods from Downloads", how: "Put a mod's zip in Downloads, then Get mods > Add from Downloads.",
           expect: "The mod shows in the list, turned on, with its name and version." },
@@ -8227,7 +8240,7 @@ Window {
         visible: app.sheet === "settingsedit"
         onSaveClicked: app.settingsSaveNow()
         onResetClicked: app.settingsResetAsk()
-        onCloseClicked: { app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsBack }
+        onCloseClicked: { app.note("action", "Edit settings closed" + (changes > 0 ? " without saving " + changes + " changes" : "")); app.sheet = app.settingsReturn }
         onTypeAsked: (row, value, label) => {
             app.settingsTypeRow = row
             const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
@@ -8304,7 +8317,7 @@ Window {
         anchors.right: parent.right
         anchors.leftMargin: rail.width
         // 0.58: a taller bar with room between its groups.
-        height: Math.max(app.px(60), barGameCol.implicitHeight + app.px(12))
+        height: Math.max(app.px(60), app.tpx(30) + app.px(10), barGameCol.implicitHeight + app.px(12))
         color: c.panel
         // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
         z: app.wheelOpen ? 80 : 40
