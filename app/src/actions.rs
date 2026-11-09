@@ -21,7 +21,7 @@ use turbine_engine::rules::Kind;
 use turbine_engine::store::Import;
 use turbine_engine::{plugins, thunderstore, Game, Runtime, Store as Launcher};
 
-type Qt = CxxQtThread<qobject::Turbine>;
+pub(crate) type Qt = CxxQtThread<qobject::Turbine>;
 pub(crate) type NetTask = Box<dyn FnOnce(&mut Net, &Qt) + Send>;
 
 const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
@@ -102,6 +102,20 @@ where
 
 fn err_json(e: &str) -> String {
     format!("{{\"error\":{}}}", quote(e))
+}
+
+/// For anticheat.rs: the same helpers.
+pub(crate) fn progress_for(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
+    progress(qt)
+}
+pub(crate) fn say_for(qt: &Qt, text: impl Into<String>, level: &'static str) {
+    say(qt, text, level)
+}
+pub(crate) fn post_for<F>(qt: &Qt, f: F)
+where
+    F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
+{
+    post(qt, f)
 }
 
 /// Progress for the status line and the rail's Downloads ring, a few times a second at most.

@@ -50,11 +50,15 @@ pub(crate) fn anti_cheat(slot: &Slot) -> Option<rules::AntiCheat> {
         return None;
     }
     let index = basic::GameIndex::cached(&slot.game.install_dir);
-    index.anti_cheat().map(|name| rules::AntiCheat { name: name.into(), level: "warn".into(), note: String::new() })
+    index.anti_cheat().map(|name| rules::AntiCheat { name: name.into(), level: "warn".into(), ..Default::default() })
 }
 
 /// The line for Before you play while any mod is on in a game with anti-cheat.
 pub(crate) fn anti_cheat_check(slot: &Slot) -> Option<rules::Check> {
+    // 0.57: a data file that says how to play it with mods has its own lines (anticheat.rs).
+    if crate::anticheat::special(slot).is_some() {
+        return None;
+    }
     let a = anti_cheat(slot)?;
     if !slot.store.mods().iter().any(|m| m.enabled) {
         return None;
@@ -74,7 +78,15 @@ pub(crate) fn anti_cheat_check(slot: &Slot) -> Option<rules::Check> {
 pub(crate) fn rules_extra(slot: &Slot) -> String {
     let r = &slot.rules;
     let ac = anti_cheat(slot)
-        .map(|a| format!("{{\"name\":{},\"level\":{},\"note\":{}}}", quote(&a.name), quote(&a.level), quote(&a.note)))
+        .map(|a| {
+            format!(
+                "{{\"name\":{},\"level\":{},\"note\":{}{}}}",
+                quote(&a.name),
+                quote(&a.level),
+                quote(&a.note),
+                crate::anticheat::json_fields(slot, &a)
+            )
+        })
         .unwrap_or_else(|| "null".into());
     let answer = nexus_answer(&slot.game);
     let (state, name, how, cands) = match &answer {

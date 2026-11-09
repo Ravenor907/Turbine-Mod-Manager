@@ -675,6 +675,29 @@ for size in $SIZES; do
   shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"
 done
+# 0.57, anti-cheat games (a home of their own): Elden Ring asks once before Play with mods; its mod goes into the
+# Turbine-owned me3 profile and never the game folder; Before you play says me3 comes next; Halo's guide; Destiny 2
+# (online only) refuses mods.
+for size in $SIZES; do
+  rm -rf "$PWD/fh/ac-$size"; python3 tools/fake-home.py "$PWD/fh/ac-$size" --anticheat > /dev/null; h="$PWD/fh/ac-$size"
+  er=steam:1245620
+  shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
+  need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods"
+  need "acask-$size" "Anti-cheat: asked once before Play ($size)" "Anti-cheat sheet: msg Turn off anti-cheat for Elden Ring\\? \\| buttons Turn it off for mods, Not now"
+  shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
+  need "acdeploy-$size" "Anti-cheat: Before you play says me3 comes first ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*warn me3 isn't installed yet"
+  g="$h/.local/share/Steam/steamapps/common/ELDEN RING"
+  inprofile=$(find "$h" "$PWD/data/acdeploy-$size" -path "*me3-profile/mods/parts/am_f_9000.partsbnd.dcx" 2>/dev/null | head -n1)
+  if [ -n "$inprofile" ] && [ ! -e "$g/Game/parts/am_f_9000.partsbnd.dcx" ] && [ "$(find "$g" -type f | wc -l)" -eq 4 ]; then
+    echo "::notice title=Anti-cheat: the mod is in the me3 profile, the game folder untouched ($size)::$inprofile"
+  else echo "::error title=Anti-cheat: the mod isn't only in the me3 profile ($size)::profile: ${inprofile:-none}"; find "$g" -type f; fail=1; fi
+  shoot "acguide-$size" "$size" acguide "$h" --game=steam:976730
+  need "acguide-$size" "Anti-cheat: Halo's own switch in the game menu ($size)" "Game menu: .*How to play Halo MCC with mods"
+  need "acguide-$size" "Anti-cheat: Halo's guide ($size)" "Anti-cheat guide: Halo MCC"
+  shoot "acrefuse-$size" "$size" acrefuse "$h" --game=steam:1085660 "--selftest-import=$h/Downloads/Guardian Colors 1.0.zip"
+  need "acrefuse-$size" "Anti-cheat: an online-only game refuses mods ($size)" "needs its anti-cheat to play at all"
+  need "acrefuse-$size" "Anti-cheat: the refusal on screen ($size)" "Refused: tabs 1, status Needs its anti-cheat: no mods, Play shown"
+done
 if [ "$MODE" = 1280x800 ]; then
   fresh placestart; h="$PWD/fh/placestart"
   SHOOT_ENV="$NG" shoot placestart 1280x800 placestart "$h" --game=$bp "--selftest-import=$h/Downloads/Odd Layout 1.0.zip"

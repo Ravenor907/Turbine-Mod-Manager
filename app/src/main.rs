@@ -1,4 +1,5 @@
 mod actions;
+mod anticheat;
 mod anygame;
 mod backend;
 mod bridge;

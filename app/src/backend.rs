@@ -414,6 +414,21 @@ pub mod qobject {
         #[cxx_name = "installLoader"]
         fn install_loader(self: Pin<&mut Self>);
 
+        /// 0.57, anti-cheat games: the ask-once answer (true: off while mods are on, me3 starts it offline).
+        #[qinvokable]
+        #[cxx_name = "antiCheatOff"]
+        fn anti_cheat_off(self: Pin<&mut Self>, on: bool);
+
+        /// Gets me3 from its pinned GitHub release (SHA-256 checked); plays after when `then_play`.
+        #[qinvokable]
+        #[cxx_name = "installMe3"]
+        fn install_me3(self: Pin<&mut Self>, then_play: bool);
+
+        /// Gets Seamless Co-op from its pinned GitHub release (SHA-256 checked) and adds it like a loader.
+        #[qinvokable]
+        #[cxx_name = "installSeamless"]
+        fn install_seamless(self: Pin<&mut Self>);
+
         #[qinvokable]
         #[cxx_name = "cancelDownload"]
         fn cancel_download(self: Pin<&mut Self>);
@@ -2116,8 +2131,18 @@ impl qobject::Turbine {
                 match result {
                     Ok(r) => {
                         w.note(&game, &r);
-                        w.say("Starting the game with no mods. Your mods are kept.", "ok");
-                        launch(w, &game);
+                        // 0.57: an anti-cheat game starts normally only when its folder is original.
+                        let blocked = w.slot(&game).ok().and_then(|s| {
+                            crate::anticheat::keep_record(s);
+                            crate::anticheat::normal_launch_blocked(s)
+                        });
+                        match blocked {
+                            Some(why) => w.say(why, "error"),
+                            None => {
+                                w.say("Starting the game with no mods. Your mods are kept.", "ok");
+                                launch(w, &game);
+                            }
+                        }
                     }
                     Err(e) => {
                         w.post(move |mut t| {
@@ -2208,6 +2233,7 @@ impl qobject::Turbine {
             Some(game.id()), "Check before Play",
             false,
             Box::new(move |w: &mut Worker| {
+                let data = w.data_home.clone();
                 let json = match w.slot(&game) {
                     Ok(s) => {
                         let needs = s.store.mods().iter().any(|m| m.enabled && m.needs_loader);
@@ -2249,6 +2275,9 @@ impl qobject::Turbine {
                         if let Some(c) = crate::anygame::anti_cheat_check(s) {
                             extra.push(c);
                         }
+                        // 0.57: games whose data file says how to play them with mods (me3, Halo's switch, offline,
+                        // refused), and whether the game folder is original for the normal launch.
+                        extra.extend(crate::anticheat::checks(s, &data));
                         if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
                             list.clear(); // "Everything checks out" no longer says it all
                         }
@@ -2287,7 +2316,26 @@ impl qobject::Turbine {
                     w.say(format!("{} is still running. Close it, then press Play again.", game.name), "error");
                     return;
                 }
-                // 0.56: a copy of the saves first, so a mod that breaks them can't take them with it.
+                // 0.57: a game me3 starts with mods: the player's answer first, and me3 itself (fetched, then Play
+                // again).
+                let me3_play = w.slot(&game).ok().and_then(|s| {
+                    let on = s.store.mods().iter().any(|m| m.enabled);
+                    let a = crate::anticheat::special(s)?;
+                    (on && s.store.me3_game().is_some()).then_some(turbine_engine::anticheat::needs_ask(a) && !crate::anticheat::turned_off(s))
+                });
+                if me3_play == Some(true) {
+                    put_back(w);
+                    w.say(format!("Answer the anti-cheat question for {} first: press Play again.", game.name), "warn");
+                    return;
+                }
+                if me3_play.is_some() && crate::anticheat::me3_state(&w.data_home).is_err() {
+                    put_back(w);
+                    crate::log::line("anticheat", &format!("{}: me3 isn't installed (or changed): getting it, then Play", game.name));
+                    w.post(move |t| t.install_me3(true));
+                    return;
+                }
+                // 0.56: a copy of the saves first, so a mod that breaks them can't take them with it. (0.57: for a game
+                // me3 starts this is also the copy before its first modded launch.)
                 crate::health::backup_before_play(w, &game);
                 let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
                 crate::actions::sync_order(w, &game);
@@ -2324,8 +2372,28 @@ impl qobject::Turbine {
                             Some(e) => w.say(format!("Started without {what} this time. {e}"), "warn"),
                             None => w.say(applied_words(&r, &game), "ok"),
                         }
-                        launch(w, &game);
-                        watch_game(w, &game);
+                        // 0.57: anti-cheat games. With mods on, me3 starts it offline from its profile; with none on,
+                        // Steam starts it normally, only when the game folder is original.
+                        let blocked = w.slot(&game).ok().and_then(|s| {
+                            crate::anticheat::keep_record(s);
+                            if me3_play.is_some() {
+                                None
+                            } else {
+                                crate::anticheat::normal_launch_blocked(s)
+                            }
+                        });
+                        if let Some(why) = blocked {
+                            w.say(why, "error");
+                        } else if me3_play.is_some() {
+                            let wr: &Worker = w;
+                            let ok = wr.slots.get(&game.id()).is_some_and(|s| crate::anticheat::launch_me3(wr, s));
+                            if ok {
+                                watch_game(w, &game);
+                            }
+                        } else {
+                            launch(w, &game);
+                            watch_game(w, &game);
+                        }
                         w.show(&game, false);
                     }
                     Err(e) => {

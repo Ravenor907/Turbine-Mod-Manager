@@ -4,6 +4,7 @@
 // toolchain the build uses.
 #![allow(unknown_lints, clippy::chunks_exact_to_as_chunks)]
 
+pub mod anticheat;
 pub mod archives;
 pub mod basic;
 pub mod browser;

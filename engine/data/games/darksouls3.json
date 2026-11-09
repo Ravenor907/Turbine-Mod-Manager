@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "name": "DARK SOULS III",
+  "shortName": "Dark Souls III",
+  "ids": {
+    "steam": [
+      "374320"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "nexus": "darksouls3",
+  "antiCheat": {
+    "name": "Online checks for changed files",
+    "level": "warn",
+    "mode": "me3",
+    "me3": "darksouls3",
+    "gameExe": "Game/DarkSoulsIII.exe",
+    "offlineSetting": "Network, Launch setting: Start offline",
+    "note": "No anti-cheat program on PC, but the servers flag changed game files. me3 also keeps the game offline."
+  },
+  "layout": [
+    {
+      "match": "folder",
+      "values": [
+        "parts",
+        "chr",
+        "map",
+        "menu",
+        "msg",
+        "sfx",
+        "param",
+        "action",
+        "event",
+        "script",
+        "sd",
+        "font",
+        "other",
+        "mtd",
+        "obj",
+        "asset",
+        "movie",
+        "shader",
+        "expression",
+        "facegen"
+      ],
+      "to": "Game"
+    },
+    {
+      "match": "file",
+      "values": [
+        "regulation.bin"
+      ],
+      "to": "Game"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "AppData/Roaming/DarkSoulsIII"
+    ]
+  },
+  "notes": [
+    "Steam 374320. Nexus domain darksouls3. me3 has an offline lock for Dark Souls III since v0.8 (NEWS.md).",
+    "me3 v0.13.0 (github.com/garyttierney/me3, releases 2026-08-11) starts Game/DarkSoulsIII.exe directly, without the anti-cheat starter, with mods from a Turbine-owned profile; nothing is placed in the game folder. Recheck on the device before shipping."
+  ]
+}

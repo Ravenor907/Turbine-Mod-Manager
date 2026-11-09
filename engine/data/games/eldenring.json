@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "name": "ELDEN RING",
+  "shortName": "Elden Ring",
+  "ids": {
+    "steam": [
+      "1245620"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "nexus": "eldenring",
+  "antiCheat": {
+    "name": "Easy Anti-Cheat",
+    "level": "warn",
+    "mode": "me3",
+    "me3": "eldenring",
+    "starter": "Game/start_protected_game.exe",
+    "gameExe": "Game/eldenring.exe",
+    "note": "Mods load through me3, which starts the game offline without its anti-cheat."
+  },
+  "layout": [
+    {
+      "match": "folder",
+      "values": [
+        "SeamlessCoop"
+      ],
+      "to": "Game"
+    },
+    {
+      "match": "folder",
+      "values": [
+        "parts",
+        "chr",
+        "map",
+        "menu",
+        "msg",
+        "sfx",
+        "param",
+        "action",
+        "event",
+        "script",
+        "sd",
+        "font",
+        "other",
+        "mtd",
+        "obj",
+        "asset",
+        "movie",
+        "shader",
+        "expression",
+        "facegen"
+      ],
+      "to": "Game"
+    },
+    {
+      "match": "file",
+      "values": [
+        "regulation.bin"
+      ],
+      "to": "Game"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "AppData/Roaming/EldenRing"
+    ]
+  },
+  "notes": [
+    "Steam 1245620. Nexus domain eldenring. Saves: AppData/Roaming/EldenRing/<steam id>/ER0000.sl2 (Seamless Co-op: .co2).",
+    "me3 v0.13.0 (github.com/garyttierney/me3, releases 2026-08-11) starts Game/eldenring.exe directly, without the anti-cheat starter, with mods from a Turbine-owned profile; nothing is placed in the game folder. Recheck on the device before shipping."
+  ]
+}

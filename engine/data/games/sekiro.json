@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "name": "Sekiro: Shadows Die Twice",
+  "shortName": "Sekiro",
+  "ids": {
+    "steam": [
+      "814380"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "nexus": "sekiro",
+  "antiCheat": {
+    "name": "No anti-cheat",
+    "level": "warn",
+    "mode": "me3",
+    "me3": "sekiro",
+    "gameExe": "sekiro.exe",
+    "note": "Single player only. Mods load through me3."
+  },
+  "layout": [
+    {
+      "match": "folder",
+      "values": [
+        "parts",
+        "chr",
+        "map",
+        "menu",
+        "msg",
+        "sfx",
+        "param",
+        "action",
+        "event",
+        "script",
+        "sd",
+        "font",
+        "other",
+        "mtd",
+        "obj",
+        "asset",
+        "movie",
+        "shader",
+        "expression",
+        "facegen"
+      ],
+      "to": ""
+    },
+    {
+      "match": "file",
+      "values": [
+        "regulation.bin"
+      ],
+      "to": ""
+    }
+  ],
+  "saves": {
+    "proton": [
+      "AppData/Roaming/Sekiro"
+    ]
+  },
+  "notes": [
+    "Steam 814380. Nexus domain sekiro. No anti-cheat and no online play.",
+    "me3 v0.13.0 (github.com/garyttierney/me3, releases 2026-08-11) starts sekiro.exe directly, without the anti-cheat starter, with mods from a Turbine-owned profile; nothing is placed in the game folder. Recheck on the device before shipping."
+  ]
+}

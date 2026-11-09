@@ -113,6 +113,15 @@ pub trait ModRules: Send {
     fn guarded(&self) -> bool {
         false
     }
+    /// 0.57: me3's name for the game when me3 starts it with mods (anticheat.rs). Its mods then go into a
+    /// Turbine-owned me3 profile folder, never the game folder.
+    fn me3_game(&self) -> Option<String> {
+        None
+    }
+    /// 0.57: an online-only anti-cheat game: no mods are added at all (the words why).
+    fn refuses_mods(&self) -> Option<String> {
+        None
+    }
 }
 
 impl ModRules for GameRules {
@@ -152,6 +161,12 @@ impl ModRules for GameRules {
     }
     fn guarded(&self) -> bool {
         self.support_level != rules::Support::Full
+    }
+    fn me3_game(&self) -> Option<String> {
+        self.anti_cheat.as_ref().and_then(|a| a.me3_game()).map(str::to_string)
+    }
+    fn refuses_mods(&self) -> Option<String> {
+        self.anti_cheat.as_ref().filter(|a| a.refuses()).map(|_| crate::anticheat::REFUSE_WORDS.to_string())
     }
 }
 
@@ -795,10 +810,53 @@ impl Store {
         self.root.join("removed").join(id)
     }
 
-    /// The deploy bookkeeping for this game.
+    /// The deploy bookkeeping for this game. 0.57: a game me3 starts deploys into its Turbine-owned me3 profile
+    /// folder (with a record of its own), never the game folder.
     pub fn deploy_paths(&self) -> Paths {
+        if self.rules.me3_game().is_some() {
+            let d = self.root.join("deploy");
+            return Paths {
+                game: crate::anticheat::profile_mods(&self.root),
+                backups: d.join("me3-backups"),
+                record: d.join("me3-record.json"),
+                plan: d.join("me3-plan.json"),
+            };
+        }
+        self.game_folder_paths()
+    }
+
+    /// The deploy bookkeeping for the game folder itself (for a game me3 starts: what Turbine placed there before
+    /// 0.57, which must all come out before the normal anti-cheat launch).
+    pub fn game_folder_paths(&self) -> Paths {
         let d = self.root.join("deploy");
         Paths { game: self.game.install_dir.clone(), backups: d.join("backups"), record: d.join("record.json"), plan: d.join("plan.json") }
+    }
+
+    /// me3's name for this game when me3 starts it with mods.
+    pub fn me3_game(&self) -> Option<String> {
+        self.rules.me3_game()
+    }
+
+    /// How many files Turbine's game-folder record still lists.
+    pub fn files_in_game_folder(&self) -> usize {
+        Record::load(&self.game_folder_paths().record).map(|r| r.files.len()).unwrap_or(0)
+    }
+
+    /// Takes every file Turbine placed out of the game folder and puts the game's own back, then checks that
+    /// nothing is left and every file put back is as it was (deploy's own checks). For a game me3 starts this is
+    /// what makes the folder original for the normal launch; its me3 profile is left alone.
+    pub fn clean_game_folder(&self) -> io::Result<Report> {
+        let paths = self.game_folder_paths();
+        if !paths.record.exists() {
+            return Ok(Report::default());
+        }
+        deploy::recover(&paths)?;
+        let report = deploy::apply(&paths, &[], None)?;
+        let left = self.files_in_game_folder();
+        if left > 0 {
+            return Err(io::Error::other(format!("{left} mod files are still in the game folder")));
+        }
+        Ok(report)
     }
 
     /// Reads state.json. Returns true when it needed rewriting (missing or unreadable).
@@ -1099,6 +1157,9 @@ impl Store {
     /// The same download (same file name, or the same package from the same source) added again replaces the old
     /// one's files and keeps its place and on/off state.
     pub fn import_archive(&mut self, archive: &Path, source: SourceInfo) -> Result<Import, String> {
+        if let Some(why) = self.rules.refuses_mods() {
+            return Err(why);
+        }
         let target = self.target_for(archive, source, None)?;
         self.begin(archive, target)
     }
@@ -1946,6 +2007,16 @@ impl Store {
     /// taken out first, so the new copy goes in.
     fn deploy(&self, wanted: Vec<Wanted>, stop_after: Option<usize>) -> io::Result<Report> {
         let paths = self.deploy_paths();
+        // A game me3 starts: paths as the package folder has them (no leading Game/), and anything Turbine placed in
+        // the game folder before comes out first.
+        let wanted = if self.rules.me3_game().is_some() {
+            fs::create_dir_all(&paths.game)?;
+            self.clean_game_folder()?;
+            // The profile holds only Turbine's files, so nothing of the game's own is ever replaced there.
+            wanted.into_iter().map(|w| Wanted { rel: crate::anticheat::package_rel(&w.rel), may_replace: true, ..w }).collect()
+        } else {
+            wanted
+        };
         let recovered = deploy::recover(&paths)?.is_some();
         let record = Record::load(&paths.record)?;
         let stale: HashSet<String> = record
@@ -2086,6 +2157,11 @@ impl Store {
 
     /// Takes every mod file out of the game (nothing is deleted; mods stay on/off as they were).
     pub fn play_original(&mut self) -> io::Result<Report> {
+        // A game me3 starts: the mods stay in its profile (Steam's normal launch never reads it); the game folder
+        // must be original.
+        if self.rules.me3_game().is_some() {
+            return self.clean_game_folder();
+        }
         self.deploy(Vec::new(), None)
     }
 
@@ -2148,6 +2224,9 @@ impl Store {
     /// own files back from the backup folder (see `deploy::reset_from_backups`). Mods stay listed, all turned off.
     pub fn reset_game(&mut self) -> io::Result<Report> {
         let report = deploy::reset_from_backups(&self.deploy_paths())?;
+        if self.rules.me3_game().is_some() && self.game_folder_paths().record.exists() {
+            deploy::reset_from_backups(&self.game_folder_paths())?;
+        }
         for m in &mut self.mods {
             m.enabled = false;
         }

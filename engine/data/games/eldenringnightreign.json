@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "name": "ELDEN RING NIGHTREIGN",
+  "shortName": "Nightreign",
+  "ids": {
+    "steam": [
+      "2622380"
+    ]
+  },
+  "support": "basic",
+  "kind": "generic",
+  "nexus": "eldenringnightreign",
+  "antiCheat": {
+    "name": "Easy Anti-Cheat",
+    "level": "warn",
+    "mode": "me3",
+    "me3": "nightreign",
+    "starter": "Game/start_protected_game.exe",
+    "gameExe": "Game/nightreign.exe",
+    "note": "Mods load through me3, which starts the game offline without its anti-cheat."
+  },
+  "layout": [
+    {
+      "match": "folder",
+      "values": [
+        "parts",
+        "chr",
+        "map",
+        "menu",
+        "msg",
+        "sfx",
+        "param",
+        "action",
+        "event",
+        "script",
+        "sd",
+        "font",
+        "other",
+        "mtd",
+        "obj",
+        "asset",
+        "movie",
+        "shader",
+        "expression",
+        "facegen"
+      ],
+      "to": "Game"
+    },
+    {
+      "match": "file",
+      "values": [
+        "regulation.bin"
+      ],
+      "to": "Game"
+    }
+  ],
+  "saves": {
+    "proton": [
+      "AppData/Roaming/Nightreign"
+    ]
+  },
+  "notes": [
+    "Steam 2622380. Nexus domain eldenringnightreign.",
+    "me3 v0.13.0 (github.com/garyttierney/me3, releases 2026-08-11) starts Game/nightreign.exe directly, without the anti-cheat starter, with mods from a Turbine-owned profile; nothing is placed in the game folder. Recheck on the device before shipping."
+  ]
+}

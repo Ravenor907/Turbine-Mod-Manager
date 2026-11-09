@@ -175,12 +175,29 @@ impl Support {
 }
 
 /// A game's anti-cheat, from its data file or found in its folder.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AntiCheat {
     pub name: String,
-    /// "warn" (Play anyway allowed) or "stop".
+    /// "warn" (Play anyway allowed), "stop", or "refuse" (online only: no mods at all).
     pub level: String,
     pub note: String,
+    /// 0.57: "warn", "me3", "official", "offline" or "refuse" (see gamedata::AntiCheatFile). Empty is "warn".
+    pub mode: String,
+    pub starter: Option<String>,
+    pub game_exe: Option<String>,
+    pub me3: Option<String>,
+    pub offline_setting: Option<String>,
+    pub official_choice: Option<String>,
+}
+
+impl AntiCheat {
+    /// me3's name for the game, when me3 starts it with mods.
+    pub fn me3_game(&self) -> Option<&str> {
+        if self.mode == "me3" { self.me3.as_deref() } else { None }
+    }
+    pub fn refuses(&self) -> bool {
+        self.mode == "refuse" || self.level == "refuse"
+    }
 }
 
 fn leak(s: &str) -> &'static str {
@@ -367,7 +384,17 @@ impl GameRules {
             launch_help: def.native_launch.map(|(_, h)| h.to_string()),
             family: def.family,
             support_level: def.support,
-            anti_cheat: def.data.anti_cheat.as_ref().map(|a| AntiCheat { name: a.name.clone(), level: a.level.clone(), note: a.note.clone() }),
+            anti_cheat: def.data.anti_cheat.as_ref().map(|a| AntiCheat {
+                name: a.name.clone(),
+                level: a.level.clone(),
+                note: a.note.clone(),
+                mode: a.mode.clone(),
+                starter: a.starter.clone(),
+                game_exe: a.game_exe.clone(),
+                me3: a.me3.clone(),
+                offline_setting: a.offline_setting.clone(),
+                official_choice: a.official_choice.clone(),
+            }),
             layout: def.data.layout.clone(),
             nexus: def.data.nexus.clone(),
             thunderstore: def.data.thunderstore.clone(),

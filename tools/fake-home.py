@@ -306,5 +306,34 @@ def downloads(folder):
     write(os.path.join(folder, "Turbine profile - Lethal Company - Friday night.json"), json.dumps(share, indent=1))
 
 
+def anticheat_games(home):
+    """0.57: anti-cheat games for their own pictures (a separate home, so the shared one's rail stays as it was): Elden
+    Ring (me3), Halo MCC (its own switch) and Destiny 2 (online only), with made-up files."""
+    steam = os.path.join(home, ".local/share/Steam")
+    for app_id, name, folder, exe, top, bottom in [
+        ("1245620", "ELDEN RING", "ELDEN RING", "Game/eldenring.exe", (160, 140, 80), (30, 25, 15)),
+        ("976730", "Halo: The Master Chief Collection", "Halo The Master Chief Collection", "mcclauncher.exe", (60, 110, 60), (15, 25, 15)),
+        ("1085660", "Destiny 2", "Destiny 2", "destiny2.exe", (90, 90, 120), (20, 20, 30)),
+    ]:
+        apps = os.path.join(steam, "steamapps")
+        write(os.path.join(apps, f"appmanifest_{app_id}.acf"), manifest(app_id, name, folder))
+        write(os.path.join(apps, "common", folder, exe), "the game's own program\n")
+        os.makedirs(os.path.join(apps, "compatdata", app_id, "pfx/drive_c/users/steamuser/AppData/Roaming"), exist_ok=True)
+        png(os.path.join(steam, "appcache/librarycache", app_id, "library_600x900.png"), 60, 90, top, bottom)
+    er = os.path.join(steam, "steamapps/common/ELDEN RING/Game")
+    write(os.path.join(er, "start_protected_game.exe"), "the anti-cheat starter\n")
+    write(os.path.join(er, "regulation.bin"), "the game's own regulation\n")
+    write(os.path.join(er, "parts/am_f_0000.partsbnd.dcx"), "parts\n")
+    write(os.path.join(steam, "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing/76561190000000000/ER0000.sl2"), "a save\n")
+    write(os.path.join(steam, "steamapps/common/Destiny 2/BattlEye/BEService.exe"))
+    now = time.time()
+    zip_file(os.path.join(home, "Downloads", "Golden Armor 1.0.zip"), {
+        "parts/am_f_9000.partsbnd.dcx": b"made-up armor",
+    }, now - 3 * 86400)
+    zip_file(os.path.join(home, "Downloads", "Guardian Colors 1.0.zip"), {"colors.txt": b"x"}, now - 3 * 86400)
+
+
 if __name__ == "__main__":
     main(os.path.abspath(sys.argv[1]))
+    if "--anticheat" in sys.argv[2:]:
+        anticheat_games(os.path.abspath(sys.argv[1]))

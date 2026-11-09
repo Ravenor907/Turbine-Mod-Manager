@@ -49,13 +49,31 @@ pub struct SavesFile {
     pub game: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AntiCheatFile {
     pub name: String,
-    /// "warn" or "stop".
+    /// "warn", "stop" or "refuse" (online only: Turbine adds no mods at all).
     pub level: String,
     pub note: String,
+    /// 0.57: how Turbine plays it with mods. "warn" (the default: a warning before Play), "me3" (me3 starts the game
+    /// without its anti-cheat, mods from a Turbine-owned me3 profile; built-in files only), "official" (the game has
+    /// its own switch; `officialChoice` says which Play choice), "offline" (no anti-cheat on PC, but online play
+    /// flags changed files: `offlineSetting` says how to start offline), "refuse" (no mods).
+    pub mode: String,
+    /// The anti-cheat starter Steam runs ("Game/start_protected_game.exe"): its SHA-256 is recorded and checked.
+    pub starter: Option<String>,
+    /// The game's own program me3 starts ("Game/eldenring.exe").
+    pub game_exe: Option<String>,
+    /// me3's name for the game: eldenring, nightreign, darksouls3, sekiro or armoredcore6.
+    pub me3: Option<String>,
+    /// Where to set the game to start offline, in the game's own words.
+    pub offline_setting: Option<String>,
+    /// The exact Play choice in Steam that starts the game without its anti-cheat (Halo).
+    pub official_choice: Option<String>,
 }
+
+/// me3's names for the games it starts.
+pub const ME3_GAMES: &[&str] = &["eldenring", "nightreign", "darksouls3", "sekiro", "armoredcore6"];
 
 /// One game's data file.
 #[derive(Debug, Clone, PartialEq)]
@@ -176,7 +194,7 @@ fn str_list(v: Option<&Json>, key: &str) -> Result<Vec<String>, String> {
 /// ["basic"], kind ("bethesda", "bepinex", "smapi", "generic") ["generic"], handler (null, "cyberpunk", "witcher3",
 /// "kcd", "kcd2") [null], modRoot [""], plugins [false], ordered [true], loader ({"use", "source"}) [null],
 /// nativeLaunch ({"option", "help"}) [null], nexus [null], thunderstore [null], antiCheat ({"name", "level",
-/// "note"}) [null], layout ([{"match", "values", "to"}]) [[]], starters ([{"source", "id", "name", "what"}]) [[]],
+/// "note", "mode", "starter", "gameExe", "me3", "offlineSetting", "officialChoice"}; see `AntiCheatFile`) [null], layout ([{"match", "values", "to"}]) [[]], starters ([{"source", "id", "name", "what"}]) [[]],
 /// saves ({"proton", "native", "game"}: lists of paths) [none], notes (list of text, never shown) [[]].
 pub fn parse_game(file: &str, text: &str, builtin: bool) -> Result<GameFile, String> {
     let v = json::parse(text).map_err(|e| format!("isn't valid JSON ({} at byte {})", e.message, e.offset))?;
@@ -270,12 +288,57 @@ pub fn parse_game(file: &str, text: &str, builtin: bool) -> Result<GameFile, Str
     let anti_cheat = match v.get("antiCheat") {
         None | Some(Json::Null) => None,
         Some(a) => {
-            check_keys(a, &["name", "level", "note"], "\"antiCheat\"")?;
+            check_keys(a, &["name", "level", "note", "mode", "starter", "gameExe", "me3", "offlineSetting", "officialChoice"], "\"antiCheat\"")?;
             let level = opt_str(a, "level")?.unwrap_or_else(|| "warn".into());
-            if level != "warn" && level != "stop" {
-                return Err("\"antiCheat\".\"level\" can be \"warn\" or \"stop\"".into());
+            if !["warn", "stop", "refuse"].contains(&level.as_str()) {
+                return Err("\"antiCheat\".\"level\" can be \"warn\", \"stop\" or \"refuse\"".into());
             }
-            Some(AntiCheatFile { name: req_str(a, "name")?, level, note: opt_str(a, "note")?.unwrap_or_default() })
+            let mode = opt_str(a, "mode")?.unwrap_or_else(|| if level == "refuse" { "refuse".into() } else { "warn".into() });
+            if !["warn", "me3", "official", "offline", "refuse"].contains(&mode.as_str()) {
+                return Err(format!("\"antiCheat\".\"mode\" is \"{mode}\"; it can be warn, me3, official, offline or refuse"));
+            }
+            if (mode == "refuse") != (level == "refuse") {
+                return Err("\"antiCheat\": \"mode\" and \"level\" must both be \"refuse\", or neither".into());
+            }
+            let starter = opt_str(a, "starter")?;
+            let game_exe = opt_str(a, "gameExe")?;
+            for p in starter.iter().chain(game_exe.iter()) {
+                if !safe_path(p) {
+                    return Err(format!("\"antiCheat\" path \"{p}\" isn't a plain path inside the game folder"));
+                }
+            }
+            let me3 = opt_str(a, "me3")?;
+            if mode == "me3" {
+                // Starting a program on the host is Turbine's own decision, never a player's file's.
+                if !builtin {
+                    return Err("only Turbine's own files can say \"mode\": \"me3\"".into());
+                }
+                match &me3 {
+                    Some(g) if ME3_GAMES.contains(&g.as_str()) => {}
+                    _ => return Err(format!("\"antiCheat\".\"me3\" must be one of {}", ME3_GAMES.join(", "))),
+                }
+            } else if me3.is_some() {
+                return Err("\"antiCheat\".\"me3\" is only for \"mode\": \"me3\"".into());
+            }
+            let offline_setting = opt_str(a, "offlineSetting")?;
+            let official_choice = opt_str(a, "officialChoice")?;
+            if mode == "official" && official_choice.is_none() {
+                return Err("\"antiCheat\" with \"mode\": \"official\" needs \"officialChoice\"".into());
+            }
+            if mode == "offline" && offline_setting.is_none() {
+                return Err("\"antiCheat\" with \"mode\": \"offline\" needs \"offlineSetting\"".into());
+            }
+            Some(AntiCheatFile {
+                name: req_str(a, "name")?,
+                level,
+                note: opt_str(a, "note")?.unwrap_or_default(),
+                mode,
+                starter,
+                game_exe,
+                me3,
+                offline_setting,
+                official_choice,
+            })
         }
     };
     let mut layout = Vec::new();

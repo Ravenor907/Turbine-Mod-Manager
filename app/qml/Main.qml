@@ -124,7 +124,7 @@ Window {
                                       "playoptions", "findmods", "selectmods", "overlaps", "quickexit", "chain", "listbar",
                                       "checkfocus", "menuskse", "addbrowser", "slowhint",
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
-                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll"].indexOf(page) >= 0 || scripted
+                                      "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
         readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
@@ -290,6 +290,9 @@ Window {
             }
             // 0.57: My mods' Y pop-up (Find, Show, Sort, Select several), with Show "On" chosen.
             else if (shot.page === "listbar") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.listShow = "on"; findPopShot.start() }
+            // 0.57, anti-cheat games: Play asks once (Elden Ring); the mod goes into the me3 profile, and Before you
+            // play; Halo's guide; an online-only game refusing mods.
+            else if (["acask", "acdeploy", "acguide", "acrefuse"].indexOf(shot.page) >= 0) { app.tab = 0; app.zone = "main"; acShot.start() }
             // 0.57: Get mods' Y pop-up and Get mods scrolled down to full screen, once the cards are in.
             else if (shot.page === "findpop" || shot.page === "fullscroll") { app.zone = "main"; app.tab = 1; findPopShot.start() }
             // 0.52: A on Before you play runs the highlighted button; the mod and game menus offer the missing loader.
@@ -336,7 +339,7 @@ Window {
     Timer {
         running: shot.on
         // 0.57: pictures that wait for the cards or the engine, then press, then wait for what the press did.
-        interval: ["findpop", "fullscroll", "listbar"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
+        interval: ["findpop", "fullscroll", "listbar", "acask", "acdeploy", "acguide", "acrefuse"].indexOf(shot.page) >= 0 ? 9000 : shot.page === "browsertest" ? 200000 : shot.page === "regress" ? 48000 : shot.page === "browserpersist" ? 110000 : shot.page === "inputcheck" ? 45000 : shot.scripted ? 16000 : shot.page.indexOf("loot") === 0 || shot.page.indexOf("nxm") === 0 || shot.page === "getmodsback" ? 6500 : shot.slow ? 4500 : 1500
         // The overlay pictures are of the overlay window itself.
         onTriggered: (shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
     }
@@ -366,6 +369,28 @@ Window {
         }
     }
 
+    Timer {
+        id: acShot
+        interval: 3500
+        onTriggered: {
+            const a = app.acInfo
+            app.note("shot", "Anti-cheat rules: " + (a ? a.mode + ", ask " + a.needsAsk + ", off " + a.off + ", me3 ready " + a.me3Ready : "none") + ", " + app.mods.length + " mods")
+            if (shot.page === "acask") {
+                app.startPlay()
+                app.note("shot", "Anti-cheat sheet: " + app.sheet + " " + (app.msgData ? app.msgData.title : "") + " | buttons " + app.infoButtons.map(x => x.label).join(", "))
+            } else if (shot.page === "acdeploy") {
+                Turbine.applyNow()
+                app.acAnswered = ({ "steam:1245620": true })
+                Turbine.antiCheatOff(true)
+                app.startPlay()
+            } else if (shot.page === "acguide") {
+                app.note("shot", "Game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                app.openAcGuide()
+            } else {
+                app.note("shot", "Refused: tabs " + app.tabs.length + ", status " + app.statusNow.words + ", Play " + (playBtn.visible ? "shown" : "hidden"))
+            }
+        }
+    }
     // findpop: Y on Get mods once the cards are in, then Down to Sort. fullscroll: Down through the cards until the
     // bars and the rail are gone.
     Timer {
@@ -599,7 +624,35 @@ Window {
     readonly property bool loaderMissing: rules !== null && rules.loader !== null && rules.loader !== undefined && !rules.loaderInstalled
     readonly property string loaderShort: rules && rules.loader ? rules.loader.name.split(" (")[0] : ""
     readonly property var needLoader: loaderMissing ? mods.filter(m => m.enabled && m.needsLoader) : []
-    readonly property var tabs: ["My mods (" + mods.length + ")", "Get mods"].concat(rules && rules.plugins ? ["Load order"] : [])
+    readonly property var tabs: ["My mods (" + mods.length + ")"].concat(acRefused ? [] : ["Get mods"]).concat(rules && rules.plugins ? ["Load order"] : [])
+    // ---------------------------------------------------------------- anti-cheat games (0.57)
+    // The data file says how each is played with mods: "me3" (me3 starts it offline without the anti-cheat, mods in a
+    // Turbine-owned profile, asked once), "official" (Halo's own switch), "offline", "refuse" (online only: no mods).
+    readonly property var acInfo: rules && rules.antiCheat ? rules.antiCheat : null
+    readonly property string acMode: acInfo ? (acInfo.mode || "warn") : ""
+    readonly property bool acRefused: acMode === "refuse"
+    property var acAnswered: ({})          // games answered this run (the engine keeps the answer)
+    function acAskNeeded() { return !!game && acMode === "me3" && acInfo.needsAsk === true && !acInfo.off && !acAnswered[game.id] && mods.some(m => m.enabled) }
+    readonly property bool acOffNow: acMode === "me3" && !!acInfo && (acInfo.off === true || (!!game && !!acAnswered[game.id])) && mods.some(m => m.enabled)
+    // Turn off anti-cheat for <game>? A turns it off for mods (then `then`), B Not now.
+    function openAcAsk(then) {
+        if (!acInfo) return
+        note("action", "Anti-cheat question: " + acInfo.askTitle)
+        openMsg({ title: acInfo.askTitle, text: acInfo.askText, buttons: [
+            { key: "a", label: "Turn it off for mods", run: () => {
+                let a = Object.assign({}, acAnswered); a[game.id] = true; acAnswered = a
+                Turbine.antiCheatOff(true)
+                note("action", "Anti-cheat: off while mods are on")
+                if (then) then()
+            } },
+            { key: "b", label: "Not now", run: () => note("action", "Anti-cheat: not now (mods wait)") }] })
+    }
+    function openAcGuide() {
+        if (!acInfo) return
+        note("action", "Anti-cheat guide: " + gameTitle)
+        openMsg({ title: "Play " + gameTitle + " with mods", text: acInfo.officialWords || "", steps: acInfo.guide || [], buttons: [{ key: "b", label: "OK", run: () => {} }] })
+    }
+    readonly property bool seamlessIn: mods.some(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless")
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
     readonly property var listItems: {
         let l = shownMods.map(m => ({ kind: "mod", m: m }))
@@ -1208,7 +1261,8 @@ Window {
             return { level: "warn", words: warned.length === 1 ? warned[0].name + ": " + modWarns[warned[0].id] : plural(warned.length, "mod", "mods") + " may not work here", detail: "Before you play says why" }
         const on = mods.filter(m => m.enabled).length
         // Changes waiting to be saved show nothing (they go in by themselves); while saving, the line says Saving.
-        return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on",
+        if (acRefused) return { level: "warn", words: "Needs its anti-cheat: no mods", detail: "" }
+        return { level: "ok", words: "Ready to play", detail: !modsLoaded ? "" : mods.length === 0 ? "No mods yet" : plural(on, "mod", "mods") + " on" + (acOffNow ? " · " + acInfo.statusRow : ""),
                  pill: updateCount > 0 ? plural(updateCount, "update", "updates") + " ready"
                        : profileData && profileList.length > 1 ? "Loadout: " + profileData.active : "" }
     }
@@ -1399,6 +1453,9 @@ Window {
     // ---------------------------------------------------------------- Play
     function startPlay() {
         if (!game) return
+        // 0.57: an anti-cheat game me3 starts: asked once before the first Play with mods.
+        if (acAskNeeded()) { openAcAsk(startPlay); return }
+        if (acRefused && mods.some(m => m.enabled)) { toast.problem(acInfo.refuseWords); return }
         note("action", "Play " + game.name)
         if (!shot.on) { let p = parse(seen.played, []).filter(x => x !== game.id); p.unshift(game.id); seen.played = JSON.stringify(p.slice(0, 50)) }
         if (moving) endMove()
@@ -1638,7 +1695,7 @@ Window {
     // (onPageChanged and onTabChanged, near the top, call it too.)
     onModPageChanged: stopDangerHolds()
     readonly property var gameMenuItems: [
-        { icon: "play", title: "Play without mods", detail: "Starts the game with no mods. Nothing is deleted.", ok: true },
+        { icon: "play", title: "Play without mods", detail: acMode === "me3" ? "Starts it the normal way, with its anti-cheat. Nothing is deleted." : "Starts the game with no mods. Nothing is deleted.", ok: true },
         // One row for both ways back: the last setup that worked, or (with more saved) the list, newest first.
         { icon: "back", title: "Go back to a setup that worked",
           detail: lastGood ? "Last: " + when(lastGood.savedAt) + " · " + plural(lastGood.modsOn, "mod", "mods") + " on" + (setups.length > 1 ? " · " + plural(setups.length, "setup", "setups") + " saved" : "")
@@ -1655,7 +1712,16 @@ Window {
         { icon: "restore", title: "Put back my mod_order.txt", detail: "As it was before Turbine changed it. Turbine re-adds its own mods that are on at your next change or Play.", ok: true, act: "kcdrestore" }
     ] : []).concat([
         { icon: "profile", title: "Loadouts", detail: profileData && profileList.length > 1 ? "In use: " + profileData.active : "Save setups by name, switch, share", ok: true, act: "profiles" }
-    ]).concat(overlapCount > 0 ? [
+    ]).concat(acMode === "me3" && acInfo.needsAsk ? [
+        acInfo.off ? { icon: "power", title: "Anti-cheat: off while mods are on", detail: "A turns it back on: mods wait until you answer again", ok: true, act: "acon" }
+                   : { icon: "info", title: acInfo.askTitle, detail: "Mods load through me3, offline only", ok: true, act: "acask" }
+    ] : []).concat(acMode === "me3" && !acInfo.me3Ready ? [
+        { icon: "update", title: "Get me3", detail: "From its GitHub release, checked. Turbine gets it at the first Play with mods anyway.", ok: true, act: "me3" }
+    ] : []).concat(acMode === "me3" && acInfo.seamless && !seamlessIn ? [
+        { icon: "update", title: "Get Seamless Co-op", detail: "From its GitHub release, checked. Loads through me3; keeps its own .co2 saves.", ok: true, act: "seamless" }
+    ] : []).concat(acMode === "official" ? [
+        { icon: "info", title: "How to play " + gameTitle + " with mods", detail: "Its own Play choice without anti-cheat", ok: true, act: "acguide" }
+    ] : []).concat(overlapCount > 0 ? [
         { icon: "info", title: "Overlaps: " + plural(overlapCount, "mod shares", "mods share") + " files", detail: "Which mod's copy the game gets", ok: true, act: "overlaps" }
     ] : []).concat(updateCount > 0 ? [
         { icon: "update", title: "Update all", detail: plural(updateCount, "mod has", "mods have") + " a newer version", ok: true, act: "updateall" }
@@ -1778,6 +1844,11 @@ Window {
             else holdHint("5 seconds to reset the game files")
         }
         else if (item.act === "profiles") openProfiles()
+        else if (item.act === "acask") openAcAsk(null)
+        else if (item.act === "acon") { sheet = ""; let a = Object.assign({}, acAnswered); delete a[game.id]; acAnswered = a; Turbine.antiCheatOff(false); toast.info("Anti-cheat stays on. Mods wait until you answer again.") }
+        else if (item.act === "me3") { sheet = ""; Turbine.installMe3(false) }
+        else if (item.act === "seamless") { sheet = ""; Turbine.installSeamless() }
+        else if (item.act === "acguide") openAcGuide()
         else if (item.act === "loader") { sheet = ""; getLoader() }
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
         else if (item.act === "setups") openSetups()
@@ -2441,14 +2512,19 @@ Window {
         if (done.indexOf(game.id) >= 0) return
         if (!shot.on) { done.push(game.id); seen.antiCheatDone = JSON.stringify(done) }
         note("page", "Anti-cheat card: " + game.name + " (" + rules.antiCheat.name + ")")
-        openMsg({ title: gameTitle + " uses anti-cheat", reason: "anti-cheat in the game",
-                  text: gameTitle + " uses anti-cheat (" + rules.antiCheat.name + "). Mods that change its files can get you kicked or banned from online play. Use mods only in offline or single player modes.",
+        const a = rules.antiCheat
+        openMsg({ title: a.mode === "refuse" ? gameTitle + " needs its anti-cheat" : gameTitle + " uses anti-cheat", reason: "anti-cheat in the game",
+                  text: a.mode === "refuse" ? a.refuseWords
+                        : a.mode === "official" ? a.officialWords
+                        : a.mode === "me3" && a.needsAsk ? "Mods for " + gameTitle + " load through me3, which starts it offline without its anti-cheat. Turbine asks before the first Play with mods, and never changes the game's own files."
+                        : a.mode === "me3" ? "Mods for " + gameTitle + " load through me3. Turbine never changes the game's own files."
+                        : gameTitle + " uses anti-cheat (" + a.name + "). Mods that change its files can get you kicked or banned from online play. Use mods only in offline or single player modes.",
                   notes: rules.antiCheat.note ? [rules.antiCheat.note] : [],
                   buttons: [{ key: "b", label: "OK", run: () => {} }] })
     }
     // The first visit to a Basic game with no mods: what Basic support means (once per game).
     property var introSeen: null          // the games seen before this run (read once, so the card stays this run)
-    readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame
+    readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame && !acRefused
                                        && (introSeen || []).indexOf(game.id) < 0
     onBasicIntroChanged: {
         if (introSeen === null) introSeen = parse(seen.basicIntroDone, [])
@@ -3034,6 +3110,10 @@ Window {
                 if (it && it.kind === "mod") o.a = bind(ticked[it.m.id] ? "Untick" : "Tick", () => selectAct("a"))
                 o.b = bind("Done", () => selectAct("b"))
                 if (tickedCount > 0) o.x = bind("Act on " + tickedCount, () => selectAct("x"))
+                return o
+            }
+            if (acRefused && mods.length === 0) {
+                o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
             if (mods.length === 0 && modsLoaded && basicGame) {
@@ -5582,6 +5662,17 @@ Window {
     }
     // Things to confirm on the device: what the build server can't check. title, how to try it, what should happen.
     readonly property var labsItems: [
+        // 0.57: anti-cheat games.
+        { id: "ac-me3", title: "Elden Ring with mods through me3", how: "Elden Ring (or Nightreign, Armored Core VI): add a mod, press Play, answer Turn it off for mods. Turbine gets me3 the first time.",
+          expect: "The game starts offline with the mod, without the anti-cheat. The game folder has no new files; your normal save is untouched (a separate save is used)." },
+        { id: "ac-original", title: "Normal launch after mods", how: "After playing with mods, turn every mod off (or Play without mods).",
+          expect: "Steam starts it the normal way, with its anti-cheat, and online play works. Steam's Verify finds nothing to repair." },
+        { id: "ac-seamless", title: "Seamless Co-op through me3", how: "Elden Ring, game menu, Get Seamless Co-op. Then Play.",
+          expect: "Seamless Co-op starts with the game and uses its own .co2 saves; turning it off in My mods takes it out." },
+        { id: "ac-halo", title: "Halo MCC guide", how: "Halo MCC: add a mod, press Play.",
+          expect: "Before you play says to pick Anti-Cheat Disabled (Mods and Limited Services) in Steam's Play menu, and the mod works there." },
+        { id: "ac-refuse", title: "Online-only games refuse mods", how: "Open Dead by Daylight, Apex Legends or Destiny 2 and try Add from Downloads.",
+          expect: "Turbine says the game needs its anti-cheat and adds nothing." },
         { id: "pad-quiet", title: "Controller quiet after a game", how: "Play a game, press buttons as you quit it, then come back to Turbine.",
           expect: "Nothing happens in Turbine from buttons pressed in the game." },
         { id: "proton-bepinex", title: "Proton setting on a BepInEx game", how: "Add a BepInEx mod to Valheim, Lethal Company or Risk of Rain 2, then Play.",
@@ -6718,6 +6809,16 @@ Window {
                         buttonLabel: app.nexusUnknown ? "Pick the Nexus game" : "Add from Downloads"
                         buttonFocused: app.zone === "main"
                         onActivated: app.nexusUnknown ? app.openNexusPick() : app.openAdd()
+                    }
+                    // 0.57: an online-only anti-cheat game: no mods, and why.
+                    EmptyState {
+                        ui: kit
+                        anchors.fill: parent
+                        visible: app.page === "game" && app.acRefused && app.tab === 0 && app.mods.length === 0 && !app.modPage
+                        title: app.gameTitle + " needs its anti-cheat"
+                        body: app.acInfo ? app.acInfo.refuseWords : ""
+                        buttonKey: ""
+                        buttonLabel: ""
                     }
                     // A Basic game's first visit with no mods: what Basic support means.
                     EmptyState {
