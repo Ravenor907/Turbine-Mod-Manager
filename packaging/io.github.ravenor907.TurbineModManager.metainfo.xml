@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.57" date="2026-11-09" type="development">
+      <description>
+        <p>Full screen mods and anti-cheat games:</p>
+        <ul>
+          <li>No top bar: the game, its status and Play live in the bottom bar; scrolling down goes full screen</li>
+          <li>Y opens one pop-up for search, sort and categories</li>
+          <li>Elden Ring, Nightreign, Armored Core VI, Dark Souls III and Sekiro run mods offline through me3, without changing the game folder</li>
+          <li>Seamless Co-op through me3; a guide for Halo's own anti-cheat switch; online-only anti-cheat games never get mods</li>
+          <li>Saves go back even when the save folder was deleted</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.56" date="2026-11-08" type="development">
       <description>
         <p>Mods for any game, and a roomier, cleaner Turbine:</p>
