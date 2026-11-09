@@ -9,6 +9,7 @@ use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use turbine_engine::anticheat::{self as ac, AcState, Mode, Original};
+use turbine_engine::json::quote;
 use turbine_engine::rules::{AntiCheat, Check};
 
 /// The game's name as Turbine shows it ("Elden Ring", not "ELDEN RING").
@@ -91,7 +92,6 @@ pub(crate) fn checks(slot: &Slot, data: &Path) -> Vec<Check> {
 
 /// What the rules JSON says about it (anygame::rules_extra adds these to "antiCheat").
 pub(crate) fn json_fields(slot: &Slot, a: &AntiCheat) -> String {
-    use turbine_engine::json::quote;
     let mode = ac::mode(a);
     let name = title(slot);
     let guide: Vec<String> = if mode == Mode::Official { ac::official_guide(&name, a).iter().map(|s| quote(s)).collect() } else { Vec::new() };
@@ -161,9 +161,13 @@ pub(crate) fn through_steam(slot: &Slot) -> bool {
     slot.game.store == turbine_engine::games::Store::Steam && special(slot).is_some_and(|a| ac::mode(a) == Mode::Me3)
 }
 
+/// Turbine's Flatpak id, when it runs as one (the helper checks it is still installed).
+const FLATPAK_ID: &str = "io.github.ravenor907.TurbineModManager";
+
 /// The helper in Turbine's data folder, written again when it changed. Logged.
 pub(crate) fn ensure_helper(data: &Path) {
-    match ac::write_helper(data) {
+    let id = Path::new("/.flatpak-info").exists().then_some(FLATPAK_ID);
+    match ac::write_helper(data, id) {
         Ok(true) => crate::log::line("launch", &format!("Steam launch helper written: {}", ac::helper_path(data).display())),
         Ok(false) => {}
         Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam launch helper: {e}")),
@@ -178,9 +182,30 @@ pub(crate) fn launch_option_state(slot: &Slot, data: &Path) -> (Option<String>, 
     (set, need, ok)
 }
 
-/// Play with mods (or Seamless Co-op) through Steam: the profile, then the helper armed with me3's arguments. Answers
-/// Ok(true) when Steam can start it now, Ok(false) when the Launch Options aren't set yet (nothing armed, logged), and
-/// Err with why it couldn't.
+/// The last apply of this game's mods failed: until one works, Steam's Play never starts me3.
+fn doubt_file(slot: &Slot) -> PathBuf {
+    slot.store.root().join("steam-launch-doubt")
+}
+
+/// Play without mods until the mods that may break update (the game update warning): Steam's Play too.
+pub(crate) fn hold_file(store_root: &Path) -> PathBuf {
+    store_root.join("hold-mods")
+}
+
+pub(crate) fn set_doubt(slot: &Slot, doubt: bool) {
+    let f = doubt_file(slot);
+    let _ = if doubt { std::fs::write(&f, b"the last apply failed\n") } else { std::fs::remove_file(&f) };
+}
+
+/// Why Steam's own Play must not start me3 now (None: mods on, and nothing in doubt).
+pub(crate) fn not_armed_why(w: &Worker, slot: &Slot) -> Option<&'static str> {
+    let on = slot.store.mods().iter().filter(|m| m.enabled).count();
+    let consent = !special(slot).is_some_and(ac::needs_ask) || turned_off(slot);
+    ac::helper_state(on, consent, hold_file(slot.store.root()).exists(), doubt_file(slot).exists(), ac::me3_ready(&ac::me3_dir(&w.data_home)).is_ok()).err()
+}
+
+/// Play with mods (or Seamless Co-op, for this Play only) through Steam. Answers Ok(true) when Steam can start it
+/// now, Ok(false) when the Launch Options aren't set yet (nothing armed, logged), and Err with why it couldn't.
 pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, String> {
     let game = slot.store.me3_game().ok_or("not a game me3 starts")?;
     let data = &w.data_home;
@@ -195,17 +220,34 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     };
     crate::log::line("launch", &format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name));
     if !ok {
+        if let Some(s) = &set {
+            if let Err(e) = ac::remember_original(data, &slot.game.store_id, s) {
+                crate::log::line("launch", &format!("{}: couldn't keep the Launch Options as they were: {e}", slot.game.name));
+            }
+        }
         return Ok(false);
     }
+    if let Some(why) = not_armed_why(w, slot) {
+        let _ = ac::arm(data, &slot.game.store_id, None);
+        return Err(format!("not started with mods: {why}"));
+    }
+    // The normal state first (solo), then this Play's own when it is Seamless Co-op. A Play without mods still
+    // waiting from before goes: this is a Play with mods.
+    sync_helper(w, slot);
+    let _ = ac::clear_plain(data, &slot.game.store_id);
     let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {e}"))?;
     let args = ac::helper_args(&me3, &profile);
-    ac::arm(data, &slot.game.store_id, Some(&args)).map_err(|e| format!("Couldn't get the launch helper ready: {e}"))?;
+    let r = match coop {
+        ac::Coop::Seamless => ac::arm_once(data, &slot.game.store_id, &args, "Seamless Co-op, this Play only"),
+        ac::Coop::Solo => ac::arm_with(data, &slot.game.store_id, Some(&args), &state_words(slot)),
+    };
+    r.map_err(|e| format!("Couldn't get the launch helper ready: {e}"))?;
     crate::log::line(
         "launch",
         &format!(
             "{} {} through Steam and me3 {} (offline, no anti-cheat): helper armed with {} ({} natives)",
             slot.game.name,
-            if coop == ac::Coop::Seamless { "Seamless Co-op" } else { "with mods" },
+            if coop == ac::Coop::Seamless { "Seamless Co-op (this Play only)" } else { "with mods" },
             ac::ME3_VERSION,
             args.join(" "),
             natives.len()
@@ -214,27 +256,44 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     Ok(true)
 }
 
+fn state_words(slot: &Slot) -> String {
+    let on = slot.store.mods().iter().filter(|m| m.enabled).count();
+    format!("mods on: {on} {} through me3, solo, written by Turbine", if on == 1 { "mod" } else { "mods" })
+}
+
 /// The normal launch for a game me3 starts (no mods on, or Play without mods): the helper runs Steam's own command.
-/// `once`: Play without mods (the mods stay on for the next Play); otherwise mods are off, so the helper is disarmed.
-pub(crate) fn arm_plain(w: &Worker, slot: &Slot, once: bool) {
+/// `once`: Play without mods (the mods stay on for the next Play). Answers false when that couldn't be set up: the
+/// game must not be started then (the helper would start me3).
+#[must_use]
+pub(crate) fn arm_plain(w: &Worker, slot: &Slot, once: bool) -> bool {
     if !through_steam(slot) {
-        return;
+        return true;
     }
     let data = &w.data_home;
     ensure_helper(data);
     let id = &slot.game.store_id;
-    let r = if once && ac::armed_file(data, id).exists() { ac::arm_plain_once(data, id) } else { ac::arm(data, id, None) };
+    let armed = ac::armed_file(data, id).exists();
+    let r = if once && armed { ac::arm_plain_once(data, id) } else { ac::arm(data, id, None) };
     match r {
-        Ok(()) => crate::log::line(
-            "launch",
-            &format!("{}: the launch helper runs Steam's own command{}", slot.game.name, if once { " this once (Play without mods)" } else { " (no mods on)" }),
-        ),
-        Err(e) => crate::log::line("launch", &format!("{}: couldn't set the launch helper to Steam's own command: {e}", slot.game.name)),
+        Ok(()) => {
+            crate::log::line(
+                "launch",
+                &format!("{}: the launch helper runs Steam's own command{}", slot.game.name, if once && armed { " this once (Play without mods)" } else { " (no mods on)" }),
+            );
+            true
+        }
+        Err(e) => {
+            crate::log::line("launch", &format!("{}: couldn't set the launch helper to Steam's own command: {e}", slot.game.name));
+            // On any doubt, nothing armed at all.
+            let _ = ac::arm(data, id, None);
+            !ac::armed_file(data, id).exists()
+        }
     }
 }
 
-/// Keeps the helper's file for a game in step with Turbine after the mods changed (Steam's own Play button uses it
-/// too): armed when mods are on and the player said yes, off otherwise. Logged when it changes.
+/// The helper's file for a game, kept to Turbine's current state after anything changed (Steam's own Play button
+/// uses it): armed only while mods are on, the player turned the anti-cheat off for them, nothing holds them back,
+/// the last apply worked and me3 is there; cleared otherwise. Logged when it changes.
 pub(crate) fn sync_helper(w: &Worker, slot: &Slot) {
     if !through_steam(slot) {
         return;
@@ -242,27 +301,30 @@ pub(crate) fn sync_helper(w: &Worker, slot: &Slot) {
     let data = &w.data_home;
     let id = &slot.game.store_id;
     let was = ac::armed_file(data, id).exists();
-    let on = slot.store.mods().iter().any(|m| m.enabled) && (turned_off(slot) || special(slot).is_some_and(|a| !ac::needs_ask(a)));
-    if on == was {
-        if on {
-            // The profile follows the package folder.
-            if let Some(game) = slot.store.me3_game() {
-                let _ = ac::write_profile_for(slot.store.root(), &game, ac::Coop::Solo);
-            }
-        }
+    let why = not_armed_why(w, slot);
+    let game = slot.store.me3_game();
+    let args = match (why, &game) {
+        (None, Some(g)) => ac::write_profile_for(slot.store.root(), g, ac::Coop::Solo).ok().map(|(p, _)| ac::helper_args(&ac::me3_dir(data), &p)),
+        _ => None,
+    };
+    let r = match &args {
+        Some(a) => ac::arm_with(data, id, Some(a), &state_words(slot)),
+        None => ac::arm(data, id, None),
+    };
+    if let Err(e) = r {
+        crate::log::line("launch", &format!("{}: couldn't update the launch helper ({e}); cleared", slot.game.name));
+        let _ = std::fs::remove_file(ac::armed_file(data, id));
+        let _ = std::fs::remove_file(ac::once_file(data, id));
         return;
     }
-    if !on {
-        if ac::arm(data, id, None).is_ok() {
-            crate::log::line("launch", &format!("{}: no mods on, so Steam's Play starts it normally", slot.game.name));
-        }
-        return;
-    }
-    let (Some(game), Ok(())) = (slot.store.me3_game(), ac::me3_ready(&ac::me3_dir(data))) else { return };
-    if let Ok((profile, _)) = ac::write_profile_for(slot.store.root(), &game, ac::Coop::Solo) {
-        if ac::arm(data, id, Some(&ac::helper_args(&ac::me3_dir(data), &profile))).is_ok() {
-            crate::log::line("launch", &format!("{}: mods on, so Steam's Play starts it with them through me3", slot.game.name));
-        }
+    if was != args.is_some() {
+        crate::log::line(
+            "launch",
+            &match why {
+                None => format!("{}: mods on, so Steam's Play starts it with them through me3", slot.game.name),
+                Some(w) => format!("{}: Steam's Play starts it normally ({w})", slot.game.name),
+            },
+        );
     }
 }
 
@@ -314,6 +376,65 @@ pub(crate) fn refused_cleanup(w: &Worker, slot: &Slot) {
 }
 
 impl qobject::Turbine {
+    /// Play without mods until they update (the game update warning), for Turbine's and Steam's Play alike.
+    pub fn set_mod_hold(mut self: Pin<&mut Self>, on: bool) {
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().send(
+            Some(game.id()),
+            "Hold mods until they update",
+            false,
+            Box::new(move |w: &mut Worker| {
+                let Ok(s) = w.slot(&game) else { return };
+                let f = hold_file(s.store.root());
+                let r = if on { std::fs::write(&f, b"Play without mods until they update\n") } else { std::fs::remove_file(&f).or(Ok(())) };
+                match r {
+                    Ok(()) => crate::log::line("launch", &format!("{}: mods {} (Turbine's Play and Steam's)", game.name, if on { "held until they update" } else { "back on for Play" })),
+                    Err(e) => w.say(format!("Couldn't save that: {e}"), "error"),
+                }
+                w.show(&game, false);
+            }),
+        );
+    }
+
+    /// The me3 games whose Steam Launch Options run Turbine's helper, and what to paste back.
+    pub fn launch_undo_json(&self, current: bool) -> QString {
+        let data = crate::backend::data_home();
+        let cur = self.current_game().map(|g| g.id());
+        let items: Vec<String> = self
+            .rust()
+            .found
+            .iter()
+            .filter(|g| g.store == turbine_engine::games::Store::Steam)
+            .filter(|g| !current || cur.as_deref() == Some(g.id().as_str()))
+            .filter(|g| turbine_engine::rules::GameRules::for_game(g).anti_cheat.as_ref().is_some_and(|a| ac::mode(a) == Mode::Me3))
+            .filter_map(|g| {
+                let set = turbine_engine::steam::launch_options(&turbine_engine::home_dir(), &g.store_id).unwrap_or_default();
+                let uses = ac::launch_option_uses_helper(&set, &data);
+                (uses || current).then(|| {
+                    format!(
+                        "{{\"game\":{},\"name\":{},\"uses\":{uses},\"set\":{},\"original\":{},\"line\":{}}}",
+                        quote(&g.id()),
+                        quote(&g.name),
+                        quote(&set),
+                        quote(&ac::original_options(&data, &g.store_id)),
+                        quote(&ac::launch_option(&data))
+                    )
+                })
+            })
+            .collect();
+        QString::from(format!("[{}]", items.join(",")).as_str())
+    }
+
+    /// Undo the launch options change for a game: the helper never starts me3 for it again until Play asks for the
+    /// step again (Turbine shows the text to paste back).
+    pub fn launch_undo(self: Pin<&mut Self>, game: &QString) {
+        let Some(g) = self.find(&game.to_string()) else { return };
+        let data = crate::backend::data_home();
+        let _ = ac::arm(&data, &g.store_id, None);
+        let _ = ac::clear_plain(&data, &g.store_id);
+        crate::log::line("launch", &format!("{}: Undo the launch options change: the helper starts nothing for it now; the player pastes back \"{}\"", g.name, ac::original_options(&data, &g.store_id)));
+    }
+
     /// Removes only another tool's "<starter>.backup" from the game folder, after a hold to confirm, and only while
     /// the starter itself is as Turbine recorded it.
     pub fn remove_ac_leftover(mut self: Pin<&mut Self>) {
@@ -360,6 +481,7 @@ impl qobject::Turbine {
                     ),
                     Err(e) => w.say(format!("Couldn't save the answer: {e}"), "error"),
                 }
+                // show() keeps the launch helper to this answer (anti-cheat back on: Steam's Play starts it normally).
                 w.show(&game, true);
             }),
         );

@@ -68,6 +68,8 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Field {
     pub id: usize,
+    /// Which one of the settings with this section and name it is (0 for the first): a file may repeat a name.
+    pub occ: usize,
     /// "[GAMEPLAY]", "General", "a.b" (JSON and YAML paths): where it is, for the page's headings.
     pub section: String,
     pub key: String,
@@ -257,14 +259,80 @@ fn line_starts(text: &str) -> Vec<usize> {
     v
 }
 
-/// The settings in a file, in file order.
+/// Files bigger than this are not read as settings (the plain text is still shown).
+pub const PARSE_MAX: usize = 256 * 1024;
+
+/// The settings in a file, in file order, with their values as the player reads them (no escapes) and which
+/// occurrence of their name each one is.
 pub fn parse(text: &str, fmt: Format) -> Vec<Field> {
-    match fmt {
+    if text.len() > PARSE_MAX {
+        return Vec::new();
+    }
+    let mut fields = match fmt {
         Format::Ini | Format::Toml => parse_ini(text, fmt == Format::Toml),
         Format::Yaml => parse_yaml(text),
         Format::Json => parse_json(text),
         Format::Xml => parse_xml(text),
+    };
+    let mut seen: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+    for f in fields.iter_mut() {
+        let n = seen.entry((f.section.clone(), f.key.clone())).or_insert(0);
+        f.occ = *n;
+        *n += 1;
+        f.value = match (fmt, quote_of(text, f, fmt)) {
+            (Format::Toml | Format::Yaml, Some('"')) => unescape_basic(&f.value),
+            (Format::Yaml, Some('\'')) => f.value.replace("''", "'"),
+            (Format::Xml, _) => unescape_xml(&f.value),
+            _ => f.value.clone(),
+        };
     }
+    fields
+}
+
+/// The quote around a field's value in the file, if any (XML text has none).
+fn quote_of(text: &str, f: &Field, fmt: Format) -> Option<char> {
+    if !f.quoted || fmt == Format::Xml {
+        return None;
+    }
+    text.get(f.span.0.checked_sub(1)?..f.span.0).and_then(|c| c.chars().next())
+}
+
+fn unescape_basic(v: &str) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut it = v.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('u') => {
+                let h: String = it.by_ref().take(4).collect();
+                match u32::from_str_radix(&h, 16).ok().and_then(char::from_u32) {
+                    Some(ch) => out.push(ch),
+                    None => {
+                        out.push_str("\\u");
+                        out.push_str(&h);
+                    }
+                }
+            }
+            Some(o) => {
+                out.push('\\');
+                out.push(o);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn unescape_xml(v: &str) -> String {
+    v.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
 fn unquote_span(text: &str, vs: usize, ve: usize) -> (usize, usize, bool) {
@@ -283,8 +351,13 @@ fn parse_ini(text: &str, toml: bool) -> Vec<Field> {
     let mut pending = Pending { help: Vec::new() };
     let starts = line_starts(text);
     for (n, line) in text.split('\n').enumerate() {
-        let base = starts[n];
-        let line_nr = line.trim_end_matches('\r');
+        let mut base = starts[n];
+        let mut line_nr = line.trim_end_matches('\r');
+        // A byte order mark before the first line isn't part of it.
+        if let Some(rest) = line_nr.strip_prefix('\u{feff}') {
+            base += 3;
+            line_nr = rest;
+        }
         let t = line_nr.trim();
         if t.is_empty() {
             pending.help.clear();
@@ -351,7 +424,7 @@ fn parse_ini(text: &str, toml: bool) -> Vec<Field> {
                     help = format!("{help} {inline_help}").trim().to_string();
                 }
                 out.push(Field {
-                    id: out.len(),
+                    id: out.len(), occ: 0,
                     section: section.clone(),
                     key: key.trim_matches('"').to_string(),
                     value: line_nr[s0..e0].to_string(),
@@ -376,7 +449,7 @@ fn parse_ini(text: &str, toml: bool) -> Vec<Field> {
         }
         let kind = kind_for(&value, &help, quoted);
         out.push(Field {
-            id: out.len(),
+            id: out.len(), occ: 0,
             section: section.clone(),
             key: key.trim_matches('"').to_string(),
             value,
@@ -396,8 +469,12 @@ fn parse_yaml(text: &str) -> Vec<Field> {
     let mut pending = Pending { help: Vec::new() };
     let starts = line_starts(text);
     for (n, raw) in text.split('\n').enumerate() {
-        let base = starts[n];
-        let line = raw.trim_end_matches('\r');
+        let mut base = starts[n];
+        let mut line = raw.trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix('\u{feff}') {
+            base += 3;
+            line = rest;
+        }
         let t = line.trim();
         if t.is_empty() || t == "---" {
             pending.help.clear();
@@ -443,6 +520,13 @@ fn parse_yaml(text: &str) -> Vec<Field> {
             while j < rb.len() && !(rb[j] == q && (q == b'\'' || rb[j - 1] != b'\\')) {
                 j += 1;
             }
+            // YAML writes a ' inside single quotes as ''.
+            while q == b'\'' && j + 1 < rb.len() && rb[j + 1] == b'\'' {
+                j += 2;
+                while j < rb.len() && rb[j] != q {
+                    j += 1;
+                }
+            }
             if j >= rb.len() {
                 pending.help.clear();
                 continue;
@@ -464,7 +548,7 @@ fn parse_yaml(text: &str) -> Vec<Field> {
         }
         let section = stack.iter().map(|(_, k)| k.as_str()).collect::<Vec<_>>().join(".");
         let kind = if value == "null" || value == "~" { Kind::Text } else { kind_for(&value, &help, quoted) };
-        out.push(Field { id: out.len(), section, key, value, kind, help, span: (base + s0, base + e0), quoted, line: n + 1 });
+        out.push(Field { id: out.len(), occ: 0, section, key, value, kind, help, span: (base + s0, base + e0), quoted, line: n + 1 });
     }
     out
 }
@@ -592,7 +676,7 @@ fn parse_json(text: &str) -> Vec<Field> {
                     let value = crate::json::parse(&format!("\"{raw}\"")).ok().and_then(|j| j.as_str().map(str::to_string)).unwrap_or(raw);
                     let line = self.line_of(s);
                     self.out.push(Field {
-                        id: self.out.len(),
+                        id: self.out.len(), occ: 0,
                         section: path.join("."),
                         key: key.to_string(),
                         value,
@@ -614,7 +698,7 @@ fn parse_json(text: &str) -> Vec<Field> {
                     }
                     let line = self.line_of(s);
                     let kind = if v == "null" { Kind::Text } else { kind_for(&v, "", false) };
-                    self.out.push(Field { id: self.out.len(), section: path.join("."), key: key.to_string(), value: v, kind, help: String::new(), span: (s, self.i), quoted: false, line });
+                    self.out.push(Field { id: self.out.len(), occ: 0, section: path.join("."), key: key.to_string(), value: v, kind, help: String::new(), span: (s, self.i), quoted: false, line });
                 }
             }
             self.depth -= 1;
@@ -670,7 +754,9 @@ fn parse_xml(text: &str) -> Vec<Field> {
         // A leaf: text up to its own closing tag, with no other tag in between.
         let rest = &text[i..];
         let end_tag = format!("</{name}>");
-        match (rest.find('<'), rest.find(&end_tag)) {
+        // Only the next tag is looked at (never a search to the end of the file for each element).
+        let lt = rest.find('<');
+        match (lt, lt.filter(|&l| rest[l..].starts_with(&end_tag))) {
             (Some(lt), Some(et)) if lt == et => {
                 let (s, e) = (i, i + et);
                 let raw = &text[s..e];
@@ -680,7 +766,7 @@ fn parse_xml(text: &str) -> Vec<Field> {
                 if !value.contains("<![CDATA[") {
                     let kind = kind_for(&value, &help, false);
                     out.push(Field {
-                        id: out.len(),
+                        id: out.len(), occ: 0,
                         section: stack.join("."),
                         key: name.clone(),
                         value,
@@ -704,33 +790,44 @@ fn parse_xml(text: &str) -> Vec<Field> {
 
 // ---- Writing ----
 
-fn escape(value: &str, fmt: Format, field: &Field) -> Result<String, String> {
+/// The value as it goes into the file, and whether the quotes around it change too (a TOML literal string that now
+/// holds a ' becomes a basic string).
+fn escape(value: &str, fmt: Format, field: &Field, quote: Option<char>) -> Result<(String, bool), String> {
     if value.contains('\n') || value.contains('\r') {
         return Err(format!("{}: a value can't have a line break", field.key));
     }
-    Ok(match fmt {
-        Format::Json if field.quoted => {
+    let basic = |v: &str| v.replace('\\', "\\\\").replace('"', "\\\"");
+    Ok(match (fmt, quote) {
+        (Format::Json, _) if field.quoted => {
             let q = crate::json::quote(value);
-            q[1..q.len() - 1].to_string()
+            (q[1..q.len() - 1].to_string(), false)
         }
-        Format::Toml | Format::Yaml if field.quoted => value.replace('\\', "\\\\").replace('"', "\\\""),
-        Format::Xml => value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"),
-        _ => value.to_string(),
+        (Format::Toml | Format::Yaml, Some('"')) => (basic(value), false),
+        (Format::Toml, Some('\'')) if value.contains('\'') => (format!("\"{}\"", basic(value)), true),
+        (Format::Yaml, Some('\'')) => (value.replace('\'', "''"), false),
+        (Format::Xml, _) => (value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;"), false),
+        _ => (value.to_string(), false),
     })
 }
 
-/// The file with these settings changed (by field id). Only the values' own characters change.
+/// The file with these settings changed (by field id, as `parse` numbered them in this same text). Only the values'
+/// own characters change.
 pub fn set(text: &str, fmt: Format, edits: &[(usize, String)]) -> Result<String, String> {
     let fields = parse(text, fmt);
     let mut spans: Vec<((usize, usize), String)> = Vec::new();
     for (id, v) in edits {
         let f = fields.iter().find(|f| f.id == *id).ok_or_else(|| format!("setting {id} isn't in the file any more"))?;
-        let mut val = escape(v, fmt, f)?;
-        // A JSON or TOML number or bool stays bare; text into a bare JSON value that isn't one gets quotes.
+        let q = quote_of(text, f, fmt);
+        let (mut val, requote) = escape(v, fmt, f, q)?;
+        let mut span = f.span;
+        if requote {
+            span = (span.0 - 1, span.1 + 1);
+        }
+        // A JSON number or bool stays bare; text into a bare JSON value that isn't one gets quotes.
         if fmt == Format::Json && !f.quoted && !(is_number(v) || v == "true" || v == "false" || v == "null") {
             val = crate::json::quote(v);
         }
-        spans.push((f.span, val));
+        spans.push((span, val));
     }
     spans.sort_by_key(|s| std::cmp::Reverse(s.0 .0));
     let mut out = text.to_string();
@@ -738,6 +835,42 @@ pub fn set(text: &str, fmt: Format, edits: &[(usize, String)]) -> Result<String,
         out.replace_range(s..e, &v);
     }
     Ok(out)
+}
+
+/// One change from the page, by the setting's identity (never a position): its section, name and occurrence, the
+/// value the page showed, and the new value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Edit {
+    pub section: String,
+    pub key: String,
+    pub occ: usize,
+    pub was: String,
+    pub value: String,
+}
+
+/// The file with these changes, matched again by identity in the file as it is now. A setting that is gone, or that
+/// changed in the file since the page showed it (the game or a mod update rewrote it), is refused.
+pub fn set_by_key(text: &str, fmt: Format, edits: &[Edit]) -> Result<String, String> {
+    let fields = parse(text, fmt);
+    let mut ids = Vec::new();
+    for e in edits {
+        let f = fields
+            .iter()
+            .find(|f| f.section == e.section && f.key == e.key && f.occ == e.occ)
+            .ok_or_else(|| format!("{} isn't in the file any more. Open it again.", e.key))?;
+        if f.value != e.was {
+            return Err(format!("{} changed in the file since this page opened (now {}). Open it again.", e.key, f.value));
+        }
+        ids.push((f.id, e.value.clone()));
+    }
+    set(text, fmt, &ids)
+}
+
+/// The first array index in a path ("list.2.on" is in the array "list").
+fn array_prefix(section: &str) -> Option<String> {
+    let parts: Vec<&str> = section.split('.').collect();
+    let i = parts.iter().position(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))?;
+    Some(parts[..i].join("."))
 }
 
 /// The plain text fallback: one line replaced (1-based).
@@ -756,18 +889,35 @@ pub fn set_line(text: &str, line: usize, new: &str) -> Result<String, String> {
 }
 
 /// A new default file with the player's changes carried over: every setting whose edited value differs from the old
-/// default gets that value in the new default, when the new one still has it (same section and name).
+/// default gets that value in the new default, matched by section, name and occurrence, only where the name occurs
+/// as often in both defaults; inside a JSON or YAML array only when the array's items are the same in both. Running
+/// it again changes nothing (values are compared and written unescaped).
 pub fn merge(fmt: Format, new_default: &str, old_default: &str, edited: &str) -> String {
     let old = parse(old_default, fmt);
     let mine = parse(edited, fmt);
     let new = parse(new_default, fmt);
+    let count = |list: &[Field], s: &str, k: &str| list.iter().filter(|f| f.section == s && f.key == k).count();
+    let items = |list: &[Field], prefix: &str| -> Vec<(String, String, String)> {
+        list.iter()
+            .filter(|f| f.section == prefix || f.section.starts_with(&format!("{prefix}.")))
+            .map(|f| (f.section.clone(), f.key.clone(), f.value.clone()))
+            .collect()
+    };
     let mut edits = Vec::new();
     for m in &mine {
-        let was = old.iter().find(|o| o.section == m.section && o.key == m.key);
+        let was = old.iter().find(|o| o.section == m.section && o.key == m.key && o.occ == m.occ);
         if was.is_some_and(|w| w.value == m.value) {
             continue;
         }
-        if let Some(n) = new.iter().find(|n| n.section == m.section && n.key == m.key) {
+        if count(&old, &m.section, &m.key) != count(&new, &m.section, &m.key) && was.is_some() {
+            continue;
+        }
+        if let Some(prefix) = array_prefix(&m.section) {
+            if items(&old, &prefix) != items(&new, &prefix) {
+                continue;
+            }
+        }
+        if let Some(n) = new.iter().find(|n| n.section == m.section && n.key == m.key && n.occ == m.occ) {
             if n.value != m.value {
                 edits.push((n.id, m.value.clone()));
             }
@@ -921,6 +1071,33 @@ pub fn save_game_file(store_root: &Path, game_dir: &Path, rel: &str, text: &str)
     fs::rename(&tmp, &file)
 }
 
+fn build_file(store_root: &Path, rel: &str) -> PathBuf {
+    with_ext(&store_root.join("settings-game").join(rel), ".build")
+}
+
+/// `save_game_file`, noting the game's build the original was kept at.
+pub fn save_game_file_at(store_root: &Path, game_dir: &Path, rel: &str, text: &str, build: Option<&str>) -> io::Result<()> {
+    let first = !game_original(store_root, rel).exists();
+    save_game_file(store_root, game_dir, rel, text)?;
+    if first {
+        let _ = fs::write(build_file(store_root, rel), build.unwrap_or(""));
+    }
+    Ok(())
+}
+
+/// `reset_game_file`, refused when the game updated since the original was kept (it would put an old file back):
+/// Steam's Verify integrity is the way then.
+pub fn reset_game_file_at(store_root: &Path, game_dir: &Path, rel: &str, build: Option<&str>) -> io::Result<bool> {
+    if let (Ok(then), Some(now)) = (fs::read_to_string(build_file(store_root, rel)), build) {
+        if !then.is_empty() && then != now {
+            return Err(io::Error::other(format!(
+                "the game updated since Turbine kept its original {rel}, so putting that back could break it. Use Steam's Verify integrity of game files instead"
+            )));
+        }
+    }
+    reset_game_file(store_root, game_dir, rel)
+}
+
 pub fn reset_game_file(store_root: &Path, game_dir: &Path, rel: &str) -> io::Result<bool> {
     let orig = game_original(store_root, rel);
     if !safe_rel(rel) || !orig.is_file() {
@@ -955,8 +1132,9 @@ pub fn fields_json(fields: &[Field]) -> String {
                 Kind::Text => ("text", String::new()),
             };
             format!(
-                "{{\"id\":{},\"section\":{},\"key\":{},\"value\":{},\"kind\":\"{kind}\"{extra},\"help\":{},\"line\":{}}}",
+                "{{\"id\":{},\"occ\":{},\"section\":{},\"key\":{},\"value\":{},\"kind\":\"{kind}\"{extra},\"help\":{},\"line\":{}}}",
                 f.id,
+                f.occ,
                 quote(&f.section),
                 quote(&f.key),
                 quote(&f.value),
@@ -1027,7 +1205,7 @@ mod tests {
         let f = parse(toml, Format::Toml);
         assert_eq!(by_key(&f, "speed").kind, Kind::Number { min: Some(0.0), max: None, step: 0.1 });
         assert_eq!(by_key(&f, "speed").help, "Speed of the thing times");
-        assert_eq!(by_key(&f, "name").value, "Ro\\\"ach");
+        assert_eq!(by_key(&f, "name").value, "Ro\"ach");
         assert_eq!(by_key(&f, "show").section, "ui");
         assert_eq!(by_key(&f, "list").kind, Kind::Text);
         let t = set(toml, Format::Toml, &[(by_key(&f, "name").id, "say \"hi\"".into()), (by_key(&f, "show").id, "true".into())]).unwrap();
@@ -1105,6 +1283,11 @@ mod tests {
         assert_eq!(fs::read_to_string(game_backup(&store, "game.ini")).unwrap(), "a = 2\n");
         assert!(reset_game_file(&store, &game, "game.ini").unwrap());
         assert_eq!(fs::read_to_string(game.join("game.ini")).unwrap(), "a = 1\n");
+        // An original kept at another build isn't put back.
+        fs::write(game.join("g2.ini"), "b = 1\n").unwrap();
+        save_game_file_at(&store, &game, "g2.ini", "b = 2\n", Some("100")).unwrap();
+        assert!(reset_game_file_at(&store, &game, "g2.ini", Some("101")).is_err());
+        assert!(reset_game_file_at(&store, &game, "g2.ini", Some("100")).unwrap());
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -1119,5 +1302,85 @@ mod tests {
     fn set_line_keeps_the_rest() {
         assert_eq!(set_line("a\r\nb\r\n", 2, "c").unwrap(), "a\r\nc\r\n");
         assert!(set_line("a", 3, "x").is_err());
+    }
+}
+
+#[cfg(test)]
+mod break_tests {
+    use super::*;
+
+    fn key<'a>(f: &'a [Field], k: &str, occ: usize) -> &'a Field {
+        f.iter().find(|x| x.key == k && x.occ == occ).unwrap()
+    }
+
+    #[test]
+    fn no_double_escaping() {
+        let toml = "path = \"C:\\\\Games\"\nlit = 'abc'\n";
+        let f = parse(toml, Format::Toml);
+        assert_eq!(key(&f, "path", 0).value, "C:\\Games");
+        let t = set(toml, Format::Toml, &[(key(&f, "path", 0).id, "D:\\Games".into()), (key(&f, "lit", 0).id, "it's".into())]).unwrap();
+        assert_eq!(t, "path = \"D:\\\\Games\"\nlit = \"it's\"\n");
+        let f2 = parse(&t, Format::Toml);
+        assert_eq!((key(&f2, "path", 0).value.as_str(), key(&f2, "lit", 0).value.as_str()), ("D:\\Games", "it's"));
+        let xml = "<a><n>Tom &amp; Jerry</n></a>";
+        let f = parse(xml, Format::Xml);
+        assert_eq!(f[0].value, "Tom & Jerry");
+        let t = set(xml, Format::Xml, &[(f[0].id, "Tom & Jerry x".into())]).unwrap();
+        assert_eq!(t, "<a><n>Tom &amp; Jerry x</n></a>");
+        let yaml = "a: 'it''s'\nb: \"x\\\\y\"\n";
+        let f = parse(yaml, Format::Yaml);
+        assert_eq!((f[0].value.as_str(), f[1].value.as_str()), ("it's", "x\\y"));
+        assert_eq!(set(yaml, Format::Yaml, &[(f[0].id, "it's".into()), (f[1].id, "x\\y".into())]).unwrap(), yaml);
+        // Carrying values over twice changes nothing more.
+        let old = "p = \"C:\\\\A\"\n";
+        let mine = "p = \"C:\\\\B&\"\n";
+        let new = "# new\np = \"C:\\\\A\"\n";
+        let once = merge(Format::Toml, new, old, mine);
+        assert_eq!(once, "# new\np = \"C:\\\\B&\"\n");
+        assert_eq!(merge(Format::Toml, new, old, &once), once);
+        let xold = "<a><n>x</n></a>";
+        let xmine = "<a><n>A &amp; B</n></a>";
+        let m1 = merge(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, xmine);
+        assert_eq!(m1, "<a><n>A &amp; B</n><m>1</m></a>");
+        assert_eq!(merge(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, &m1), m1);
+    }
+
+    #[test]
+    fn identity_not_position() {
+        // Repeated names: the player's second plugin stays the second.
+        let old = "[p]\nplugin = a\nplugin = b\n";
+        let mine = "[p]\nplugin = a\nplugin = z\n";
+        let new = "[p]\n; help\nplugin = a\nplugin = b\n";
+        assert_eq!(merge(Format::Ini, new, old, mine), "[p]\n; help\nplugin = a\nplugin = z\n");
+        // A JSON array that changed shape: the player's value isn't moved onto another item.
+        let old = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}]}";
+        let mine = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": false}]}";
+        let new = "{\"l\": [{\"n\": \"w\", \"on\": true}, {\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}]}";
+        assert_eq!(merge(Format::Json, new, old, mine), new);
+        // The same array: carried.
+        let new2 = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}], \"v\": 2}";
+        assert!(merge(Format::Json, new2, old, mine).contains("{\"n\": \"y\", \"on\": false}"));
+        // Saves match by name again and refuse a value that changed meanwhile.
+        let text = "[a]\nx = 1\ny = 2\n";
+        let e = |k: &str, was: &str, v: &str| Edit { section: "a".into(), key: k.into(), occ: 0, was: was.into(), value: v.into() };
+        assert_eq!(set_by_key(text, Format::Ini, &[e("y", "2", "5")]).unwrap(), "[a]\nx = 1\ny = 5\n");
+        let moved = "[a]\nnew = 0\nx = 1\ny = 2\n";
+        assert_eq!(set_by_key(moved, Format::Ini, &[e("y", "2", "5")]).unwrap(), "[a]\nnew = 0\nx = 1\ny = 5\n");
+        assert!(set_by_key("[a]\nx = 1\ny = 3\n", Format::Ini, &[e("y", "2", "5")]).unwrap_err().contains("changed"));
+        assert!(set_by_key("[a]\nx = 1\n", Format::Ini, &[e("y", "2", "5")]).unwrap_err().contains("isn't in the file"));
+    }
+
+    #[test]
+    fn bom_and_big_files() {
+        let f = parse("\u{feff}[GAMEPLAY]\na = 1\n", Format::Ini);
+        assert_eq!(f[0].section, "GAMEPLAY");
+        let t = set("\u{feff}[G]\na = 1\n", Format::Ini, &[(0, "2".into())]).unwrap();
+        assert_eq!(t, "\u{feff}[G]\na = 2\n");
+        // Deeply nested XML is read in linear time; past the limit nothing is parsed.
+        let deep = "<b>".repeat(60_000) + &"</b>".repeat(60_000);
+        let t0 = std::time::Instant::now();
+        let _ = parse(&deep[..PARSE_MAX.min(deep.len())], Format::Xml);
+        assert!(t0.elapsed().as_secs() < 3, "{:?}", t0.elapsed());
+        assert!(parse(&"a = 1\n".repeat(60_000), Format::Ini).is_empty());
     }
 }

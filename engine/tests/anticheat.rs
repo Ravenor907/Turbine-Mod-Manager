@@ -403,6 +403,7 @@ fn heroic_copies_of_online_only_games_are_refused() {
         (Launcher::Epic, "abc", "Dead by Daylight"),
         (Launcher::Gog, "1234", "DEAD BY DAYLIGHT"),
         (Launcher::Epic, "x", "Destiny 2"),
+        (Launcher::Epic, "y", "Tom Clancy's Rainbow Six Siege X"),
     ] {
         let r = GameRules::for_game(&g(store, id, name));
         assert_eq!(r.anti_cheat.as_ref().map(anticheat::mode), Some(Mode::Refuse), "{name} on {store:?}");
@@ -412,6 +413,8 @@ fn heroic_copies_of_online_only_games_are_refused() {
     assert!(r.anti_cheat.is_none());
     let r = GameRules::for_game(&g(Launcher::Epic, "z", "Destiny"));
     assert!(r.anti_cheat.is_none(), "only the whole name matches");
+    let r = GameRules::for_game(&g(Launcher::Gog, "1", "Fallout 2"));
+    assert!(r.anti_cheat.is_none());
 }
 
 /// 0.58: a me3 game's own files (regulation.bin) never make the "game already has this file" question: the mod goes

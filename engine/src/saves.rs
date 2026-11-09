@@ -411,9 +411,15 @@ impl Kind {
 
 /// Which kind a save file is, by its name (the game's own .bak copies count with their save).
 pub fn kind_of(name: &str) -> Option<Kind> {
+    kind_of_with(name, "co2")
+}
+
+/// `kind_of` where Seamless Co-op's save extension was changed in its settings (save_file_extension).
+pub fn kind_of_with(name: &str, coop_ext: &str) -> Option<Kind> {
     let l = name.to_ascii_lowercase();
     let l = l.strip_suffix(".bak").unwrap_or(&l);
-    if l.ends_with(".co2") {
+    let coop = format!(".{}", coop_ext.trim().trim_start_matches('.').to_ascii_lowercase());
+    if coop.len() > 1 && coop != ".sl2" && l.ends_with(&coop) || l.ends_with(".co2") {
         Some(Kind::Coop)
     } else if l == crate::anticheat::ME3_SAVEFILE.to_ascii_lowercase() {
         Some(Kind::Modded)
@@ -434,13 +440,17 @@ pub struct SaveFile {
 
 /// The save files of one kind in the save folders now.
 pub fn files_of(folders: &[PathBuf], kind: Kind) -> Vec<SaveFile> {
+    files_of_with(folders, kind, "co2")
+}
+
+pub fn files_of_with(folders: &[PathBuf], kind: Kind, coop_ext: &str) -> Vec<SaveFile> {
     let mut out = Vec::new();
     for f in folders {
         let (lines, _) = index_of(f, MAX_FILES);
         for line in lines {
             let rel = line.split('\t').next().unwrap_or(&line).to_string();
             let name = rel.rsplit('/').next().unwrap_or(&rel);
-            if kind_of(name) == Some(kind) {
+            if kind_of_with(name, coop_ext) == Some(kind) {
                 let m = fs::metadata(f.join(&rel)).ok();
                 let modified = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
                 out.push(SaveFile { rel, bytes: m.map(|m| m.len()).unwrap_or(0), modified });
@@ -457,14 +467,22 @@ fn index_rel(l: &str) -> &str {
 
 /// How many files of one kind a backup holds.
 pub fn count_in(root: &Path, id: &str, kind: Kind) -> usize {
+    count_in_with(root, id, kind, "co2")
+}
+
+pub fn count_in_with(root: &Path, id: &str, kind: Kind, coop_ext: &str) -> usize {
     fs::read_to_string(root.join(id).join("index"))
-        .map(|t| t.lines().map(index_rel).filter(|l| kind_of(l.rsplit('/').next().unwrap_or(l)) == Some(kind)).count())
+        .map(|t| t.lines().map(index_rel).filter(|l| kind_of_with(l.rsplit('/').next().unwrap_or(l), coop_ext) == Some(kind)).count())
         .unwrap_or(0)
 }
 
 /// Puts back only one kind's files from a backup (the saves as they are now are kept first, as a new backup).
 /// Answers how many files went back.
 pub fn restore_kind(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now: u64) -> io::Result<usize> {
+    restore_kind_with(id, kind, folders, root, now, "co2")
+}
+
+pub fn restore_kind_with(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now: u64, coop_ext: &str) -> io::Result<usize> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a backup"));
     }
@@ -476,7 +494,7 @@ pub fn restore_kind(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now:
         }
     }
     let index = fs::read_to_string(snap.join("index"))?;
-    let wanted: Vec<&str> = index.lines().map(index_rel).filter(|l| kind_of(l.rsplit('/').next().unwrap_or(l)) == Some(kind)).collect();
+    let wanted: Vec<&str> = index.lines().map(index_rel).filter(|l| kind_of_with(l.rsplit('/').next().unwrap_or(l), coop_ext) == Some(kind)).collect();
     if wanted.is_empty() {
         return Ok(0);
     }
@@ -515,6 +533,8 @@ mod kind_tests {
         assert_eq!(kind_of("TurbineModded.sl2"), Some(Kind::Modded));
         assert_eq!(kind_of("ER0000.co2"), Some(Kind::Coop));
         assert_eq!(kind_of("steam_autocloud.vdf"), None);
+        assert_eq!(kind_of_with("ER0000.myco", "myco"), Some(Kind::Coop));
+        assert_eq!(kind_of_with("ER0000.sl2", "sl2"), Some(Kind::Solo), "never the normal save");
         let d = std::env::temp_dir().join(format!("turbine-savekinds-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         let saves = d.join("EldenRing/7656");

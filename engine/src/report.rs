@@ -3,13 +3,12 @@
 //! after a word like key, token, cookie, password or authorization is replaced, and so is anything that looks like a
 //! long secret (a Nexus key, a session id).
 
-/// Is this word (a setting's or header's name) one whose value is secret?
-fn secret_word(w: &str) -> bool {
+/// Is this word (a setting's or header's name) one whose value is secret? Any name with pass, pwd, token, secret,
+/// key, auth, rcon, webhook, cookie or session in it.
+pub fn secret_word(w: &str) -> bool {
     let l = w.to_ascii_lowercase();
     let l = l.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-');
-    const EXACT: &[&str] = &["key", "apikey", "token", "cookie", "cookies", "password", "passwd", "secret", "authorization", "sid", "session", "cooppassword"];
-    const ENDS: &[&str] = &["apikey", "api_key", "api-key", "_key", "-key", "nexuskey", "token", "cookie", "password", "secret", "sessionid", "session_id"];
-    EXACT.contains(&l) || ENDS.iter().any(|e| l.ends_with(e))
+    ["pass", "pwd", "token", "secret", "key", "auth", "rcon", "webhook", "cookie", "session"].iter().any(|p| l.contains(p)) || l == "sid"
 }
 
 /// A run of 24 or more letters and digits (with + = _ - .): a key or token as written. Paths stay readable.
@@ -124,7 +123,9 @@ mod tests {
         let l = "2026-11-09 03:58:28.334 launch  ELDEN RING through me3 0.13.0: /home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/me3";
         assert_eq!(redact(l), l);
         assert_eq!(redact("Interface size: 100%"), "Interface size: 100%");
-        assert_eq!(redact("Monkey: 3"), "Monkey: 3");
+        assert_eq!(redact("Monkey: 3"), "Monkey: (hidden)", "on any doubt, hidden");
+        assert!(!redact("AdminPass hunter2").contains("hunter2"));
+        assert_eq!(redact("rcon_pass=abc"), "rcon_pass=(hidden)");
         assert_eq!(redact("Press key a"), "Press key a");
     }
 

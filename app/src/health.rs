@@ -131,8 +131,9 @@ impl qobject::Turbine {
             rules.launch_option.clone().unwrap_or_default()
         };
         let set = if game.store == turbine_engine::games::Store::Steam { steam::launch_options(&turbine_engine::home_dir(), &game.store_id) } else { None };
+        let ok = if me3 { set.as_deref().is_some_and(|x| ac::launch_option_ok(x, &data_home())) } else { set.as_deref().is_some_and(|x| !needed.is_empty() && x.contains(needed.replace("%command%", "").trim())) };
         let launch = format!(
-            "{{\"listed\":{},\"set\":{},\"needed\":{}}}",
+            "{{\"listed\":{},\"set\":{},\"needed\":{},\"ok\":{ok}}}",
             set.is_some(),
             quote(set.as_deref().unwrap_or("")),
             quote(&needed)

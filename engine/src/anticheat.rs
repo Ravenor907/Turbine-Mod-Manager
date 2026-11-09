@@ -428,14 +428,21 @@ pub fn helper_log(data: &Path) -> PathBuf {
     launch_dir(data).join("steam-launch.log")
 }
 
-/// The exact text for the game's Steam Launch Options.
+/// The game's Launch Options as they were before Turbine's line (to paste back when undoing it).
+pub fn original_file(data: &Path, app_id: &str) -> PathBuf {
+    launch_dir(data).join(format!("{app_id}.original"))
+}
+
+/// The next Play only (Seamless Co-op): used once by the helper, then the normal file again.
+pub fn once_file(data: &Path, app_id: &str) -> PathBuf {
+    launch_dir(data).join(format!("{app_id}.me3.once"))
+}
+
+/// The exact text for the game's Steam Launch Options. Steam runs Launch Options through its shell, so the line
+/// itself falls back to Steam's own command when the helper is gone (Turbine's data deleted): the game always starts.
 pub fn launch_option(data: &Path) -> String {
-    let p = helper_path(data).to_string_lossy().to_string();
-    if p.contains(' ') {
-        format!("\"{p}\" %command%")
-    } else {
-        format!("{p} %command%")
-    }
+    let p = helper_path(data).to_string_lossy().replace('"', "");
+    format!("if [ -x \"{p}\" ]; then \"{p}\" %command%; else %command%; fi")
 }
 
 /// Do the Launch Options as set in Steam run the helper with Steam's command after it?
@@ -447,16 +454,44 @@ pub fn launch_option_ok(set: &str, data: &Path) -> bool {
     }
 }
 
-/// The helper's text. It runs only me3 from the file Turbine wrote, or Steam's own command.
-pub fn helper_text() -> String {
-    r#"#!/bin/bash
-# Turbine Mod Manager's Steam launch helper. Steam runs it from a game's Launch Options as
-#   <this file> %command%
-# With mods on in Turbine (a "<app id>.me3" file next to it, one argument per line) it starts the game through me3
-# with Turbine's profile; otherwise it runs Steam's own command unchanged. It runs nothing else.
-# Turbine writes this file again when it changes; every step goes to steam-launch.log next to it.
+/// Do the Launch Options mention Turbine's helper at all (the line to undo)?
+pub fn launch_option_uses_helper(set: &str, data: &Path) -> bool {
+    set.contains(&*helper_path(data).to_string_lossy())
+}
+
+/// Keeps the player's Launch Options from before Turbine's line, the first time they are seen without it.
+pub fn remember_original(data: &Path, app_id: &str, set: &str) -> io::Result<()> {
+    if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() {
+        return Ok(());
+    }
+    fs::create_dir_all(launch_dir(data))?;
+    fs::write(original_file(data, app_id), set)
+}
+
+/// What to paste back to undo Turbine's line: the player's earlier Launch Options ("" when they were empty).
+pub fn original_options(data: &Path, app_id: &str) -> String {
+    fs::read_to_string(original_file(data, app_id)).unwrap_or_default()
+}
+
+/// The helper's text. It runs only Turbine's own me3 from the file Turbine wrote, or Steam's own command.
+/// `flatpak_id`: Turbine's Flatpak; when it is no longer installed the helper runs Steam's own command.
+pub fn helper_text(flatpak_id: Option<&str>) -> String {
+    let installed = match flatpak_id {
+        Some(id) => format!(
+            "# Turbine gone (uninstalled, its data kept): the game starts normally.\nif command -v flatpak > /dev/null 2>&1 && ! flatpak info {id} > /dev/null 2>&1; then\n  say \"Turbine Mod Manager isn't installed any more: Steam's own command\"\n  exec \"$@\"\nfi\n"
+        ),
+        None => String::new(),
+    };
+    let text = r#"#!/bin/bash
+# Turbine Mod Manager's Steam launch helper. Steam runs it from a game's Launch Options (Turbine's line runs Steam's
+# own command when this file is gone). With mods on in Turbine (a "<app id>.me3" file next to it, one argument per
+# line, written by Turbine from its current state) it starts the game through Turbine's own me3 with Turbine's profile;
+# "<app id>.me3.once" is for the next Play only. Otherwise, and on any doubt, it runs Steam's own command unchanged.
+# It runs nothing else. Turbine writes this file again when it changes; every step goes to steam-launch.log.
 here=$(cd "$(dirname "$0")" && pwd)
+data=$(dirname "$here")
 log="$here/steam-launch.log"
+if [ -f "$log" ] && [ "$(wc -c < "$log")" -gt 262144 ]; then tail -n 400 "$log" > "$log.tmp" && mv -f "$log.tmp" "$log"; fi
 say() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log" 2>/dev/null; }
 app="${SteamAppId:-${STEAM_COMPAT_APP_ID:-}}"
 if [ -z "$app" ]; then
@@ -470,16 +505,36 @@ fi
 case "$app" in
   ''|*[!0-9]*) say "No app id: Steam's own command"; exec "$@" ;;
 esac
-if [ -f "$here/$app.plain" ]; then
+@INSTALLED@if [ -f "$here/$app.plain" ]; then
+  if [ -n "$(find "$here/$app.plain" -mmin -10 2> /dev/null)" ]; then
+    rm -f "$here/$app.plain" "$here/$app.me3.once"
+    say "Play without mods (once): Steam's own command"
+    exec "$@"
+  fi
   rm -f "$here/$app.plain"
-  say "Play without mods (once): Steam's own command"
-  exec "$@"
+  say "An old Play without mods (over ten minutes) was left: ignored"
 fi
-if [ ! -f "$here/$app.me3" ]; then
+flag="$here/$app.me3"
+if [ -f "$here/$app.me3.once" ]; then
+  flag="$here/$app.me3.once.run"
+  mv -f "$here/$app.me3.once" "$flag"
+  say "This Play only: $(head -n 1 "$flag")"
+elif [ ! -f "$flag" ]; then
   say "No mods on in Turbine: Steam's own command"
   exec "$@"
 fi
-mapfile -t me3 < "$here/$app.me3"
+me3=()
+while IFS= read -r line || [ -n "$line" ]; do
+  line="${line%$'\r'}"
+  case "$line" in '#'*|'') continue ;; esac
+  me3+=("$line")
+done < "$flag"
+case "$flag" in *.run) rm -f "$flag" ;; esac
+# Only Turbine's own me3, from its data folder.
+case "${me3[0]}" in
+  "$data"/me3/*/bin/me3) ;;
+  *) say "The mods file doesn't name Turbine's own me3 (${me3[0]}): Steam's own command, without mods"; exec "$@" ;;
+esac
 if [ "${#me3[@]}" -lt 2 ] || [ ! -x "${me3[0]}" ]; then
   say "me3 isn't where Turbine put it (${me3[0]}): Steam's own command, without mods"
   exec "$@"
@@ -495,15 +550,15 @@ for ((i = 0; i < ${#args[@]}; i++)); do
   esac
 done
 say "Mods on: ${prefix[*]} ${me3[*]}"
-exec "${prefix[@]}" "${me3[@]}" >> "$here/me3-$app.log" 2>&1
-"#
-    .to_string()
+exec "${prefix[@]}" "${me3[@]}" > "$here/me3-$app.log" 2>&1
+"#;
+    text.replace("@INSTALLED@", &installed)
 }
 
 /// Writes the helper (executable) when it is missing or different. Answers true when it wrote it.
-pub fn write_helper(data: &Path) -> io::Result<bool> {
+pub fn write_helper(data: &Path, flatpak_id: Option<&str>) -> io::Result<bool> {
     let path = helper_path(data);
-    let text = helper_text();
+    let text = helper_text(flatpak_id);
     if fs::read_to_string(&path).is_ok_and(|t| t == text) {
         return Ok(false);
     }
@@ -524,44 +579,100 @@ pub fn helper_args(me3: &Path, profile: &Path) -> Vec<String> {
     launch_args(me3, profile).into_iter().skip(2).collect()
 }
 
-/// Mods on (Some: me3's arguments) or off (None) for the game's next Steam launch. A line break in an argument
-/// would split it, so such an argument is refused.
-pub fn arm(data: &Path, app_id: &str, args: Option<&[String]>) -> io::Result<()> {
+fn check_app_id(app_id: &str) -> io::Result<()> {
     if app_id.is_empty() || !app_id.bytes().all(|b| b.is_ascii_digit()) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id"));
     }
-    let file = armed_file(data, app_id);
-    match args {
-        None => match fs::remove_file(&file) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        },
-        Some(a) => {
-            if a.iter().any(|x| x.contains('\n') || x.contains('\r') || x.is_empty()) {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput, "an argument holds a line break"));
-            }
-            fs::create_dir_all(launch_dir(data))?;
-            let tmp = file.with_extension("tmp");
-            fs::write(&tmp, a.join("\n") + "\n")?;
-            fs::rename(&tmp, &file)
-        }
+    Ok(())
+}
+
+fn write_flag(file: &Path, args: &[String], state: &str) -> io::Result<()> {
+    if args.iter().any(|x| x.contains('\n') || x.contains('\r') || x.is_empty()) || state.contains('\n') {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "an argument holds a line break"));
+    }
+    if let Some(p) = file.parent() {
+        fs::create_dir_all(p)?;
+    }
+    let tmp = file.with_extension("tmp");
+    fs::write(&tmp, format!("# {state}\n{}\n", args.join("\n")))?;
+    fs::rename(&tmp, file)
+}
+
+fn remove_if(file: &Path) -> io::Result<()> {
+    match fs::remove_file(file) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
     }
 }
 
-/// One Play without mods through Steam (the helper removes the file when it runs).
+/// Mods on (Some: me3's arguments) or off (None) for the game's Steam launches. Off also clears a waiting
+/// next-Play-only file; on clears a waiting Play without mods. A line break in an argument is refused.
+pub fn arm(data: &Path, app_id: &str, args: Option<&[String]>) -> io::Result<()> {
+    arm_with(data, app_id, args, "mods on")
+}
+
+/// `arm` with words saying the state it carries (the file's first line, in the helper's log).
+pub fn arm_with(data: &Path, app_id: &str, args: Option<&[String]>, state: &str) -> io::Result<()> {
+    check_app_id(app_id)?;
+    match args {
+        None => {
+            remove_if(&once_file(data, app_id))?;
+            remove_if(&armed_file(data, app_id))
+        }
+        // A waiting Play without mods stays: it is for the Play that asked for it (Turbine's Play with mods clears it).
+        Some(a) => write_flag(&armed_file(data, app_id), a, state),
+    }
+}
+
+/// The next Play only (Seamless Co-op): the helper uses this once, then the normal state again.
+pub fn arm_once(data: &Path, app_id: &str, args: &[String], state: &str) -> io::Result<()> {
+    check_app_id(app_id)?;
+    write_flag(&once_file(data, app_id), args, state)?;
+    remove_if(&plain_file(data, app_id))
+}
+
+/// A Play without mods that is still waiting goes (Turbine's own Play with mods).
+pub fn clear_plain(data: &Path, app_id: &str) -> io::Result<()> {
+    check_app_id(app_id)?;
+    remove_if(&plain_file(data, app_id))
+}
+
+/// One Play without mods through Steam (the helper removes the file when it runs, and ignores one older than ten
+/// minutes).
 pub fn arm_plain_once(data: &Path, app_id: &str) -> io::Result<()> {
+    check_app_id(app_id)?;
     fs::create_dir_all(launch_dir(data))?;
+    remove_if(&once_file(data, app_id))?;
     fs::write(plain_file(data, app_id), b"once\n")
 }
 
 /// The helper's log lines since `since_len` bytes (what the helper did for the last launch), at most 40 lines.
 pub fn helper_log_since(data: &Path, since_len: u64) -> Vec<String> {
     let Ok(text) = fs::read(helper_log(data)) else { return Vec::new() };
-    let from = (since_len as usize).min(text.len());
+    let from = if since_len as usize > text.len() { 0 } else { since_len as usize };
     let tail = String::from_utf8_lossy(&text[from..]).to_string();
     let lines: Vec<String> = tail.lines().map(str::to_string).collect();
     let skip = lines.len().saturating_sub(40);
     lines.into_iter().skip(skip).collect()
+}
+
+/// Turbine's state for Steam's own Play of a game me3 starts: Ok when the helper may start me3 (mods on, the player
+/// turned the anti-cheat off for them, nothing holds them back, the last apply worked, me3 is there); otherwise why
+/// not, and the helper is cleared. Every way of turning mods off ends here.
+pub fn helper_state(mods_on: usize, consent: bool, held: bool, apply_failed: bool, me3_ok: bool) -> Result<(), &'static str> {
+    if mods_on == 0 {
+        Err("no mods on")
+    } else if !consent {
+        Err("anti-cheat is on (the player hasn't turned it off for mods)")
+    } else if held {
+        Err("held without mods until they update")
+    } else if apply_failed {
+        Err("the last apply failed")
+    } else if !me3_ok {
+        Err("me3 isn't installed")
+    } else {
+        Ok(())
+    }
 }
 
 /// Which profile: Play with mods (solo, Turbine's own save) or Play Seamless Co-op (its .co2 saves).

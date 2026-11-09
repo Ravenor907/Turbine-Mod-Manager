@@ -379,7 +379,7 @@ for size in $SIZES; do
   done
   # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text), and the launch check's sheet.
   shoot "launchsetup-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
-  need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"/home/deck/.*/steam-launch/turbine-launch.sh %command%\""
+  need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
   need "notstarted-$size" "Launch check: didn't start, with the fixes ($size)" "Launch check sheet: .* didn't start \| Play without mods; Activity log; Why won't it start\?"
   rm -rf "$PWD/fh/modsempty-$size"; python3 tools/fake-home.py "$PWD/fh/modsempty-$size" > /dev/null; h="$PWD/fh/modsempty-$size"

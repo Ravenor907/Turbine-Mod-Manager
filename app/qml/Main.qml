@@ -331,7 +331,7 @@ Window {
             else if (shot.page === "nexuspick") app.openNexusPick()
             else if (shot.page === "why") app.openWhy()
             // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
-            else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh %command%", set: "", listed: true, coop: false })
+            else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false })
             else if (shot.page === "notstarted") { app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; ")) }
             // 0.56: a mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
             else if (shot.page === "tucked" && app.mods.length > 1) {
@@ -418,26 +418,32 @@ Window {
         property int step: 0
         onTriggered: {
             if (shot.page === "modsettings") {
+                const m = app.mods.find(x => x.name.indexOf("Glow") >= 0)
                 if (step === 0) {
-                    const m = app.mods.find(x => x.name.indexOf("Glow") >= 0)
                     app.tab = 0; app.zone = "main"; app.modIndex = Math.max(0, app.listItems.findIndex(x => x.kind === "mod" && x.m === m))
                     app.note("shot", "Mod menu: " + app.modMenuTitles())
                     // It comes in off (SKSE isn't there): on, so the edited copy goes into the game.
                     if (m && !m.enabled) Turbine.setEnabled(m.id, true)
                     if (m) app.openModSettings(m)
+                    step = 1; interval = 1200; restart()
+                } else if (step === 1) {
                     const r = settingsView.shown[settingsView.focusIndex]
                     app.note("shot", "Settings page: " + app.sheet + " | " + settingsView.shown.length + " rows | focus " + (r && r.f ? r.f.key + " " + r.f.kind + " " + settingsView.valueOf(r.f) : "none"))
                     app.act("right")
                     app.note("shot", "After Right: " + (r && r.f ? settingsView.valueOf(r.f) : "") + ", " + settingsView.changes + " change; legend " + app.legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     app.act("start")
-                    step = 1; interval = 1500; restart()
+                    step = 2; interval = 1500; restart()
                 } else app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
             } else if (shot.page === "coopsettings") {
-                app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
-                app.sheet = ""
-                app.note("shot", "Co-op beside Play: " + coopBtn.visible + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
-                legend.check("coopbar")
-                app.openCoopSettings()
+                // The bar is looked at once it has laid itself out again with no sheet open.
+                if (step === 0) { app.sheet = ""; step = 1; interval = 800; restart(); return }
+                if (step === 1) {
+                    app.note("shot", "Seamless in: " + app.seamlessIn + "; game menu: " + app.gameMenuItems.map(x => x.title).join("; "))
+                    app.note("shot", "Co-op beside Play: " + coopBtn.visible + "; Play options: " + (app.seamlessIn ? "Play Seamless Co-op" : "none"))
+                    legend.check("coopbar")
+                    app.openCoopSettings()
+                    step = 2; interval = 1200; restart(); return
+                }
                 app.note("shot", "Seamless page: " + settingsView.title + " | first " + (settingsView.shown[0] && settingsView.shown[0].f ? settingsView.shown[0].f.key : "none")
                          + " | " + settingsView.shown.filter(r => r.f).map(r => r.f.key + ":" + r.f.kind).join(", "))
             } else if (shot.page === "gameupdate") {
@@ -769,16 +775,25 @@ Window {
     property string settingsRel: ""
     property string settingsReturn: ""         // the sheet B goes back to
     property var settingsTypeRow: null
+    // The file is read on its own thread (a big one never stops the interface); the page opens when it comes.
+    property var settingsWant: null
     function openSettingsFile(modId, rel, title, pin, back) {
-        const d = parse(Turbine.settingsOpen(modId, rel), { error: "Couldn't open it." })
+        settingsWant = { mod: modId, rel: rel, title: title, pin: pin || [], back: back || "" }
+        Turbine.settingsLoad(modId, rel)
+    }
+    function settingsLoaded(d) {
+        const w = settingsWant
+        if (!w || d.mod !== w.mod || d.rel !== w.rel) return
+        settingsWant = null
         if (d.error) { toast.problem(d.error); return }
-        settingsMod = modId; settingsRel = rel; settingsReturn = back || ""
-        settingsView.title = title
-        settingsView.sub = rel + (d.edited ? " · your version (Reset to default goes back to " + (modId === "" ? "the original" : "the mod's own") + ")" : "") + (d.fields.length > 0 ? " · " + plural(d.fields.length, "setting", "settings") : "")
-        settingsView.pinFirst = pin || []
+        settingsMod = w.mod; settingsRel = w.rel; settingsReturn = w.back
+        settingsView.title = w.title
+        settingsView.sub = w.rel + (d.edited ? " · your version (Reset to default goes back to " + (w.mod === "" ? "the original" : "the mod's own") + ")" : "")
+                           + (d.big ? " · too big to edit here as settings, so it's shown as plain text" : d.fields.length > 0 ? " · " + plural(d.fields.length, "setting", "settings") : "")
+        settingsView.pinFirst = w.pin
         settingsView.doc = d
         settingsView.reset()
-        note("action", "Edit settings: " + title + " (" + rel + ", " + d.format + ", " + d.fields.length + " settings" + (d.edited ? ", edited" : "") + ")")
+        note("action", "Edit settings: " + w.title + " (" + w.rel + ", " + d.format + ", " + d.fields.length + " settings" + (d.edited ? ", edited" : "") + (d.big ? ", too big: plain text" : "") + ")")
         sheet = "settingsedit"
     }
     function settingsFilesOf(modId) { return parse(Turbine.settingsFiles(modId), []) }
@@ -814,8 +829,9 @@ Window {
         if (row.kind === "line") { settingsView.setLine(row.n, text); return }
         const f = row.f
         if (f.kind === "number") {
-            const v = parseFloat(text)
-            if (isNaN(v) || String(text).trim() === "") { toast.problem(f.key + " takes a number."); return }
+            text = String(text).trim()
+            const v = Number(text)
+            if (!/^-?\d+(\.\d+)?$/.test(text) || !isFinite(v)) { toast.problem(f.key + " takes a number, like 5 or 1.5."); return }
             if (f.min !== null && v < f.min || f.max !== null && v > f.max) { toast.problem(f.key + " goes from " + f.min + " to " + f.max + "."); return }
         }
         settingsView.setValue(f, text)
@@ -823,7 +839,10 @@ Window {
     function settingsSaveNow() {
         if (settingsView.changes === 0) { toast.info("Nothing changed."); return }
         const e = settingsView.edits, le = settingsView.lineEdits
-        const body = { fields: Object.keys(e).map(id => ({ id: parseInt(id), value: e[id] })), lines: Object.keys(le).map(n => ({ line: parseInt(n), text: le[n] })) }
+        // Each setting by its identity and the value the page showed (the file may have changed since).
+        const byId = id => settingsView.fields.find(f => f.id === parseInt(id))
+        const body = { fields: Object.keys(e).map(id => { const f = byId(id); return { section: f.section, key: f.key, occ: f.occ || 0, was: f.value, value: e[id] } }),
+                       lines: Object.keys(le).map(n => ({ line: parseInt(n), was: settingsView.lines[parseInt(n) - 1], text: le[n] })) }
         const r = parse(Turbine.settingsSave(settingsMod, settingsRel, JSON.stringify(body)), { ok: false, error: "Couldn't save it." })
         if (!r.ok) { toast.problem(r.error); return }
         note("action", "Edit settings saved: " + settingsRel + " (" + settingsView.changes + " changes)")
@@ -841,6 +860,25 @@ Window {
                       toast.done("Back to the default.")
                       openSettingsFile(mod, rel, title, pin, back) } },
                             { key: "b", label: "Cancel", run: () => { sheet = "settingsedit" } }] })
+    }
+    // ---------------------------------------------------------------- 0.58: Undo the launch options change
+    function openLaunchUndo(current) {
+        const list = parse(Turbine.launchUndoJson(current), [])
+        note("action", "Undo the launch options change: " + list.map(x => x.name + (x.uses ? " (uses it)" : "")).join("; "))
+        if (list.length === 0) { toast.info("No game's Steam Launch Options run Turbine's helper."); return }
+        if (list.length === 1) { showLaunchUndo(list[0]); return }
+        openPick("Undo the launch options change", "Pick the game", list.map(x => ({ icon: "restore", title: x.name, detail: x.original !== "" ? "Back to: " + x.original : "Back to empty", aLabel: "Show", run: () => showLaunchUndo(x) })), "")
+    }
+    function showLaunchUndo(x) {
+        Turbine.launchUndo(x.game)
+        const back = x.original
+        openMsg({ title: "Undo the launch options change: " + shortGame(x.name),
+                  text: "Turbine's helper starts nothing for " + shortGame(x.name) + " now. To take its line out of Steam too, put back what was there before:\n\n" + (back !== "" ? back : "(nothing: leave Launch Options empty)"),
+                  steps: ["In Steam: " + shortGame(x.name) + ", the gear, Properties, General, Launch Options.",
+                          back !== "" ? "Replace Turbine's line with the text above (A copies it)." : "Delete everything there.",
+                          "Close Properties. Steam starts the game normally, with its anti-cheat."],
+                  buttons: (back !== "" ? [{ key: "a", label: "Copy it", run: () => { Turbine.copyText(back); toast.done("Copied. Paste it in Steam: Properties, Launch Options.") } }] : [])
+                           .concat([{ key: "b", label: "Close", run: () => {} }]) })
     }
     // ---------------------------------------------------------------- 0.58: Elden Ring's saves, each kind apart
     function openErSaves() {
@@ -883,6 +921,7 @@ Window {
         for (const r of gameUpdate.risky) { const m = mods.find(x => x.id === r.id); versions[r.id] = m ? (m.version || "") : "" }
         all[game.id] = { build: gameUpdate.now, versions: versions }
         seen.modHold = JSON.stringify(all)
+        Turbine.setModHold(true)
         note("action", "Mods held until they update: " + Object.keys(versions).join(", "))
         toast.done("Play starts " + gameTitle + " without mods until they update. Game menu, Play with mods again, ends it.")
     }
@@ -892,6 +931,7 @@ Window {
         if (!all[game.id]) return
         delete all[game.id]
         seen.modHold = JSON.stringify(all)
+        Turbine.setModHold(false)
         note("action", "Mods back on for Play: " + why)
         toast.done("Play uses your mods again: " + why + ".")
     }
@@ -1238,6 +1278,7 @@ Window {
         function onLaunch(url) { app.playAt = Date.now(); app.playGame = app.game ? app.game.id : ""; if (!shot.on) Qt.openUrlExternally(url) }
         function onLaunchSetup(gameId, json) { const o = app.parse(json, null); if (o) app.openLaunchSetup(o) }
         function onNotStarted(gameId) { app.openNotStarted(gameId) }
+        function onSettingsLoaded(json) { app.settingsLoaded(app.parse(json, { error: "Couldn't open it." })) }
         function onGameEnded(gameId, seconds, known) {
             if (known) { if (seconds < 60) app.quickExit(gameId, seconds) }
             else app.measureAway = gameId
@@ -1737,7 +1778,7 @@ Window {
         if (acAskNeeded()) { openAcAsk(() => startPlay(coop === true)); return }
         if (acRefused && mods.some(m => m.enabled)) { toast.problem(acInfo.refuseWords); return }
         // 0.58: held after a game update: without mods until they update.
-        if (modHold && mods.some(m => m.enabled) && coop !== true) {
+        if (modHold && mods.some(m => m.enabled)) {
             note("action", "Play " + game.name + " without mods (held until they update after the game update)")
             toast.info("Playing without mods until they update. Game menu, Play with mods again, ends that.")
             Turbine.playOriginal()
@@ -2013,6 +2054,8 @@ Window {
         { icon: "play", title: "Play with mods again", detail: "Play has started it without mods since the game updated", ok: true, act: "unhold" }
     ] : []).concat(seamlessIn ? [
         { icon: "info", title: "Seamless Co-op settings", detail: "Session password first, then its other options", ok: true, act: "coopsettings" }
+    ] : []).concat(acMode === "me3" && game && String(game.id).indexOf("steam:") === 0 ? [
+        { icon: "restore", title: "Undo the launch options change", detail: "Shows what to paste back in Steam", ok: true, act: "launchundo" }
     ] : []).concat(acMode === "me3" && acInfo.seamless ? [
         { icon: "restore", title: "Saves: normal, modded and co-op", detail: "Each kind apart, with its backups", ok: true, act: "ersaves" }
     ] : []).concat(acMode === "me3" || acRefused ? [] : [
@@ -2050,7 +2093,7 @@ Window {
     function launchFinding(h) {
         const need = (h.launch && h.launch.needed) || "", set = (h.launch && h.launch.set) || ""
         if (need === "") return null
-        if (set.indexOf(need.replace(/ ?%command%/, "").trim()) >= 0) return { icon: "power", title: "Steam launch option: set", detail: "Steam has what " + gameTitle + " needs", info: true, run: () => {} }
+        if (h.launch.ok === true || (h.launch.ok === undefined && set.indexOf(need.replace(/ ?%command%/, "").trim()) >= 0)) return { icon: "power", title: "Steam launch option: set", detail: "Steam has what " + gameTitle + " needs", info: true, run: () => {} }
         return { icon: "info", title: set === "" ? "Steam launch option missing" : "Steam launch option is different", detail: "A copies it: " + need + "  Game page, gear, Properties, Launch Options.",
                  run: () => { Turbine.copyText(need); note("action", "Launch option copied: " + need); toast.done("Copied. Paste it in Steam: Properties, Launch Options.") } }
     }
@@ -2150,6 +2193,7 @@ Window {
         else if (item.act === "unhold") { sheet = ""; releaseHold("as you asked") }
         else if (item.act === "coopsettings") openCoopSettings()
         else if (item.act === "ersaves") openErSaves()
+        else if (item.act === "launchundo") openLaunchUndo(true)
         else if (item.act === "gamesettings") openGameSettings()
         else if (item.act === "acleftover") askDelete("acleftover:" + acInfo.leftover, acInfo.leftover + " was left in " + gameTitle + "'s folder by another program that used to start it without its anti-cheat. It isn't Steam's, and Steam's Verify doesn't remove it. Turbine removes only that one file; the anti-cheat starter stays as it is.")
         else if (item.act === "loader") { sheet = ""; getLoader() }
@@ -5864,6 +5908,7 @@ Window {
     // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
     readonly property var helpRows: [
         { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
+        { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: what to paste back in Steam's Launch Options", action: "Show" },
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A does the highlighted thing. B goes back (hold it to go home). X: options for what's highlighted. Y: Find, with search, sort and show. LB and RB: tabs. LT and RT: a page up or down. View: the quick wheel. Start: Play (hold it for Play options). Right stick: the pointer; RT or R3 clicks, LT opens options." },
@@ -5983,6 +6028,7 @@ Window {
         perf: () => openPerf(),
         activity: () => openActivity(),
         problem: () => saveProblemReport(),
+        launchundo: () => openLaunchUndo(false),
         steamBrowser: (r) => labsRun(r), keyless: (r) => labsRun(r), gmBrowser: (r) => labsRun(r),
         nexusKey: () => openAsk("nexusKey", "Nexus Mods API key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it"),
         pasteKey: () => pasteKey(),

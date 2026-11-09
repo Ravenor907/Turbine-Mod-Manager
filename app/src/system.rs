@@ -73,6 +73,24 @@ pub fn game_running(dir: &std::path::Path) -> Option<bool> {
     }
 }
 
+/// Is Steam running on the host? None when it can't be asked.
+pub fn steam_running() -> Option<bool> {
+    use std::process::{Command, Stdio};
+    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg("pgrep");
+        c
+    } else {
+        Command::new("pgrep")
+    };
+    let status = cmd.arg("-x").arg("steam").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
 /// The desktop file Turbine is installed with (it says it opens nxm:// links).
 pub const DESKTOP_FILE: &str = "io.github.ravenor907.TurbineModManager.desktop";
 const NXM_TYPE: &str = "x-scheme-handler/nxm";

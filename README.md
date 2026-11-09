@@ -32,6 +32,10 @@ Game rules for: Skyrim Special Edition, Cyberpunk 2077, The Witcher 3, Stardew V
 
 The Flatpak can write to Steam's library folders (internal and SD cards under /run/media), ~/Games and Heroic's folders, because that is where mods go. It reads your Downloads folder to find mod zip files.
 
+## Games started through Steam (Elden Ring and other me3 games)
+
+For a game Turbine starts through me3 (Elden Ring, Nightreign, Armored Core VI, Dark Souls III, Sekiro), Turbine asks you once to put one line in the game's Steam Launch Options, so Steam starts it and Game Mode shows it. That line starts the game normally when Turbine's helper isn't there, and the helper starts it normally whenever no mods are on. Before you uninstall Turbine, use Settings, Help, Undo the launch options change: it shows what to paste back in Steam.
+
 ## License
 
 GNU General Public License, version 3 or later. See [LICENSE](LICENSE).

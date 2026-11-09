@@ -297,12 +297,13 @@ pub mod qobject {
         #[cxx_name = "settingsFiles"]
         fn settings_files(self: &Self, mod_id: &QString) -> QString;
 
-        /// One settings file for the page: {"rel","format","fields","lines","edited","error"}.
+        /// Reads one settings file for the page on its own thread; the answer comes as `settingsLoaded`.
         #[qinvokable]
-        #[cxx_name = "settingsOpen"]
-        fn settings_open(self: &Self, mod_id: &QString, rel: &QString) -> QString;
+        #[cxx_name = "settingsLoad"]
+        fn settings_load(self: Pin<&mut Self>, mod_id: &QString, rel: &QString);
 
-        /// Saves the page's changes ({"fields":[{"id","value"}]} or {"lines":[{"line","text"}]}): {"ok","error"}.
+        /// Saves the page's changes ({"fields":[{"section","key","occ","was","value"}]} or
+        /// {"lines":[{"line","was","text"}]}), matched again in the file as it is now: {"ok","error"}.
         #[qinvokable]
         #[cxx_name = "settingsSave"]
         fn settings_save(self: &Self, mod_id: &QString, rel: &QString, edits: &QString) -> QString;
@@ -821,6 +822,27 @@ pub mod qobject {
         #[cxx_name = "launchSetup"]
         fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
 
+        /// 0.58: one settings file read for the Edit settings page (see settingsLoad).
+        #[qsignal]
+        #[cxx_name = "settingsLoaded"]
+        fn settings_loaded(self: Pin<&mut Self>, json: QString);
+
+        /// 0.58: Play without mods until they update (the game update warning), for Turbine's and Steam's Play.
+        #[qinvokable]
+        #[cxx_name = "setModHold"]
+        fn set_mod_hold(self: Pin<&mut Self>, on: bool);
+
+        /// 0.58: the me3 games whose Steam Launch Options run Turbine's helper, with what to paste back:
+        /// [{"game","name","uses","set","original","line"}] (only the current game when `current`).
+        #[qinvokable]
+        #[cxx_name = "launchUndoJson"]
+        fn launch_undo_json(self: &Self, current: bool) -> QString;
+
+        /// 0.58: Undo the launch options change: the helper stops starting me3 for this game (logged).
+        #[qinvokable]
+        #[cxx_name = "launchUndo"]
+        fn launch_undo(self: Pin<&mut Self>, game: &QString);
+
         /// 0.58: the game wasn't seen running about 20 seconds after Play.
         #[qsignal]
         #[cxx_name = "notStarted"]
@@ -1141,6 +1163,9 @@ impl Worker {
     pub(crate) fn show(&mut self, game: &Game, with_rules: bool) {
         let key = game.id();
         let Some(slot) = self.slots.get(&key) else { return };
+        // 0.58: after anything that changed this game (mods on or off, the anti-cheat answer, Reset, a loadout, a
+        // removed mod), the Steam launch helper carries exactly Turbine's state now.
+        crate::anticheat::sync_helper(self, slot);
         let mods = slot.store.to_json();
         // Who wins shared files, and requirements both ways, for the list and the mod menu.
         let overlaps = turbine_engine::overlaps::to_json(&slot.store.overlaps());
@@ -1148,7 +1173,9 @@ impl Worker {
         let warns = mod_warns_json(slot);
         let restore = matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root());
         // 0.58, the game update warning: the build changed since mods were last played, and which mods may break.
-        let update = match (slot.store.last_build(), slot.game.build.as_deref()) {
+        // The build last played with mods (an apply alone doesn't count, so the warning isn't lost to one).
+        let played = std::fs::read_to_string(slot.store.root().join("played-build")).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
+        let update = match (played.or_else(|| slot.store.last_build()), slot.game.build.as_deref()) {
             (Some(last), Some(now)) if last != now => {
                 let risky: Vec<String> = slot
                     .store
@@ -2219,13 +2246,15 @@ impl qobject::Turbine {
                         match blocked {
                             Some(why) => w.say(why, "error"),
                             None => {
-                                w.say("Starting the game with no mods. Your mods are kept.", "ok");
                                 let wr: &Worker = w;
-                                if let Some(s) = wr.slots.get(&game.id()) {
-                                    crate::anticheat::arm_plain(wr, s, true);
+                                let ready = wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, true));
+                                if ready {
+                                    w.say("Starting the game with no mods. Your mods are kept.", "ok");
+                                    launch(w, &game);
+                                    watch_game_as(w, &game, false);
+                                } else {
+                                    w.say(format!("Couldn't set {} to start without mods, so it wasn't started. Try again, or turn every mod off.", game.name), "error");
                                 }
-                                launch(w, &game);
-                                watch_game_as(w, &game, false);
                             }
                         }
                     }
@@ -2464,10 +2493,18 @@ impl qobject::Turbine {
                 match result {
                     Ok(r) => {
                         w.note(&game, &r);
+                        if let Some(s) = w.slots.get(&game.id()) {
+                            crate::anticheat::set_doubt(s, false);
+                        }
                         // Play went through with the mods as they are: that setup is the one Restore goes back to,
                         // and this game build no longer counts as "updated since".
                         if let Ok(s) = w.slot(&game) {
                             let marked = s.store.mark_played().and_then(|_| s.store.acknowledge_build());
+                            if s.store.mods().iter().any(|m| m.enabled) {
+                                if let Some(b) = &s.game.build {
+                                    let _ = std::fs::write(s.store.root().join("played-build"), b);
+                                }
+                            }
                             if let Err(e) = marked {
                                 w.say(format!("Couldn't note this setup as played: {e}"), "warn");
                             }
@@ -2524,11 +2561,12 @@ impl qobject::Turbine {
                         } else {
                             // A me3 game with no mods on: Steam's own command through the helper.
                             let wr: &Worker = w;
-                            if let Some(s) = wr.slots.get(&game.id()) {
-                                crate::anticheat::arm_plain(wr, s, false);
+                            if wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, false)) {
+                                launch(w, &game);
+                                watch_game(w, &game);
+                            } else {
+                                w.say(format!("Couldn't set {} to start normally, so it wasn't started.", game.name), "error");
                             }
-                            launch(w, &game);
-                            watch_game(w, &game);
                         }
                         w.show(&game, false);
                     }
@@ -2537,6 +2575,10 @@ impl qobject::Turbine {
                             let p = *t.pending() + n;
                             t.as_mut().set_pending(p);
                         });
+                        if let Some(s) = w.slots.get(&game.id()) {
+                            crate::anticheat::set_doubt(s, true);
+                            crate::anticheat::sync_helper(w, s);
+                        }
                         w.say(format!("Couldn't get the mods in place, so the game wasn't started: {e}"), "error");
                     }
                 }
@@ -2570,12 +2612,13 @@ impl qobject::Turbine {
                         match blocked {
                             Some(why) => w.say(why, "error"),
                             None => {
-                                w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
                                 let wr: &Worker = w;
-                                if let Some(s) = wr.slots.get(&game.id()) {
-                                    crate::anticheat::arm_plain(wr, s, true);
+                                if wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, true)) {
+                                    w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
+                                    launch(w, &game);
+                                } else {
+                                    w.say(format!("Couldn't set {} to start without mods, so it wasn't started.", game.name), "error");
                                 }
-                                launch(w, &game);
                             }
                         }
                     }
@@ -2846,10 +2889,9 @@ fn apply_job(game: Game, n: i32) -> Job {
         match result {
             Ok(r) => {
                 w.note(&game, &r);
-                // 0.58: Steam's own Play button starts a me3 game the way Turbine's mods are now.
-                let wr: &Worker = w;
-                if let Some(s) = wr.slots.get(&game.id()) {
-                    crate::anticheat::sync_helper(wr, s);
+                // 0.58: the last apply worked (show() below keeps the launch helper to the state).
+                if let Some(s) = w.slots.get(&game.id()) {
+                    crate::anticheat::set_doubt(s, false);
                 }
                 w.say(applied_words(&r, &game), "ok")
             }
@@ -2858,6 +2900,11 @@ fn apply_job(game: Game, n: i32) -> Job {
                     let p = *t.pending() + n;
                     t.as_mut().set_pending(p);
                 });
+                // 0.58: on any doubt, Steam's Play never starts me3 until an apply works again.
+                if let Some(s) = w.slots.get(&game.id()) {
+                    crate::anticheat::set_doubt(s, true);
+                    crate::anticheat::sync_helper(w, s);
+                }
                 w.say(format!("Couldn't apply the changes: {e}. Nothing was lost; Turbine tries again after the next change."), "error");
             }
         }
@@ -2886,6 +2933,8 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
     let (id, name, dir) = (game.id(), game.name.clone(), game.install_dir.clone());
     let data = w.data_home.clone();
     let helper_from = crate::anticheat::helper_log_len(&data);
+    // Steam that has to start (or update) first takes longer: the check waits a minute then.
+    let wait = if crate::system::steam_running() == Some(false) { 60 } else { START_WAIT_SECS };
     let _ = std::thread::Builder::new().name("turbine-game-watch".into()).spawn(move || {
         let tick = Duration::from_secs(2);
         let started = std::time::Instant::now();
@@ -2895,11 +2944,11 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
         // Up to 3 minutes for the game to start, then until it closes (at most 10 minutes of watching).
         for i in 0..300 {
             std::thread::sleep(tick);
-            if !told && (seen.is_some() || started.elapsed() >= Duration::from_secs(START_WAIT_SECS)) {
+            if !told && (seen.is_some() || started.elapsed() >= Duration::from_secs(wait)) {
                 told = true;
                 crate::anticheat::helper_log_to_activity(&data, helper_from);
                 if seen.is_none() {
-                    crate::log::line("launch", &format!("{name} wasn't seen running {START_WAIT_SECS} seconds after Play: the launch check opens"));
+                    crate::log::line("launch", &format!("{name} wasn't seen running {wait} seconds after Play: the launch check opens"));
                     let gid = id.clone();
                     let _ = qt.queue(move |t| t.not_started(QString::from(gid.as_str())));
                 }

@@ -318,7 +318,10 @@ pub fn refused_by_name(game_name: &str) -> Option<&'static GameDef> {
     }
     games().iter().find(|d| {
         d.data.anti_cheat.as_ref().is_some_and(|a| a.mode == "refuse" || a.level == "refuse")
-            && (name_key(d.name) == key || d.short_name.is_some_and(|s| name_key(s) == key))
+            && [Some(d.name), d.short_name].into_iter().flatten().map(name_key).any(|n| {
+                // The whole name, or an edition after it ("Rainbow Six Siege X"): never a shorter name of another game.
+                n == key || (n.len() >= 6 && key.starts_with(&n) && key.len() - n.len() <= 12)
+            })
     })
 }
 
