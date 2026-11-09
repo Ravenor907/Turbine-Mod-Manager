@@ -440,7 +440,16 @@ Window {
                     app.note("shot", "After Right: " + (r && r.f ? settingsView.valueOf(r.f) : "") + ", " + settingsView.changes + " change; legend " + app.legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     app.act("start")
                     step = 2; interval = 1500; restart()
-                } else app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
+                } else {
+                    app.note("shot", "After Save: sheet " + app.sheet + ", " + settingsView.changes + " changes, edited " + settingsView.doc.edited)
+                    // 0.61 (I18): X opens the options; its first row shows the file as text; again as a list.
+                    app.act("x")
+                    const first = app.sheet === "pick" && app.pickItems[0] ? app.pickItems[0].title : ""
+                    app.act("a")
+                    const text = app.sheet === "settingsedit" && settingsView.plain
+                    app.act("x"); app.act("a")
+                    app.note("check", "Edit settings X: " + app.pickTitle + ", first " + first + "; then " + (text ? "as text" : "not as text") + ", back " + (app.sheet === "settingsedit" && !settingsView.plain ? "as a list" : "PROBLEM"))
+                }
             } else if (shot.page === "coopsettings") {
                 // The bar is looked at once it has laid itself out again with no sheet open.
                 if (step === 0) { app.sheet = ""; step = 1; interval = 800; restart(); return }
@@ -3347,6 +3356,25 @@ Window {
     // ---------------------------------------------------------------- Add mods from Downloads
     property int addIndex: 0
     function openAdd() { Turbine.listDownloads(); addIndex = 0; addAll = false; sheet = "add" }
+    // 0.61 (I18): Add from Downloads' Find pop-up. The first row is which files show; B goes back to the list.
+    function openAddFind() {
+        const pickShow = (all) => { addAll = all; addIndex = 0; note("action", all ? "Add: all files" : "Add: this game's files"); sheet = "add" }
+        openPick("Find mod files", "Which files Add from Downloads lists", [
+            { icon: "files", title: "This game's files", detail: "In Downloads and Game Mods/" + gameTitle + (addAll ? "" : " · Showing now"), aLabel: "Show", run: () => pickShow(false) },
+            { icon: "files", title: "All files", detail: "Every mod file in Downloads and its Game Mods folders" + (addAll ? " · Showing now" : ""), aLabel: "Show", run: () => pickShow(true) }], "add")
+        pickNoStart = true
+        menuIndex = addAll ? 1 : 0
+    }
+    // 0.61 (I18): Edit settings' options (X): how the file shows, and Reset to default.
+    function openSettingsOptions() {
+        const rows = []
+        if (settingsView.fields.length > 0)
+            rows.push({ icon: "info", title: settingsView.plain ? "Show as a list" : "Show as text", detail: settingsView.plain ? "Each setting with its own control" : "The file's lines as they are", aLabel: "Show",
+                        run: () => { settingsView.toggleView(); sheet = "settingsedit" } })
+        rows.push({ icon: "restore", title: "Reset to default", detail: settingsMod === "" ? "Puts back the file as it was before you first changed it" : "Puts back the mod's own file", aLabel: "Reset", run: settingsResetAsk })
+        openPick("Options", settingsView.title, rows, "settingsedit")
+        pickNoStart = true
+    }
     function addChosen() {
         const d = addList[addIndex]
         // Nothing to add: the sheet stays (controls #19).
@@ -3668,7 +3696,7 @@ Window {
                                                pickY ? { y: bind(pickY.label, k("y")) } : {},
                                                page === "game" && game && !pickNoStart ? { start: bind("Play", k("start")) } : {})
         if (s === "removed") return { a: bind(removedIndex === removedMods.length ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === removedMods.length ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
-        if (s === "add") return { a: bind(addList[addIndex] ? "Add" : "", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
+        if (s === "add") return { a: bind(addList[addIndex] ? "Add" : "", k("a")), b: bind("Close", k("b")), y: bind("Find", k("y")) }
         if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
         if (s === "profiles") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), x: bind(!importData && profIndex < profileList.length ? "Options" : "", k("x")) }
         if (s === "pages") return { a: bind("Open", k("a")), b: bind("Close", k("b")) }
@@ -3686,7 +3714,7 @@ Window {
                                        b: bind("Close, keep it", k("b")), start: bind(reportView.text.trim() !== "" ? "Save report" : "", k("start")) }
         if (s === "activity") return { a: bind("", k("a")), b: bind("Close", k("b")), x: bind(activityView.full ? "What happened" : "Full log", k("x")) }
         if (s === "settingsedit") return { a: bind(settingsView.aWord, k("a")), b: bind(settingsView.leaveArmed ? "Leave" : "Back", k("b")),
-                                           x: bind("Reset to default", k("x")), y: bind(settingsView.fields.length === 0 ? "" : settingsView.plain ? "As a list" : "As text", k("y")), start: bind("Save", k("start")) }
+                                           x: bind("Options", k("x")), start: bind("Save", k("start")) }
         return { a: bind("", k("a")), b: bind("Close", k("b")) }
     }
     function sheetAct(b) {
@@ -3743,8 +3771,8 @@ Window {
             if (b === "up") addIndex = Math.max(0, addIndex - 1)
             else if (b === "down") addIndex = Math.min(addList.length - 1, addIndex + 1)
             else if (b === "a") addChosen()
-            // Y: every mod file, not only the ones for this game.
-            else if (b === "y") { addAll = !addAll; addIndex = 0; note("action", addAll ? "Add: all files" : "Add: this game's files") }
+            // Y: Find (0.61, I18): its first row chooses this game's files or every mod file.
+            else if (b === "y") openAddFind()
             else if (b === "b") sheet = ""
         } else if (sheet === "pages") {
             if (b === "up") pagesIndex = Math.max(0, pagesIndex - 1)
@@ -4923,6 +4951,15 @@ Window {
                     pad("a")
                     m.ok(sheet === "confirm" && !(toast.shown && toast.text.indexOf("Press A again") === 0), "Press twice check: first A on Delete for good: " + (toast.shown && toast.text.indexOf("Press A again") === 0 ? "a toast repeats it" : "the button says it, no toast"))
                     disarm(); sheet = ""; look.confirmBy = m.cb },
+            // 11c. 0.61 (I18): Add from Downloads' Y is Find; its first row chooses which files show.
+            () => { if (!game) return false; sheet = ""; openAdd() },
+            () => { if (sheet !== "add") return false
+                    const o = binds(); m.addY = o.y ? o.y.label : ""; pad("y") },
+            () => { if (sheet !== "pick") return false
+                    m.addRows = pickItems.map(x => x.title).join(", "); pad("down"); pad("a") },
+            () => { if (sheet !== "add") return false
+                    m.ok(m.addY === "Find" && m.addRows === "This game's files, All files" && addAll, "Find check: Add from Downloads Y " + m.addY + " (" + m.addRows + "), All files " + (addAll ? "showing" : "not showing"))
+                    pad("b") },
             // 12. 0.61 (M6): Y is Find even while a toast offers Undo; R3 runs the toast's Undo.
             () => { if (!game) return false
                     page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""; Turbine.pointerHide()
@@ -9029,8 +9066,8 @@ Window {
                                  : "Mod files in Downloads and Game Mods/" + app.gameTitle + ", newest first"
             files: app.addList.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: (d.modified > 0 ? app.age(d.modified) : "") + (app.addAll && d.folder ? " · " + d.folder : "") }))
             focusIndex: app.addIndex
-            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Show every mod file lists the rest."
-            otherLabel: app.downloads.length === 0 ? "" : app.addAll ? "Only this game's files" : "Show every mod file"
+            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Find, All files lists the rest."
+            otherLabel: app.downloads.length === 0 ? "" : "Find"
             onOtherClicked: { if (!app.gate(2, "sheet onOtherClicked")) return; app.act("y") }
             laterText: ""
             onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.addIndex = index; app.addChosen() }
@@ -9340,6 +9377,7 @@ Window {
             visible: app.sheet === "settingsedit"
             onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return; app.settingsSaveNow() }
             onResetClicked: { if (!app.gate(2, "sheet onResetClicked")) return; app.settingsResetAsk() }
+            onOptionsClicked: { if (!app.gate(2, "sheet onOptionsClicked")) return; app.openSettingsOptions() }
             onCloseClicked: {
                 if (!app.gate(2, "sheet onCloseClicked")) return
                 // Anything still waiting to save goes in first: B never loses a change.

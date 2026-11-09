@@ -282,6 +282,7 @@ need $i "A as the removed row goes" "Ghost check: A just as the removed row went
 need $i "Tutorial waits" "Tutorial check: after the tutorial: sheet \"oldhelper\""
 need $i "Show hidden games" "Hidden check: every game hidden, the rail shows Show hidden games"
 need $i "Press twice: no repeat toast" "Press twice check: first A on Delete for good: the button says it, no toast"
+need $i "Add from Downloads: Y is Find" "Find check: Add from Downloads Y Find \(This game's files, All files\), All files showing"
 need $i "Toast action on R3" "Toast check: Turn every mod off shows (R3|F) Undo"
 need $i "Y is Find under a toast" "Toast check: Y with Undo showing: Find opened, Undo kept"
 need $i "R3 undoes" "Toast check: R3 with Undo showing: [1-9][0-9]* mods? back on of [1-9]"
@@ -892,9 +893,10 @@ for size in $SIZES; do
   need "modsettings-$size" "Edit settings in the mod menu ($size)" "Mod menu: .*Edit settings"
   need "modsettings-$size" "Edit settings: the number setting ($size)" "Settings page: settingsedit \| [0-9]+ rows \| focus Glow number 1.5"
   need "modsettings-$size" "Edit settings: the first Right after opening changes nothing ($size)" "First Right after Edit settings opened: nothing changed"
-  need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset to default · Y As text"
+  need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Options"
   need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
   need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"
+  need "modsettings-$size" "Edit settings: X options switch text and list ($size)" "Edit settings X: Options, first Show as text; then as text, back as a list"
   if ran "modsettings-$size"; then
   ini=$(find "$h" -name LanternGlow.ini -path "*Data/SKSE/Plugins/*" -not -path "*turbine-mod-manager*" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"

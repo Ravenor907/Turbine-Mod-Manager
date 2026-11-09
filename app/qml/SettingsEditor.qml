@@ -45,6 +45,9 @@ Overlay {
 
     signal saveClicked()
     signal resetClicked()
+    // 0.61 (I18): X opens the options (Show as text or as a list, Reset to default); Y is never used here.
+    signal optionsClicked()
+    function toggleView() { textMode = !textMode; focusIndex = firstField() }
     signal closeClicked()
     // A number or text to type: the field (or line), its value now, the words for the keyboard.
     signal typeAsked(var row, string value, string label)
@@ -132,8 +135,7 @@ Overlay {
         else if (b === "left" || b === "right") change(shown[focusIndex], b === "right" ? 1 : -1)
         else if (b === "a") activate(shown[focusIndex])
         else if (b === "start") saveClicked()
-        else if (b === "x") resetClicked()
-        else if (b === "y") { textMode = !textMode; focusIndex = firstField() }
+        else if (b === "x") optionsClicked()
         // 0.6: changes save themselves; B only goes back (Main.qml saves anything still waiting first).
         else if (b === "b") closeClicked()
     }
@@ -310,10 +312,9 @@ Overlay {
             anchors.bottomMargin: se.ui.px(14)
             spacing: se.ui.px(10)
             Repeater {
-                model: [{ k: "start", label: "Save" }, { k: "x", label: "Reset to default" }, { k: "y", label: se.plain && se.fields.length > 0 ? "As a list" : "As text" }, { k: "b", label: "Back" }]
+                model: [{ k: "start", label: "Save" }, { k: "x", label: "Options" }, { k: "b", label: "Back" }]
                 Rectangle {
                     required property var modelData
-                    visible: !(modelData.k === "y" && se.fields.length === 0)
                     width: bRow.implicitWidth + se.ui.px(24); height: se.ui.tpx(38); radius: se.ui.px(6)
                     color: modelData.k === "start" && se.changes > 0 ? se.ui.c.accent : se.ui.c.card
                     border.color: se.ui.c.line

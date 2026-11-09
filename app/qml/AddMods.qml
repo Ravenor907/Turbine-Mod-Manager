@@ -34,7 +34,7 @@ Overlay {
     property string actionLabel: "Add"
     property string emptyText: "No mod files in Downloads yet."
     property string laterText: ""
-    // Y's action as a button too (touch has no Y): "Show every mod file" or "Only this game's files" (0.59).
+    // Y's action as a button too (touch has no Y): "Find", the pop-up that chooses which files show (0.61).
     property string otherLabel: ""
     signal otherClicked()
     property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar
