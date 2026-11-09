@@ -36,6 +36,7 @@ jobs:
       actions: read
     outputs:
       run: ${{ steps.find.outputs.run }}
+      ids: ${{ steps.find.outputs.ids }}
     steps:
       - id: find
         shell: bash
@@ -43,17 +44,34 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           run=""
+          ids=""
           if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
             sha="${{ github.sha }}"
             # The standing method: a release needs every check green three times on this commit (fresh runs or
             # reruns), and ships the bundle and plugin those runs built, never a new build.
+            # 0.61: dispatched runs (not releases) count as well as pushes. A run counts only when it built the
+            # bundle (a release that reused a build has none). The run shipped is one whose latest attempt is green,
+            # and its files must come from that attempt (made between its start and its end), never from an
+            # earlier or later failed one (N2).
+            repo="${{ github.repository }}"
             greens=0
-            for r in $(gh api "repos/${{ github.repository }}/actions/workflows/build.yml/runs?head_sha=$sha&per_page=50" \
-                         --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and .event == \"push\") | .id"); do
-              n=$(gh api "repos/${{ github.repository }}/actions/runs/$r" --jq .run_attempt)
+            for r in $(gh api "repos/$repo/actions/workflows/build.yml/runs?head_sha=$sha&per_page=50" \
+                         --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and (.event == \"push\" or .event == \"workflow_dispatch\") and .id != ${{ github.run_id }}) | .id"); do
+              arts=$(gh api "repos/$repo/actions/runs/$r/artifacts?per_page=100" --jq '[.artifacts[] | select(.expired == false)]')
+              [ "$(echo "$arts" | jq '[.[] | select(.name == "TurbineModManager.flatpak")] | length')" -gt 0 ] || continue
+              n=$(gh api "repos/$repo/actions/runs/$r" --jq .run_attempt)
               for a in $(seq 1 "$n"); do
-                c=$(gh api "repos/${{ github.repository }}/actions/runs/$r/attempts/$a" --jq .conclusion)
-                if [ "$c" = success ]; then greens=$((greens + 1)); [ -z "$run" ] && run=$r; fi
+                read -r c from to < <(gh api "repos/$repo/actions/runs/$r/attempts/$a" --jq '"\(.conclusion) \(.run_started_at) \(.updated_at)"')
+                [ "$c" = success ] || continue
+                greens=$((greens + 1))
+                if [ -z "$run" ] && [ "$a" = "$n" ]; then
+                  ok=1
+                  for name in TurbineModManager.flatpak Turbine-Decky.zip; do
+                    made=$(echo "$arts" | jq -r --arg n "$name" '[.[] | select(.name == $n)] | sort_by(.created_at) | last | .created_at // ""')
+                    if [ -z "$made" ] || [[ "$made" < "$from" ]] || [[ "$made" > "$to" ]]; then ok=0; fi
+                  done
+                  [ "$ok" = 1 ] && run=$r
+                fi
               done
             done
             echo "::notice title=Green runs of this commit::$greens"
@@ -61,13 +79,19 @@ jobs:
               echo "::error title=Not green three times::commit $sha has $greens green runs; run or rerun the build until every check is green three times"
               exit 1
             fi
+            if [ -z "$run" ]; then
+              echo "::error title=No run to ship::no run of $sha has a green latest attempt with its own files; run the build once more"
+              exit 1
+            fi
             for name in TurbineModManager.flatpak Turbine-Decky.zip; do
-              art=$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts" --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)][0] | \"\(.id) \(.digest)\"")
+              art=$(gh api "repos/$repo/actions/runs/$run/artifacts?per_page=100" --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)] | sort_by(.created_at) | last | \"\(.id) \(.digest)\"")
               if [ -z "$art" ] || [ "$art" = "null null" ] || [ "${art#* }" = null ]; then echo "::error title=$name is gone::run $run's artifact expired or has no digest; push a new commit and get three greens"; exit 1; fi
               echo "::notice title=Release reuses run $run::$name, artifact $art"
+              ids="${ids:+$ids,}${art%% *}"
             done
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "ids=${ids:-}" >> "$GITHUB_OUTPUT"
 
   rules:
     name: House rules
@@ -453,14 +477,12 @@ jobs:
       actions: read
     steps:
       # Both files from the green runs of this commit (same commit, artifact digests checked when downloaded).
+      # 0.61 (N2): by the exact artifacts the reuse job chose (made by the run's green latest attempt).
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
-          name: TurbineModManager.flatpak
-          run-id: ${{ needs.reuse.outputs.run }}
-          github-token: ${{ github.token }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
-        with:
-          name: Turbine-Decky.zip
+          artifact-ids: ${{ needs.reuse.outputs.ids }}
+          merge-multiple: true
+          path: .
           run-id: ${{ needs.reuse.outputs.run }}
           github-token: ${{ github.token }}
       - name: Both files are the ones that were checked
