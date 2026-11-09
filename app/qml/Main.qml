@@ -630,6 +630,7 @@ Window {
         settingsFresh = true
         note("page", "Settings section " + (settingsSections[setSection] || setSection))
         if (settingsSections[setSection] === "Getting mods") { Turbine.handlerStatus(); if (!shot.on) Turbine.bridgeRefresh(); browserSignedIn = Turbine.browserSignedIn() }
+        if (settingsSections[setSection] === "Help" && !decky.checked) deckyCheck()
     }
     onWidthChanged: sizeNote.restart()
     onHeightChanged: sizeNote.restart()
@@ -6118,6 +6119,8 @@ Window {
     function linkArrived(link) {
         // Turbine launched again with no link: this one comes to the front (the second one has closed).
         if (link === "turbine:show") { if (!shot.on) { app.raise(); app.requestActivate() } return }
+        // 0.6: a request from Steam's menu (the Decky plugin) for one game.
+        if (link.indexOf("turbine:quick ") === 0) { quickRequest(link, 0); return }
         const r = parse(Turbine.openLink(link), { error: "That Nexus link can't be read." })
         if (!shot.on) { app.raise(); app.requestActivate() }
         if (r.needsKey && browserOpen) {
@@ -6142,6 +6145,35 @@ Window {
     }
     // 0.6 (I17): after the quiet second the ring moves to Get it by itself, so A says yes (B is still Not now).
     Timer { id: nxmRingMove; interval: 1200; onTriggered: if (app.nxmAsking && app.sheet === "pick" && app.menuIndex === 1) { app.menuIndex = 0; app.note("nxm", "The ring moved to Get it") } }
+
+    // 0.6: Steam's menu (the Decky plugin, decky/) asks Turbine, open or just started for it, to do one thing for one
+    // game: open on it, Report a bug, Mods on or off, or a Play. The same buttons' own steps run, on screen. A request
+    // that arrives before the games are read waits for them (up to 10 seconds); a Play waits for the game's mods.
+    property var quickWaiting: null
+    Timer { id: quickRetry; interval: 500; onTriggered: { const w = app.quickWaiting; app.quickWaiting = null; if (w) app.quickRequest(w.link, w.tries) } }
+    function quickRequest(link, tries) {
+        const parts = link.split(" ")
+        const what = parts[1] || ""
+        let id = ""
+        try { id = decodeURIComponent(parts[2] || "") } catch (e) { id = "" }
+        const i = games.findIndex(g => g.id === id)
+        if (i < 0 && tries < 20 && allGames.length === 0) { quickWaiting = { link: link, tries: tries + 1 }; quickRetry.restart(); return }
+        note("action", "Steam's menu: " + what + " " + id)
+        if (i < 0) { say("Turbine doesn't list that game (it may be hidden in Settings).", "warn"); return }
+        if (what === "mods-on" || what === "mods-off") { Turbine.quickMods(id, what === "mods-on"); return }
+        if (!shot.on) { app.raise(); app.requestActivate() }
+        if (i !== current) current = i
+        page = "game"; zone = "main"; modPage = false
+        if (sheet !== "fomod") sheet = ""
+        if (what === "open") return
+        if (what === "report") { openReport(null, "Problem with " + games[i].name + ": ", ""); return }
+        // A Play: once this game's mods are read (the seamless check and the check before Play need them).
+        if (!modsLoaded && tries < 20) { quickWaiting = { link: link, tries: tries + 1 }; quickRetry.restart(); return }
+        if (what === "play") startPlay()
+        else if (what === "play-coop") { if (seamlessMod) startCoop(); else Turbine.playCoop() }
+        else if (what === "play-plain") Turbine.playOriginal()
+    }
+
     // "Get <mod> (<file>) for <game>?", asked for every Mod Manager Download link from Turbine's page. It opens on
     // Not now and takes no input at all for its first second (a page saying "press A again" can't have the next
     // press answer it); Right (or a tap on Get it) then A gets it. One question at a time: a second link while it
@@ -6418,6 +6450,7 @@ Window {
         { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
         { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: what to paste back in Steam's Launch Options", action: "Show" },
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
+        { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Play (hold: Play options). Right stick: pointer, RT clicks." },
         { kind: "info", key: "touch", title: "Touch",
@@ -6425,6 +6458,39 @@ Window {
     ].concat(hiddenIds.length > 0 ? [
         { kind: "action", key: "unhide", title: "Games hidden from the rail: " + hiddenIds.length, how: "Puts them back on the rail", action: "Show them" }
     ] : [])
+    // 0.6: the optional Steam menu plugin (decky/): Turbine's panel in the Quick Access menu, through Decky Loader.
+    // Whether Decky and the plugin are on this device is read on the host when Help opens and when the row is pressed.
+    property var decky: ({ checked: false })
+    function deckyCheck() { if (!shot.on) decky = parse(Turbine.deckyJson(), { checked: true, decky: null, plugin: false, url: "" }) }
+    readonly property string deckyWords: decky.plugin === true ? "Installed. In a game: the Quick Access button, Decky, then Turbine."
+        : decky.decky === true ? "Decky is on this device: one step adds Turbine to the Quick Access menu."
+        : decky.decky === false ? "Optional, for the Quick Access menu in a game. It needs Decky Loader, which isn't on this device yet."
+        : "Optional: Turbine in the Quick Access menu in a game. Mods on or off and Play, without opening Turbine."
+    function openDecky() {
+        deckyCheck()
+        const url = decky.url || "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip"
+        note("action", "Steam menu plugin: Decky " + decky.decky + ", plugin " + decky.plugin)
+        if (decky.plugin === true) {
+            openMsg({ title: "Turbine is in the Quick Access menu",
+                      text: "In a game, press the Quick Access button, open Decky (the plug), then Turbine. It shows that game's mods: Mods on or off, Play with mods, Play Seamless Co-op when it's installed, Play without mods, Open Turbine on the game, and how the last launch went.",
+                      buttons: [{ key: "b", label: "Close", run: () => {} }] })
+            return
+        }
+        if (decky.decky === true) {
+            openMsg({ title: "Add Turbine to the Quick Access menu",
+                      text: "Decky is on this device, so it's one step. Decky gets Turbine's plugin from this address:\n\n" + url,
+                      steps: ["Quick Access button, Decky (the plug), its gear, Developer, Install Plugin From URL: type or paste the address above, then Install. (No Developer tab? In General, turn on Developer Mode first.)"],
+                      buttons: [{ key: "a", label: "Copy the address", keep: true, run: () => { Turbine.copyText(url); note("action", "Steam menu plugin: address copied"); toast.done("Copied. The step stays here until B.") } },
+                                { key: "b", label: "Close", run: () => {} }] })
+            return
+        }
+        openMsg({ title: "Steam menu plugin (optional)",
+                  text: "With Decky Loader, Turbine gets a panel in the Quick Access menu: Mods on or off and Play with or without mods for the game you're in, without opening Turbine. Turbine works the same without it." + (decky.decky === false ? " Decky isn't on this device yet." : ""),
+                  steps: ["Switch to Desktop Mode: the Steam button, Power, Switch to Desktop.",
+                          "In a browser, open decky.xyz, download the installer, run it and pick the release version.",
+                          "Back in Game Mode, open this row again: it shows the one step left."],
+                  buttons: [{ key: "b", label: "Close", run: () => {} }] })
+    }
     // The Nexus key's rows show folded until asked for (or while a key is set, or the key is being checked).
     property bool keyRowsOpen: false
     // Settings, Getting mods: the rows for the player's own browser are folded until asked for (open in Desktop Mode
@@ -6529,6 +6595,7 @@ Window {
         perf: () => openPerf(),
         activity: () => openActivity(),
         problem: () => saveProblemReport(),
+        decky: () => openDecky(),
         launchundo: () => openLaunchUndo(false),
         steamBrowser: (r) => labsRun(r), keyless: (r) => labsRun(r), gmBrowser: (r) => labsRun(r),
         nexusKey: () => openAsk("nexusKey", "Nexus key", keyWhere + " It's kept in a file only you can read.", "", "API key", 1024, true, "Check it"),

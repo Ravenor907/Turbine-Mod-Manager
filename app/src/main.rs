@@ -15,6 +15,7 @@ mod nexus_sso;
 mod online;
 mod pad;
 mod pointer;
+mod quick;
 mod single;
 mod system;
 mod web;
@@ -148,6 +149,10 @@ fn choose_platform() -> Option<&'static str> {
 }
 
 fn main() {
+    // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
+    if let Some(req) = quick::wanted() {
+        std::process::exit(quick::run(req));
+    }
     let _ = labs::started();
     let platform = choose_platform();
     // One Turbine at a time: a Nexus link given to a second launch goes to the running one, a second launch with no
@@ -214,6 +219,14 @@ fn main() {
     if let Some(l) = link {
         log::line("nxm", &format!("Started with a Nexus link: {}", redacted(&l)));
         single::push(l);
+    }
+    // 0.6: Open or Report from Steam's menu, asked just before Steam started Turbine for it.
+    if !screenshot {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        if let Some(l) = turbine_engine::quick::take_request(&log::folder(&backend::data_home()), now) {
+            log::line("quick", &format!("Started from Steam's menu: {l}"));
+            single::push(l);
+        }
     }
     let mut app = QGuiApplication::new();
     if let Some(mut a) = app.as_mut() {

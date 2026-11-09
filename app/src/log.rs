@@ -56,6 +56,17 @@ pub fn start(dir: PathBuf) {
     install_panic_hook();
 }
 
+/// 0.6: a run from Steam's menu (no window): its lines go into the same activity.log, and it leaves the window's
+/// crash mark alone (that run's own start and close keep it).
+pub fn start_quiet(dir: PathBuf) {
+    let _ = fs::create_dir_all(&dir);
+    let mut s = state();
+    let path = dir.join("activity.log");
+    s.size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    s.file = OpenOptions::new().create(true).append(true).open(&path).ok();
+    s.dir = Some(dir);
+}
+
 /// This run is closing normally.
 pub fn clean_exit() {
     line("app", "Closed");

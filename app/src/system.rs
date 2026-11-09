@@ -154,3 +154,39 @@ mod tests {
         assert!(super::free_bytes(std::path::Path::new("/no/such/folder")).is_none());
     }
 }
+
+/// 0.6: where the Steam menu plugin (decky/) is downloaded from: always the newest release's.
+pub const DECKY_PLUGIN_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip";
+
+/// Is there a file or folder at this path on the host (`test -e`, fixed arguments)? None when it can't be asked.
+fn host_exists(path: &std::path::Path) -> Option<bool> {
+    use std::process::{Command, Stdio};
+    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg("test");
+        c
+    } else {
+        Command::new("test")
+    };
+    let status = cmd.arg("-e").arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
+}
+
+/// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
+/// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
+pub fn decky_json() -> String {
+    use turbine_engine::json::quote;
+    let home = turbine_engine::home_dir();
+    let decky = host_exists(&home.join("homebrew/services/PluginLoader"));
+    let plugin = host_exists(&home.join("homebrew/plugins/Turbine/plugin.json")) == Some(true);
+    crate::log::line("app", &format!("Steam menu plugin: Decky {}, Turbine's plugin {}", match decky { Some(true) => "found", Some(false) => "not found", None => "unknown" }, if plugin { "installed" } else { "not installed" }));
+    format!(
+        "{{\"checked\":true,\"decky\":{},\"plugin\":{plugin},\"url\":{}}}",
+        decky.map(|d| d.to_string()).unwrap_or_else(|| "null".into()),
+        quote(DECKY_PLUGIN_URL)
+    )
+}
