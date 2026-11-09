@@ -1762,7 +1762,13 @@ impl qobject::Turbine {
     pub fn wake(mut self: Pin<&mut Self>) {
         crate::log::line("window", "Back in front; controller quiet for 250 ms");
         let ups = match self.as_mut().rust_mut().reader.as_mut() {
-            Some(r) => r.wake(Duration::from_millis(250)),
+            Some(r) => {
+                // 0.61 (integration I9): no controller yet: ask SDL again (after leaving Game Mode).
+                if r.rescan(Duration::from_secs(2)) {
+                    crate::log::line("pad", "A controller showed after asking again");
+                }
+                r.wake(Duration::from_millis(250))
+            }
             None => Vec::new(),
         };
         // A stick still pushed from the game presses nothing until it has been back in the middle.
@@ -1790,7 +1796,13 @@ impl qobject::Turbine {
             self.as_mut().rust_mut().reader = Some(r);
         }
         let (events, connected, sticks, quiet, lost) = match self.as_mut().rust_mut().reader.as_mut() {
-            Some(r) => (r.poll(), r.connected(), r.sticks(), r.quiet(), r.take_dropped_out()),
+            Some(r) => {
+                // 0.61 (integration I9): while none is seen, SDL is asked again every 10 seconds.
+                if r.rescan(Duration::from_secs(10)) {
+                    crate::log::line("pad", "A controller showed after asking again");
+                }
+                (r.poll(), r.connected(), r.sticks(), r.quiet(), r.take_dropped_out())
+            }
             None => (Vec::new(), false, crate::pointer::Sticks::default(), false, false),
         };
         let wait = self.rust().reader.as_ref().map(|r| r.last_press_wait()).unwrap_or(0);

@@ -1859,6 +1859,14 @@ Window {
         Turbine.profiles()
         if (tab === 1) Qt.callLater(browseNow)
     }
+    // 0.61 (integration I9): Desktop Mode with no controller seen a few seconds after start: say so where the player
+    // looks, with what to do. (Steam keeps the controller for programs it didn't start and gives them only its desktop
+    // layout, a mouse and a few keys.) Once per run; never in pictures.
+    readonly property string padHelp: "No controller reaches Turbine here. For the controller, start Turbine from its entry in Steam: Steam then gives it the controller."
+    Timer {
+        interval: 4000; running: !shot.on && !Turbine.gamemode
+        onTriggered: if (!Turbine.pads) { app.note("pad", "Desktop Mode with no controller: told the player to start Turbine from Steam"); toast.info(app.padHelp) }
+    }
     Component.onCompleted: {
         introSeen = parse(seen.basicIntroDone, [])
         // Recorded samples instead of the internet (the build's screenshot checks); first, before anything asks.
@@ -8659,7 +8667,7 @@ Window {
                                     Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.fpx(15); font.bold: true }
                                 }
                             }
-                            Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
+                            Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: Turbine.gamemode ? "Using Steam's controller settings (no controller seen directly)." : app.padHelp }
                             Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
                             // 0.6 (I26): a test for the build's makers, so only with Labs on.
                             Rectangle {

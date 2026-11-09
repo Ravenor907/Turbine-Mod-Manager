@@ -38,6 +38,8 @@ pub struct Pads {
     /// 0.6: how long the newest press read in the last poll waited in SDL's queue (ms), so the interface can judge a
     /// press by when it was made, not when it was handled (a stalled window handles it late).
     last_wait: u32,
+    /// 0.61 (integration I9): when SDL was last asked again for controllers while none was seen.
+    last_rescan: Option<Instant>,
 }
 
 impl Pads {
@@ -73,23 +75,48 @@ impl Pads {
             waits: VecDeque::new(),
             dropped_out: false,
             last_wait: 0,
+            last_rescan: Some(Instant::now()),
         };
-        if let Some(sub) = pads.subsystem.as_ref() {
-            let count = sub.num_joysticks().unwrap_or(0);
-            crate::log::line("pad", &format!("SDL lists {count} joystick device(s)"));
-            for i in 0..count {
-                let name = sub.name_for_index(i).unwrap_or_else(|_| "unnamed".into());
-                let guid = pads._sdl.as_ref().and_then(|s| s.joystick().ok()).and_then(|j| j.device_guid(i).ok()).map(|g| g.string()).unwrap_or_default();
-                crate::log::line("pad", &format!("Device {i}: {name}, GUID {guid}, {}", if sub.is_game_controller(i) { "a game controller" } else { "not a game controller (no mapping)" }));
-                if sub.is_game_controller(i) {
-                    if let Ok(c) = sub.open(i) {
-                        crate::log::line("pad", &format!("Controller found: {}", c.name()));
-                        pads.open.push(c);
-                    }
+        pads.enumerate(true);
+        pads
+    }
+
+    /// Opens every game controller SDL lists now. `say_none`: log it when there are none (once, not every rescan).
+    fn enumerate(&mut self, say_none: bool) {
+        let Some(sub) = self.subsystem.as_ref() else { return };
+        let count = sub.num_joysticks().unwrap_or(0);
+        if count == 0 && !say_none {
+            return;
+        }
+        crate::log::line("pad", &format!("SDL lists {count} joystick device(s)"));
+        for i in 0..count {
+            let name = sub.name_for_index(i).unwrap_or_else(|_| "unnamed".into());
+            let guid = self._sdl.as_ref().and_then(|s| s.joystick().ok()).and_then(|j| j.device_guid(i).ok()).map(|g| g.string()).unwrap_or_default();
+            crate::log::line("pad", &format!("Device {i}: {name}, GUID {guid}, {}", if sub.is_game_controller(i) { "a game controller" } else { "not a game controller (no mapping)" }));
+            if sub.is_game_controller(i) {
+                if let Ok(c) = sub.open(i) {
+                    crate::log::line("pad", &format!("Controller found: {}", c.name()));
+                    self.open.push(c);
                 }
             }
         }
-        pads
+        if count == 0 {
+            crate::log::line("pad", &format!("No controller seen: {}", input_report()));
+        }
+    }
+
+    /// 0.61 (integration I9): with no controller open, asks SDL again from scratch (at most every `every`): after
+    /// leaving Game Mode the controller can come back without SDL hearing it arrive. Answers whether one was found.
+    pub fn rescan(&mut self, every: Duration) -> bool {
+        if !self.open.is_empty() || self._sdl.is_none() || self.last_rescan.is_some_and(|t| t.elapsed() < every) {
+            return false;
+        }
+        self.last_rescan = Some(Instant::now());
+        // Letting go of the only handle shuts SDL's controller part down; taking it again lists the devices afresh.
+        self.subsystem = None;
+        self.subsystem = self._sdl.as_ref().and_then(|s| s.game_controller().ok());
+        self.enumerate(false);
+        !self.open.is_empty()
     }
 
     /// Where the sticks are now. With more than one pad (Steam's virtual pad and the raw one report the same
@@ -373,4 +400,13 @@ pub fn send(kind: Kind, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) {
     if r != 1 && kind != Kind::Move {
         crate::log::line("pad", "Pointer event not delivered: Turbine's window wasn't found");
     }
+}
+
+/// 0.61 (integration I9): what the sandbox sees of the input devices, for the activity log when no controller shows:
+/// how many event devices there are and how many Turbine may read.
+fn input_report() -> String {
+    let Ok(rd) = std::fs::read_dir("/dev/input") else { return "the input devices folder isn't visible".into() };
+    let events: Vec<std::path::PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("event"))).collect();
+    let readable = events.iter().filter(|p| std::fs::File::open(p).is_ok()).count();
+    format!("{} input device(s), {readable} readable by Turbine", events.len())
 }
