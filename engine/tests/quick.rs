@@ -152,6 +152,7 @@ fn mods_off_then_on_brings_back_exactly_those() {
     fs::create_dir_all(install.join("Data")).unwrap();
     let g = game(Launcher::Steam, "4242", "Test Game", &install, None);
     let data = t.path("data");
+    assert_eq!(quick::existing_root(&g, &data), None);
     let mut s = Store::open_with(&g, &data, Box::new(Flat)).unwrap();
     let mut add = |name: &str, file: &str| {
         let z = t.path(&format!("Downloads/{name}.zip"));
@@ -177,7 +178,8 @@ fn mods_off_then_on_brings_back_exactly_those() {
     assert_eq!(s.hold_all_off().unwrap(), 0);
     assert_eq!(s.held_off().len(), 2);
 
-    // The plugin's read-only look sees the same.
+    // The plugin's read-only look sees the same, in the same folder.
+    assert_eq!(quick::existing_root(&g, &data).as_deref(), Some(s.root()));
     let p = quick::peek(s.root());
     assert_eq!(p, Peek { mods: 3, on: 0, held: 2, seamless: false, seamless_on: false });
 

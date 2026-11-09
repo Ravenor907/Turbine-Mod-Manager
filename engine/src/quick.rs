@@ -376,6 +376,15 @@ pub struct Peek {
     pub seamless_on: bool,
 }
 
+/// The game's store folder when Turbine has made one (read only: nothing is created, unlike `Store::root_for`).
+pub fn existing_root(game: &Game, data_home: &Path) -> Option<PathBuf> {
+    let key = crate::store::folder_safe(&game.id().replace(':', "-"));
+    [true, false]
+        .into_iter()
+        .map(|on_library| crate::store::choose_root(&key, &game.library, None, None, on_library, data_home))
+        .find(|r| r.join("state.json").is_file())
+}
+
 pub fn peek(store_root: &Path) -> Peek {
     let mut p = Peek::default();
     let Ok(text) = fs::read_to_string(store_root.join("state.json")) else { return p };
