@@ -129,7 +129,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -4481,6 +4481,118 @@ Window {
         ]
         // 0.6 (I8): Edit settings on the mod's panel: a tap and Right then A open that mod's settings; no button
         // for a mod without settings.
+        // 0.6 (the owner's rule): A selects and B goes back one step, on every screen and sheet, by real presses. Each
+        // case starts on My mods, opens its screen, reads what A is bound to, presses B and checks where it landed.
+        else if (name === "abcheck") {
+            const where = () => [page, "tab " + tab, "zone " + zone, "sheet " + (sheet || "none"), modPage ? "mod page" : "", wheelOpen ? "wheel" : ""].filter(x => x).join(", ")
+            const home = () => { sheet = ""; if (wheelOpen) wheelOpen = false; modPage = false; history = []; page = "game"; tab = 0; zone = "main"; modIndex = 0 }
+            const sheetCase = (label, open) => [label, open, () => sheet === "" && page === "game" && tab === 0 && !modPage]
+            const cases = [
+                sheetCase("Mod menu", () => { menuIndex = 0; sheet = "modmenu" }),
+                sheetCase("Game menu", () => { menuIndex = 0; sheet = "gamemenu" }),
+                sheetCase("Add from Downloads", () => openAdd()),
+                sheetCase("Loadouts", () => openProfiles()),
+                sheetCase("Play options", () => openPlayOptions()),
+                sheetCase("Find pop-up", () => openFindPop()),
+                sheetCase("Before you play", () => { checks = [{ level: "warn", title: "A test warning", detail: "" }]; checkIndex = 0; sheet = "check" }),
+                sheetCase("Mod loader", () => { loaderFor = ["Lantern Glow SKSE"]; openLoader() }),
+                sheetCase("Activity log", () => openActivity()),
+                sheetCase("Removed mods", () => openRemoved()),
+                ["Quick wheel", () => pad("view"), () => !wheelOpen && sheet === "" && page === "game" && tab === 0],
+                ["Settings", () => openSettings(), () => page === "game" && tab === 0 && sheet === ""],
+                ["Get mods", () => { tab = 1; zone = "main" }, () => tab === 0 && page === "game"],
+                ["A mod's page", () => { tab = 1; zone = "main"; if (getItems.length > 0) openDetails(getItems[0]) }, () => tab === 1 && !modPage && page === "game"],
+                ["Play button", () => { zone = "play" }, () => zone === "main" && page === "game"]
+            ]
+            let steps = [() => { if (mods.length < 2 || !modsLoaded) return false; m.bad = 0; m.n = 0; home() }]
+            for (const cs of cases) {
+                steps.push(() => { home(); cs[1]() })
+                steps.push(() => {
+                    if (cs[0] === "A mod's page" && !modPage) return false
+                    if (cs[0] === "Quick wheel" && !wheelOpen) return false
+                    if (cs[0].indexOf("menu") >= 0 && cs[0] !== "Mod menu" && cs[0] !== "Game menu" && sheet === "") return false
+                    const o = binds()
+                    m.a = o.a && o.a.label ? o.a.label : (wheelOpen ? "(the wedge)" : "")
+                    m.bLabel = o.b && o.b.label !== undefined ? (o.b.label || "(unlabelled)") : ""
+                    m.at = where()
+                    pad("b")
+                })
+                steps.push(() => {
+                    const ok = cs[2]() && m.a !== "" && m.bLabel !== ""
+                    m.n++
+                    if (!ok) m.bad++
+                    check("A and B, " + cs[0] + ": A " + (m.a || "nothing") + ", B " + (m.bLabel || "nothing") + " from " + m.at + " to " + where() + (ok ? "" : "  PROBLEM"))
+                })
+            }
+            steps.push(() => { home(); check("A and B (" + width + "x" + height + "): " + m.n + " screens, " + m.bad + " problems") })
+            script = steps
+        }
+        // 0.6 (the owner's rule): nothing goes through a pop-up. With each sheet, menu or the wheel open, a real click
+        // on Play in the bar and on the first game in the rail (both under the pop-up's backdrop) must start nothing
+        // and change nothing beneath.
+        else if (name === "passthrough") {
+            const cases = [
+                ["Mod menu", () => { menuIndex = 0; sheet = "modmenu" }],
+                ["Game menu", () => { menuIndex = 0; sheet = "gamemenu" }],
+                ["Add from Downloads", () => openAdd()],
+                ["Loadouts", () => openProfiles()],
+                ["Play options", () => openPlayOptions()],
+                ["Find pop-up", () => openFindPop()],
+                ["Before you play", () => { checks = [{ level: "warn", title: "A test warning", detail: "" }]; checkIndex = 0; sheet = "check" }],
+                ["Mod loader", () => { loaderFor = ["Lantern Glow SKSE"]; openLoader() }],
+                ["Activity log", () => openActivity()],
+                ["Delete for good", () => askDelete("check:none", "Test")],
+                ["Quick wheel", () => pad("view")]
+            ]
+            const state = () => [game ? game.id : "", tab, page, mods.map(x => x.enabled ? 1 : 0).join(""), playAt].join("|")
+            let steps = [() => { if (mods.length < 2 || !modsLoaded) return false; m.bad = 0; m.n = 0; sheet = ""; page = "game"; tab = 0; zone = "main" }]
+            for (const cs of cases) {
+                for (const target of ["Play", "the rail"]) {
+                    steps.push(() => { Turbine.pointerHide(); sheet = ""; if (wheelOpen) wheelOpen = false; page = "game"; tab = 0; zone = "main"; cs[1]() })
+                    steps.push(() => {
+                        if (sheet === "" && !wheelOpen) return false
+                        const it = target === "Play" ? playBtn : railList.itemAtIndex(Math.max(0, games.findIndex(g => game && g.id !== game.id)))
+                        if (!it || !it.visible) { m.skip = target + " not shown"; return }
+                        m.skip = ""
+                        m.before = state(); m.open = sheet || "wheel"
+                        const p = it.mapToItem(null, it.width / 2, it.height / 2)
+                        Turbine.selftestPointer(p.x, p.y, true, 0)
+                    })
+                    steps.push(() => {
+                        if (m.skip) { check("Pass-through, " + cs[0] + ", a click on " + target + ": skipped (" + m.skip + ")"); return }
+                        const after = state()
+                        const ok = after === m.before && !(sheet === "check" && m.open !== "check")
+                        m.n++
+                        if (!ok) m.bad++
+                        check("Pass-through, " + cs[0] + ", a click on " + target + ": " + (ok ? "nothing beneath changed" : "PROBLEM: " + m.before + " to " + after) + ", " + m.open + " then " + (sheet || (wheelOpen ? "wheel" : "closed")))
+                    })
+                }
+            }
+            steps.push(() => { Turbine.pointerHide(); sheet = ""; check("Pass-through (" + width + "x" + height + "): " + m.n + " clicks, " + m.bad + " problems") })
+            script = steps
+        }
+        // 0.6: the golden path, by real presses only: an empty game, X Add from Downloads, A on the file, the mod is on
+        // in My mods, Start plays it (Before you play's Play anyway when it asks); then the mod off and on with A, X
+        // Uninstall and A Put back.
+        else if (name === "golden") script = [
+            () => { if (!modsLoaded || !game) return false; sheet = ""; page = "game"; tab = 0; zone = "main"; m.played = playAt
+                    check("Journey start: " + game.name + ", " + mods.length + " mods, legend " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · ")); pad("x") },
+            () => { if (sheet !== "add" || addList.length === 0) return false
+                    addIndex = Math.max(0, addList.findIndex(d => d.name.indexOf("Brighter Lanterns") === 0)); check("Journey add: sheet add, " + addList.length + " files, A " + (binds().a ? binds().a.label : "")); pad("a") },
+            () => { if (mods.length < 1 || page === "place") return false
+                    check("Journey added: " + mods.map(x => x.name + (x.enabled ? " on" : " off")).join(", ") + ", sheet " + (sheet || "none")); pad("start") },
+            () => { if (sheet === "check") { const o = binds(); check("Journey Before you play: A " + (o.a ? o.a.label : "")); if (checks.some(c => c.level === "stop")) return; act("right"); pad("a"); return false }
+                    if (playAt === m.played) return false
+                    check("Journey played: Play started " + game.name + " with " + mods.filter(x => x.enabled).length + " mods on") },
+            () => { sheet = ""; zone = "main"; tab = 0; modIndex = Math.max(0, listItems.findIndex(x => x.kind === "mod")); m.on = focusedItem && focusedItem.m ? focusedItem.m.enabled : null; pad("a") },
+            () => { if (!focusedItem || !focusedItem.m || focusedItem.m.enabled === m.on) return false; m.mid = focusedItem.m.id; pad("a") },
+            () => { const r = mods.find(x => x.id === m.mid); if (!r || r.enabled !== m.on) return false
+                    check("Journey A off and on: " + r.name + " " + (r.enabled ? "on" : "off") + " again"); pad("x") },
+            () => { if (sheet !== "modmenu") return false; const i = modMenuItems.findIndex(x => /^Uninstall/.test(x.title)); if (i < 0) { check("Journey uninstall: no Uninstall row"); return }
+                    menuIndex = i; pad("a") },
+            () => { if (!focusedItem || focusedItem.kind !== "ghost") return false; check("Journey uninstall: the row says " + focusedItem.m.name + " removed, A " + (binds().a ? binds().a.label : "")); pad("a") },
+            () => { if (!mods.some(x => x.id === m.mid)) return false; check("Journey put back: " + mods.find(x => x.id === m.mid).name + " is back in My mods") }
+        ]
         // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
         else if (name === "heldcheck") script = [
             () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length; Turbine.quickMods(game.id, false) },

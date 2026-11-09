@@ -897,6 +897,24 @@ for size in $SIZES; do
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
   fi
   # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
+  # 0.6: outcome checks by real presses and clicks (not pictures): A and B on every screen, nothing through a pop-up,
+  # and the golden path from an empty game to Play and back.
+  fresh "abcheck-$size"; h="$PWD/fh/abcheck-$size"
+  shoot "abcheck-$size" "$size" abcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
+  need "abcheck-$size" "A selects and B goes back one step on every screen ($size)" "A and B \([0-9]+x[0-9]+\): 1[0-9] screens, 0 problems"
+  if ran "abcheck-$size"; then grep -h "A and B, .*PROBLEM" "$PWD/data/abcheck-$size/turbine-mod-manager/activity.log" | head -n 5 | sed 's/^/::error title=A and B::/' || true; fi
+  fresh "passthrough-$size"; h="$PWD/fh/passthrough-$size"
+  shoot "passthrough-$size" "$size" passthrough "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
+  need "passthrough-$size" "No click goes through a pop-up ($size)" "Pass-through \([0-9]+x[0-9]+\): [1-9][0-9]* clicks, 0 problems"
+  if ran "passthrough-$size"; then grep -h "Pass-through, .*PROBLEM" "$PWD/data/passthrough-$size/turbine-mod-manager/activity.log" | head -n 5 | sed 's/^/::error title=Pass-through::/' || true; fi
+  fresh "golden-$size"; h="$PWD/fh/golden-$size"
+  shoot "golden-$size" "$size" golden "$h" --game=$skyrim
+  need "golden-$size" "Journey: X on an empty game opens Add from Downloads ($size)" "Journey add: sheet add, [1-9][0-9]* files, A Add"
+  need "golden-$size" "Journey: A adds the mod, on ($size)" "Journey added: Brighter Lanterns[^,]* on"
+  need "golden-$size" "Journey: Start plays it ($size)" "Journey played: Play started .* with [1-9] mods on"
+  need "golden-$size" "Journey: A turns it off and on ($size)" "Journey A off and on: .* on again"
+  need "golden-$size" "Journey: Uninstall leaves the row with Put back ($size)" "Journey uninstall: the row says .* removed, A Put back"
+  need "golden-$size" "Journey: A puts it back ($size)" "Journey put back: .* is back in My mods"
   # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
   fresh "heldcheck-$size"; h="$PWD/fh/heldcheck-$size"
   shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
