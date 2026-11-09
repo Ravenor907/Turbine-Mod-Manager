@@ -314,7 +314,7 @@ else echo "::error title=No way back to SKSE in the mod or game menu::"; (grep -
 fi
 for size in $SIZES; do
   log="$PWD/data/mods-kcd2-$size/turbine-mod-manager/activity.log"
-  if grep -q "Row warnings: .*Fast Travel KCD1 2.0: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
+  if grep -q "Row warnings: .*Fast Travel KCD1: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=KCD II row has no warning for the first game's mod ($size)::"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
   log="$PWD/data/check-witcher-$size/turbine-mod-manager/activity.log"
   if grep -q "Check before Play buttons: .*Turn off Faster Roach" "$log"; then echo "::notice title=Witcher clash $size::$(grep -h 'Check before Play buttons' "$log" | head -n1 | cut -c1-200)"
