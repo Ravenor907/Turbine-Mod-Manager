@@ -11,6 +11,7 @@ mod launch;
 mod log;
 mod modsettings;
 mod loot;
+mod nexus_sso;
 mod online;
 mod pad;
 mod pointer;

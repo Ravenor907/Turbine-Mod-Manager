@@ -30,6 +30,12 @@ for tool in curl bsdtar; do
     echo "::error title=$tool missing from the Flatpak::$v"; exit 1
   fi
 done
+# openssl carries Nexus single sign-on (app/src/nexus_sso.rs). Without it, sign-in stays on the browser helper.
+if v=$(flatpak run --command=openssl io.github.ravenor907.TurbineModManager version 2>&1 | head -n1); then
+  echo "::notice title=openssl in the Flatpak::$v"
+else
+  echo "::warning title=openssl missing from the Flatpak (Nexus single sign-on can't turn on)::$v"
+fi
 fi
 mkdir -p shots home empty data samples
 python3 tools/fake-home.py "$PWD/home"

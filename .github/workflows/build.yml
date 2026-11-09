@@ -126,6 +126,11 @@ jobs:
           OUT_DIR=/tmp/browse rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/browse/libturbine_engine.rlib
           rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/tests
           /tmp/browse/tests
+      - name: Test Nexus single sign-on against a stand-in server (app/src/nexus_sso.rs needs only the engine)
+        shell: bash
+        run: |
+          rustc +1.97.0 --edition 2021 --test app/src/nexus_sso.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/sso-tests
+          /tmp/browse/sso-tests
       - name: Test the browser helper (extension/, Node 22)
         shell: bash
         run: |

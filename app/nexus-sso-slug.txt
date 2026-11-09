@@ -1,0 +1,3 @@
+# Nexus Mods gives Turbine an application slug when it registers the app for single sign-on.
+# Put that slug on its own line below (lowercase letters, digits, - or _). While there is none,
+# signing in to Nexus goes through the browser helper. app/src/nexus_sso.rs reads this file.
