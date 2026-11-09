@@ -15,6 +15,7 @@ Overlay {
     property string startGlyph: "START"
     signal next()
     signal skip()
+    signal back()
 
     anchors.fill: parent
     z: 100
@@ -172,9 +173,19 @@ Overlay {
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(28)
+            // Back a card by touch (0.59; Left does it with the controller).
             Row {
                 spacing: tut.ui.px(10)
+                height: tut.ui.tpx(44)
+                visible: tut.card > 0
+                Text { anchors.verticalCenter: parent.verticalCenter; text: "Back"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20) }
+                TapHandler { onTapped: tut.back() }
+            }
+            Row {
+                spacing: tut.ui.px(10)
+                height: tut.ui.tpx(44)
                 Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
                     width: tut.ui.px(40); height: width; radius: width / 2; color: tut.ui.c.accent
                     Text { anchors.centerIn: parent; text: "A"; color: tut.ui.c.onAccent; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.bold: true }
                 }
@@ -183,8 +194,10 @@ Overlay {
             }
             Row {
                 spacing: tut.ui.px(10)
+                height: tut.ui.tpx(44)
                 visible: tut.card < tut.count - 1
                 Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
                     width: tut.ui.px(40); height: width; radius: width / 2; color: tut.ui.c.raised; border.color: tut.ui.c.accentLo; border.width: Math.max(1, tut.ui.px(2))
                     Text { anchors.centerIn: parent; text: "B"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.bold: true }
                 }

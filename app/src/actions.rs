@@ -924,13 +924,16 @@ impl qobject::Turbine {
             &name,
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let r = if source == "nexus" { net.browse_nexus(&info, &text, &category, &sort, offset) } else { net.browse_ts(&info, &text, &category, &sort) };
+                // 0.59: the answer names the whole question (words, category, sort, source), so the app can drop an
+                // answer that comes back after a newer question.
+                let echo = format!("\"qcat\":{},\"qsort\":{},\"qsrc\":{}", quote(&category), quote(&sort), quote(&source));
                 let j = match r {
-                    Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{}", quote(&info.id), quote(&text), offset > 0, &j[1..]),
+                    Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},{}", quote(&info.id), quote(&text), offset > 0, &j[1..]),
                     Err(e) if source == "nexus" => {
                         crate::log::line("net", &format!("Nexus browse without a key failed: {e}. Using Open on Nexus instead."));
-                        format!("{{\"game\":{},\"query\":{},\"append\":{},\"fallback\":true,\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e))
+                        format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},\"fallback\":true,\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e))
                     }
-                    Err(e) => format!("{{\"game\":{},\"query\":{},\"append\":{},\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e)),
+                    Err(e) => format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e)),
                 };
                 set(qt, move |t| t.set_browse_json(QString::from(j.as_str())));
             }),

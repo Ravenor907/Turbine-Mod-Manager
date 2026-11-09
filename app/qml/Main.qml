@@ -429,6 +429,9 @@ Window {
                 } else if (step === 1) {
                     const r = settingsView.shown[settingsView.focusIndex]
                     app.note("shot", "Settings page: " + app.sheet + " | " + settingsView.shown.length + " rows | focus " + (r && r.f ? r.f.key + " " + r.f.kind + " " + settingsView.valueOf(r.f) : "none"))
+                    const v0 = r && r.f ? settingsView.valueOf(r.f) : ""
+                    app.act("right")
+                    app.note("check", "First Right after Edit settings opened: " + (r && r.f && settingsView.valueOf(r.f) === v0 && settingsView.changes === 0 ? "nothing changed" : "PROBLEM: it changed " + v0 + " to " + (r && r.f ? settingsView.valueOf(r.f) : "")))
                     app.act("right")
                     app.note("shot", "After Right: " + (r && r.f ? settingsView.valueOf(r.f) : "") + ", " + settingsView.changes + " change; legend " + app.legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     app.act("start")
@@ -514,7 +517,10 @@ Window {
     // Text: never under 12 pixels, so 50% stays readable.
     function fpx(v) { return Math.max(12, Math.round(v * s)) }
     // Something to press: at least 44 physical pixels where the design size allows it.
-    function tpx(v) { return Math.max(44, Math.round(v * s)) }
+    // 0.59: touch targets never shrink under a finger, whatever the Interface size: 44 pixels, or 6 mm on a dense
+    // screen (the Ally X's 7 inch 1080p panel is about 12 pixels a millimetre).
+    readonly property int touchFloor: Math.max(44, Math.round(Screen.pixelDensity * 6))
+    function tpx(v) { return Math.max(touchFloor, Math.round(v * s)) }
     // Design width: 3 grid columns on a handheld, 4 from 1100 (TV and Desktop layouts), 2 below 860.
     readonly property real designWidth: width / s
     readonly property int gridColumns: designWidth < 640 ? 2 : designWidth < 760 ? 3 : 4
@@ -558,7 +564,7 @@ Window {
     // ---------------------------------------------------------------- Labs mode and the activity log
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
     function note(kind, text) { Turbine.log(kind, text) }
-    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); barsHidden = false }
+    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); barsHidden = false; if (page === "settings") settingsFresh = true; else settingsFrom = null }
     // 0.57: no top bar on the game screen. Going down a long list hides the bottom bar and the rail too, so the
     // content is truly full screen; going up, reaching the top, View, a tab change, a sheet or the rail bring them
     // back. Reduce motion: no slide, they just go and come.
@@ -589,7 +595,10 @@ Window {
         return !it || it.y + it.height > modList.height - modList.topMargin
     }
     property int tuckModBefore: 0
-    onModIndexChanged: { tuckFollow(modIndex, tuckModBefore, modRowPastFirstScreen(modIndex)); tuckModBefore = modIndex }
+    onModIndexChanged: {
+        tuckFollow(modIndex, tuckModBefore, modRowPastFirstScreen(modIndex)); tuckModBefore = modIndex
+        if (keptRow !== "" && !(focusedItem && focusedItem.kind === "mod" && focusedItem.m.id === keptRow)) keptRow = ""
+    }
     property int tuckGetBefore: 0
     onGetIndexChanged: {
         const cols = Math.max(1, gridColumns), row = Math.floor(getIndex / cols)
@@ -616,6 +625,7 @@ Window {
     }
     onZoneChanged: { note("page", "Focus zone " + zone); if (zone !== "main" && barsHidden) barsHidden = false }
     onSetSectionChanged: {
+        settingsFresh = true
         note("page", "Settings section " + (settingsSections[setSection] || setSection))
         if (settingsSections[setSection] === "Getting mods") { Turbine.handlerStatus(); if (!shot.on) Turbine.bridgeRefresh() }
     }
@@ -1002,6 +1012,9 @@ Window {
     readonly property var shownMods: {
         const words = findText.toLowerCase().split(/\s+/).filter(w => w !== "")
         let list = mods.filter(m => {
+            // A mod just turned on or off under Show stays in its row until the ring moves (controls #9), so the next
+            // mod never slides under the ring and a second A never changes it.
+            if (keptRow === m.id) return true
             const n = (m.name || "").toLowerCase()
             if (!words.every(w => n.indexOf(w) >= 0)) return false
             if (listShow === "on") return m.enabled
@@ -1015,6 +1028,8 @@ Window {
         else if (listSort === "recent") list = list.slice().sort((a, b) => b.added - a.added)
         return list
     }
+    property string keptRow: ""
+    onListShowChanged: keptRow = ""
     readonly property bool listFiltered: findText !== "" || listShow !== "all" || listSort !== "order"
     function openFind() {
         note("action", "Find a mod")
@@ -1023,9 +1038,9 @@ Window {
     }
     // ---------------------------------------------------------------- the Y pop-up (0.57)
     // One pop-up for finding. Get mods: Search, Sort and Category (and From when the game has two sources). My
-    // mods: Find, Show, Sort and Select several. The D-pad moves, A chooses (nothing changes yet), Start shows the
-    // results, B closes. Y (or A on the field) opens the keyboard. A long category list ends in More..., which lists
-    // every category.
+    // mods: Find, Show and Sort (Select several is in a mod's X menu). 0.59 (R1): A on a choice puts it into effect at
+    // once; B, Start or a tap outside is Done and keeps everything; X clears all. A on the field (or Y, or a tap) types
+    // right in it; Enter shows the results. A long category list ends in More..., which lists every category.
     property var findPop: ({ kind: "get", text: "", sort: 0, cat: "", src: "", show: "all", order: "order" })
     property int findRow: 0               // 0 the field, then one row per section
     property int findCol: 0
@@ -1036,7 +1051,7 @@ Window {
         if (f.kind === "mods") return [
             { key: "show", title: "Show", options: showKeys.map(k => showNames[k]), chosen: showKeys.indexOf(f.show) },
             { key: "sort", title: "Sort", options: sortKeys2.map(k => sortNames2[k]), chosen: sortKeys2.indexOf(f.order) }
-        ].concat(mods.length > 1 ? [{ key: "select", title: "Many at once", options: ["Select several"], chosen: -1 }] : [])
+        ]
         let l = []
         const src = f.src || srcNow
         if (sources.length > 1) l.push({ key: "source", title: "From", options: sources.map(srcName), chosen: Math.max(0, sources.indexOf(src)) })
@@ -1054,25 +1069,38 @@ Window {
         }
         return l
     }
-    readonly property int findRows: 1 + findSections.length
+    readonly property int findRows: 2 + findSections.length   // the field, the sections, Done and Clear all
     function openFindPop() {
         if (!game || sheet !== "") return
-        const kind = tab === 1 && !modPage ? "get" : "mods"
-        if (kind === "mods" && mods.length === 0) return
+        // 0.59: Get mods' pop-up whenever Get mods is the tab (a mod page on it closes, with its history), My mods'
+        // otherwise. Never nothing: with no mods yet it says so.
+        const kind = tab === 1 ? "get" : "mods"
+        if (kind === "mods" && mods.length === 0) { toast.info("No mods to find yet. Get mods finds new ones."); return }
+        if (kind === "get" && modPage) { modPage = false; history = []; note("action", "Find from a mod page: the page closes") }
         findPop = { kind: kind, text: kind === "get" ? getText : findText, sort: getSortIndex, cat: getCategory, src: srcNow, show: listShow, order: listSort }
         findRow = 0; findCol = 0
+        // The focus: the first section with a choice of its own, else the field.
+        const secs = findSections
+        for (let r = 0; r < secs.length; r++) if (secs[r].key !== "source" && secs[r].chosen > 0) { findRow = r + 1; findCol = secs[r].chosen; break }
         sheet = "findpop"
         note("action", "Find pop-up (" + (kind === "get" ? "Get mods" : "My mods") + "): " + ["field"].concat(findSections.map(x => x.title + " " + x.options.length + (x.more ? " and More" : ""))).join(", "))
     }
+    // The defaults: no words, the first sort, every category, every mod shown, my order.
+    function findPopDefaults(f) { return Object.assign({}, f, { text: "", sort: 0, cat: "", show: "all", order: "order" }) }
     function findPopChoose(r, c) {
         const sec = findSections[r - 1]
         if (!sec) return
         let f = Object.assign({}, findPop)
-        if (sec.key === "select") { sheet = ""; tab = 0; zone = "main"; startSelect(null); modIndex = 0; toast.showPlain("A ticks a mod, X acts on every ticked mod, B is done."); return }
         if (sec.key === "category" && sec.more && c === sec.options.length - 1) {
             const now = Math.max(0, getCats.indexOf(f.cat))
             openPick("Category", gameTitle, getCats.map((x, i) => ({ icon: i === now ? "power" : "info", title: x || "All", detail: i === now ? "Chosen" : "", aLabel: "Choose",
-                run: () => { findPop = Object.assign({}, findPop, { cat: getCats[i] }); findCol = Math.min(findCol, findSections[findRow - 1] ? findSections[findRow - 1].options.length - 1 : 0); sheet = "findpop" } })), "findpop")
+                run: () => {
+                    findPop = Object.assign({}, findPop, { cat: getCats[i] }); sheet = "findpop"
+                    // The ring goes onto the chosen category (controls #25), and it takes effect at once.
+                    const sc = findSections[findRow - 1]
+                    findCol = sc && sc.chosen >= 0 ? sc.chosen : 0
+                    findPopApply(false)
+                } })), "findpop")
             pickNoStart = true
             menuIndex = now
             return
@@ -1083,50 +1111,110 @@ Window {
         else if (sec.key === "category") f.cat = getCats[sec.values[c]]
         findPop = f
         note("action", "Find pop-up: " + sec.title + " " + sec.options[c])
+        // 0.59 (R1): a choice takes effect the moment it is made.
+        findPopApply(false)
     }
-    function findPopKeyboard() {
-        const g = findPop.kind === "get"
-        openAsk("popfind", g ? "Search " + gameTitle + " mods" : "Find a mod", g ? "Words from the mod's name or what it does." : "Shows only the mods whose names have these words.",
-                findPop.text, g ? "Search" : "Part of a mod's name", g ? 100 : 60, false, "Done")
+    // Typing right in the pop-up: Steam's keyboard opens over it; Enter shows the results.
+    function findPopField() {
+        findRow = 0
+        findView.focusField()
+        keyboardUp = true
+        note("action", "Find pop-up: typing")
+        if (Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://open/keyboard")
     }
-    function findPopApply() {
+    function findPopTyping(text) {
+        // My mods follows the words as they're typed.
+        if (findPop.kind === "mods") { findPop = Object.assign({}, findPop, { text: text }); findText = text; modIndex = 0 }
+    }
+    function findPopEntered(text) {
+        findPop = Object.assign({}, findPop, { text: text })
+        note("action", "Find pop-up: words \"" + text + "\"")
+        findPopApply(true)
+    }
+    function findPopEndTyping() {
+        if (keyboardUp) { keyboardUp = false; if (Turbine.gamemode && !shot.on) Qt.openUrlExternally("steam://close/keyboard") }
+        findView.stopTyping()
+        keyRoot.forceActiveFocus()
+    }
+    // Done (B, Start, View, a tap outside, or A on Done): close, keeping everything. Words typed but not yet entered
+    // count too.
+    function findPopDone() {
+        const typed = findView.typing ? findView.fieldText.trim() : findPop.text
+        findPopEndTyping()
+        if (typed !== findPop.text) { findPop = Object.assign({}, findPop, { text: typed }); findPopApply(true) }
+        else { sheet = ""; note("action", "Find pop-up: Done") }
+    }
+    function findPopClear() {
+        findPopEndTyping()
+        findPop = findPopDefaults(findPop)
+        findRow = 0; findCol = 0
+        note("action", "Find pop-up: Clear all")
+        findPopApply(false)
+        toast.info("Cleared")
+    }
+    // Puts the pop-up's choices into effect; close says whether the pop-up closes (words entered, Done).
+    Timer { id: findBrowse; interval: 400; onTriggered: app.browseNow() }
+    function findPopApply(close) {
         const f = findPop
-        sheet = ""
+        if (close) { findPopEndTyping(); sheet = "" }
         if (f.kind === "mods") {
-            findText = f.text; listShow = f.show; listSort = f.order; tab = 0; zone = "main"; modIndex = 0
-            note("action", "Find pop-up: show results: \"" + f.text + "\", " + showNames[f.show] + ", " + sortNames2[f.order] + ": " + shownMods.length + " shown")
+            findText = f.text; listShow = f.show; listSort = f.order
+            if (tab !== 0) tab = 0
+            zone = "main"; modIndex = 0
+            note("action", "Find pop-up: \"" + f.text + "\", " + showNames[f.show] + ", " + sortNames2[f.order] + ": " + shownMods.length + " shown")
             return
         }
+        // Get mods: the results always end on the grid with no mod page over it (controls #2).
+        modPage = false; history = []
+        const changed = (f.src && f.src !== srcNow) || f.text !== getText || f.sort !== getSortIndex || f.cat !== getCategory
         if (f.src && f.src !== srcNow) { getSource = f.src; browseData = null; catList = [] }
         getText = f.text; getSortIndex = f.sort; getCategory = f.cat
+        if (tab !== 1) tab = 1
         zone = "main"; getArea = "grid"; getIndex = 0; gridReturn = -1
-        restoreFocus = { area: getText === "" && starterItems.length > 0 ? "recent" : "grid", index: 0 }
-        note("action", "Find pop-up: show results: \"" + f.text + "\", " + (sortNamesFor(srcNow)[f.sort] || "") + ", " + (f.cat || "All"))
-        browseNow()
+        restoreFocus = { area: "grid", index: 0 }
+        note("action", "Find pop-up: \"" + f.text + "\", " + (sortNamesFor(srcNow)[f.sort] || "") + ", " + (f.cat || "All") + (changed ? "" : " (no change)"))
+        if (!changed) return
+        // Stepping through chips doesn't fire a search per chip; words and Done search at once.
+        browseLoading = true
+        if (close) { findBrowse.stop(); browseNow() } else findBrowse.restart()
     }
     function findPopAct(b) {
         const sec = findSections[findRow - 1]
-        const n = findRow === 0 ? 1 : (sec ? sec.options.length : 1)
+        const btnRow = findSections.length + 1
+        const n = findRow === 0 ? 1 : findRow === btnRow ? 2 : (sec ? sec.options.length : 1)
         // Up and Down land on the row's chosen option.
         if (b === "up" || b === "down") {
-            findRow = Math.max(0, Math.min(findRows - 1, findRow + (b === "up" ? -1 : 1)))
+            if (findView.typing) findPopEndTyping()
+            findRow = Math.max(0, Math.min(btnRow, findRow + (b === "up" ? -1 : 1)))
             const s2 = findSections[findRow - 1]
             findCol = s2 && s2.chosen >= 0 ? s2.chosen : 0
         }
         else if (b === "left") findCol = Math.max(0, findCol - 1)
         else if (b === "right") findCol = Math.min(n - 1, findCol + 1)
-        else if (b === "y" || (b === "a" && findRow === 0)) findPopKeyboard()
+        else if (b === "y" || (b === "a" && findRow === 0)) findPopField()
+        else if (b === "a" && findRow === btnRow) { if (findCol === 0) findPopDone(); else findPopClear() }
         else if (b === "a") findPopChoose(findRow, findCol)
-        else if (b === "start") findPopApply()
-        else if (b === "b" || b === "view") { sheet = ""; note("action", "Find pop-up closed") }
+        else if (b === "x") findPopClear()
+        else if (b === "b" || b === "view" || b === "start") findPopDone()
     }
     function findPopALabel() {
-        if (findRow === 0) return "Keyboard"
+        if (findRow === 0) return "Type"
+        if (findRow === findSections.length + 1) return findCol === 0 ? "Done" : "Clear all"
         const sec = findSections[findRow - 1]
         if (!sec) return ""
-        if (sec.key === "select") return "Select several"
         if (sec.more && findCol === sec.options.length - 1) return "More"
         return "Choose"
+    }
+    // The pop-up's live result line.
+    readonly property string findResult: findPop.kind === "mods" ? "Showing " + shownMods.length + " of " + mods.length
+        : browseLoading ? "Looking..." : nexusFallback ? "" : getItems.length === 0 ? "Nothing matches" : plural(getItems.length, "mod", "mods") + (noMore ? "" : "+")
+    // What is in effect on Get mods, over the cards (empty when everything is the default).
+    readonly property string getSummary: {
+        const parts = []
+        if (getSortIndex > 0) parts.push(sortNamesFor(srcNow)[getSortIndex] || "")
+        if (getCategory !== "") parts.push(getCategory)
+        if (getText !== "") parts.push("\"" + getText + "\"")
+        return parts.filter(x => x !== "").join(" · ")
     }
     // Select several (from the bar over My mods): A ticks, X acts on every ticked mod, B done.
     property bool selecting: false
@@ -1204,7 +1292,10 @@ Window {
     readonly property string pluginOwner: orderPlugin ? (orderOwners[orderPlugin.name.toLowerCase()] || "") : ""
     function goToMod(id) {
         note("action", "Go to its mod: " + id)
-        sheet = ""; tab = 0; findText = ""; listShow = "all"; modPage = false
+        // 0.59 (controls #14): always lands on My mods with the ring on the mod, from anywhere (Settings, Play, the
+        // rail, the Nexus page).
+        if (browserOpen) { browserFrom = null; closeBrowser("back") }
+        sheet = ""; page = "game"; zone = "main"; tab = 0; findText = ""; listShow = "all"; modPage = false; history = []
         const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
         if (i >= 0) modIndex = i
     }
@@ -1327,6 +1418,12 @@ Window {
         function onBrowseJsonChanged() {
             const v = app.parse(Turbine.browseJson, null)
             if (!v || !app.game || v.game !== app.game.id) return
+            // 0.59: an answer for an older question (a quick second choice, a source switch) is dropped, so the grid
+            // never shows Trending while the pop-up says Most liked (controls #7).
+            if (v.qsrc !== undefined && (v.query !== app.getText || v.qcat !== app.getCategory || v.qsort !== (app.sortKeys[app.getSortIndex] || "") || v.qsrc !== app.srcNow)) {
+                app.note("net", "Get mods: an older answer dropped (\"" + v.query + "\", " + (v.qsort || "no sort") + ", " + (v.qcat || "All") + ")")
+                return
+            }
             app.loadingMore = false
             if (!v.append && (v.items || []).length > 0) app.note("net", "Get mods for " + app.game.name + ": " + v.items.length + " mods, first " + v.items[0].name + (v.categories && v.categories.length > 0 ? ", " + v.categories.length + " categories" : ""))
             if (v.fallback === true) {
@@ -1515,6 +1612,8 @@ Window {
         landedOn = ""
         browseData = null; catList = []
         getArea = "grid"; getIndex = 0; getText = ""; getCategory = ""
+        // 0.59 (controls #17): a find, show or sort from one game never follows into the next.
+        findText = ""; listShow = "all"; listSort = "order"; getSortIndex = 0; getSource = ""; keptRow = ""
         order = []; orderIndex = 0; orderMessages = {}; orderNote = ""
         profileData = null
         // Back to a game: its tab and the row it was on. First visit: My mods, the first mod.
@@ -1629,6 +1728,10 @@ Window {
             return
         }
         note("action", "Turn " + (on ? "on " : "off ") + m.name)
+        if (listShow !== "all" && tab === 0) {
+            keptRow = m.id
+            if ((listShow === "on" && !on) || (listShow === "off" && on)) toast.info((on ? "Turned on " : "Turned off ") + m.name + ". It leaves this list (Show: " + showNames[listShow] + ") when you move on.")
+        }
         mods = mods.map(x => x.id === m.id ? Object.assign({}, x, { enabled: on }) : x)
         Turbine.setEnabled(m.id, on)
         edited()
@@ -1642,7 +1745,9 @@ Window {
         list.splice(from, 1)
         list.splice(to, 0, m)
         mods = list
-        modIndex = to
+        // The ring follows the mod's own row (the list on screen may be filtered or sorted; controls #10).
+        const row = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.id)
+        modIndex = row >= 0 ? row : to
         Turbine.moveTo(m.id, to)
         edited()
     }
@@ -1653,19 +1758,23 @@ Window {
         Turbine.removeMod(m.id)
         edited()
         // The same row, dimmed: A puts it back for 8 seconds; then the focus is on the next row.
+        // Uninstalled from somewhere else (a Get mods card): My mods' ring stays put, and a toast says where it went
+        // (controls #15).
+        if (tab !== 0 || modPage) { toast.done(m.name + " uninstalled. Removed mods, at the bottom of My mods, puts it back for 7 days."); return }
         ghost = { game: game ? game.id : "", id: m.id, name: m.name, index: at }
         ghostTimer.restart()
         modIndex = at
     }
     // ---------------------------------------------------------------- Recently removed (one collapsed row; a sheet)
     property int removedIndex: 0
-    function openRemoved() { removedIndex = removedMods.length > 0 ? 1 : 0; sheet = "removed" }
+    function openRemoved() { removedIndex = 0; sheet = "removed" }
     function removedRun(i) {
-        if (i === 0) askDelete("all", "Delete all " + plural(removedMods.length, "removed mod", "removed mods") + " for good? They can't be put back.")
-        else if (removedMods[i - 1]) putBack(removedMods[i - 1].id)
+        // 0.59 (T10): the mods first, Empty last, so the dangerous row is never the first one.
+        if (i === removedMods.length) askDelete("all", "Delete all " + plural(removedMods.length, "removed mod", "removed mods") + " for good? They can't be put back.")
+        else if (removedMods[i]) putBack(removedMods[i].id)
     }
     function removedDelete(i) {
-        const m = removedMods[i - 1]
+        const m = removedMods[i]
         if (m) askDelete(m.id, "Delete " + m.name + " for good? It can't be put back.")
     }
     // Hold A to confirm (data that can't come back): the same hold the game menu's Reset uses.
@@ -2610,7 +2719,8 @@ Window {
     // asks once ("Where do these files go?"). The engine decides (basic.rs); these draw it and take the answers.
     readonly property bool basicGame: !!rules && !!rules.supportLevel && rules.supportLevel !== "full"
     // 0.57: an anti-cheat game me3 starts says how its mods run; an online-only one says nothing here (the status does).
-    readonly property string supportChip: acMode === "refuse" ? "" : acMode === "me3" ? "Mods offline" : !basicGame ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
+    // 0.59: rules can be null for a moment while the rail switches games (basicGame may not have caught up yet).
+    readonly property string supportChip: acMode === "refuse" ? "" : acMode === "me3" ? "Mods offline" : !basicGame || !rules ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
     property var placements: ({})         // mod id: {from, to, rule, replace, skipped} (Basic games)
     property var guardedMods: ({})        // mod id: {replace, skipped} (a player file's game, mods it laid out)
     property var placeData: null          // the waiting mod: {game, gameName, pending: {name, placement, sure, conflicts, refused, tree}}
@@ -2911,8 +3021,9 @@ Window {
     function openAdd() { Turbine.listDownloads(); addIndex = 0; addAll = false; sheet = "add" }
     function addChosen() {
         const d = addList[addIndex]
-        sheet = ""
+        // Nothing to add: the sheet stays (controls #19).
         if (!d) return
+        sheet = ""
         note("action", "Add from Downloads: " + d.name)
         tab = 0
         Turbine.importZip(d.path)
@@ -2963,6 +3074,8 @@ Window {
         menuIndex = 0; stopDangerHolds()
         if (sheet !== "") closeWheel()
         if (sheet !== "" && barsHidden) barsHidden = false
+        // Other files' place in the history goes with its sheet (controls #13).
+        if (sheet !== "versions" && history.some(x => x.kind === "files")) history = history.filter(x => x.kind !== "files")
         // 0.59: the text prompt lives only while it is the sheet (another sheet replacing it closes it unanswered).
         if (sheet !== "ask" && askView.shown) { note("page", "Text entry closed: another sheet replaced it"); askView.close(); reportEditing(false) }
         // An installer's choices: the Nexus page closes so they show; any other sheet over the page gives the page
@@ -2999,14 +3112,11 @@ Window {
             for (let i = 0; i < n; i++) app.act(app.repeatButton)
         }
     }
-    // Hold B for 1 second: every sheet and page closes, back to the game's list.
-    Timer {
-        id: homeHold
-        interval: 1000
-        onTriggered: if (app.bHeld) app.goHome()
-    }
+    // 0.59 (the owner's rule: A selects, B goes back one step, nothing else): holding B no longer goes home. goHome
+    // stays for the build's checks.
+    Timer { id: homeHold; interval: 1000 }
     function goHome() {
-        note("action", "Hold B: home")
+        note("action", "Home")
         if (sheet === "ask") askView.cancel ? askView.cancel() : null
         sheet = ""; moving = false; orderMoving = false; modPage = false; history = []
         if (browserOpen) { browserFrom = null; browserArrival = null; closeBrowser("home") }
@@ -3045,7 +3155,6 @@ Window {
             repeater.restart()
         }
         if (b === "view" && sheet === "" && !moving && !orderMoving) { wheelPress(); return }
-        if (b === "b") homeHold.restart()
         if (b === "a" && sheet === "confirm" && confirmIndex === 0) { startConfirm(); return }
         act(b)
     }
@@ -3078,7 +3187,7 @@ Window {
     function rowA(focus, settings) {
         if (sheet !== "" || wheelOpen || !tapOnce()) return
         focus()
-        if (!settings) zone = "main"
+        if (!settings) zone = "main"; else settingsFresh = false
         note("action", "Click on a row: A")
         act("a")
     }
@@ -3144,7 +3253,7 @@ Window {
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
             app.inputCount++; app.lastInputAt = Date.now(); app.lastInputName = b
             if (b === "start" || b === "view") { if (!e.isAutoRepeat) app.press(b); return }
-            if (b === "b" && !e.isAutoRepeat) { app.bHeld = true; homeHold.restart() }
+            if (b === "b" && !e.isAutoRepeat) app.bHeld = true
             if (b === "a" && !e.isAutoRepeat) app.aHeld = true
             // Holding a key repeats it, except A (Reset waits for A to be held down).
             if (b === "a" && app.sheet === "confirm" && app.confirmIndex === 0) { if (!e.isAutoRepeat) app.startConfirm(); return }
@@ -3154,7 +3263,7 @@ Window {
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
             if (!e.isAutoRepeat && e.key === Qt.Key_V) app.release("view")
             if (!e.isAutoRepeat && e.key === Qt.Key_P) app.release("start")
-            if (!e.isAutoRepeat && (e.key === Qt.Key_Escape || e.key === Qt.Key_Backspace)) { app.bHeld = false; homeHold.stop() }
+            if (!e.isAutoRepeat && (e.key === Qt.Key_Escape || e.key === Qt.Key_Backspace)) app.bHeld = false
         }
     }
 
@@ -3212,7 +3321,8 @@ Window {
         }
         const s = sheet
         const k = key => () => sheetAct(key)
-        if (s === "findpop") return { a: bind(findPopALabel(), k("a")), b: bind("Close", k("b")), y: bind("Keyboard", k("y")), start: bind("Show results", k("start")) }
+        // 0.59 (R1): choices are already in effect, so B is Done; Start does the same but isn't shown (Start is Play).
+        if (s === "findpop") return { a: bind(findPopALabel(), k("a")), b: bind("Done", k("b")), x: bind("Clear all", k("x")), y: bind("Keyboard", k("y")), start: bind("", k("start")) }
         if (s === "modmenu" || s === "gamemenu" || s === "cardmenu") {
             // A says what the highlighted row does ("A Uninstall", "A Rename").
             const row = s === "modmenu" ? modMenuItems[menuIndex] : s === "cardmenu" ? cardMenuItems[menuIndex] : null
@@ -3222,17 +3332,23 @@ Window {
                                                  b: bind(pickBLabel !== "" ? pickBLabel : pickBack !== "" ? "Back" : "Close", k("b")) },
                                                pickY ? { y: bind(pickY.label, k("y")) } : {},
                                                page === "game" && game && !pickNoStart ? { start: bind("Play", k("start")) } : {})
-        if (s === "removed") return { a: bind(removedIndex === 0 ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === 0 ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
-        if (s === "add") return { a: bind("Add", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
+        if (s === "removed") return { a: bind(removedIndex === removedMods.length ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === removedMods.length ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
+        if (s === "add") return { a: bind(addList[addIndex] ? "Add" : "", k("a")), b: bind("Close", k("b")), y: bind(addAll ? "This game's files" : "All files", k("y")) }
         if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
         if (s === "profiles") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), x: bind(!importData && profIndex < profileList.length ? "Options" : "", k("x")) }
         if (s === "pages") return { a: bind("Open", k("a")), b: bind("Close", k("b")) }
-        if (s === "versions") return { a: bind(detailsData && detailsData.premium === false ? "Get it on Nexus" : "Install", k("a")), b: bind("Close", k("b")) }
+        if (s === "versions") return { a: bind(otherVersions[versionIndex] && otherVersions[versionIndex].installed ? "" : detailsData && detailsData.premium === false ? "Get it on Nexus" : "Install", k("a")), b: bind("Close", k("b")) }
         if (s === "code") return { a: bind(codeData && codeData.state === "ready" ? "Copy" : "", k("a")), b: bind("Back", k("b")) }
         if (s === "plugin") return { a: bind(pluginOwner ? "Go to its mod" : "", k("a")), b: bind("Close", k("b")) }
         if (s === "pickgame") return { a: bind("Add here", k("a")), b: bind("Back", k("b")) }
-        if (s === "fomod") return { a: bind("Choose", k("a")), b: bind("Back a step", k("b")), start: bind("Next", k("start")) }
-        if (s === "report") return { b: bind(reportView.editing ? "Done typing" : "Close", k("b")) }
+        // 0.59: the legend follows the installer (controls #6): the stop question's buttons, Stop on the first page,
+        // and Start goes on from any row.
+        if (s === "fomod") return fomodView.askStop ? { a: bind(fomodView.stopFocus === 1 ? "Stop installing" : "Keep choosing", k("a")), b: bind("Keep choosing", k("b")) }
+                                  : { a: bind(fomodView.onNextRow ? (fomodView.lastPage ? "Install" : "Next") : "Choose", k("a")), b: bind(fomodView.canStepBack ? "Back a step" : "Stop", k("b")),
+                                      start: bind(fomodView.lastPage ? "Install" : "Next", k("start")) }
+        if (s === "report") return reportView.editing ? { b: bind("Done typing", k("b")) }
+                                   : { a: bind(reportView.focusAt === 2 ? "Save report" : reportView.focusAt === 3 ? "Not now" : reportView.focusAt === 1 ? "Type" : "Switch", k("a")),
+                                       b: bind("Close, keep it", k("b")), start: bind(reportView.text.trim() !== "" ? "Save report" : "", k("start")) }
         if (s === "activity") return { a: bind("", k("a")), b: bind("Close", k("b")), x: bind(activityView.full ? "What happened" : "Full log", k("x")) }
         if (s === "settingsedit") return { a: bind(settingsView.aWord, k("a")), b: bind(settingsView.leaveArmed ? "Leave" : "Back", k("b")), x: bind("Reset", k("x")),
                                            y: bind(settingsView.fields.length === 0 ? "" : settingsView.plain ? "Settings" : "Plain text", k("y")), start: bind("Save", k("start")) }
@@ -3356,6 +3472,8 @@ Window {
             else if (b === "rt") stepMove(100000)
             else if (b === "a") endMove()
             else if (b === "b") cancelMove()
+            // Start puts the mod down and plays (the Play button says Start; controls #22).
+            else if (b === "start") { endMove(); startPlay() }
             return
         }
         if (orderMoving) { orderAct(b); return }
@@ -3379,7 +3497,7 @@ Window {
         // Nexus inside Turbine: A clicks at the pointer (or works the Downloads row), B back a page or close.
         if (page === "browser") {
             // B: back a page (held: close), or close on the first page.
-            o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back, hold: Close" : "Close", browserBack)
+            o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back" : "Close", browserBack)
             o.lb = bind("", () => { browserTab = 0 })
             o.rb = bind("", () => { browserTab = 1 })
             o.start = bind(browserAddedGame !== "" ? "Play" : "", browserPlay)
@@ -3439,6 +3557,8 @@ Window {
         if (zone === "play" && page === "game" && game) {
             o.a = bind("Play", startPlay)
             o.b = bind("Back", () => { zone = "main"; note("focus", "Back from Play to the list") })
+            o.lb = bind("", () => switchTab(-1))
+            o.rb = bind("", () => switchTab(1))
             return o
         }
         if (page === "settings") {
@@ -3489,8 +3609,8 @@ Window {
             }
             // 0.58: no mods yet (any game): A Get mods, X Add a file (the centered card says the same).
             if (mods.length === 0 && modsLoaded && !(focusedItem && (focusedItem.kind === "removed" || focusedItem.kind === "ghost"))) {
-                if (canGetMods) { o.a = bind("Get mods", () => { note("action", "No mods yet: Get mods"); tab = 1 }); o.x = bind("Add a file", openAdd) }
-                else o.a = bind("Add a file", openAdd)
+                if (canGetMods) { o.a = bind("Get mods", () => { note("action", "No mods yet: Get mods"); tab = 1 }); o.x = bind("Add from Downloads", openAdd) }
+                else o.a = bind("Add from Downloads", openAdd)
                 o.b = bind("Games", () => { zone = "rail"; railIndex = current })
                 return o
             }
@@ -3509,23 +3629,24 @@ Window {
             }
             // The removed row went a moment ago and another row slid under the highlight: A still means Put back.
             if (ghostJustWent()) o.a = bind("Put back", () => { note("action", "A just as the removed row went: put back"); const id = ghostGone.id; ghostGone = null; putBack(id) })
-            o.b = bind(listFiltered ? "Show all" : "Games", () => {
-                if (listFiltered) { findText = ""; listShow = "all"; listSort = "order"; modIndex = 0; note("action", "Find, Show and Sort cleared") }
-                else { zone = "rail"; railIndex = current }
-            })
+            // 0.59 (the owner's rule): B only ever goes back. Find, Show and Sort stay (the line over the list says
+            // them); Y, then X Clear all, clears them.
+            o.b = bind("Games", () => { zone = "rail"; railIndex = current })
             return o
         }
         if (tab === 1 && sources.length === 0) {
-            if (nexusUnknown) { o.a = bind("Pick game", openNexusPick); o.x = bind("Add a file", openAdd) }
-            else o.a = bind("Add a file", openAdd)
+            if (nexusUnknown) { o.a = bind("Pick game", openNexusPick); o.x = bind("Add from Downloads", openAdd) }
+            else o.a = bind("Add from Downloads", openAdd)
             o.b = bind("My mods", () => { tab = 0 })
             return o
         }
         if (tab === 1) {
-            o.b = bind(getArea === "fallback" || getText === "" ? "My mods" : "Clear search", getBack)
+            // B goes back (a search stays, named over the cards; Y, X clears it).
+            o.b = bind("My mods", getBack)
             if (getArea === "fallback") {
                 o.a = bind("Open on Nexus", openNexusMods)
                 o.x = bind("Try again here", retryBrowse)
+                o.y = bind("Add from Downloads", openAdd)
                 return o
             }
             // Y: the pop-up with Search, Sort and Category.
@@ -3537,7 +3658,7 @@ Window {
                 // A screen of rows; the rows stop at both ends.
                 const jump = gridColumns * 2
                 o.lt = bind("", () => { getIndex = Math.max(getIndex % gridColumns, getIndex - jump) })
-                o.rt = bind("", () => { getIndex = Math.min(getItems.length - 1, getIndex + jump); if (getIndex >= getItems.length - gridColumns) browseMore() })
+                o.rt = bind("", () => { getIndex = Math.max(0, Math.min(getItems.length - 1, getIndex + jump)); if (getIndex >= getItems.length - gridColumns) browseMore() })
             }
             return o
         }
@@ -3547,7 +3668,7 @@ Window {
         else if (p && !p.fixed) o.a = bind(p.active ? "Turn off" : "Turn on", () => orderAct("a"))
         o.b = bind("My mods", () => { tab = 0 })
         if (p) o.x = bind("Options", openPluginMenu)
-        o.y = bind("Find plugin", openFindPlugin)
+        if (order.length > 0) o.y = bind("Find plugin", openFindPlugin)
         // A page up or down, landing on a plugin that can be changed (the game's own are locked).
         o.lt = bind("", () => { orderIndex = orderLandOn(Math.max(-1, orderIndex - pageJump), -1) })
         o.rt = bind("", () => { orderIndex = orderLandOn(Math.min(order.length - 1, orderIndex + pageJump), 1) })
@@ -3570,7 +3691,14 @@ Window {
         else if (o.start && o.start.label) h.push(["start", o.start.label, ""])
         return h.slice(0, 5)
     }
+    // 0.59: the first press after a page opens never changes a setting (the owner's Left on the way into Settings, a
+    // press carried over from the quick wheel, set the Nexus page to 140%). Left or Right changes a value only after
+    // the focus has been moved (Up, Down, a tap) or something chosen since the page or section opened.
+    property bool settingsFresh: false
     function navigate(b) {
+        // The controls audit's blocker: the D-pad on "Where do these files go?" moves its own folders, never the
+        // list hidden behind the page.
+        if (page === "place") { placeAct(b); return }
         if (page === "browser") {
             if (browserTab === 1) {
                 if (b === "up") browserDlIndex = Math.max(0, browserDlIndex - 1)
@@ -3591,7 +3719,12 @@ Window {
             const rows = sec === "Look" ? lookRows.length : sec === "About" ? 2 : rowsNow.length
             const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
             const kind = r ? r.kind : ""
-            if (b === "up" || b === "down") settingsMove(b === "up" ? -1 : 1, rows)
+            if (b === "up" || b === "down") { settingsFresh = false; settingsMove(b === "up" ? -1 : 1, rows) }
+            else if (settingsFresh && (b === "left" || b === "right")) {
+                settingsFresh = false
+                note("action", "Settings: " + b + " just after opening, nothing changed")
+                toast.info("Left and Right change the highlighted setting. Press again to change it.")
+            }
             // Left and Right change values; Left never leaves Settings (B does).
             else if (sec === "Look" && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
             else if (kind === "item" && b === "left") labsChip = Math.max(0, labsChip - 1)
@@ -3807,7 +3940,7 @@ Window {
         // 0.57: Up is the Y pop-up (Find, Show, Sort; Search, Sort, Category), Right Add from Downloads and Up-left
         // Loadouts on every tab; Up-right is the tab's own.
         const tail = [slot("Add from Downloads", g, openAdd, "A mod file you downloaded")].concat(common).concat([slot("Loadouts", g, openProfiles, "Save or switch sets of mods")])
-        if (k === "get") return [slot("Find", sources.length > 0, () => { if (modPage) getBack(); openFindPop() }, "Search, sort and category"),
+        if (k === "get") return [slot("Find", sources.length > 0, openFindPop, "Search, sort and category"),
                                  slot("Recently viewed", recentViewed.length > 0, openRecentPick, recentViewed.length > 0 ? plural(recentViewed.length, "mod page", "mod pages") + " you opened" : "Mod pages you open show here")].concat(tail)
         if (k === "order") return [slot("Find plugin", order.length > 0, openFindPlugin, "Find a plugin by name"), slot("Sort", order.length > 0, () => { orderIndex = -1; Turbine.orderSort() }, "Put plugins in a safe order")].concat(tail)
         return [slot("Find", k === "mods" && mods.length > 0, openFindPop, "Find, show, sort, select several"),
@@ -4030,6 +4163,7 @@ Window {
             () => { openSection("Look"); zone = "settings"; setRow = Math.max(0, lookRows.findIndex(r => r.key === "size")); sizeTrial = 100 },
             () => { m.row = lookList.itemAtIndex(setRow); if (!m.row || !m.row.minus) return false
                     check("Size buttons: - " + Math.round(m.row.minus.width) + " x " + Math.round(m.row.minus.height) + ", + " + Math.round(m.row.plus.width) + " x " + Math.round(m.row.plus.height) + " pixels" + (m.row.minus.width >= 44 && m.row.plus.height >= 44 ? "" : "  PROBLEM: under 44"))
+                    m.was = sizeNow; pad("left"); check("Size first Left after Settings opened: " + m.was + "% to " + sizeNow + "%" + (sizeNow === m.was ? ", unchanged" : "  PROBLEM: the first press changed it"))
                     m.was = sizeNow; pad("left"); check("Size by D-pad Left: " + m.was + "% to " + sizeNow + "%" + (sizeNow < m.was ? ", smaller" : "  PROBLEM: not smaller")) },
             () => { m.row = lookList.itemAtIndex(setRow); if (!m.row) return false
                     const p = m.row.minus.mapToItem(null, m.row.minus.width / 2, m.row.minus.height / 2)
@@ -4376,6 +4510,7 @@ Window {
     property int tutCard: 0
     function openTutorial(n) {
         tutCard = n || 0
+        tutorialFrom = page
         // Remembered as soon as it shows, so a sheet or a quit part way doesn't bring it back at the next start.
         if (!shot.on) seen.tutorialDone = true
         note("action", "Beginner tutorial, card " + (tutCard + 1))
@@ -4391,10 +4526,14 @@ Window {
         // Start finishes it (card 4 says Start plays): straight to picking a game.
         else if (b === "start") tutorialDone("finished with Start")
     }
+    property string tutorialFrom: ""
     function tutorialDone(how) {
         if (!shot.on) seen.tutorialDone = true
-        note("action", "Tutorial " + how + ": pick a game")
         sheet = ""
+        // Shown again from Settings, Help: back to Settings (controls #5).
+        if (tutorialFrom === "settings" && page === "settings") { tutorialFrom = ""; note("action", "Tutorial " + how + ": back to Settings"); return }
+        tutorialFrom = ""
+        note("action", "Tutorial " + how + ": pick a game")
         page = "game"
         zone = "rail"
         railIndex = Math.min(current, Math.max(0, games.length - 1))
@@ -4442,7 +4581,7 @@ Window {
     // Updates for your mods, on the Get mods start page.
     readonly property var updateList: Object.keys(updateMap).map(k => ({ u: updateMap[k], m: mods.find(x => x.id === k) })).filter(x => !!x.m)
     // 0.56: Good first mods (from the game's data file) on the Get mods start page, for this source.
-    readonly property var starterItems: getText === "" && rules && rules.starters ? rules.starters.filter(x => x.source === srcNow)
+    readonly property var starterItems: getSummary === "" && rules && rules.starters ? rules.starters.filter(x => x.source === srcNow)
         .map(x => ({ id: x.id, name: x.name, icon: "", source: x.source, what: x.what })) : []
     // Recently viewed: the last 8 mod pages opened in this game.
     property var recentSeed: null
@@ -4480,7 +4619,8 @@ Window {
     function getBack() {
         if (sheet !== "") return
         if (modPage) {
-            const h = history.slice()
+            // Other files' step (controls #13) is never a place to go back to.
+            const h = history.filter(x => x.kind !== "files")
             const top = h.pop()
             history = h
             if (top && top.kind === "mod" && h.length > 0 && h[h.length - 1].kind === "mod") {
@@ -4502,12 +4642,7 @@ Window {
             note("action", "Back to the results")
             return
         }
-        // 0.57: no bar to go back to. B clears a search first, then goes to My mods.
-        if (getText !== "" && getArea !== "fallback") {
-            getText = ""; getArea = "grid"; getIndex = 0; gridReturn = -1
-            restoreFocus = { area: starterItems.length > 0 ? "recent" : "grid", index: 0 }
-            note("action", "Search cleared"); browseNow(); return
-        }
+        // 0.59: B goes to My mods; a search stays as it is (the line over the cards names it).
         tab = 0
     }
     function browseNow() {
@@ -4558,7 +4693,7 @@ Window {
             if (b === "left") { if (getIndex % cols > 0) getIndex--; else { zone = "rail"; railIndex = current } }
             else if (b === "right") { if (getIndex % cols < cols - 1) getIndex = Math.min(getItems.length - 1, getIndex + 1) }
             else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = Math.min(starterItems.length - 1, getIndex) } else barsHidden = false }
-            else if (b === "down") getIndex = Math.min(getItems.length - 1, getIndex + cols)
+            else if (b === "down") getIndex = Math.max(0, Math.min(getItems.length - 1, getIndex + cols))
             else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
             else if (b === "x" && getItems[getIndex]) { menuIndex = 0; sheet = "cardmenu" }
             // Infinite scroll: the next 30 when the focus reaches the last row.
@@ -4756,11 +4891,15 @@ Window {
     }
     function installFromDetails() {
         if (!detailsData || detailsData.loading || detailsData.error) return
+        // Installing already (controls #12): a second press never starts a second install.
+        if (busyHere) { note("action", "Install pressed while installing: ignored"); toast.info("Installing " + detailsData.name + " already."); return }
         if (detailsData.partial) { if (detailsData.page) openNexus(detailsData.page); return }
         if (pageInstalled) {
             // Off: A turns it on (the button then says Show in My mods). On: A shows it in My mods.
             if (pageModOff) toggle(pageMod)
             else if (pageMod) goToMod(pageMod.id)
+            // Installed, but its row isn't found by id (controls #26): My mods all the same.
+            else { modPage = false; history = []; tab = 0; zone = "main"; toast.info("It's in My mods.") }
             return
         }
         if (detailsData.source === "nexus" && detailsData.premium === false) {
@@ -4796,8 +4935,15 @@ Window {
         const p = pagesList[i]
         if (!p) return
         note("action", "Open page: " + p.name)
-        openNexus(p.url)
+        // 0.59 (controls #4): the list steps aside so the page shows and takes the presses; it comes back, on the
+        // next page, when the page closes.
+        pagesReturn = true
+        sheet = ""
+        const opened = openNexus(p.url)
+        // Opened outside Turbine (or not at all): the list stays, on the next page when this one opened.
+        if (!browserOpen) { pagesReturn = false; if (opened && pagesIndex < pagesList.length - 1) pagesIndex++; sheet = "pages" }
     }
+    property bool pagesReturn: false
 
     // ---------------------------------------------------------------- Nexus inside Turbine (NexusBrowser.qml)
     // Nexus opens full screen in Turbine's window: the player signs in once, presses Slow download (or Mod Manager
@@ -4908,6 +5054,11 @@ Window {
             const t = "Still downloading " + plural(webDlsRunning, "mod", "mods") + ". It's added by itself. To watch it: View, Game menu, Nexus downloads."
             note("browser", t)
             toast.showPlain(t)
+        }
+        // The list of pages it was opened from comes back on the next one.
+        if (pagesReturn) {
+            pagesReturn = false
+            if (pagesIndex < pagesList.length - 1 && why !== "play" && why !== "home" && why !== "installer") { pagesIndex = pagesIndex + 1; Qt.callLater(() => { if (app.sheet === "") app.sheet = "pages" }) }
         }
         // Install notes that came while the page was open.
         if (pendingNotes && sheet === "") { pendingNotes = false; infoIndex = 0; sheet = "notes" }
@@ -5158,7 +5309,7 @@ Window {
         ] : []).concat([
             { icon: "update", title: "Reload", detail: "", run: () => { if (nexusView) nexusView.reload() } },
             { icon: "info", title: "Zoom", detail: zoomWords, keep: true, step: (d) => browserZoomBy(d * 0.1), run: () => browserZoomKeep() },
-            { icon: "restore", title: "Back to " + gameTitle + "'s mods", detail: "The page it opened on", run: () => { if (nexusView) nexusView.url = browserStart } }
+            { icon: "restore", title: "Back to the first page", detail: "The page Nexus opened on", run: () => { if (nexusView) nexusView.url = browserStart } }
         ]).concat(labsOn ? [
             { icon: "info", title: "Copy page address", detail: nexusView ? Turbine.browserLogUrl(nexusView.url) : "", run: () => { Turbine.copyText(nexusView ? nexusView.url : browserStart); toast.done("Address copied.") } }
         ] : []).concat(browserSigninShown ? [
@@ -5736,7 +5887,8 @@ Window {
     }
     function installVersion(i) {
         const v = otherVersions[i]
-        if (!v || v.installed) return
+        if (!v) return
+        if (v.installed) { toast.info("That one is already in My mods."); return }
         sheet = ""
         if (detailsData.premium === false && detailsData.page) {
             note("action", "Get it on Nexus: " + v.name + " " + (v.version || ""))
@@ -5926,7 +6078,8 @@ Window {
     // With a newer Turbine ready, Settings opens on Updates.
     function openSettings() {
         // B comes back here.
-        if (page !== "settings" && !settingsFrom) settingsFrom = { zone: zone, tab: tab, modPage: modPage, railIndex: railIndex, browser: page === "browser" }
+        // 0.59 (controls #5): where B goes back to is taken every time Settings opens, never left over from before.
+        if (page !== "settings") settingsFrom = { zone: zone, tab: tab, modPage: modPage, railIndex: railIndex, browser: page === "browser" }
         page = "settings"; zone = "settings"
         if (selfUpd.state === "available" && settingsSections.indexOf("Updates") >= 0) setSection = settingsSections.indexOf("Updates")
         setRow = firstSettingsRow()
@@ -6400,10 +6553,13 @@ Window {
         const tmp = Turbine.shotTemp()
         const open = function (ok) {
             reportView.shotUrl = ok ? fileUrl(tmp) + "?" + Date.now() : ""
-            reportView.aboutLine = "Send saves the report to Downloads and copies it, with Turbine " + Turbine.version
+            reportView.aboutLine = "Save report puts it in Downloads and copies it, with Turbine " + Turbine.version
                 + ", this device, the game and its mods, and the last 300 lines of the activity log."
-            reportView.open(item ? item.title : "", startText !== "" ? startText : item ? "Problem: " + item.title + ". " : "",
+            // 0.59: a draft B kept comes back (unless this report starts with words of its own).
+            const draft = reportDraft !== "" && startText === "" && !perfText ? reportDraft : ""
+            reportView.open(item ? item.title : "", draft !== "" ? draft : startText !== "" ? startText : item ? "Problem: " + item.title + ". " : "",
                             perfText, Turbine.hasCrashLog())
+            if (draft !== "") { reportView.focusAt = 2; toast.info("Your draft is back. A saves it.") }
             perfView.visible = false
             sheet = "report"
         }
@@ -6419,19 +6575,31 @@ Window {
         const res = parse(Turbine.saveReport(text, stamp, withShot ? Turbine.shotTemp() : ""), { error: "Couldn't save the report." })
         if (res.error !== "") { toast.showPlain(res.error); return }
         Turbine.copyText(text)
+        reportDraft = ""
         closeReport()
-        toast.showPlain("Report saved to Downloads as " + res.report + ". The report is copied.")
+        note("labs", "Report saved: Downloads/" + res.report)
+        // Where it went, on screen until OK (0.59: the owner couldn't tell it had saved).
+        openMsg({ title: "Report saved", text: "It's in Downloads as " + res.report + (withShot ? ", with the screenshot beside it" : "") + ". The words are copied too, ready to paste.",
+                  steps: [], notes: [], footnote: "In Desktop Mode, open Downloads to send the file with a few words.",
+                  buttons: [{ key: "a", label: "OK" }] })
     }
     function closeReport() {
         reportView.close()
         discardArmed = false
         if (sheet === "report") sheet = ""
     }
+    property string reportDraft: ""
     function dismissReport() {
-        if (reportView.text.trim() === "" || discardArmed) { note("labs", "Report closed without saving"); closeReport(); return }
-        discardArmed = true
-        discardReset.restart()
-        toast.showPlain("Press B again to throw this report away.")
+        // 0.59: B never throws words away: they stay as a draft for the next Report a bug.
+        if (reportView.text.trim() !== "" && !/^Problem: [^.]*\. ?$/.test(reportView.text.trim())) {
+            reportDraft = reportView.text
+            note("labs", "Report closed, kept as a draft")
+            closeReport()
+            toast.info("Not saved yet. Your words are kept: Report a bug brings them back.")
+            return
+        }
+        note("labs", "Report closed, nothing typed")
+        closeReport()
     }
     // Steam's on-screen keyboard is up: the controller pointer leaves the sticks and triggers to it.
     property bool keyboardUp: false
@@ -6607,6 +6775,8 @@ Window {
         property string label2: ""
         // In the legend, a hint for one button is also a button: a tap or click does what the button does.
         readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y"].indexOf(k) >= 0
+        // A finger-sized target in the bar (0.59: the key caps alone are 24 px).
+        height: clickable ? Math.max(app.tpx(44), implicitHeight) : implicitHeight
         spacing: app.px(6)
         TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
@@ -6951,10 +7121,11 @@ Window {
                     Rectangle {
                         id: backBtn
                         // For touch and the mouse; with a pad or keys the legend already says B Back.
-                        visible: app.page !== "game" && app.lastInput !== "pad" && app.lastInput !== "keys"
+                        // 0.59 (newbie H1): on a mod page too, so touch has a way back.
+                        visible: (app.page !== "game" || app.modPage) && app.lastInput !== "pad" && app.lastInput !== "keys"
                         x: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
-                        width: backRow.implicitWidth + app.px(20); height: app.px(32); radius: app.px(6)
+                        width: backRow.implicitWidth + app.px(20); height: app.tpx(44); radius: app.px(6)
                         color: c.raised
                         Hint { id: backRow; anchors.centerIn: parent; k: "b"; label: app.page === "place" ? app.placeBLabel : "Back" }
                         HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -7030,13 +7201,15 @@ Window {
                     // The mod page: LB and RB step through the results.
                     Row {
                         id: resultCaps
-                        visible: app.page === "game" && app.modPage && app.getItems.length > 1
+                        // Only when this mod is one of the results (controls #8).
+                        readonly property int at: app.getItems.findIndex(x => app.detailsItem && String(x.id) === String(app.detailsItem.id))
+                        visible: app.page === "game" && app.modPage && app.getItems.length > 1 && at >= 0
                         anchors.right: pagePlayBtn.left
                         anchors.rightMargin: app.px(14)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(6)
                         Key { k: "lb"; anchors.verticalCenter: parent.verticalCenter }
-                        Label { text: "Mod " + (Math.max(0, app.getItems.findIndex(x => app.detailsItem && String(x.id) === String(app.detailsItem.id))) + 1) + " of " + app.getItems.length; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                        Label { text: "Mod " + (resultCaps.at + 1) + " of " + app.getItems.length; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
                         Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
                     }
                     Rectangle {
@@ -7100,12 +7273,12 @@ Window {
                     Label {
                         id: moveLine
                         y: listBarRow.height
-                        visible: app.page === "game" && app.tab === 0 && (app.moving || app.findText !== "" || app.selecting || app.listShow !== "all")
+                        visible: app.page === "game" && app.tab === 0 && (app.moving || app.selecting || app.listFiltered)
                         height: visible ? app.px(26) : 0
                         x: app.px(6)
                         text: app.moving ? "Lower in the list wins when two mods change the same file."
                               : app.selecting ? app.plural(app.tickedCount, "mod", "mods") + " ticked. A ticks, X acts on them, B done."
-                              : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + " · B Show all"
+                              : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + (app.listSort !== "order" ? " · " + app.sortNames2[app.listSort] : "") + " · Y changes it"
                         color: c.soft
                         font.pixelSize: app.fpx(14)
                     }
@@ -7349,8 +7522,8 @@ Window {
                                     border.color: c.line; border.width: Math.max(1, app.px(1))
                                     Row { id: emptyAddRow; anchors.centerIn: parent; spacing: app.px(10)
                                         Key { k: app.canGetMods ? "x" : "a"; anchors.verticalCenter: parent.verticalCenter }
-                                        Text { text: "Add a file"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
-                                    Accessible.role: Accessible.Button; Accessible.name: "Add a file"
+                                        Text { text: "Add from Downloads"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
+                                    Accessible.role: Accessible.Button; Accessible.name: "Add from Downloads"
                                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                                     TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } } }
                                 }
@@ -7404,6 +7577,7 @@ Window {
                         loadingMore: app.loadingMore
                         search: app.getText
                         category: app.getCategory
+                        summary: app.getSummary
                         recent: app.starterItems
                         recentTitle: "Good first mods"
                         fallback: app.nexusFallback
@@ -8031,7 +8205,9 @@ Window {
                                  : "Mod files in Downloads and Game Mods/" + app.gameTitle + ", newest first"
             files: app.addList.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: (d.modified > 0 ? app.age(d.modified) : "") + (app.addAll && d.folder ? " · " + d.folder : "") }))
             focusIndex: app.addIndex
-            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Y shows every mod file in Downloads."
+            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Show every mod file lists the rest."
+            otherLabel: app.downloads.length === 0 ? "" : app.addAll ? "Only this game's files" : "Show every mod file"
+            onOtherClicked: { if (!app.gate(2, "sheet onOtherClicked")) return; app.act("y") }
             laterText: ""
             onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.addIndex = index; app.addChosen() }
             onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
@@ -8251,14 +8427,18 @@ Window {
             subtitle: app.findPop.kind === "get" ? app.nexusLine : ""
             fieldLabel: app.findPop.kind === "get" ? "Search" : "Find"
             text: app.findPop.text
-            placeholder: app.findPop.kind === "get" ? "Words from a mod's name, Y types" : "Part of a mod's name, Y types"
+            placeholder: app.findPop.kind === "get" ? "Search " + app.gameTitle + " mods" : "Part of a mod's name"
+            result: app.findResult
             sections: app.findSections
             focusRow: app.findRow
             focusCol: app.findCol
-            onFieldClicked: { if (!app.gate(2, "sheet onFieldClicked")) return; app.findRow = 0; app.findPopKeyboard() }
+            onFieldClicked: { if (!app.gate(2, "sheet onFieldClicked")) return; app.findPopField() }
+            onTyped: (text) => app.findPopTyping(text)
+            onEntered: (text) => app.findPopEntered(text)
+            onDoneClicked: { if (!app.gate(2, "sheet onDoneClicked")) return; app.findPopDone() }
+            onClearClicked: { if (!app.gate(2, "sheet onClearClicked")) return; app.findPopClear() }
             onOptionClicked: (r, c) => { if (!app.gate(2, "sheet onOptionClicked")) return; app.findRow = r; app.findCol = c; app.findPopChoose(r, c) }
-            onShowClicked: { if (!app.gate(2, "sheet onShowClicked")) return; app.findPopApply() }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
+            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.findPopDone() }
         }
         // A small menu made on the spot: Play options (hold Start), a profile's Rename and Delete, Select several's actions.
         ModMenu {
@@ -8323,6 +8503,7 @@ Window {
             onAccepted: (text) => app.askDone(text)
             onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = 0 } }
             onCancelled: app.askCancelled()
+            onFieldTapped: { app.askIndex = -1; app.askKeyboard() }
         }
 
         // 0.58: Edit settings (a mod's config files, the game's own, and Seamless Co-op's).
@@ -8711,6 +8892,7 @@ Window {
         startGlyph: app.glyph("start")
         onNext: app.tutorialAct("a")
         onSkip: app.tutorialAct("b")
+        onBack: app.tutorialAct("left")
     }
     // Touch anywhere: the pointer goes and the legend hides (the next press brings it back). A tap still does its
     // thing; this only watches.

@@ -28,10 +28,23 @@ Overlay {
         border.color: pg.ui.c.line
         clip: true
         CardGuard {}
+        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        Flickable {
+            id: scroller
+            anchors.fill: parent
+            anchors.margins: pg.ui.px(20)
+            contentHeight: col.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            function follow(it) {
+                if (!it) return
+                const y = it.mapToItem(col, 0, 0).y
+                if (y < contentY) contentY = Math.max(0, y)
+                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
+            }
         Column {
             id: col
-            x: pg.ui.px(22); y: pg.ui.px(20)
-            width: parent.width - pg.ui.px(44)
+            width: scroller.width
             spacing: pg.ui.px(10)
             Text {
                 width: parent.width
@@ -62,6 +75,7 @@ Overlay {
                     required property int index
                     required property var modelData
                     readonly property bool foc: pg.focusIndex === index
+                    onFocChanged: if (foc) Qt.callLater(() => scroller.follow(row))
                     width: col.width
                     height: pg.ui.px(row.modelData.note ? 62 : 50)
                     radius: pg.ui.px(6)
@@ -91,6 +105,7 @@ Overlay {
                     TapHandler { onTapped: pg.activated(row.index) }
                 }
             }
+        }
         }
     }
 }

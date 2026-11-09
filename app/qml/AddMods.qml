@@ -27,13 +27,16 @@ Overlay {
     }
 
     property string title: "Add from Downloads"
-    property string subtitle: "Zip files in your Downloads folder"
+    property string subtitle: "Mod files in Downloads, newest first"
     // Each file: { name, size (text, e.g. "4.1 MB"), age (text, e.g. "2 days ago"), note (optional, e.g. "Already added") }
     property var files: []
     property int focusIndex: 0
     property string actionLabel: "Add"
-    property string emptyText: "No zip files in Downloads. Download a mod's zip in Desktop Mode, then come back."
-    property string laterText: "Browsing and downloading mods online comes in a later version."
+    property string emptyText: "No mod files in Downloads yet."
+    property string laterText: ""
+    // Y's action as a button too (touch has no Y): "Show every mod file" or "Only this game's files" (0.59).
+    property string otherLabel: ""
+    signal otherClicked()
     property real bottomInset: ui.px(56)  // room left for the legend under the sheet
 
     signal activated(int index)
@@ -87,6 +90,15 @@ Overlay {
                 color: root.ui.c.muted
                 font.family: root.ui.bodyFont
                 font.pixelSize: root.ui.fpx(14)
+            }
+            Rectangle {
+                objectName: "addOther"
+                visible: root.otherLabel !== ""
+                width: otherText.implicitWidth + root.ui.px(24); height: root.ui.tpx(40); radius: root.ui.px(6)
+                color: root.ui.c.raised; border.color: root.ui.c.line; border.width: Math.max(1, root.ui.px(1))
+                Text { id: otherText; anchors.centerIn: parent; text: root.otherLabel; color: root.ui.c.text; font.family: root.ui.bodyFont; font.pixelSize: root.ui.fpx(14); font.bold: true }
+                HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
+                TapHandler { onTapped: root.otherClicked() }
             }
             Item { width: 1; height: root.ui.px(7) }
             Rectangle { width: parent.width; height: Math.max(1, root.ui.px(1)); color: root.ui.c.line }

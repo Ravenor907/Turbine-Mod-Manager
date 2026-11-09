@@ -107,7 +107,12 @@ Overlay {
         if (i >= 0 && i < shown.length) focusIndex = i
         list.positionViewAtIndex(focusIndex, ListView.Contain)
     }
+    // 0.59: the first Left or Right after the page opens changes nothing (it is often a press carried over).
+    property bool fresh: true
+    onVisibleChanged: if (visible) fresh = true
     function handleButton(b) {
+        if (b === "left" || b === "right") { if (fresh) { fresh = false; return } }
+        else fresh = false
         if (b === "up" || b === "down") move(b === "down" ? 1 : -1)
         else if (b === "lt" || b === "rt") { for (let k = 0; k < 6; k++) move(b === "rt" ? 1 : -1) }
         else if (b === "left" || b === "right") change(shown[focusIndex], b === "right" ? 1 : -1)

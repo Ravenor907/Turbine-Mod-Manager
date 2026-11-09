@@ -1,10 +1,11 @@
 import QtQuick
 
-// Y's pop-up (0.57): one place to find. Get mods: a Search field, Sort and Category buttons (a long category list
-// ends in More...). My mods: a Find field, Show and Sort buttons, and Select several. The chosen button in each row
-// is filled; the focus ring is on the button A would choose. Nothing changes until Start (or Show results) shows the
-// results; B (or Close, or a tap outside) closes. Main.qml moves the focus (focusRow 0 is the field, then one row
-// per section, focusCol the button) and handles the keys; taps come back through the signals.
+// Y's pop-up: one place to find. Get mods: a Search field, Sort and Category buttons (a long category list ends in
+// More...). My mods: a Find field, Show and Sort buttons. 0.59: every choice takes effect the moment it is made (the
+// result line on the right says what it found), and the pop-up only closes: Done (A on it, B, Start, a tap outside)
+// keeps everything; Clear all (X) puts everything back. The field is typed right here (A or a tap opens Steam's
+// keyboard); Enter shows the results. Main.qml moves the focus (focusRow 0 is the field, then one row per section,
+// then the buttons row; focusCol the button) and handles the keys; taps come back through the signals.
 Overlay {
     id: fs
     onOutsideTapped: fs.closed()
@@ -19,11 +20,20 @@ Overlay {
     property var sections: []             // [{key, title, options: [label], chosen}]
     property int focusRow: 0
     property int focusCol: 0
+    property string result: ""            // "24 mods", "Looking...", "Showing 3 of 12"
+    readonly property int buttonsRow: sections.length + 1
+    readonly property bool typing: input.activeFocus
 
     signal fieldClicked()
     signal optionClicked(int row, int col)
-    signal showClicked()
+    signal doneClicked()
+    signal clearClicked()
     signal closed()
+    signal typed(string text)             // every change while typing
+    signal entered(string text)           // Enter or Done on Steam's keyboard
+    function focusField() { input.text = fs.text; input.forceActiveFocus(); input.cursorPosition = input.length }
+    function stopTyping() { if (input.activeFocus) input.focus = false }
+    readonly property string fieldText: input.activeFocus ? input.text : fs.text
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
     Rectangle {
@@ -49,12 +59,27 @@ Overlay {
                 id: col
                 width: flick.width
                 spacing: fs.ui.px(10)
-                Text {
+                Item {
                     width: parent.width
+                    height: titleText.implicitHeight
+                Text {
+                    id: titleText
+                    width: parent.width - resultText.implicitWidth - fs.ui.px(12)
                     elide: Text.ElideRight
                     text: fs.title
                     color: fs.ui.c.text
                     font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true
+                }
+                // What the choices found, live.
+                Text {
+                    id: resultText
+                    objectName: "findResult"
+                    anchors.right: parent.right
+                    anchors.verticalCenter: titleText.verticalCenter
+                    text: fs.result
+                    color: fs.ui.c.accentText
+                    font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(14); font.bold: true
+                }
                 }
                 Text {
                     visible: fs.subtitle !== ""
@@ -65,24 +90,37 @@ Overlay {
                     font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13)
                 }
                 Text { text: fs.fieldLabel; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13) }
-                // The field: A or Y opens the keyboard.
+                // The field, typed right here: A, Y or a tap opens Steam's keyboard.
                 Rectangle {
                     id: field
                     readonly property bool foc: fs.focusRow === 0
                     width: parent.width
-                    height: fs.ui.px(40)
+                    height: fs.ui.tpx(44)
                     radius: fs.ui.px(6)
                     color: fs.ui.c.card
                     border.color: foc ? fs.ui.c.accentHi : fs.ui.c.line
                     border.width: foc ? fs.ui.px(2) : Math.max(1, fs.ui.px(1))
-                    Text {
+                    TextInput {
+                        id: input
                         x: fs.ui.px(12)
                         width: parent.width - fs.ui.px(24)
                         anchors.verticalCenter: parent.verticalCenter
-                        elide: Text.ElideRight
-                        text: fs.text !== "" ? fs.text : fs.placeholder
-                        color: fs.text !== "" ? fs.ui.c.text : fs.ui.c.muted
+                        clip: true
+                        maximumLength: 100
+                        color: fs.ui.c.text
                         font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(16)
+                        // Shows the words in effect when not typing.
+                        Binding on text { when: !input.activeFocus; value: fs.text }
+                        onTextEdited: fs.typed(text)
+                        onAccepted: { const t = text.trim(); input.focus = false; fs.entered(t) }
+                        Text {
+                            visible: input.text === "" && !input.activeFocus
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width; elide: Text.ElideRight
+                            text: fs.placeholder
+                            color: fs.ui.c.muted
+                            font: input.font
+                        }
                     }
                     Accessible.role: Accessible.EditableText
                     Accessible.name: fs.fieldLabel + ": " + (fs.text !== "" ? fs.text : "empty")
@@ -109,7 +147,7 @@ Overlay {
                                     readonly property bool chosen: index === secCol.modelData.chosen
                                     readonly property bool foc: fs.focusRow === secCol.index + 1 && fs.focusCol === index
                                     width: optText.implicitWidth + fs.ui.px(28)
-                                    height: fs.ui.px(34)
+                                    height: fs.ui.tpx(40)
                                     radius: fs.ui.px(6)
                                     color: chosen ? fs.ui.c.accent : fs.ui.c.card
                                     border.color: foc ? fs.ui.c.text : fs.ui.c.line
@@ -129,21 +167,22 @@ Overlay {
                         }
                     }
                 }
-                // For touch and the mouse (the legend says Start and B).
+                // Done and Clear all (A on them, or B and X anywhere).
                 Row {
                     spacing: fs.ui.px(10)
                     topPadding: fs.ui.px(4)
                     Repeater {
-                        model: ["Show results", "Close"]
+                        model: ["Done", "Clear all"]
                         Rectangle {
                             required property int index
                             required property string modelData
+                            readonly property bool foc: fs.focusRow === fs.buttonsRow && fs.focusCol === index
                             width: bt.implicitWidth + fs.ui.px(32)
-                            height: fs.ui.px(38)
+                            height: fs.ui.tpx(44)
                             radius: fs.ui.px(6)
                             color: index === 0 ? fs.ui.c.accent : fs.ui.c.raised
-                            border.color: fs.ui.c.line
-                            border.width: index === 0 ? 0 : Math.max(1, fs.ui.px(1))
+                            border.color: foc ? fs.ui.c.text : fs.ui.c.line
+                            border.width: foc ? fs.ui.px(3) : index === 0 ? 0 : Math.max(1, fs.ui.px(1))
                             Text {
                                 id: bt
                                 anchors.centerIn: parent
@@ -153,7 +192,7 @@ Overlay {
                             }
                             Accessible.role: Accessible.Button
                             Accessible.name: modelData
-                            TapHandler { onTapped: parent.index === 0 ? fs.showClicked() : fs.closed() }
+                            TapHandler { onTapped: parent.index === 0 ? fs.doneClicked() : fs.clearClicked() }
                         }
                     }
                 }

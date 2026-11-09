@@ -143,7 +143,7 @@ Overlay {
                     required property int index
                     required property var modelData
                     readonly property bool foc: al.focusAt === index
-                    width: inner.implicitWidth + al.ui.px(24); height: al.ui.px(40)
+                    width: inner.implicitWidth + al.ui.px(24); height: al.ui.tpx(44)
                     radius: al.ui.px(6)
                     color: foc ? al.ui.c.focusFill : al.ui.c.card
                     border.color: foc ? al.ui.c.accent : al.ui.c.line

@@ -27,7 +27,7 @@ Flow {
             readonly property string modelData: sb.labels[index] || ""
             readonly property bool foc: index === sb.focusIndex
             width: btnText.implicitWidth + sb.ui.px(36)
-            height: sb.ui.px(44)
+            height: sb.ui.tpx(44)
             radius: sb.ui.px(6)
             color: sb.ui.c.raised
             border.width: Math.max(1, sb.ui.px(1.5))

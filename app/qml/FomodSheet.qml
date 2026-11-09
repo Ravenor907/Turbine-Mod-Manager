@@ -2,7 +2,9 @@ import QtQuick
 
 // Installer choices (a mod's FOMOD installer): one question per page, big options, and a preview of the focused one
 // (its picture from the archive and its description). The D-pad moves, A picks; in "pick one" questions A also goes
-// on. The last row is Next (or Install on the last page). B goes back a page, and on the first page asks to stop.
+// on. The last row is Next (or Install on the last page). B goes back a page, and on the first page asks "Stop
+// installing?" with Keep choosing highlighted (0.59: A presses the highlighted button, B keeps choosing; touch has
+// both buttons). Start goes on from any row.
 // LB and RB do nothing here, so a game can't be switched mid-install. Main.qml drives it with handleButton().
 Overlay {
     id: fs
@@ -12,6 +14,9 @@ Overlay {
     property int page: 0                  // which group of the current step
     property int focusIndex: 0
     property bool askStop: false
+    property int stopFocus: 0             // 0 Keep choosing, 1 Stop installing
+    readonly property bool canStepBack: page > 0 || (step !== null && step.canGoBack === true)
+    readonly property bool onNextRow: focusIndex >= options.length
 
     signal choose(int group, int option)
     signal next()
@@ -34,15 +39,17 @@ Overlay {
 
     function handleButton(b) {
         if (askStop) {
-            if (b === "a") { askStop = false; stop() }
-            else if (b === "b") askStop = false
+            if (b === "left" || b === "up") stopFocus = 0
+            else if (b === "right" || b === "down") stopFocus = 1
+            else if (b === "a") answerStop(stopFocus)
+            else if (b === "b") answerStop(0)
             return
         }
         if (b === "up") focusIndex = Math.max(0, focusIndex - 1)
         else if (b === "down") focusIndex = Math.min(rows - 1, focusIndex + 1)
         else if (b === "a") activate(focusIndex)
         else if (b === "b") goBack()
-        else if (b === "start" && focusIndex >= options.length) goOn()
+        else if (b === "start") goOn()
     }
     function activate(i) {
         focusIndex = i
@@ -60,7 +67,11 @@ Overlay {
     function goBack() {
         if (page > 0) { page--; focusIndex = 0 }
         else if (step && step.canGoBack) { back(); pageAtEnd = true }
-        else askStop = true
+        else { stopFocus = 0; askStop = true }
+    }
+    function answerStop(i) {
+        askStop = false
+        if (i === 1) stop()
     }
     // After going back a step, start at its last question.
     property bool pageAtEnd: false
@@ -70,6 +81,8 @@ Overlay {
 
     Rectangle { anchors.fill: parent; color: fs.ui.c.ground }
     Column {
+        // Off while "Stop installing?" is up, so a tap on it never reaches an option underneath.
+        enabled: !fs.askStop
         anchors.fill: parent
         anchors.margins: fs.ui.px(14)
         spacing: fs.ui.px(8)
@@ -77,7 +90,7 @@ Overlay {
             width: parent.width; height: fs.ui.px(44)
             Rectangle {
                 anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                width: backRow.implicitWidth + fs.ui.px(20); height: fs.ui.px(32); radius: fs.ui.px(6)
+                width: backRow.implicitWidth + fs.ui.px(20); height: fs.ui.tpx(44); radius: fs.ui.px(6)
                 color: fs.ui.c.panel
                 Row {
                     id: backRow
@@ -248,6 +261,15 @@ Overlay {
         }
     }
     // Stop installing?
+    MouseArea {
+        visible: fs.askStop
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        preventStealing: true
+        onWheel: (w) => { w.accepted = true }
+        onClicked: fs.answerStop(0)
+        Rectangle { anchors.fill: parent; color: "#A0000000" }
+    }
     Rectangle {
         visible: fs.askStop
         anchors.centerIn: parent
@@ -256,6 +278,7 @@ Overlay {
         radius: fs.ui.px(10)
         color: fs.ui.c.panel
         border.color: fs.ui.c.line
+        CardGuard {}
         Column {
             id: stopCol
             x: fs.ui.px(18); y: fs.ui.px(16)
@@ -263,7 +286,16 @@ Overlay {
             spacing: fs.ui.px(10)
             Text { text: "Stop installing?"; color: fs.ui.c.text; font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true }
             Text { width: parent.width; wrapMode: Text.WordWrap; text: "The mod isn't added. Nothing in the game changes."; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15) }
-            Text { text: "A  Stop      B  Keep choosing"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: true }
+            SheetButtons {
+                id: stopButtons
+                objectName: "fomodStopButtons"
+                ui: fs.ui
+                width: parent.width
+                labels: ["Keep choosing", "Stop installing"]
+                focusIndex: fs.stopFocus
+                mainIndex: 0
+                onActivated: (i) => fs.answerStop(i)
+            }
         }
     }
 }

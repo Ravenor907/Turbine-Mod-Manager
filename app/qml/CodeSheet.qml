@@ -19,15 +19,29 @@ Overlay {
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - cs.ui.px(40), cs.ui.px(720))
-        height: col.implicitHeight + cs.ui.px(40)
+        height: Math.min(col.implicitHeight + cs.ui.px(40), parent.height - cs.ui.px(40))
+        clip: true
         radius: cs.ui.px(10)
         color: cs.ui.c.panel
         border.color: cs.ui.c.line
         CardGuard {}
+        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        Flickable {
+            id: scroller
+            anchors.fill: parent
+            anchors.margins: cs.ui.px(20)
+            contentHeight: col.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            function follow(it) {
+                if (!it) return
+                const y = it.mapToItem(col, 0, 0).y
+                if (y < contentY) contentY = Math.max(0, y)
+                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
+            }
         Column {
             id: col
-            x: cs.ui.px(22); y: cs.ui.px(20)
-            width: parent.width - cs.ui.px(44)
+            width: scroller.width
             spacing: cs.ui.px(12)
             Text {
                 text: "Thunderstore profile code"
@@ -89,6 +103,7 @@ Overlay {
                 spacing: cs.ui.px(18)
                 Row {
                     visible: cs.state_ === "ready"
+                    height: cs.ui.tpx(44)
                     spacing: cs.ui.px(6)
                     Rectangle {
                         width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
@@ -100,6 +115,7 @@ Overlay {
                     TapHandler { onTapped: cs.copyClicked() }
                 }
                 Row {
+                    height: cs.ui.tpx(44)
                     spacing: cs.ui.px(6)
                     Rectangle {
                         width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
@@ -111,6 +127,7 @@ Overlay {
                     TapHandler { onTapped: cs.closed() }
                 }
             }
+        }
         }
     }
 }

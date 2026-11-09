@@ -10,7 +10,7 @@ signals below, so touch works too.
 | Button | Meaning everywhere |
 | --- | --- |
 | A | Do the focused thing |
-| B | Back one level, focus put back where it was. Hold 1 s: home |
+| B | Back one step, focus put back where it was (0.59: nothing else, never a hold) |
 | X | Quick menu for the focused item (max 6 rows) |
 | Y | Find: the pop-up with Search, Sort and Category (Get mods) or Find, Show, Sort and Select several (My mods); Find plugin (Load order) |
 | LB / RB | Previous / next tab of this view: game tabs, Settings sections, installer steps; on a mod page the previous / next result. Never another game |

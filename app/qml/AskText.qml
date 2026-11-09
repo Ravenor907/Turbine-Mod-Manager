@@ -22,6 +22,7 @@ Overlay {
     signal accepted(string text)
     signal cancelled()
     signal edited(string text)            // every change, for filters that follow the typing
+    signal fieldTapped()                  // a tap on the field: Steam's keyboard again (0.59)
 
     function open(t, n, start, ph, max, hide, done) {
         title = t; note = n || ""; placeholder = ph || ""
@@ -67,7 +68,7 @@ Overlay {
             }
             Rectangle {
                 width: parent.width
-                height: ask.ui.px(48)
+                height: ask.ui.tpx(48)
                 radius: ask.ui.px(6)
                 color: ask.ui.c.ground
                 border.color: ask.focusIndex < 0 ? ask.ui.c.accentHi : ask.ui.c.line
@@ -89,6 +90,7 @@ Overlay {
                     Keys.onReturnPressed: ask.accept()
                     Keys.onEnterPressed: ask.accept()
                     Keys.onEscapePressed: ask.cancel()
+                    TapHandler { onTapped: { field.forceActiveFocus(); ask.fieldTapped() } }
                     Text {
                         visible: field.text === ""
                         anchors.verticalCenter: parent.verticalCenter

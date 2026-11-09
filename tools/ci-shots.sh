@@ -269,8 +269,8 @@ shoot "quickexit-1280x800" 1280x800 quickexit "$h" --game=$skyrim "--selftest-im
 shoot "chain-1280x800" 1280x800 chain "$PWD/home" --game=steam:292030
 fresh "listbar"; h="$PWD/fh/listbar"
 shoot "listbar-1280x800" 1280x800 listbar "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
-need listbar-1280x800 "My mods: Y opens the pop-up with Find, Show, Sort, Select several" "Find pop-up \\(My mods\\): field, Show 6, Sort 3, Many at once 1"
-need listbar-1280x800 "My mods pop-up legend" "My mods pop-up legend: A Choose · B Close · Y Keyboard · START Show results"
+need listbar-1280x800 "My mods: Y opens the pop-up with Find, Show, Sort" "Find pop-up \\(My mods\\): field, Show 6, Sort 3$"
+need listbar-1280x800 "My mods pop-up legend (0.59: B is Done, X Clear all)" "My mods pop-up legend: A Choose · B Done · X Clear all · Y Keyboard$"
 log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
 else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
@@ -348,6 +348,7 @@ done
 if [ "$MODE" = 1280x800 ]; then
 shoot "sizeinputs-1280x800" 1280x800 sizeinputs "$PWD/home"
 n=sizeinputs-1280x800
+need $n "Size: the first press after opening Settings changes nothing (the owner's Nexus zoom)" "Size first Left after Settings opened: [0-9]+% to [0-9]+%, unchanged"
 need $n "Size: D-pad Left makes it smaller" "Size by D-pad Left: [0-9]+% to [0-9]+%, smaller"
 need $n "Size: the - button makes it smaller" "Size by the - button \(pointer click\): [0-9]+% to [0-9]+%, smaller"
 need $n "Size: the + button makes it bigger" "Size by the \+ button \(pointer click\): [0-9]+% to [0-9]+%, bigger"
@@ -706,7 +707,7 @@ for size in $SIZES; do
   need "tucked-$size" "The bars hide going down ($size)" "Bars hidden: true; panel: true"
   shoot "findpop-$size" "$size" findpop "$PWD/home" --game=$skyrim
   need "findpop-$size" "Get mods: Y opens the pop-up ($size)" "Find pop-up \\(Get mods\\): field, Sort 5, Category"
-  need "findpop-$size" "Get mods pop-up: Sort and Category buttons, Start shows ($size)" "Get mods pop-up: Sort: Trending/.*; Category: All/.* \\| legend A Choose · B Close · Y Keyboard · START Show results \\| sheet findpop"
+  need "findpop-$size" "Get mods pop-up: Sort and Category buttons, B Done, X Clear all ($size)" "Get mods pop-up: Sort: Trending/.*; Category: All/.* \\| legend A Choose · B Done · X Clear all · Y Keyboard \\| sheet findpop"
   need "findpop-$size" "Get mods: no search row, no top bar ($size)" "Get mods page: search row none, top bar none"
   shoot "fullscroll-$size" "$size" fullscroll "$PWD/home" --game=$skyrim
   need "fullscroll-$size" "Get mods: down to full screen ($size)" "Full screen: bars hidden true, rail hidden"
@@ -754,6 +755,7 @@ for size in $SIZES; do
   shoot "modsettings-$size" "$size" modsettings "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
   need "modsettings-$size" "Edit settings in the mod menu ($size)" "Mod menu: .*Edit settings"
   need "modsettings-$size" "Edit settings: the number setting ($size)" "Settings page: settingsedit \| [0-9]+ rows \| focus Glow number 1.5"
+  need "modsettings-$size" "Edit settings: the first Right after opening changes nothing ($size)" "First Right after Edit settings opened: nothing changed"
   need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset · Y Plain text"
   need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
   need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"

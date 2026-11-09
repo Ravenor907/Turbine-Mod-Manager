@@ -16,6 +16,9 @@ Item {
     property bool loadingMore: false
     property string search: ""
     property string category: ""
+    // 0.59: what is in effect ("Most liked · Armour · \"cloak\""), shown over the cards whenever it isn't the
+    // default, and "Looking..." over the old cards while a new answer comes.
+    property string summary: ""
     property var recent: []                 // the strip over the cards: [{id, name, icon, what}]
     property string recentTitle: "Good first mods"
     property bool fallback: false
@@ -26,7 +29,7 @@ Item {
     property int columns: 3
     readonly property var items: result && result.items ? result.items : []
     readonly property var cats: result && result.categories ? [""].concat(result.categories) : []
-    readonly property bool showRecent: recent.length > 0 && search === "" && !fallback
+    readonly property bool showRecent: recent.length > 0 && summary === "" && !fallback
 
     signal recentClicked(int index)
     signal itemClicked(int index)
@@ -46,14 +49,33 @@ Item {
     onFocusIndexChanged: if (focusArea === "grid") { grid.positionViewAtIndex(focusIndex, GridView.Contain); grid.snapRow() }
     onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "recent") grid.positionViewAtBeginning()
     function gridItem(i) { return grid.itemAtIndex(i) }
+    readonly property bool lookingOver: loading && items.length > 0 && !fallback
 
     Item {
         anchors.fill: parent
         // Results (0.57: Good first mods is the grid's header, so it scrolls away with the cards)
+        Rectangle {
+            id: summaryBar
+            objectName: "getSummary"
+            visible: gm.summary !== "" && !gm.fallback
+            width: parent.width
+            height: visible ? summaryText.implicitHeight + gm.ui.px(12) : 0
+            color: "transparent"
+            Text {
+                id: summaryText
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                elide: Text.ElideRight
+                text: gm.summary + "  ·  Y changes it"
+                color: gm.ui.c.accentText
+                font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(14); font.bold: true
+            }
+        }
         Item {
             id: resultsArea
             width: parent.width
-            height: gm.height
+            y: summaryBar.height
+            height: gm.height - summaryBar.height
             // Browsing failed: open the game's mods on Nexus instead.
             Rectangle {
                 id: fallbackCard
@@ -250,6 +272,20 @@ Item {
     }
 
     // A thumbnail: the picture, or a raised tile with the mod's first letter.
+    // A new search, sort or category is on its way: the old cards dim under "Looking..." until it lands.
+    Rectangle {
+        objectName: "getLooking"
+        visible: gm.lookingOver
+        x: 0; y: summaryBar.height
+        width: parent.width; height: parent.height - y
+        color: Qt.rgba(gm.ui.c.ground.r, gm.ui.c.ground.g, gm.ui.c.ground.b, 0.6)
+        Rectangle {
+            anchors.centerIn: parent
+            width: lookText.implicitWidth + gm.ui.px(32); height: gm.ui.px(44); radius: gm.ui.px(6)
+            color: gm.ui.c.raised; border.color: gm.ui.c.accent; border.width: Math.max(1, gm.ui.px(1.5))
+            Text { id: lookText; anchors.centerIn: parent; text: "Looking..."; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(16); font.bold: true }
+        }
+    }
     component Thumb: Rectangle {
         id: th
         property string src: ""

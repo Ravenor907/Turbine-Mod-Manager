@@ -34,9 +34,23 @@ Overlay {
         color: ps.ui.c.panel
         border.color: ps.ui.c.line
         CardGuard {}
+        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        Flickable {
+            id: scroller
+            anchors.fill: parent
+            anchors.margins: ps.ui.px(18)
+            contentHeight: scrollCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            function follow(it) {
+                if (!it) return
+                const y = it.mapToItem(scrollCol, 0, 0).y
+                if (y < contentY) contentY = Math.max(0, y)
+                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
+            }
         Column {
-            x: ps.ui.px(18); y: ps.ui.px(18)
-            width: parent.width - ps.ui.px(36)
+            id: scrollCol
+            width: scroller.width
             spacing: ps.ui.px(8)
             Text { text: ps.plan ? "Import a loadout" : "Loadouts"; color: ps.ui.c.text; font.family: ps.ui.titleFont; font.pixelSize: ps.ui.fpx(18); font.bold: true }
             Text {
@@ -72,6 +86,7 @@ Overlay {
                     required property int index
                     required property var modelData
                     readonly property bool foc: ps.focusIndex === index
+                    onFocChanged: if (foc) Qt.callLater(() => scroller.follow(row))
                     readonly property bool firstAction: !ps.plan && index === ps.profiles.length
                     width: parent.width
                     height: ps.ui.px(modelData.detail ? 58 : 46) + (firstAction ? ps.ui.px(8) : 0)
@@ -106,6 +121,7 @@ Overlay {
                     TapHandler { onTapped: ps.activated(row.index) }
                 }
             }
+        }
         }
     }
 }

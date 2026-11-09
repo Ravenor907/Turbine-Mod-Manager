@@ -33,6 +33,9 @@ Overlay {
     // Buttons: { key, label }. Empty uses the defaults for the variant.
     property var buttons: []
     property int focusIndex: 0
+    // The buttons stay in view when the words don't fit (0.59).
+    onFocusIndexChanged: Qt.callLater(() => scroller.follow(loaderButtons))
+    onVisibleChanged: if (visible) Qt.callLater(() => scroller.follow(loaderButtons))
 
     signal activated(int index, string key)
     signal closed()
@@ -71,7 +74,7 @@ Overlay {
         id: card
         anchors.centerIn: parent
         width: Math.min(parent.width - root.ui.px(40), root.ui.px(520))
-        height: Math.min(content.implicitHeight + root.ui.px(34), parent.height - root.ui.px(24))
+        height: Math.min(content.implicitHeight + root.ui.px(40), parent.height - root.ui.px(24))
         radius: root.ui.px(6)
         color: root.ui.c.panel
         border.width: Math.max(1, root.ui.px(1.5))
@@ -80,11 +83,23 @@ Overlay {
 
         CardGuard {}   // taps on the card don't close it
 
+        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        Flickable {
+            id: scroller
+            anchors.fill: parent
+            anchors.margins: root.ui.px(20)
+            contentHeight: content.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            function follow(it) {
+                if (!it) return
+                const y = it.mapToItem(content, 0, 0).y
+                if (y < contentY) contentY = Math.max(0, y)
+                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
+            }
         Column {
             id: content
-            x: root.ui.px(20)
-            y: root.ui.px(18)
-            width: parent.width - root.ui.px(40)
+            width: scroller.width
             spacing: root.ui.px(8)
 
             Text {
@@ -210,6 +225,7 @@ Overlay {
             }
 
             SheetButtons {
+                id: loaderButtons
                 ui: root.ui
                 width: parent.width
                 topPadding: root.ui.px(6)
@@ -218,6 +234,7 @@ Overlay {
                 mainIndex: 0
                 onActivated: (i) => root.activated(i, "")
             }
+        }
         }
     }
 

@@ -209,7 +209,7 @@ Overlay {
                         required property string modelData
                         readonly property bool focused: perf.focusAt === index
                         width: label.implicitWidth + perf.ui.px(28)
-                        height: perf.ui.px(40)
+                        height: perf.ui.tpx(44)
                         radius: perf.ui.px(8)
                         opacity: index > 0 && perf.running ? 0.5 : 1
                         color: focused ? perf.ui.c.focusFill : perf.ui.c.raised

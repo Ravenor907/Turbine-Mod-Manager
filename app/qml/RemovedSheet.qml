@@ -1,7 +1,8 @@
 import QtQuick
 
-// Recently removed: "Empty (delete all 2 for good)", then one row per mod ("<name> · removed Nov 6 · 6 days left").
-// A puts the focused mod back, X deletes it for good; both deletions ask first (Main.qml's hold-to-confirm sheet).
+// Recently removed: one row per mod ("<name> · removed Nov 6 · 6 days left"), then "Empty (delete all 2 for good)".
+// A (or Put back) puts the focused mod back, X (or Delete now) deletes it for good; both deletions ask first (Main.qml's
+// hold-to-confirm sheet).
 // Main.qml handles the keys.
 Overlay {
     id: rs
@@ -10,7 +11,7 @@ Overlay {
     anchors.fill: parent
 
     property var mods: []                 // [{id, name, removedAt}]
-    property int focusIndex: 0            // 0 is Empty, then the mods
+    property int focusIndex: 0            // the mods, then Empty
     property var now: new Date()
 
     signal activated(int index)
@@ -24,6 +25,15 @@ Overlay {
     }
 
     Rectangle { anchors.fill: parent; color: "#C0000000" }
+    onFocusIndexChanged: Qt.callLater(showFocused)
+    onVisibleChanged: if (visible) { flick.contentY = 0; Qt.callLater(showFocused) }
+    function showFocused() {
+        const it = rows.itemAt(focusIndex)
+        if (!it) return
+        const y = it.y + list.y
+        if (y < flick.contentY) flick.contentY = y
+        else if (y + it.height > flick.contentY + flick.height) flick.contentY = y + it.height - flick.height
+    }
     Rectangle {
         anchors.centerIn: parent
         width: Math.min(parent.width - rs.ui.px(40), rs.ui.px(620))
@@ -33,33 +43,50 @@ Overlay {
         border.color: rs.ui.c.line
         clip: true
         CardGuard {}
+        // 0.59: scrolls by touch and follows the focus (a long list at 150% runs past the card).
+        Flickable {
+            id: flick
+            anchors.fill: parent
+            anchors.margins: rs.ui.px(20)
+            contentHeight: col.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
         Column {
             id: col
-            x: rs.ui.px(22); y: rs.ui.px(20)
-            width: parent.width - rs.ui.px(44)
+            width: flick.width
             spacing: rs.ui.px(8)
             Text { text: "Removed mods"; color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(19); font.weight: Font.DemiBold }
             Text { width: parent.width; wrapMode: Text.WordWrap; text: "Kept for 7 days, then deleted by themselves."; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14) }
+            Column {
+                id: list
+                width: parent.width
+                spacing: rs.ui.px(8)
             Repeater {
-                model: [{ empty: true }].concat(rs.mods)
+                id: rows
+                // 0.59 (T10): the mods first, Empty (delete them all for good) last.
+                model: rs.mods.concat([{ empty: true }])
                 Rectangle {
                     id: row
                     required property int index
                     required property var modelData
                     readonly property bool foc: rs.focusIndex === index
-                    width: col.width
-                    height: rs.ui.px(48)
+                    width: list.width
+                    height: Math.max(rs.ui.tpx(48), rowText.implicitHeight + rs.ui.px(12))
                     radius: rs.ui.px(6)
                     color: foc ? rs.ui.c.focusFill : rs.ui.c.card
                     border.color: rs.ui.c.accent
                     border.width: foc ? rs.ui.px(2) : 0
+                    HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
+                    // Mouse areas, not tap handlers: a tap on a row's button must not also reach the row.
+                    MouseArea { anchors.fill: parent; onClicked: rs.activated(row.index) }
                     Column {
+                        id: rowText
                         x: rs.ui.px(14)
                         anchors.verticalCenter: parent.verticalCenter
-                        width: parent.width - rs.ui.px(28) - hints.width
+                        width: parent.width - rs.ui.px(28) - buttons.width
                         Text {
                             width: parent.width
-                            elide: Text.ElideRight
+                            wrapMode: Text.WordWrap
                             text: row.modelData.empty ? "Empty (delete all " + rs.mods.length + " for good)" : row.modelData.name
                             color: row.modelData.empty ? rs.ui.c.warn : rs.ui.c.text
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(16); font.weight: Font.DemiBold
@@ -71,22 +98,34 @@ Overlay {
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13)
                         }
                     }
+                    // Every action is a button too (touch has no X): Put back, and Delete now (B16).
                     Row {
-                        id: hints
-                        visible: row.foc
-                        anchors.right: parent.right; anchors.rightMargin: rs.ui.px(12)
+                        id: buttons
+                        anchors.right: parent.right; anchors.rightMargin: rs.ui.px(6)
                         anchors.verticalCenter: parent.verticalCenter
-                        spacing: rs.ui.px(12)
-                        KeyHint { k: "a"; label: row.modelData.empty ? "Empty" : "Put back" }
-                        KeyHint { visible: !row.modelData.empty; k: "x"; label: "Delete now" }
+                        spacing: rs.ui.px(6)
+                        RowButton { objectName: "putBack"; visible: !row.modelData.empty; label: "Put back"; onClicked: rs.activated(row.index) }
+                        RowButton { objectName: "deleteNow"; visible: !row.modelData.empty; label: "Delete now"; danger: true; onClicked: rs.deleteClicked(row.index) }
                     }
-                    HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: rs.activated(row.index) }
                 }
             }
+            }
+        }
         }
     }
 
+    component RowButton: Rectangle {
+        id: rb
+        property string label: ""
+        property bool danger: false
+        signal clicked()
+        width: rbText.implicitWidth + rs.ui.px(20); height: rs.ui.tpx(40); radius: rs.ui.px(6)
+        color: rs.ui.c.raised
+        border.color: danger ? rs.ui.c.warn : rs.ui.c.line; border.width: Math.max(1, rs.ui.px(1))
+        Text { id: rbText; anchors.centerIn: parent; text: rb.label; color: rb.danger ? rs.ui.c.warn : rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14); font.bold: true }
+        HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
+        MouseArea { anchors.fill: parent; onClicked: rb.clicked() }
+    }
     component KeyHint: Row {
         property string k: ""
         property string label: ""

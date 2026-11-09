@@ -3,8 +3,9 @@ import QtQuick
 // Labs > Report a bug: the screenshot of Turbine taken just before this opened, Include screenshot (on unless switched
 // off), what went wrong (up to 2000 characters, typed with Steam's on-screen keyboard), Include performance check
 // (when Labs > Performance check opened it; on unless switched off), Include crash log (off unless ticked; only when
-// there is one), then Cancel and Send side by side. The D-pad moves between them, A uses one, B closes.
-// Send saves the report (Turbine writes the details itself: version, device, the game, its mods, the activity log)
+// there is one), then Not now and Save report side by side. The D-pad moves between them, A uses one. B (0.59) closes
+// and keeps the words as a draft (Report a bug brings them back); nothing typed is ever lost by B.
+// Save report saves the report (Turbine writes the details itself: version, device, the game, its mods, the activity log)
 // and the screenshot to Downloads and copies the report to the clipboard, ready to paste.
 //
 // Main.qml takes the screenshot, calls open(), passes controller buttons to handleButton() and does the saving when
@@ -27,7 +28,7 @@ Overlay {
     property string aboutLine: ""         // "Also saves Turbine 0.2 ..." under the switches
     property bool editing: false
     // The focus with a controller: 0 Include screenshot, 1 the text, 5 Include performance check, 4 Include crash
-    // log, 2 Send, 3 Cancel.
+    // log, 2 Save report, 3 Not now. Done typing moves the focus to Save report, so A saves.
     property int focusAt: 1
     readonly property var order: (shotUrl !== "" ? [0] : []).concat([1]).concat(perf !== "" ? [5] : []).concat(hasLog ? [4] : []).concat([2])
 
@@ -66,6 +67,7 @@ Overlay {
         if (!editing) return
         report.text = editor.text.slice(0, 2000)
         editing = false
+        if (report.text.trim() !== "") focusAt = 2
         editEnded()
     }
     function activate() {
@@ -92,6 +94,7 @@ Overlay {
             if (focusAt === 2) focusAt = 3
             else if (focusAt === 3) focusAt = 2
         } else if (b === "a") activate()
+        else if (b === "start") sendClicked()
         else if (b === "b") closeClicked()
     }
     onFocusAtChanged: Qt.callLater(reveal)
@@ -150,7 +153,7 @@ Overlay {
         property bool dim: false
         signal clicked()
         width: btnRow.implicitWidth + report.ui.px(28)
-        height: report.ui.px(40)
+        height: report.ui.tpx(44)
         radius: report.ui.px(8)
         opacity: dim ? 0.55 : 1
         color: primary ? report.ui.c.accent : (focused ? report.ui.c.focusFill : report.ui.c.raised)
@@ -321,9 +324,9 @@ Overlay {
                     id: buttons
                     anchors.right: parent.right
                     spacing: report.ui.px(10)
-                    Button { label: "Cancel"; focused: report.focusAt === 3 && !report.editing; onClicked: report.closeClicked() }
+                    Button { label: "Not now"; focused: report.focusAt === 3 && !report.editing; onClicked: report.closeClicked() }
                     Button {
-                        label: "Send"; key: "a"; primary: true
+                        label: "Save report"; key: "a"; primary: true
                         dim: report.text.trim() === ""
                         focused: report.focusAt === 2 && !report.editing
                         onClicked: report.sendClicked()
