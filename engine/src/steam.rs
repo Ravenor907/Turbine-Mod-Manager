@@ -468,6 +468,12 @@ pub fn signed_in_account(home: &Path) -> Option<String> {
     None
 }
 
+/// 0.61: the signed-in account's file among userdata/<account>/... files, when that account is known and has one.
+pub fn signed_in_file(home: &Path, files: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
+    let acc = signed_in_account(home)?;
+    files.iter().find(|p| p.components().any(|c| c.as_os_str() == acc.as_str())).cloned()
+}
+
 /// Puts the signed-in account's file first in a list of userdata/<account>/... files (the rest keep their order).
 pub fn signed_in_first(home: &Path, files: &mut [std::path::PathBuf]) {
     let Some(acc) = signed_in_account(home) else { return };

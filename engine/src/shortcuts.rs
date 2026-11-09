@@ -282,8 +282,11 @@ pub enum TileChange {
 /// The shortcuts.vdf for the account signed in last (the most recently changed one), or, when that account has no
 /// non-Steam games yet, where its file goes.
 pub fn tile_file(home: &Path) -> Option<PathBuf> {
+    // 0.61: another account's file never stands in for the signed-in account's (it may have none yet).
     if let Some(f) = shortcut_files(home).into_iter().next() {
-        return Some(f);
+        if crate::steam::signed_in_account(home).is_none() || crate::steam::signed_in_file(home, std::slice::from_ref(&f)).is_some() {
+            return Some(f);
+        }
     }
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for root in crate::steam::steam_roots(home).into_iter().chain([home.join(".local/share/Steam"), home.join(".steam/steam")]) {

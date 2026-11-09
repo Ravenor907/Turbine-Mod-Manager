@@ -236,5 +236,17 @@ fn the_signed_in_account_comes_first() {
     let files = turbine_engine::shortcuts::shortcut_files(&home);
     assert!(files[0].to_string_lossy().contains("/userdata/111/"), "{files:?}");
     assert!(turbine_engine::shortcuts::tile_file(&home).unwrap().to_string_lossy().contains("/userdata/111/"));
+    // 0.61: the signed-in account has no non-Steam games yet: its file is where the tile goes, not 222's.
+    fs::remove_file(root.join("userdata/111/config/shortcuts.vdf")).unwrap();
+    let t = turbine_engine::shortcuts::tile_file(&home).unwrap();
+    assert!(t.to_string_lossy().contains("/userdata/111/config/shortcuts.vdf"), "{t:?}");
+    // localconfig.vdf: 222 changed last, but 111's own file is the one picked.
+    fs::create_dir_all(root.join("steamapps")).unwrap();
+    for acc in ["111", "222"] {
+        fs::write(root.join("userdata").join(acc).join("config/localconfig.vdf"), "\"UserLocalConfigStore\"\n{\n}\n").unwrap();
+    }
+    let files = turbine_engine::steam_setup::localconfig_files(&home);
+    let f = turbine_engine::steam::signed_in_file(&home, &files).unwrap();
+    assert!(f.to_string_lossy().contains("/userdata/111/"), "{f:?}");
     let _ = fs::remove_dir_all(&home);
 }

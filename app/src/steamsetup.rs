@@ -27,6 +27,10 @@ fn now_secs() -> u64 {
 /// The localconfig.vdf that lists the game (the account signed in last first), or the newest one.
 fn localconfig_for(home: &Path, app_id: &str) -> Option<PathBuf> {
     let files = steam_setup::localconfig_files(home);
+    // 0.61: the signed-in account's file whenever it has one, even when another account lists the game.
+    if let Some(f) = steam::signed_in_file(home, &files) {
+        return Some(f);
+    }
     files
         .iter()
         .find(|f| std::fs::read_to_string(f).ok().and_then(|t| steam::launch_options_in(&t, app_id)).is_some())
