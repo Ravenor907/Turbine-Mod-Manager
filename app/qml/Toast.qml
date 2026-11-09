@@ -66,7 +66,8 @@ Rectangle {
     y: parent ? parent.height - height - bottomMargin : 0
     z: 50
     width: Math.min(maxWidth, toastRow.implicitWidth + ui.px(24))
-    height: ui.px(46)
+    // 0.59: wraps to three lines rather than cutting a message off.
+    height: Math.max(ui.px(46), toastRow.implicitHeight + ui.px(20))
     radius: ui.px(6)
     color: Qt.tint(ui.c.raised, Qt.rgba(ui.c.accent.r, ui.c.accent.g, ui.c.accent.b, 0.06))
     border.width: Math.max(1, ui.px(1.5))
@@ -118,6 +119,8 @@ Rectangle {
             width: Math.min(implicitWidth, root.maxWidth - root.ui.px(76) - (detailText.visible ? detailText.width + parent.spacing : 0))
             text: root.escaped(root.text || "") + (root.strong !== "" ? (root.text !== "" ? " " : "") + "<b>" + root.escaped(root.strong) + "</b>" : "")
             textFormat: Text.StyledText
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
             elide: Text.ElideRight
             color: root.ui.c.text
             font.family: root.ui.bodyFont

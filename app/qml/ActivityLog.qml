@@ -85,7 +85,7 @@ Overlay {
             x: al.ui.px(22)
             width: parent.width - al.ui.px(44)
             wrapMode: Text.WordWrap
-            text: "The last " + al.lines.length + " lines, newest at the bottom. Scroll with Up and Down, the left stick or the wheel."
+            text: "The last " + al.lines.length + " lines, newest at the bottom. Scroll with Up and Down, the left stick, or a mouse wheel."
             color: al.ui.c.soft
             font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(14)
         }

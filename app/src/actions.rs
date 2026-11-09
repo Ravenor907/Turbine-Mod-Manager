@@ -596,7 +596,7 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
     let mut by = "masters";
     let mut general = 0;
     if let Some(l) = &lists {
-        w.say("Sorting with LOOT...", "work");
+        w.say("Sorting...", "work");
         match crate::loot::sort(game, &lo, l) {
             Ok(s) => {
                 crate::loot::apply(&mut lo, &s);
@@ -610,7 +610,7 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
             }
             Err(e) => {
                 crate::log::line("loot", &format!("LOOT sort failed: {e}"));
-                note = format!("LOOT couldn't sort: {e}.");
+                note = format!("Couldn't sort with the community list ({e}), so the game's own files go first.");
             }
         }
     }
@@ -625,9 +625,9 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
         }
         (Ok(()), "loot") => {
             let n = w.loot.get(&game.id()).map(|(_, m)| m.len()).unwrap_or(0);
-            let mut s = String::from("Sorted with LOOT's masterlist");
+            let mut s = String::from("Sorted with the community sort list");
             if n > 0 {
-                s.push_str(&format!(". LOOT has notes on {}", if n == 1 { "1 plugin".to_string() } else { format!("{n} plugins") }));
+                s.push_str(&format!(". Notes on {}: X on a plugin shows them", if n == 1 { "1 plugin".to_string() } else { format!("{n} plugins") }));
             }
             if general > 0 {
                 s.push_str(&format!(" and {general} general {}; they're in the activity log", if general == 1 { "warning" } else { "warnings" }));
@@ -637,7 +637,7 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
         }
         (Ok(()), _) => {
             let s = if note.is_empty() {
-                "Sorted by masters only (LOOT's masterlist isn't here)".to_string()
+                "Sorted with the game's own files first (the community list didn't download)".to_string()
             } else {
                 format!("Sorted by masters only. {note}")
             };
@@ -799,7 +799,7 @@ impl qobject::Turbine {
                 let mut net = Net::new(crate::VERSION, &cache_dir(), &crate::log::folder(&data_home()));
                 while let Ok(task) = rx.recv() {
                     if catch_unwind(AssertUnwindSafe(|| task(&mut net, &qt))).is_err() {
-                        say(&qt, "Something went wrong with that download. The details are in the activity log.", "error");
+                        say(&qt, "That download didn't finish. Press Get it again. If it fails twice: View, Game menu, Activity log says why.", "error");
                     }
                     post(&qt, |mut t| {
                         let n = (*t.net_busy() - 1).max(0);
@@ -811,7 +811,7 @@ impl qobject::Turbine {
                 }
             });
             if spawned.is_err() {
-                self.as_mut().say("Turbine couldn't start its download lane. Close it and open it again.", "error");
+                self.as_mut().say("Turbine couldn't start downloading. Close Turbine and open it again.", "error");
                 return;
             }
             self.as_mut().rust_mut().net = Some(tx);
@@ -1182,7 +1182,7 @@ impl qobject::Turbine {
     pub fn order_sort(mut self: Pin<&mut Self>) {
         crate::log::line("action", "Load order: sort automatically");
         let Some(game) = self.current_game() else { return };
-        self.as_mut().say("Getting LOOT's masterlist...", "work");
+        self.as_mut().say("Getting the community sort list...", "work");
         self.net_send(
             "LOOT's masterlist for sorting",
             Box::new(move |net: &mut Net, qt: &Qt| {

@@ -982,12 +982,12 @@ impl Net {
         if let Some(dir) = &self.sample {
             return match crate::loot::samples(dir) {
                 Some(l) => (Some(l), String::new()),
-                None => (None, "LOOT's masterlist isn't in the samples.".into()),
+                None => (None, "The community sort list isn't in the samples.".into()),
             };
         }
         let dir = crate::loot::folder(&self.cache);
         if let Err(e) = fs::create_dir_all(&dir) {
-            return (crate::loot::on_device(&dir), format!("LOOT's masterlist folder couldn't be made ({e})."));
+            return (crate::loot::on_device(&dir), format!("The community sort list's folder couldn't be made ({e})."));
         }
         crate::loot::lists(&self.client, &dir, force)
     }

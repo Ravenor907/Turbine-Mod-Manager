@@ -3,8 +3,7 @@ import QtQuick
 // "These mods need SKSE (Skyrim Script Extender)": said once, in plain words, when mods need a loader the game
 // doesn't have. Two variants:
 //   canDownload: true   the later one: A Install, B Not now
-//   canDownload: false  0.2, nothing is downloaded: an info line, A Show where to get it, B Close; once sourceShown
-//                       is set, the official address shows as text
+//   canDownload: false  Turbine can't get it itself: an info line, A Open its page (in Turbine), B Not now
 // A centered card over a dimmed backdrop. It fills its parent; show and hide it with visible.
 //
 // ui (required): an object that gives
@@ -28,8 +27,7 @@ Overlay {
     property string sourceUrl: ""         // official home, e.g. "skse.silverlock.org"
     property bool canDownload: false
     property bool sourceShown: false
-    property string infoText: "This test version doesn't download anything. Get " + (loaderName || "it")
-                              + " from its official site in Desktop Mode, then add its zip with Add mods."
+    property string infoText: "Turbine can't get " + (loaderName || "it") + " by itself. Open its page, download it there, and Turbine adds it when it lands in Downloads."
     // Buttons: { key, label }. Empty uses the defaults for the variant.
     property var buttons: []
     property int focusIndex: 0
@@ -42,7 +40,7 @@ Overlay {
 
     readonly property var shownButtons: (buttons || []).length > 0 ? buttons
         : canDownload ? [{ key: "a", label: "Install" }, { key: "b", label: "Not now" }]
-                      : [{ key: "a", label: "Show where to get it" }, { key: "b", label: "Close" }]
+                      : [{ key: "a", label: "Open its page" }, { key: "b", label: "Not now" }]
     readonly property string message: "These mods need " + (loaderName || "a mod loader")
         + (loaderFullName !== "" ? " (" + loaderFullName + ")" : "") + "."
         + (canDownload ? " Install it from its official source?" : "")

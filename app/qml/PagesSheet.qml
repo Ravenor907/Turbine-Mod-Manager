@@ -56,12 +56,12 @@ Overlay {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Download it on the page with Slow download (or Mod Manager Download): Turbine adds the file when it lands in Downloads."
+                text: "Press Slow download on each page. Turbine adds each file by itself."
                 color: pg.ui.c.text
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15)
             }
             Text {
-                visible: !pg.handlerSet
+                visible: false   // 0.59 (T15): the page opens in Turbine, so no setting is needed
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Getting mods. Slow download needs nothing."

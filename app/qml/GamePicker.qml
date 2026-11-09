@@ -35,7 +35,7 @@ Overlay {
             spacing: gp.ui.px(6)
             Text {
                 width: parent.width
-                text: "WHICH GAME IS IT FOR?"
+                text: "Which game is it for?"
                 color: gp.ui.c.text
                 font.family: gp.ui.titleFont; font.pixelSize: gp.ui.fpx(18); font.bold: true
             }

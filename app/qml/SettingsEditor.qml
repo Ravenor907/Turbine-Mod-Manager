@@ -297,7 +297,7 @@ Overlay {
             anchors.bottomMargin: se.ui.px(14)
             spacing: se.ui.px(10)
             Repeater {
-                model: [{ k: "start", label: "Save" }, { k: "x", label: "Reset to default" }, { k: "y", label: se.plain && se.fields.length > 0 ? "Settings" : "Plain text" }, { k: "b", label: "Back" }]
+                model: [{ k: "start", label: "Save" }, { k: "x", label: "Reset to default" }, { k: "y", label: se.plain && se.fields.length > 0 ? "As a list" : "As text" }, { k: "b", label: "Back" }]
                 Rectangle {
                     required property var modelData
                     visible: !(modelData.k === "y" && se.fields.length === 0)

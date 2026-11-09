@@ -138,7 +138,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     let (profile, natives) = match ac::write_profile_for(slot.store.root(), &game, coop) {
         Ok(p) => p,
         Err(e) => {
-            w.say(format!("Couldn't write the me3 profile: {e}"), "error");
+            w.say(format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())), "error");
             return false;
         }
     };
@@ -151,7 +151,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     match std::process::Command::new(prog).args(rest).stdin(std::process::Stdio::null()).spawn() {
         Ok(_) => true,
         Err(e) => {
-            w.say(format!("Couldn't start me3: {e}"), "error");
+            w.say(format!("Couldn't start me3: {}", crate::log::plain(&e.to_string())), "error");
             false
         }
     }
@@ -245,7 +245,7 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     // waiting from before goes: this is a Play with mods.
     sync_helper(w, slot);
     let _ = ac::clear_plain(data, &slot.game.store_id);
-    let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {e}"))?;
+    let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())))?;
     let args = ac::helper_args(&me3, &profile);
     let r = match coop {
         ac::Coop::Seamless => ac::arm_once(data, &slot.game.store_id, &args, "Seamless Co-op, this Play only"),
@@ -399,7 +399,7 @@ impl qobject::Turbine {
                 let r = if on { std::fs::write(&f, b"Play without mods until they update\n") } else { std::fs::remove_file(&f).or(Ok(())) };
                 match r {
                     Ok(()) => crate::log::line("launch", &format!("{}: mods {} (Turbine's Play and Steam's)", game.name, if on { "held until they update" } else { "back on for Play" })),
-                    Err(e) => w.say(format!("Couldn't save that: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't save that: {}", crate::log::plain(&e.to_string())), "error"),
                 }
                 w.show(&game, false);
             }),
@@ -478,7 +478,7 @@ impl qobject::Turbine {
                         crate::log::line("anticheat", &format!("{name}: removed another tool's leftover {rel} (the starter is as recorded)"));
                         w.say(format!("Removed {rel}. {name}'s anti-cheat files are as Turbine recorded them."), "ok");
                     }
-                    Err(e) => w.say(format!("Couldn't remove {rel}: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't remove {rel}: {}", crate::log::plain(&e.to_string())), "error"),
                 }
                 w.show(&game, true);
             }),
@@ -501,7 +501,7 @@ impl qobject::Turbine {
                         "anticheat",
                         &format!("{}: anti-cheat {} (asked once)", game.name, if on { "off while mods are on: me3 starts it offline" } else { "left on: mods wait" }),
                     ),
-                    Err(e) => w.say(format!("Couldn't save the answer: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't save the answer: {}", crate::log::plain(&e.to_string())), "error"),
                 }
                 // show() keeps the launch helper to this answer (anti-cheat back on: Steam's Play starts it normally).
                 w.show(&game, true);

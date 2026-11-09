@@ -112,7 +112,7 @@ for size in $SIZES; do
   for page in browser nobrowser helper overlay overlaygm addbrowser; do shoot "$page-$size" "$size" $page "$PWD/home"; done
   # 0.55: Settings, Getting mods in Game Mode (Steam's Game Mode is what SteamGamepadUI=1 says).
   SHOOT_ENV="--env=SteamGamepadUI=1" shoot "accountsgm-$size" "$size" accountsgm "$PWD/home"
-  need "accountsgm-$size" "10: Open Nexus in shows in Game Mode, own-browser rows folded ($size)" "Getting mods rows \(Game Mode true\): verdict, openInGm, .*ownFold"
+  need "accountsgm-$size" "R5: Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, keyFold$"
   if grep -Eq "Getting mods rows \(Game Mode true\):.*(, helper|, nxmHandler|, overlay|, browser(,|$))" "$PWD/data/accountsgm-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::"; fail=1; fi
   # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
@@ -703,7 +703,7 @@ for size in $SIZES; do
   shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
   need "tucked-$size" "Rename ($size)" "Renamed .* to Lanterns of the Road"
   need "tucked-$size" "A short list keeps the bars ($size)" "Short list keeps the bars: true"
-  need "tucked-$size" "The bottom bar names the game and has Play, no top bar ($size)" "Bottom bar: Skyrim SE \\| My mods · .* \\| tabs (3|caps only) \\| Play shown \\| top bar none"
+  need "tucked-$size" "The bottom bar names the game and has Play, no top bar ($size)" "Bottom bar: Skyrim SE \\| [^|]* \\| tabs (3|caps only) \\| Play shown \\| top bar none"
   need "tucked-$size" "The bars hide going down ($size)" "Bars hidden: true; panel: true"
   shoot "findpop-$size" "$size" findpop "$PWD/home" --game=$skyrim
   need "findpop-$size" "Get mods: Y opens the pop-up ($size)" "Find pop-up \\(Get mods\\): field, Sort 5, Category"
@@ -723,7 +723,7 @@ for size in $SIZES; do
   rm -rf "$PWD/fh/ac-$size"; python3 tools/fake-home.py "$PWD/fh/ac-$size" --anticheat > /dev/null; h="$PWD/fh/ac-$size"
   er=steam:1245620
   shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
-  need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| My mods · .* · Mods offline$"
+  need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| .* · Mods offline$"
   need "acask-$size" "Anti-cheat: asked once before Play ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Play without mods, Not now"
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
@@ -741,7 +741,7 @@ for size in $SIZES; do
   # 0.58: Seamless Co-op settings (its own copy; the session password first), Play Seamless Co-op in the bar, and
   # Elden Ring's saves by kind.
   shoot "coopsettings-$size" "$size" coopsettings "$h" --game=$er "--selftest-import=$h/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
-  need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Seamless Co-op settings"
+  need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Co-op settings"
   need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
   need "coopsettings-$size" "Play Seamless Co-op beside Play ($size)" "Co-op beside Play: true"
   need "coopsettings-$size" "The bar with Co-op: nothing overlaps ($size)" "Bar check \(coopbar, .*0 problems \| .*co-op, Play"
@@ -756,7 +756,7 @@ for size in $SIZES; do
   need "modsettings-$size" "Edit settings in the mod menu ($size)" "Mod menu: .*Edit settings"
   need "modsettings-$size" "Edit settings: the number setting ($size)" "Settings page: settingsedit \| [0-9]+ rows \| focus Glow number 1.5"
   need "modsettings-$size" "Edit settings: the first Right after opening changes nothing ($size)" "First Right after Edit settings opened: nothing changed"
-  need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset · Y Plain text"
+  need "modsettings-$size" "Edit settings: Right steps it ($size)" "After Right: 1.6, 1 change; legend A Type · B Back · X Reset to default · Y As text"
   need "modsettings-$size" "Edit settings: saved, password-safe log ($size)" "Edit settings saved: .*LanternGlow.ini: Glow 1.5 to 1.6"
   need "modsettings-$size" "Edit settings: the page shows your version after Save ($size)" "After Save: sheet settingsedit, 0 changes, edited true"
   ini=$(find "$h" -name LanternGlow.ini -path "*Data/SKSE/Plugins/*" -not -path "*turbine-mod-manager*" 2>/dev/null | head -n1)

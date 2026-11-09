@@ -134,7 +134,7 @@ Item {
                             spacing: pf.ui.px(1)
                             Text {
                                 width: parent.width; elide: Text.ElideMiddle
-                                text: (row.modelData.kind === "folder" || row.modelData.kind === "suggest" || row.modelData.kind === "new" ? "▸ " : "") + row.modelData.label
+                                text: (row.modelData.kind === "folder" || row.modelData.kind === "new" ? "▸ " : "") + row.modelData.label
                                 color: row.modelData.kind === "here" ? pf.ui.c.accentText : pf.ui.c.text
                                 font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(15); font.bold: row.modelData.kind === "here" || row.foc
                             }

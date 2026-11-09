@@ -13,6 +13,7 @@ Overlay {
     // The pad's names for View and Start ("VIEW", "MENU", "BACK", "START"), from Main.qml's glyphs.
     property string viewGlyph: "VIEW"
     property string startGlyph: "START"
+    property bool thunderstore: false     // the game gets its mods from Thunderstore (Install, not Nexus)
     signal next()
     signal skip()
     signal back()
@@ -92,10 +93,12 @@ Overlay {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            text: ["A picks and B goes back. X shows options for what's highlighted, and Y searches this list. LB and RB switch tabs. The right stick moves a pointer, and RT clicks.",
-                   "Press View for the quick wheel: Find, Add from Downloads, Settings, your games and more, from anywhere. Games: Left to the rail, or View then Left.",
-                   "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
-                   "Press START to play the game with your mods on. That's all you need."][tut.card] || ""
+            // 0.59 (T16): short, touch included, the game's own way to get mods, and the real Start glyph.
+            text: ["A picks, B goes back. X: options for the highlighted thing. Y: find and sort. LB and RB: tabs (on a mod page, the next result). Touch works too: tap, or hold for options.",
+                   "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
+                   tut.thunderstore ? "Open Get mods, A on a mod, then A on Install. Turbine adds it with what it needs."
+                                    : "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
+                   tut.startGlyph + " plays the game with your mods on. That's all you need."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18)
         }

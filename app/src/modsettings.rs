@@ -86,7 +86,7 @@ fn settings_json(game: &Game, id: &str, rel: &str) -> String {
     let text = match std::fs::read(&t.now) {
         Ok(b) if b.len() as u64 <= settings::MAX_BYTES => String::from_utf8_lossy(&b).to_string(),
         Ok(_) => return format!("{{{head},\"error\":\"That file is too big to edit here (over 512 KB). Open it as text in Desktop Mode.\"}}"),
-        Err(e) => return format!("{{{head},\"error\":{}}}", quote(&format!("Couldn't read it: {e}"))),
+        Err(e) => return format!("{{{head},\"error\":{}}}", quote(&format!("Couldn't read it: {}", crate::log::plain(&e.to_string())))),
     };
     let fmt = settings::format_of(rel).unwrap_or(Format::Ini);
     let big = text.len() > settings::PARSE_MAX;
@@ -192,7 +192,7 @@ impl qobject::Turbine {
             }
             Err(e) => {
                 crate::log::line("settings", &format!("Edit settings: couldn't save {rel}: {e}"));
-                answer(false, &format!("Couldn't save it: {e}"))
+                answer(false, &format!("Couldn't save it: {}", crate::log::plain(&e.to_string())))
             }
         }
     }
@@ -211,7 +211,7 @@ impl qobject::Turbine {
                 crate::log::line("settings", &format!("Edit settings reset to default: {} {} ({})", if id.is_empty() { game.name.as_str() } else { id.as_str() }, rel, if done { "done" } else { "already the default" }));
                 "{\"ok\":true,\"error\":\"\"}".to_string()
             }
-            Err(e) => format!("{{\"ok\":false,\"error\":{}}}", quote(&format!("Couldn't reset it: {e}"))),
+            Err(e) => format!("{{\"ok\":false,\"error\":{}}}", quote(&format!("Couldn't reset it: {}", crate::log::plain(&e.to_string())))),
         };
         QString::from(json.as_str())
     }

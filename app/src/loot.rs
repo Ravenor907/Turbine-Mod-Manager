@@ -145,8 +145,8 @@ pub fn lists(client: &Client, dir: &Path, force: bool) -> (Option<Lists>, String
         Err(e) => {
             crate::log::line("loot", &format!("Masterlist not updated: {e}"));
             let note = match &have {
-                Some(_) => format!("LOOT's masterlist couldn't be updated ({e}), so the copy from before was used."),
-                None => format!("LOOT's masterlist couldn't be downloaded ({e})."),
+                Some(_) => format!("The community sort list couldn't be updated ({e}), so the copy from before was used."),
+                None => format!("The community sort list couldn't be downloaded ({e})."),
             };
             (have, note)
         }
@@ -256,7 +256,7 @@ fn plugin_messages(g: &libloot::Game, lo: &LoadOrder) -> Result<HashMap<String, 
             if !parts.is_empty() {
                 text.push_str(&format!(" ({})", parts.join(", ")));
             }
-            text.push_str(&format!(". LOOT suggests cleaning it with {}.", plain(d.cleaning_utility())));
+            text.push_str(&format!(". The community list suggests cleaning it with {}.", plain(d.cleaning_utility())));
             let more = text_of(d.detail());
             if !more.is_empty() {
                 text.push(' ');

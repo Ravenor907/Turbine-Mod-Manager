@@ -79,7 +79,7 @@ impl qobject::Turbine {
                         let (i, why) = (id.clone(), e.to_string());
                         w.post(move |t| t.saves_keep_failed(QString::from(i.as_str()), QString::from(why.as_str())));
                     }
-                    Err(e) => w.say(format!("Couldn't put the saves back: {e}."), "error"),
+                    Err(e) => w.say(format!("Couldn't put the saves back: {}.", crate::log::plain(&e.to_string())), "error"),
                 }
             }),
         );
@@ -98,7 +98,7 @@ impl qobject::Turbine {
                     crate::log::line("engine", &format!("Saves put back for {}: the backup {id} (the saves before it were not kept, as asked)", game.name));
                     w.say(format!("{}'s saves are back as they were.", game.name), "ok");
                 }
-                Err(e) => w.say(format!("Couldn't put the saves back: {e}."), "error"),
+                Err(e) => w.say(format!("Couldn't put the saves back: {}.", crate::log::plain(&e.to_string())), "error"),
             }),
         );
     }

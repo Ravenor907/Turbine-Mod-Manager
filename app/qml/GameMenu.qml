@@ -1,10 +1,10 @@
 import QtQuick
 import QtQuick.Shapes
 
-// The game menu that View opens: the safety tools for the whole game. Play without mods (no mods, nothing deleted),
-// Restore last working setup (with when it was saved), then any extra items. A centered card over a dimmed
-// backdrop like the approved mockup, or a side sheet with placement: "side". It fills its parent; show and hide it
-// with visible.
+// The game menu that View opens (0.59): every row from Main.qml's gameMenuItems, in sections (Play, Mods, Fix a
+// problem, This game) with a small head over the first row of each. Rows that can't be used now are dimmed (A on
+// one says why). A centered card over a dimmed backdrop, or a side sheet with placement: "side". It fills its
+// parent; show and hide it with visible.
 //
 // ui (required): an object that gives
 //   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
@@ -20,29 +20,21 @@ Overlay {
 
     property string gameName: ""
     property string subtitle: "Game menu"
-    property string originalDetail: "Starts the game with no mods. Nothing is deleted."
-    property string restoreDate: ""       // e.g. "From Nov 4, 9:12 PM · 16 mods on"
-    property bool restoreAvailable: restoreDate !== ""
-    property string restoreEmptyText: "Nothing saved yet. Turbine saves your setup each time the game runs fine with mods."
-    // Extra items after the two fixed ones: { key, label, detail, enabled, icon, danger, more } (see ModMenu)
-    property var extraItems: []
+    // The rows: { key, label, detail, enabled, icon, danger, more, group }
+    property var items: []
     property int focusIndex: 0
     property string placement: "center"   // center or side
     property real bottomInset: ui.px(56)  // side placement: room left for the legend
 
-    // index counts the fixed items too; key is "original", "restore" or the extra item's key.
+    // index is the row's place in items; key is its key.
     signal activated(int index, string key)
     // A finger or the pointer pressed down on a row (true) and let go or slid off (false): the holds (Reset).
     signal held(int index, bool down)
     signal closed()
 
     // A row's item (the build's checks click it through the pointer).
-    function entryItem(i) { return itemRepeater.itemAt(i) }
-    readonly property var allItems: [
-        { key: "original", label: "Play without mods", detail: originalDetail, icon: "play", enabled: true },
-        { key: "restore", label: "Restore last working setup", detail: restoreAvailable ? restoreDate : restoreEmptyText,
-          icon: "restore", enabled: restoreAvailable, more: true }
-    ].concat(extraItems || [])
+    function entryItem(i) { const it = itemRepeater.itemAt(i); return it ? it.entry : null }
+    readonly property var allItems: items || []
 
     readonly property var icons: ({
         update: "M12 4v11M7 10l5 5 5-5M5 20h14",
@@ -61,6 +53,7 @@ Overlay {
     function showFocused() {
         const it = itemRepeater.itemAt(focusIndex)
         if (!it) return
+        // The section head comes into view with its first row.
         if (it.y < flick.contentY) flick.contentY = it.y
         else if (it.y + it.height > flick.contentY + flick.height) flick.contentY = it.y + it.height - flick.height
         // The last row scrolls all the way, past the fade.
@@ -158,9 +151,27 @@ Overlay {
                     // By count, so a row whose words change (Keep holding A: 4...) updates in place: a rebuilt row
                     // would lose the finger or the pointer pressing it, and with it the release that stops a hold.
                     model: root.allItems.length
-                    MenuEntry {
+                    Column {
+                        id: slot
                         required property int index
                         readonly property var modelData: root.allItems[index] || ({})
+                        readonly property alias entry: slotEntry
+                        readonly property string head: modelData.group && (index === 0 || (root.allItems[index - 1] || {}).group !== modelData.group) ? modelData.group : ""
+                        width: body.width
+                        spacing: root.ui.px(2)
+                        // The section's head (never focused: Up and Down go row to row).
+                        Text {
+                            visible: slot.head !== ""
+                            topPadding: slot.index === 0 ? 0 : root.ui.px(8)
+                            leftPadding: root.ui.px(4)
+                            text: slot.head
+                            color: root.ui.c.muted
+                            font.family: root.ui.bodyFont; font.pixelSize: root.ui.fpx(13); font.bold: true
+                        }
+                    MenuEntry {
+                        id: slotEntry
+                        readonly property int index: slot.index
+                        readonly property var modelData: slot.modelData
                         ui: root.ui
                         width: body.width
                         label: modelData.label || ""
@@ -174,10 +185,11 @@ Overlay {
                         Accessible.name: (modelData.label || "") + (modelData.enabled === false ? ", not available" : "") + (modelData.detail ? ", " + modelData.detail : "") + ", " + (index + 1) + " of " + root.allItems.length
                         Accessible.focused: index === root.focusIndex
                         // Curved icons aren't clipped by the list, so a row cut off at an edge hides its icon.
-                        iconShown: y >= flick.contentY - 1 && y + height <= flick.contentY + flick.height + 1
+                        iconShown: slot.y + y >= flick.contentY - 1 && slot.y + y + height <= flick.contentY + flick.height + 1
                         dangerColor: root.readable(root.ui.c.warn, root.ui.c.panel)
                         onClicked: root.activated(index, modelData.key || "")
                         onHeld: (down) => root.held(index, down)
+                    }
                     }
                 }
             }

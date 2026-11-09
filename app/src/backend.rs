@@ -1930,6 +1930,14 @@ impl qobject::Turbine {
         self.find(&self.rust().current)
     }
 
+    /// The current game's mod loader by its short name ("SKSE", "BepInEx"), or "the mod loader".
+    pub(crate) fn loader_short(&self) -> String {
+        self.current_game()
+            .and_then(|g| GameRules::for_game(&g).loader.map(|l| l.name.split(" (").next().unwrap_or("").to_string()))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "the mod loader".to_string())
+    }
+
     /// Queues a job for the worker thread (started the first time).
     pub(crate) fn send(mut self: Pin<&mut Self>, game: Option<String>, name: &str, long: bool, run: Job) {
         if self.rust().jobs.is_none() {
@@ -2097,18 +2105,18 @@ impl qobject::Turbine {
 
     pub fn set_enabled(self: Pin<&mut Self>, id: &QString, on: bool) {
         let id = id.to_string();
-        self.change(move |s| s.set_enabled(&id, on).map_err(|e| format!("Couldn't change that mod: {e}")));
+        self.change(move |s| s.set_enabled(&id, on).map_err(|e| format!("Couldn't change that mod: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn move_to(self: Pin<&mut Self>, id: &QString, index: i32) {
         let id = id.to_string();
         let index = index.max(0) as usize;
-        self.change(move |s| s.move_to(&id, index).map_err(|e| format!("Couldn't move that mod: {e}")));
+        self.change(move |s| s.move_to(&id, index).map_err(|e| format!("Couldn't move that mod: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn remove_mod(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
-        self.change(move |s| s.remove(&id).map_err(|e| format!("Couldn't uninstall that mod: {e}")));
+        self.change(move |s| s.remove(&id).map_err(|e| format!("Couldn't uninstall that mod: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn mod_folder(&self, id: &QString) -> QString {
@@ -2156,18 +2164,18 @@ impl qobject::Turbine {
 
     pub fn undo_remove(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
-        self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {e}")));
+        self.change(move |s| s.undo_remove(&id).map_err(|e| format!("Couldn't put that mod back: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn purge_removed(self: Pin<&mut Self>, id: &QString) {
         let id = id.to_string();
         crate::log::line("action", &format!("Delete for good: {id}"));
-        self.change(move |s| s.purge_removed(&id).map_err(|e| format!("Couldn't delete that mod: {e}")));
+        self.change(move |s| s.purge_removed(&id).map_err(|e| format!("Couldn't delete that mod: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn purge_all_removed(self: Pin<&mut Self>) {
         crate::log::line("action", "Empty Recently removed");
-        self.change(move |s| s.purge_all_removed().map(|_| ()).map_err(|e| format!("Couldn't empty Recently removed: {e}")));
+        self.change(move |s| s.purge_all_removed().map(|_| ()).map_err(|e| format!("Couldn't empty Recently removed: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn open_url(self: Pin<&mut Self>, url: &QString) -> QString {
@@ -2268,7 +2276,7 @@ impl qobject::Turbine {
                             let p = *t.pending() + n;
                             t.as_mut().set_pending(p);
                         });
-                        w.say(format!("Couldn't take the mods out: {e}"), "error");
+                        w.say(format!("Couldn't take the mods out: {}", crate::log::plain(&e.to_string())), "error");
                     }
                 }
             }),
@@ -2296,7 +2304,7 @@ impl qobject::Turbine {
                         }
                         w.say(words, "ok");
                     }
-                    Err(e) => w.say(format!("Couldn't reset the game's files: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't reset the game's files: {}", crate::log::plain(&e.to_string())), "error"),
                 }
                 w.show(&game, false);
             }),
@@ -2318,7 +2326,7 @@ impl qobject::Turbine {
                         w.note(&game, &r);
                         w.say(applied_words(&r, &game), "ok")
                     }
-                    Err(e) => w.say(format!("Couldn't put that setup back: {e}"), "error"),
+                    Err(e) => w.say(format!("Couldn't put that setup back: {}", crate::log::plain(&e.to_string())), "error"),
                 }
                 w.show(&game, false);
             }),
@@ -2586,7 +2594,7 @@ impl qobject::Turbine {
                             crate::anticheat::set_doubt(s, true);
                             crate::anticheat::sync_helper(w, s);
                         }
-                        w.say(format!("Couldn't get the mods in place, so the game wasn't started: {e}"), "error");
+                        w.say(format!("Couldn't get the mods in place, so the game wasn't started: {}", crate::log::plain(&e.to_string())), "error");
                     }
                 }
             }),
@@ -2596,7 +2604,9 @@ impl qobject::Turbine {
     pub fn play_without_loader(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         let (_, n) = self.as_mut().take_pending();
-        self.as_mut().say("Getting the game ready without the script extender...", "work");
+        // 0.59 (T8): the game's own loader by name (SKSE, BepInEx, SMAPI), never "the script extender" for all.
+        let loader = self.as_ref().loader_short();
+        self.as_mut().say(&format!("Getting the game ready without {loader}..."), "work");
         self.send(
             Some(game.id()), &format!("Play {} without the loader", game.name),
             true,
@@ -2621,7 +2631,7 @@ impl qobject::Turbine {
                             None => {
                                 let wr: &Worker = w;
                                 if wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, true)) {
-                                    w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
+                                    w.say(format!("Starting without {loader} and the mods that need it. They come back next time."), "ok");
                                     launch(w, &game);
                                 } else {
                                     w.say(format!("Couldn't set {} to start without mods, so it wasn't started.", game.name), "error");
@@ -2634,7 +2644,7 @@ impl qobject::Turbine {
                             let p = *t.pending() + n;
                             t.as_mut().set_pending(p);
                         });
-                        w.say(format!("Couldn't take the script extender out, so the game wasn't started: {e}"), "error");
+                        w.say(format!("Couldn't take {loader} out, so the game wasn't started: {}", crate::log::plain(&e.to_string())), "error");
                     }
                 }
                 w.show(&game, false);
@@ -2912,7 +2922,7 @@ fn apply_job(game: Game, n: i32) -> Job {
                     crate::anticheat::set_doubt(s, true);
                     crate::anticheat::sync_helper(w, s);
                 }
-                w.say(format!("Couldn't apply the changes: {e}. Nothing was lost; Turbine tries again after the next change."), "error");
+                w.say(format!("Couldn't apply the changes: {}. Nothing was lost; Turbine tries again after the next change.", crate::log::plain(&e.to_string())), "error");
             }
         }
         w.show(&game, false);

@@ -304,3 +304,22 @@ mod tests {
         assert!(y >= 2024 && (1..=12).contains(&mo) && (1..=31).contains(&d));
     }
 }
+
+/// 0.59: a system error in words a player can act on. "Permission denied (os error 13)" says what happened, not what
+/// to do; the raw text still goes into the activity log.
+pub fn plain(raw: &str) -> String {
+    if !raw.contains("os error ") {
+        return raw.to_string();
+    }
+    let code = raw.rsplit("os error ").next().and_then(|t| t.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<i32>().ok());
+    let words = match code {
+        Some(28) => "the drive is full. Free some space (Steam, Storage), then try again",
+        Some(13) | Some(1) => "Turbine isn't allowed to change that folder. Check the game's drive is mounted and not read-only",
+        Some(2) => "a file or folder it needed is gone. If the game is on an SD card, check the card is in",
+        Some(30) => "that drive is read-only. Check the SD card, then try again",
+        Some(5) => "the drive couldn't be read. If the game is on an SD card, check the card",
+        _ => return raw.to_string(),
+    };
+    line("error", &format!("System error: {raw}"));
+    words.to_string()
+}
