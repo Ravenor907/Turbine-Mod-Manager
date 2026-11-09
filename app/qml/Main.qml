@@ -374,7 +374,7 @@ Window {
         interval: 3500
         onTriggered: {
             const a = app.acInfo
-            app.note("shot", "Anti-cheat rules: " + (a ? a.mode + ", ask " + a.needsAsk + ", off " + a.off + ", me3 ready " + a.me3Ready : "none") + ", " + app.mods.length + " mods")
+            app.note("shot", "Anti-cheat rules: " + (a ? a.mode + ", ask " + a.needsAsk + ", off " + a.off + ", me3 ready " + a.me3Ready : "none") + ", " + app.mods.length + " mods; bar: " + barName.text + " | " + app.barStatus)
             if (shot.page === "acask") {
                 app.startPlay()
                 app.note("shot", "Anti-cheat sheet: " + app.sheet + " " + (app.msgData ? app.msgData.title : "") + " | buttons " + app.infoButtons.map(x => x.label).join(", "))
@@ -639,18 +639,19 @@ Window {
         if (!acInfo) return
         note("action", "Anti-cheat question: " + acInfo.askTitle)
         openMsg({ title: acInfo.askTitle, text: acInfo.askText, buttons: [
-            { key: "a", label: "Turn it off for mods", run: () => {
+            { key: "a", label: "Play with mods, offline", run: () => {
                 let a = Object.assign({}, acAnswered); a[game.id] = true; acAnswered = a
                 Turbine.antiCheatOff(true)
                 note("action", "Anti-cheat: off while mods are on")
                 if (then) then()
             } },
+            { key: "x", label: "Play without mods", run: () => { note("action", "Anti-cheat: played without mods"); Turbine.playOriginal() } },
             { key: "b", label: "Not now", run: () => note("action", "Anti-cheat: not now (mods wait)") }] })
     }
     function openAcGuide() {
         if (!acInfo) return
         note("action", "Anti-cheat guide: " + gameTitle)
-        openMsg({ title: "Play " + gameTitle + " with mods", text: acInfo.officialWords || "", steps: acInfo.guide || [], buttons: [{ key: "b", label: "OK", run: () => {} }] })
+        openMsg({ title: "Play " + gameTitle + " with mods", text: gameTitle + " has its own switch for this, in Steam's Play menu.", steps: acInfo.guide || [], buttons: [{ key: "b", label: "Close", run: () => {} }] })
     }
     readonly property bool seamlessIn: mods.some(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless")
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
@@ -1349,14 +1350,15 @@ Window {
     // 2 seconds for a mod already in Removed mods; 5 for a loadout or profile.
     readonly property int holdNeeded: confirmWhat.indexOf("profile:") === 0 || confirmWhat.indexOf("saves:") === 0 ? 5 : 2
     // What the confirm does, in its title and button: put saves back over the ones there, or delete for good.
-    function confirmWords() { return confirmVerb === "delete" ? "delete for good" : "replace your saves" }
-    readonly property string confirmVerb: confirmWhat.indexOf("saves:") === 0 ? "replace them" : "delete"
+    function confirmWords() { return confirmVerb === "delete" ? "delete for good" : confirmVerb === "remove it" ? "remove the leftover file" : "replace your saves" }
+    readonly property string confirmVerb: confirmWhat.indexOf("saves:") === 0 ? "replace them" : confirmWhat.indexOf("acleftover:") === 0 ? "remove it" : "delete"
     function askDelete(what, text) { disarm(); confirmWhat = what; confirmText = text; confirmIndex = 0; stopReset(); sheet = "confirm" }
     property int confirmIndex: 0
     function confirmDone() {
         const w = confirmWhat
         if (w.indexOf("check:") === 0) { note("check", "Delete for good would run now"); sheet = ""; return }
         if (w.indexOf("saves:") === 0) { note("action", "Put back saves without keeping the ones now"); sheet = ""; Turbine.restoreSavesAnyway(w.substring(6)); return }
+        if (w.indexOf("acleftover:") === 0) { note("action", "Remove another tool's leftover file: " + w.substring(11)); sheet = ""; Turbine.removeAcLeftover(); return }
         if (w.indexOf("profile:") === 0) {
             const n = w.substring(8)
             note("action", "Delete profile " + n)
@@ -1720,6 +1722,8 @@ Window {
         { icon: "update", title: "Get me3", detail: "From its GitHub release, checked. Turbine gets it at the first Play with mods anyway.", ok: true, act: "me3" }
     ] : []).concat(acMode === "me3" && acInfo.seamless && !seamlessIn ? [
         { icon: "update", title: "Get Seamless Co-op", detail: "From its GitHub release, checked. Loads through me3; keeps its own .co2 saves.", ok: true, act: "seamless" }
+    ] : []).concat(acInfo && acInfo.leftover ? [
+        { icon: "remove", title: "Remove the leftover file", detail: acInfo.leftover + ", left by another tool. Hold A.", ok: true, act: "acleftover" }
     ] : []).concat(acMode === "official" ? [
         { icon: "info", title: "How to play " + gameTitle + " with mods", detail: "Its own Play choice without anti-cheat", ok: true, act: "acguide" }
     ] : []).concat(overlapCount > 0 ? [
@@ -1850,6 +1854,7 @@ Window {
         else if (item.act === "me3") { sheet = ""; Turbine.installMe3(false) }
         else if (item.act === "seamless") { sheet = ""; Turbine.installSeamless() }
         else if (item.act === "acguide") openAcGuide()
+        else if (item.act === "acleftover") askDelete("acleftover:" + acInfo.leftover, acInfo.leftover + " was left in " + gameTitle + "'s folder by another program that used to start it without its anti-cheat. It isn't Steam's, and Steam's Verify doesn't remove it. Turbine removes only that one file; the anti-cheat starter stays as it is.")
         else if (item.act === "loader") { sheet = ""; getLoader() }
         else if (item.act === "kcdrestore") { sheet = ""; Turbine.kcdRestore() }
         else if (item.act === "setups") openSetups()
@@ -2250,7 +2255,8 @@ Window {
     // Games without rules of their own get Basic support: each mod goes where its files show they belong, or Turbine
     // asks once ("Where do these files go?"). The engine decides (basic.rs); these draw it and take the answers.
     readonly property bool basicGame: !!rules && !!rules.supportLevel && rules.supportLevel !== "full"
-    readonly property string supportChip: !basicGame ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
+    // 0.57: an anti-cheat game me3 starts says how its mods run; an online-only one says nothing here (the status does).
+    readonly property string supportChip: acMode === "refuse" ? "" : acMode === "me3" ? "Mods offline" : !basicGame ? "" : rules.supportLevel === "custom" ? "Added by you" : "Basic support"
     property var placements: ({})         // mod id: {from, to, rule, replace, skipped} (Basic games)
     property var guardedMods: ({})        // mod id: {replace, skipped} (a player file's game, mods it laid out)
     property var placeData: null          // the waiting mod: {game, gameName, pending: {name, placement, sure, conflicts, refused, tree}}
@@ -2520,7 +2526,7 @@ Window {
                         : a.mode === "me3" && a.needsAsk ? "Mods for " + gameTitle + " load through me3, which starts it offline without its anti-cheat. Turbine asks before the first Play with mods, and never changes the game's own files."
                         : a.mode === "me3" ? "Mods for " + gameTitle + " load through me3. Turbine never changes the game's own files."
                         : gameTitle + " uses anti-cheat (" + a.name + "). Mods that change its files can get you kicked or banned from online play. Use mods only in offline or single player modes.",
-                  notes: rules.antiCheat.note ? [rules.antiCheat.note] : [],
+                  notes: a.mode === "refuse" ? ["Your file stays in Downloads."] : rules.antiCheat.note ? [rules.antiCheat.note] : [],
                   buttons: [{ key: "b", label: "OK", run: () => {} }] })
     }
     // The first visit to a Basic game with no mods: what Basic support means (once per game).
@@ -2806,7 +2812,7 @@ Window {
         }
         if (s === "ask") return { labels: ["Clear", "Cancel", askView.doneLabel], index: askIndex, main: 2, cancel: 1, set: i => { askIndex = i }, run: i => askRun(i), scrolls: false }
         if (s === "confirm") return { labels: ["Delete", "Keep"], index: confirmIndex, main: -1, cancel: 1, set: i => { confirmIndex = i },
-                                      run: i => { if (i === 1) { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : confirmWhat.indexOf("saves:") === 0 ? "" : removedMods.length > 0 ? "removed" : "" } }, scrolls: false }
+                                      run: i => { if (i === 1) { stopConfirm(); sheet = confirmWhat.indexOf("profile:") === 0 ? "profiles" : confirmWhat.indexOf("saves:") === 0 || confirmWhat.indexOf("acleftover:") === 0 ? "" : removedMods.length > 0 ? "removed" : "" } }, scrolls: false }
         return null
     }
     // The build's check of the button rule: with sheetDry on, a press only says which button it would run.
@@ -3365,13 +3371,18 @@ Window {
     }
     function shortGame(name) {
         if (shortNames[name]) return shortNames[name]
-        return String(name || "").replace(/^The Elder Scrolls [IVX]+: /, "").replace(/: .*$/, "")
+        return titleCase(String(name || "").replace(/^The Elder Scrolls [IVX]+: /, "").replace(/: .*$/, ""))
+    }
+    // Steam's all-capitals names ("ELDEN RING") read as "Elden Ring"; Roman numerals stay ("ARMORED CORE VI").
+    function titleCase(n) {
+        if (!/[A-Z]{3}/.test(n) || n !== n.toUpperCase()) return n
+        return n.split(" ").map(w => /^[IVX]+$/.test(w) ? w : w.charAt(0) + w.substring(1).toLowerCase()).join(" ")
     }
     function railName(i) {
         const g = games[i]
         if (!g) return ""
         const twins = games.filter(x => x.name === g.name).length > 1
-        return g.name + (twins ? " · " + (g.launcher === "Steam" ? "Steam" : (g.storeLabel || g.launcher) + " (Heroic)") : "")
+        return titleCase(g.name) + (twins ? " · " + (g.launcher === "Steam" ? "Steam" : (g.storeLabel || g.launcher) + " (Heroic)") : "")
     }
     function railSelect(i) {
         note("action", "Rail " + (i < games.length ? games[i].name : "Settings"))
@@ -6171,6 +6182,9 @@ Window {
         return "Not started yet"
     }
     // ---------------------------------------------------------------- layout
+    // The ground under everything (the window's own color isn't in the build's pictures, so empty areas there showed
+    // as see-through).
+    Rectangle { anchors.fill: parent; color: c.ground }
     // Seasonal leaves or snow, behind everything. Still while Turbine isn't in front (a game is running).
     Seasonal {
         id: fallen
@@ -7614,7 +7628,7 @@ Window {
         id: confirmSheet
         ui: kit
         visible: app.sheet === "confirm"
-        title: app.confirmVerb === "delete" ? "Delete for good?" : "Replace your saves?"
+        title: app.confirmVerb === "delete" ? "Delete for good?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
         text: app.confirmText
         buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
                                  : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
@@ -7796,8 +7810,12 @@ Window {
     readonly property var legendHints: legendFor(binds())
     readonly property bool barGame: page === "game" && game !== null && !modPage
     // "My mods · Basic support · 2 mods on", or the problem in the status's own color.
-    readonly property string barStatus: (tabs[tab] ? tabs[tab].replace(/ \(\d+\)$/, "") : "") + (supportChip !== "" ? " · " + supportChip : "")
+    // The chip comes last, so a long line cuts it before the status words.
+    readonly property string barStatus: (tabs[tab] ? tabs[tab].replace(/ \(\d+\)$/, "") : "")
         + " · " + (statusNow.level === "ok" ? (statusNow.detail || statusNow.words) : statusNow.words) + (pill.words !== "" ? " · " + pill.words : "")
+        + (supportChip !== "" ? " · " + supportChip : "")
+    // Where LB or RB goes when there is no room for every tab's name: RB to the next tab, or LB back from the last.
+    readonly property int barTarget: tabs.length < 2 ? -1 : tab < tabs.length - 1 ? tab + 1 : tab - 1
     readonly property bool barTappable: statusNow.level === "warn" || statusNow.level === "stop" || pill.words !== ""
     // A tap on the status line: what is waiting (downloads, updates, the loadout), else why there is a problem.
     function statusTap() {
@@ -7827,7 +7845,7 @@ Window {
         readonly property real gap: app.px(12)
         // Touch: a sideways swipe on the bar is LB or RB.
         DragHandler {
-            enabled: app.barGame
+            enabled: app.barGame && app.sheet === "" && !app.wheelOpen
             target: null
             xAxis.enabled: true; yAxis.enabled: false
             acceptedDevices: PointerDevice.TouchScreen
@@ -7845,7 +7863,7 @@ Window {
                 // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
                 TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
                 TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
-                readonly property real want: Math.min(app.px(170), Math.ceil(Math.max(barNameMetrics.advanceWidth, barSubMetrics.advanceWidth)) + app.px(2))
+                readonly property real want: Math.min(app.px(240), Math.ceil(Math.max(barNameMetrics.advanceWidth, barSubMetrics.advanceWidth)) + app.px(2))
                 width: visible ? want : 0
                 anchors.verticalCenter: parent.verticalCenter
                 Text {
@@ -7864,8 +7882,8 @@ Window {
                 }
                 Accessible.role: app.barTappable ? Accessible.Button : Accessible.StaticText
                 Accessible.name: barName.text + ", " + app.barStatus
-                HoverHandler { enabled: app.barTappable; onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { enabled: app.barTappable; onTapped: app.statusTap() }
+                HoverHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onTapped: app.statusTap() }
             }
             Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
             // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
@@ -7874,8 +7892,17 @@ Window {
                 visible: app.barGame
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: app.px(6)
-                Key { k: "lb"; anchors.verticalCenter: parent.verticalCenter }
-                Key { k: "rb"; anchors.verticalCenter: parent.verticalCenter }
+                // Dimmed where they do nothing (one tab, or a sheet open).
+                Key { k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+                Key { k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+                // No room for every name: only the tab LB or RB goes to.
+                Text {
+                    visible: !legend.tabWordsFit && app.barTarget >= 0
+                    text: app.barTarget >= 0 ? (app.barTarget < app.tab ? "back to " : "") + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : ""
+                    color: c.soft; font.family: app.bodyFont; font.pixelSize: app.px(14)
+                    anchors.verticalCenter: parent.verticalCenter
+                    TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { app.note("touch", "Tab tapped: " + app.tabs[app.barTarget]); app.modPage = false; app.tab = app.barTarget } }
+                }
                 Repeater {
                     model: legend.tabWordsFit ? app.tabs : []
                     Row {
@@ -7891,8 +7918,8 @@ Window {
                             anchors.verticalCenter: parent.verticalCenter
                             Accessible.role: Accessible.PageTab
                             Accessible.name: text + (app.tab === parent.index ? ", selected" : "") + ", " + (parent.index + 1) + " of " + app.tabs.length
-                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                            TapHandler { onTapped: { const i = parent.parent.index; app.note("touch", "Tab tapped: " + app.tabs[i]); app.modPage = false; app.tab = i } }
+                            HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
+                            TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { const i = parent.parent.index; app.note("touch", "Tab tapped: " + app.tabs[i]); app.modPage = false; app.tab = i } }
                         }
                     }
                 }
@@ -7942,7 +7969,10 @@ Window {
         readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
         readonly property real wheelWordNeed: wheelMetrics.advanceWidth + app.px(6)
         readonly property bool tabWordsFit: barFree >= tabWordsNeed
-        readonly property bool wheelWord: !app.barGame || barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= wheelWordNeed)
+        TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.px(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
+        readonly property real tabShortNeed: tabShortMetrics.advanceWidth + app.px(6)
+        // The tab LB or RB goes to comes before the word Wheel.
+        readonly property bool wheelWord: !app.barGame || barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
         Rectangle {
             id: playBtn
             visible: app.barGame
@@ -7950,7 +7980,8 @@ Window {
             anchors.rightMargin: app.px(14)
             anchors.verticalCenter: parent.verticalCenter
             width: playRow.implicitWidth + app.px(24); height: app.px(36); radius: app.px(6)
-            opacity: Turbine.busy ? 0.7 : 1
+            // Dimmed while a sheet or the wheel is open (Start means the sheet's own button then).
+            opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
             // The focus ring when Play has the focus (a mod just arrived).
             border.color: c.text
             border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
@@ -7962,14 +7993,14 @@ Window {
                 id: playRow
                 anchors.centerIn: parent
                 spacing: app.px(8)
-                Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
+                Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
                 // Play waits for changes being saved: it says so.
                 Text { text: app.savingNow ? "Play (saving...)" : "Play"; color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.px(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
             }
             Accessible.role: Accessible.Button
             Accessible.name: "Play"
-            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { onTapped: app.startPlay() }
+            HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
+            TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: app.startPlay() }
         }
     }
     QuickWheel {

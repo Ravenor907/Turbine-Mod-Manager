@@ -75,17 +75,24 @@ pub fn mode(ac: &AntiCheat) -> Mode {
 
 /// The ask-once question before the first modded Play of an anti-cheat game started by me3.
 pub fn ask_title(game: &str) -> String {
-    format!("Turn off anti-cheat for {game}?")
+    format!("Play {game} with mods?")
 }
 
 pub fn ask_text(game: &str, ac: &AntiCheat) -> String {
     let offline = ac.offline_setting.as_deref().map(|s| format!(" Also set the game to start offline: {s}.")).unwrap_or_default();
+    // Elden Ring: Seamless Co-op (game menu) brings its own co-op and keeps its own .co2 saves.
+    let coop = ac.me3.as_deref() == Some("eldenring");
+    let play = if coop {
+        "The game then plays offline only: no normal co-op, invasions or messages (Seamless Co-op, in the game menu, adds its own co-op)."
+    } else {
+        "The game then plays offline only: no co-op, invasions or messages."
+    };
+    let save = if coop { "uses a separate save while mods are on (Seamless Co-op keeps its own .co2 saves)" } else { "uses a separate save while mods are on" };
     format!(
         "{game}'s anti-cheat stops mods from loading. To play with mods, Turbine starts the game without it, through me3. \
-         The game then plays offline only: no co-op, invasions or messages. Playing online with changed game files can get \
-         your account banned, so Turbine never does that. Turbine saves a copy of your save files first, uses a separate \
-         save while mods are on, and never changes the game's own files. Play without mods starts it the normal way, with \
-         its anti-cheat.{offline}"
+         {play} Playing online with changed game files can get your account banned, so Turbine never does that. Turbine \
+         saves a copy of your save files first, {save}, and never changes the game's own files. Play without mods starts it \
+         the normal way, with its anti-cheat.{offline} Change this later: View, then Game menu."
     )
 }
 
@@ -98,6 +105,14 @@ pub const STATUS_ROW: &str = "Anti-cheat: off while mods are on (offline only)";
 pub const REFUSE_WORDS: &str =
     "This game needs its anti-cheat to play at all. Changing its files can get your account banned, so Turbine won't add mods to it.";
 pub const VERIFY_WORDS: &str = "Use Steam's Verify integrity of game files to repair it: game page, gear, Properties, Installed Files.";
+/// Whose record it is: Turbine's own, from the first time it saw the game, not Steam's list of the game's files.
+pub const RECORD_WORDS: &str = "Turbine compares them with its own record from the first time it saw the game (not Steam's list of the game's files).";
+
+/// Only a game me3 starts has its folder checked against the record: Halo's mods live in its folder by design
+/// (the player picks Steam's Play choice without anti-cheat), and an offline game has no anti-cheat program.
+pub fn folder_checked(ac: &AntiCheat) -> bool {
+    mode(ac) == Mode::Me3
+}
 
 pub fn official_words(game: &str, ac: &AntiCheat) -> String {
     let choice = ac.official_choice.as_deref().unwrap_or("the choice without anti-cheat");
@@ -186,6 +201,9 @@ pub enum AcState {
     /// The same build, but the starter or the program changed or went missing: something outside Turbine
     /// replaced them (a swap by another tool; Steam's verify puts them back).
     ChangedOutside(Vec<String>),
+    /// The starter is as recorded, but another tool left its backup copy beside it ("<starter>.backup"). Steam's
+    /// verify doesn't remove extra files; Turbine offers to remove only that file, after a hold to confirm.
+    LeftoverBackup(String),
     /// Turbine still has files in the game folder (a restore that didn't finish, or files from before 0.57).
     TurbineFilesLeft(usize),
 }
@@ -207,14 +225,13 @@ pub fn state(game_dir: &Path, ac: &AntiCheat, record: Option<&Original>, build: 
             _ => changed.push(rel),
         }
     }
-    // A starter with a backup beside it was swapped by something (another tool's way of starting without it).
-    if let Some(st) = &ac.starter {
-        if game_dir.join(format!("{st}.backup")).is_file() && !changed.contains(st) {
-            changed.push(st.clone());
-        }
-    }
+    let leftover = ac.starter.as_ref().map(|st| format!("{st}.backup")).filter(|b| game_dir.join(b).is_file());
     if changed.is_empty() {
-        return AcState::Original;
+        // Another tool's backup beside a starter that is as recorded: not a swap now, but a leftover to remove.
+        return match leftover {
+            Some(b) => AcState::LeftoverBackup(b),
+            None => AcState::Original,
+        };
     }
     if build.is_some() && rec.build.as_deref() != build {
         return AcState::Updated;
@@ -225,14 +242,28 @@ pub fn state(game_dir: &Path, ac: &AntiCheat, record: Option<&Original>, build: 
 /// The line for Before you play about the game folder, when it isn't ready for the normal launch.
 pub fn state_check(game: &str, s: &AcState) -> Option<Check> {
     match s {
-        AcState::Original | AcState::Unrecorded | AcState::Updated => None,
+        AcState::Original | AcState::Unrecorded => None,
+        AcState::Updated => Some(Check {
+            level: "warn".into(),
+            title: format!("{game} updated"),
+            detail: format!(
+                "Turbine renews its record of the anti-cheat files now. {RECORD_WORDS} To be sure they are Steam's own, run Steam's Verify integrity of game files once: game page, gear, Properties, Installed Files."
+            ),
+        }),
         AcState::ChangedOutside(files) => Some(Check {
             level: "stop".into(),
             title: "The anti-cheat files changed".into(),
             detail: format!(
-                "{} isn't as Steam installed it ({}). Starting it online like this can get your account banned. {VERIFY_WORDS}",
+                "{} isn't as Turbine recorded it ({}). {RECORD_WORDS} Starting it online like this can get your account banned. {VERIFY_WORDS}",
                 game,
                 files.join(", ")
+            ),
+        }),
+        AcState::LeftoverBackup(file) => Some(Check {
+            level: "warn".into(),
+            title: "Another tool's file is in the game folder".into(),
+            detail: format!(
+                "{file} was left by another program that used to start {game} without its anti-cheat. The anti-cheat starter itself is fine. Steam's Verify doesn't remove extra files: game menu, Remove the leftover file (hold A) takes out only that one."
             ),
         }),
         AcState::TurbineFilesLeft(n) => Some(Check {
@@ -288,6 +319,11 @@ pub fn natives(mods: &Path) -> Vec<String> {
             if ft.is_dir() {
                 walk(&e.path(), &r, out, depth + 1);
             } else if name.to_ascii_lowercase().ends_with(".dll") {
+                // A name me3's profile can't hold as written (a quote, a line break or another control character)
+                // is left out rather than written wrongly.
+                if !profile_safe(&r) {
+                    continue;
+                }
                 out.push(format!("mods/{r}"));
             }
         }
@@ -295,6 +331,11 @@ pub fn natives(mods: &Path) -> Vec<String> {
     let mut out = Vec::new();
     walk(mods, "", &mut out, 0);
     out
+}
+
+/// A path that goes into the profile exactly as it is: no quotes, backslashes or control characters.
+pub fn profile_safe(rel: &str) -> bool {
+    !rel.is_empty() && !rel.chars().any(|c| c.is_control() || c == '\'' || c == '"' || c == '\\')
 }
 
 fn toml_str(s: &str) -> String {
@@ -310,7 +351,7 @@ pub fn profile_text(game: &str, natives: &[String], savefile: Option<&str>) -> S
         t.push_str(&format!("savefile = {}\n", toml_str(s)));
     }
     t.push_str(&format!("\n[[supports]]\ngame = \"{game}\"\n\n[[packages]]\nid = \"turbine-mods\"\npath = 'mods'\n"));
-    for n in natives {
+    for n in natives.iter().filter(|n| profile_safe(n)) {
         t.push_str(&format!("\n[[natives]]\npath = {}\n", toml_str(n)));
     }
     t
@@ -503,10 +544,11 @@ pub fn checks(game: &str, ac: &AntiCheat, mods_on: bool, me3_ok: Option<&Result<
                 out.push(Check { level: "warn".into(), title: "Start offline".into(), detail: w });
             }
             match me3_ok {
+                // Nothing to fix: Turbine fetches it at Play.
                 Some(Err(e)) if e.contains("isn't installed") => out.push(Check {
-                    level: "warn".into(),
-                    title: "me3 isn't installed yet".into(),
-                    detail: format!("Turbine gets me3 {ME3_VERSION} from its GitHub release (checked) the first time you play with mods."),
+                    level: "ok".into(),
+                    title: "me3 downloads now".into(),
+                    detail: "me3 (the loader that starts the game offline) downloads now, about 10 MB.".into(),
                 }),
                 Some(Err(e)) => out.push(Check { level: "warn".into(), title: "me3 needs installing again".into(), detail: format!("{e}. Turbine gets it again before starting.") }),
                 _ => {}
@@ -573,7 +615,10 @@ mod tests {
     fn ask_words_warn_of_bans() {
         let t = ask_text("Elden Ring", &er());
         assert!(t.contains("banned") && t.contains("offline only") && t.contains("never changes the game's own files"));
-        assert_eq!(ask_title("Elden Ring"), "Turn off anti-cheat for Elden Ring?");
+        assert_eq!(ask_title("Elden Ring"), "Play Elden Ring with mods?");
+        assert!(t.contains("Seamless Co-op") && t.contains(".co2"));
+        let ac6 = AntiCheat { me3: Some("armoredcore6".into()), ..er() };
+        assert!(!ask_text("Armored Core VI", &ac6).contains("Seamless"));
         assert!(!t.contains('\u{2014}') && !t.contains('\u{2013}'));
     }
 
@@ -598,10 +643,22 @@ mod tests {
         assert!(state_check("Elden Ring", &state(&d, &ac, Some(&rec), Some("100"), 0)).unwrap().detail.contains("Verify integrity"));
         // The game updated: a new build changes them.
         assert_eq!(state(&d, &ac, Some(&rec), Some("101"), 0), AcState::Updated);
-        // Steam's verify put the starter back, but another tool's backup sits beside it.
+        // Steam's verify put the starter back, but another tool's backup sits beside it: a leftover, not a block.
         fs::write(d.join("Game/start_protected_game.exe"), b"eac starter").unwrap();
         fs::write(d.join("Game/start_protected_game.exe.backup"), b"eac starter").unwrap();
-        assert!(matches!(state(&d, &ac, Some(&rec), Some("100"), 0), AcState::ChangedOutside(_)));
+        let st = state(&d, &ac, Some(&rec), Some("100"), 0);
+        assert_eq!(st, AcState::LeftoverBackup("Game/start_protected_game.exe.backup".into()));
+        let c = state_check("Elden Ring", &st).unwrap();
+        assert_eq!(c.level, "warn");
+        assert!(c.detail.contains("Steam's Verify doesn't remove"));
+        // A swapped starter with the backup: still a stop, and the words say whose record it is.
+        fs::write(d.join("Game/start_protected_game.exe"), b"swapped").unwrap();
+        let c = state_check("Elden Ring", &state(&d, &ac, Some(&rec), Some("100"), 0)).unwrap();
+        assert_eq!(c.level, "stop");
+        assert!(c.detail.contains("not Steam's list"));
+        // After an update the record is renewed, with a plain word to run Steam's Verify.
+        let c = state_check("Elden Ring", &AcState::Updated).unwrap();
+        assert!(c.level == "warn" && c.detail.contains("Verify integrity"));
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -649,6 +706,30 @@ mod tests {
     }
 
     #[test]
+    fn profile_names_are_safe() {
+        assert!(profile_safe("SeamlessCoop/ersc.dll"));
+        for bad in ["a'b.dll", "a\nb.dll", "a\\b.dll", "a\"b.dll", ""] {
+            assert!(!profile_safe(bad), "{bad:?}");
+        }
+        let t = profile_text("eldenring", &["mods/a'\n[[natives]]\npath='/evil.dll".to_string(), "mods/ok.dll".to_string()], None);
+        assert!(!t.contains("evil") && t.contains("mods/ok.dll"));
+        let d = tmp("names");
+        let mods = profile_mods(&d);
+        fs::create_dir_all(&mods).unwrap();
+        fs::write(mods.join("bad\nname.dll"), b"x").unwrap();
+        fs::write(mods.join("good.dll"), b"x").unwrap();
+        assert_eq!(natives(&mods), vec!["mods/good.dll".to_string()]);
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn only_me3_games_have_their_folder_checked() {
+        assert!(folder_checked(&er()));
+        let halo = AntiCheat { name: "Easy Anti-Cheat".into(), level: "warn".into(), mode: "official".into(), official_choice: Some("x".into()), ..Default::default() };
+        assert!(!folder_checked(&halo));
+    }
+
+    #[test]
     fn tar_reading() {
         let t = tar_of(&[("./bin/me3", b"elf", b'0'), ("./bin/", b"", b'5'), ("./link", b"", b'2'), ("./bin/win64/me3.exe", b"mz", b'0')]);
         let e = tar_entries(&t).unwrap();
@@ -684,8 +765,8 @@ mod tests {
     fn before_play() {
         let ac = er();
         let c = checks("Elden Ring", &ac, true, Some(&Err("me3 isn't installed yet".into())), false, false);
-        assert!(c.iter().any(|x| x.title == "Turn off anti-cheat for Elden Ring?"));
-        assert!(c.iter().any(|x| x.title == "me3 isn't installed yet"));
+        assert!(c.iter().any(|x| x.title == "Play Elden Ring with mods?"));
+        assert!(c.iter().any(|x| x.title == "me3 downloads now" && x.level == "ok"));
         let c = checks("Elden Ring", &ac, true, Some(&Ok(())), true, true);
         assert!(c.iter().any(|x| x.title == STATUS_ROW) && c.iter().any(|x| x.title == "Elden Ring updated"));
         assert!(checks("Elden Ring", &ac, false, None, false, false).is_empty());

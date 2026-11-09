@@ -837,9 +837,29 @@ impl Store {
         self.rules.me3_game()
     }
 
+    /// An online-only anti-cheat game with mod files from an earlier version still in its folder: takes them all
+    /// out (mods stay listed). Returns how many files came out; 0 when there was nothing to do.
+    pub fn refused_cleanup(&self) -> io::Result<usize> {
+        if self.rules.refuses_mods().is_none() {
+            return Ok(0);
+        }
+        let n = self.files_in_game_folder();
+        if n == 0 {
+            return Ok(0);
+        }
+        let paths = self.game_folder_paths();
+        deploy::recover(&paths)?;
+        let r = deploy::apply(&paths, &[], None)?;
+        Ok(r.removed.max(n.min(1)))
+    }
+
     /// How many files Turbine's game-folder record still lists.
     pub fn files_in_game_folder(&self) -> usize {
-        Record::load(&self.game_folder_paths().record).map(|r| r.files.len()).unwrap_or(0)
+        let paths = self.game_folder_paths();
+        let recorded = Record::load(&paths.record).map(|r| r.files.len()).unwrap_or(0);
+        // A deploy that stopped part way (the power went out) left its plan: whatever it placed is still there until
+        // the plan is finished or undone, even with no record written yet.
+        recorded + usize::from(paths.plan.exists())
     }
 
     /// Takes every file Turbine placed out of the game folder and puts the game's own back, then checks that
@@ -847,7 +867,7 @@ impl Store {
     /// what makes the folder original for the normal launch; its me3 profile is left alone.
     pub fn clean_game_folder(&self) -> io::Result<Report> {
         let paths = self.game_folder_paths();
-        if !paths.record.exists() {
+        if !paths.record.exists() && !paths.plan.exists() {
             return Ok(Report::default());
         }
         deploy::recover(&paths)?;
@@ -1167,6 +1187,9 @@ impl Store {
     /// Replaces a mod's files with a new download (an update), keeping its place, on/off state and name.
     /// Installer choices made last time are the starting point if the new version has an installer.
     pub fn replace_mod(&mut self, id: &str, archive: &Path, source: SourceInfo) -> Result<Import, String> {
+        if let Some(why) = self.rules.refuses_mods() {
+            return Err(why);
+        }
         self.index_of(id).map_err(|e| e.to_string())?;
         let target = self.target_for(archive, source, Some(id))?;
         self.begin(archive, target)
@@ -1873,6 +1896,9 @@ impl Store {
 
     /// Puts a mod from Recently removed back where it was in the order.
     pub fn undo_remove(&mut self, id: &str) -> io::Result<()> {
+        if let Some(why) = self.rules.refuses_mods() {
+            return Err(io::Error::other(why));
+        }
         let r = self.removed_extra.iter().position(|r| r.removed.item.id == id).ok_or_else(|| not_found(id))?;
         let src = self.removed_dir(id);
         let dest = self.mod_dir(id);
@@ -1919,6 +1945,11 @@ impl Store {
     /// Every file of the turned-on mods (but `skip`), in order. A Basic game's mod may only replace the game's own
     /// files when the player said so for it, and never places a file in the refused table (basic::refused).
     fn wanted_except(&self, skip: &[String]) -> Vec<Wanted> {
+        // An online-only anti-cheat game: nothing is ever placed, by any path (apply, undo, updates, setups,
+        // loadouts all come through here), so every apply takes everything out.
+        if self.rules.refuses_mods().is_some() {
+            return Vec::new();
+        }
         let record = Record::load(&self.deploy_paths().record).unwrap_or_default();
         let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
         let guarded = self.rules.guarded();

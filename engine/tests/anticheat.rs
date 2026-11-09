@@ -282,3 +282,101 @@ fn data_file_checks() {
     assert!(parse_game("x.json", unknown, true).unwrap_err().contains("unknown key"));
     assert!(gamedata::builtin().problems.is_empty(), "{:?}", gamedata::builtin().problems);
 }
+
+// ---- 0.57 break test fixes
+
+#[test]
+fn halo_mods_in_its_folder_never_block_play() {
+    let root = std::env::temp_dir().join(format!("turbine-ac-halo-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let library = root.join("library");
+    let install = library.join("steamapps/common/Halo The Master Chief Collection");
+    write(&install.join("mcclauncher.exe"), "launcher");
+    write(&install.join("halo1/maps/a.map"), "m");
+    let game = Game {
+        store: Launcher::Steam,
+        store_id: "976730".into(),
+        name: "Halo: The Master Chief Collection".into(),
+        install_dir: install,
+        library,
+        build: Some("1".into()),
+        runtime: Runtime::Windows,
+        cover: None,
+        header: None,
+        prefix: None,
+    };
+    let rules = GameRules::for_game(&game);
+    let ac = rules.anti_cheat.clone().unwrap();
+    let mut store = Store::open_at(&game, &root.join("store"), Box::new(rules)).unwrap();
+    let zip = root.join("dl/Halo Mod 1.0.zip");
+    write_zip(&zip, &[("halo1/maps/b.map", "x")]);
+    store.import_zip(&zip).unwrap();
+    store.apply().unwrap();
+    // Its mods are in its folder by design (the player picks Steam's Play choice without anti-cheat): the folder
+    // check that would stop Play is only for games me3 starts.
+    assert!(store.files_in_game_folder() > 0);
+    assert!(!anticheat::folder_checked(&ac));
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn online_only_games_never_get_files_by_any_path() {
+    let w = world("refusepaths");
+    let before = files_under(&w.game.install_dir);
+    let store_root = w.root.join("store");
+    {
+        // An earlier version placed two mods (one later removed).
+        let mut old = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(None, false))).unwrap();
+        let zip = w.root.join("dl/Skin 1.0.zip");
+        write_zip(&zip, &[("Game/skin.txt", "skin")]);
+        old.import_zip(&zip).unwrap();
+        let zip2 = w.root.join("dl/Other 1.0.zip");
+        write_zip(&zip2, &[("Game/other.txt", "o")]);
+        let m2 = old.import_zip(&zip2).unwrap();
+        old.remove(&m2.id).unwrap();
+        old.apply().unwrap();
+        assert!(w.game.install_dir.join("Game/skin.txt").exists());
+    }
+    let mut store = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(None, true))).unwrap();
+    // The next start takes the earlier files out.
+    assert!(store.refused_cleanup().unwrap() > 0);
+    assert_eq!(files_under(&w.game.install_dir), before);
+    assert_eq!(store.files_in_game_folder(), 0);
+    // Apply, undo, an update and a saved setup place nothing.
+    store.apply().unwrap();
+    let removed: Vec<String> = store.removed().iter().map(|m| m.item.id.clone()).collect();
+    assert!(store.undo_remove(&removed[0]).is_err());
+    let upd = w.root.join("dl/Skin 1.1.zip");
+    write_zip(&upd, &[("Game/skin2.txt", "skin2")]);
+    let id = store.mods()[0].id.clone();
+    assert!(store.replace_mod(&id, &upd, Default::default()).is_err());
+    let _ = store.restore("");
+    store.set_order(&[(id, true)]).unwrap();
+    store.apply().unwrap();
+    assert_eq!(files_under(&w.game.install_dir), before);
+    assert_eq!(store.refused_cleanup().unwrap(), 0);
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+#[test]
+fn a_first_deploy_cut_short_is_cleaned_for_a_me3_game() {
+    let w = world("crash");
+    let store_root = w.root.join("store");
+    let before = files_under(&w.game.install_dir);
+    {
+        let mut old = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(None, false))).unwrap();
+        let zip = w.root.join("dl/Big 1.0.zip");
+        write_zip(&zip, &[("Game/a.txt", "a"), ("Game/b.txt", "b"), ("Game/c.txt", "c")]);
+        old.import_zip(&zip).unwrap();
+        let _ = old.apply_stopping(Some(1));
+    }
+    let mut store = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(Some("eldenring"), false))).unwrap();
+    // The plan is still there: the folder isn't counted as original.
+    assert!(store.files_in_game_folder() > 0);
+    store.play_original().unwrap();
+    assert_eq!(files_under(&w.game.install_dir), before);
+    assert_eq!(store.files_in_game_folder(), 0);
+    store.apply().unwrap();
+    assert_eq!(files_under(&w.game.install_dir), before);
+    let _ = fs::remove_dir_all(&w.root);
+}

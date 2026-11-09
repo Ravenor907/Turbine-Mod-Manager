@@ -429,6 +429,11 @@ pub mod qobject {
         #[cxx_name = "installSeamless"]
         fn install_seamless(self: Pin<&mut Self>);
 
+        /// Removes only another tool's leftover "<starter>.backup" (after a hold to confirm in the interface).
+        #[qinvokable]
+        #[cxx_name = "removeAcLeftover"]
+        fn remove_ac_leftover(self: Pin<&mut Self>);
+
         #[qinvokable]
         #[cxx_name = "cancelDownload"]
         fn cancel_download(self: Pin<&mut Self>);
@@ -1066,7 +1071,10 @@ impl Worker {
         if !self.slots.contains_key(&key) {
             let rules = GameRules::for_game(game);
             let store = Store::open(game, &self.data_home).map_err(|e| format!("Couldn't open {}'s mods: {e}", game.name))?;
-            self.slots.insert(key.clone(), Slot { game: game.clone(), rules, store });
+            let slot = Slot { game: game.clone(), rules, store };
+            // 0.57: an online-only anti-cheat game: mod files from an earlier version come out at once.
+            crate::anticheat::refused_cleanup(self, &slot);
+            self.slots.insert(key.clone(), slot);
         }
         Ok(self.slots.get_mut(&key).expect("just inserted"))
     }
@@ -2426,8 +2434,18 @@ impl qobject::Turbine {
                     Ok((r, left)) => {
                         w.note(&game, &r);
                         crate::log::line("launch", &format!("{} without the loader: {left} mods left out this time", game.name));
-                        w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
-                        launch(w, &game);
+                        // 0.57: the same anti-cheat checks as Play.
+                        let blocked = w.slot(&game).ok().and_then(|s| {
+                            crate::anticheat::keep_record(s);
+                            crate::anticheat::normal_launch_blocked(s)
+                        });
+                        match blocked {
+                            Some(why) => w.say(why, "error"),
+                            None => {
+                                w.say("Starting without the script extender and the mods that need it. They come back next time.", "ok");
+                                launch(w, &game);
+                            }
+                        }
                     }
                     Err(e) => {
                         w.post(move |mut t| {

@@ -682,10 +682,10 @@ for size in $SIZES; do
   rm -rf "$PWD/fh/ac-$size"; python3 tools/fake-home.py "$PWD/fh/ac-$size" --anticheat > /dev/null; h="$PWD/fh/ac-$size"
   er=steam:1245620
   shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
-  need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods"
-  need "acask-$size" "Anti-cheat: asked once before Play ($size)" "Anti-cheat sheet: msg Turn off anti-cheat for Elden Ring\\? \\| buttons Turn it off for mods, Not now"
+  need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| My mods · .* · Mods offline$"
+  need "acask-$size" "Anti-cheat: asked once before Play ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Play without mods, Not now"
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
-  need "acdeploy-$size" "Anti-cheat: Before you play says me3 comes first ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*warn me3 isn't installed yet"
+  need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
   g="$h/.local/share/Steam/steamapps/common/ELDEN RING"
   inprofile=$(find "$h" "$PWD/data/acdeploy-$size" -path "*me3-profile/mods/parts/am_f_9000.partsbnd.dcx" 2>/dev/null | head -n1)
   if [ -n "$inprofile" ] && [ ! -e "$g/Game/parts/am_f_9000.partsbnd.dcx" ] && [ "$(find "$g" -type f | wc -l)" -eq 4 ]; then

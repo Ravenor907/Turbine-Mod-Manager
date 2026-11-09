@@ -43,8 +43,9 @@ fn original(slot: &Slot) -> Option<Original> {
     Original::load(&original_file(slot.store.root()))
 }
 
+/// Only for a game me3 starts (Halo's mods live in its folder by design; see anticheat::folder_checked).
 pub(crate) fn state(slot: &Slot) -> Option<AcState> {
-    let a = special(slot)?;
+    let a = special(slot).filter(|a| ac::folder_checked(a))?;
     Some(ac::state(&slot.game.install_dir, a, original(slot).as_ref(), slot.game.build.as_deref(), slot.store.files_in_game_folder()))
 }
 
@@ -96,7 +97,11 @@ pub(crate) fn json_fields(slot: &Slot, a: &AntiCheat) -> String {
     let guide: Vec<String> = if mode == Mode::Official { ac::official_guide(&name, a).iter().map(|s| quote(s)).collect() } else { Vec::new() };
     let data = crate::backend::data_home();
     format!(
-        ",\"mode\":{},\"me3\":{},\"needsAsk\":{},\"askTitle\":{},\"askText\":{},\"off\":{},\"statusRow\":{},\"refuseWords\":{},\"offlineWords\":{},\"officialWords\":{},\"guide\":[{}],\"me3Ready\":{},\"seamless\":{}",
+        ",\"leftover\":{},\"mode\":{},\"me3\":{},\"needsAsk\":{},\"askTitle\":{},\"askText\":{},\"off\":{},\"statusRow\":{},\"refuseWords\":{},\"offlineWords\":{},\"officialWords\":{},\"guide\":[{}],\"me3Ready\":{},\"seamless\":{}",
+        quote(&match state(slot) {
+            Some(AcState::LeftoverBackup(f)) => f,
+            _ => String::new(),
+        }),
         quote(match mode {
             Mode::Me3 => "me3",
             Mode::Official => "official",
@@ -180,7 +185,50 @@ pub(crate) fn normal_launch_blocked(slot: &Slot) -> Option<String> {
     }
 }
 
+/// The words when an online-only game's mod files from an earlier version came out of its folder.
+pub(crate) fn refused_cleanup(w: &Worker, slot: &Slot) {
+    match slot.store.refused_cleanup() {
+        Ok(0) => {}
+        Ok(n) => w.say(
+            format!(
+                "{} needs its anti-cheat, so Turbine took its mod files out of the game folder ({n}). Your mods stay listed in Turbine, but they never go into this game.",
+                title(slot)
+            ),
+            "warn",
+        ),
+        Err(e) => w.say(format!("Couldn't take the mod files out of {}'s folder: {e}. {}", title(slot), ac::VERIFY_WORDS), "error"),
+    }
+}
+
 impl qobject::Turbine {
+    /// Removes only another tool's "<starter>.backup" from the game folder, after a hold to confirm, and only while
+    /// the starter itself is as Turbine recorded it.
+    pub fn remove_ac_leftover(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().send(
+            Some(game.id()),
+            "Remove another tool's leftover file",
+            false,
+            Box::new(move |w: &mut Worker| {
+                let Ok(s) = w.slot(&game) else { return };
+                let Some(AcState::LeftoverBackup(rel)) = state(s) else {
+                    w.say("There's no leftover file to remove now.", "warn");
+                    return;
+                };
+                let path = s.game.install_dir.join(&rel);
+                let name = title(s);
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {
+                        crate::log::line("anticheat", &format!("{name}: removed another tool's leftover {rel} (the starter is as recorded)"));
+                        w.say(format!("Removed {rel}. {name}'s anti-cheat files are as Turbine recorded them."), "ok");
+                    }
+                    Err(e) => w.say(format!("Couldn't remove {rel}: {e}"), "error"),
+                }
+                w.show(&game, true);
+            }),
+        );
+    }
+
     /// The ask-once answer: true is "Turn it off for mods", false turns it back on (Game details).
     pub fn anti_cheat_off(mut self: Pin<&mut Self>, on: bool) {
         let Some(game) = self.current_game() else { return };

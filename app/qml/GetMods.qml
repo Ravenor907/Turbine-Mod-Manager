@@ -43,66 +43,17 @@ Item {
         if (n >= 1000) return Math.round(n / 1000) + "K"
         return String(n)
     }
-    onFocusIndexChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain)
+    onFocusIndexChanged: if (focusArea === "grid") { grid.positionViewAtIndex(focusIndex, GridView.Contain); grid.snapRow() }
     onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "recent") grid.positionViewAtBeginning()
     function gridItem(i) { return grid.itemAtIndex(i) }
 
-    Column {
+    Item {
         anchors.fill: parent
-        spacing: gm.ui.px(8)
-        // Recently viewed
-        Column {
-            visible: gm.showRecent
-            width: parent.width
-            height: visible ? implicitHeight : 0
-            spacing: gm.ui.px(4)
-            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); font.weight: Font.DemiBold }
-            ListView {
-                id: recentList
-                width: parent.width
-                height: gm.ui.px(52)
-                orientation: ListView.Horizontal
-                spacing: gm.ui.px(6)
-                clip: true
-                model: gm.recent
-                currentIndex: gm.focusArea === "recent" ? gm.focusIndex : -1
-                onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
-                delegate: Rectangle {
-                    id: rc
-                    required property int index
-                    required property var modelData
-                    readonly property bool foc: gm.active && gm.focusArea === "recent" && gm.focusIndex === index
-                    width: gm.ui.px(250); height: recentList.height; radius: gm.ui.px(6)
-                    color: foc ? gm.ui.c.focusFill : gm.ui.c.card
-                    border.color: gm.ui.c.accent
-                    border.width: foc ? gm.ui.px(2) : 0
-                    Thumb { id: rthumb; x: gm.ui.px(4); y: gm.ui.px(4); width: gm.ui.px(78); height: parent.height - gm.ui.px(8); src: rc.modelData.icon || ""; name: rc.modelData.name || "" }
-                    Column {
-                        x: rthumb.x + rthumb.width + gm.ui.px(8)
-                        width: parent.width - x - gm.ui.px(6)
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text {
-                            width: parent.width; elide: Text.ElideRight
-                            text: rc.modelData.name || ""
-                            color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
-                        }
-                        Text {
-                            visible: text !== ""
-                            width: parent.width; elide: Text.ElideRight
-                            text: rc.modelData.what || ""
-                            color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(12)
-                        }
-                    }
-                    HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: gm.recentClicked(rc.index) }
-                }
-            }
-        }
-        // Results
+        // Results (0.57: Good first mods is the grid's header, so it scrolls away with the cards)
         Item {
             id: resultsArea
             width: parent.width
-            height: gm.height - y
+            height: gm.height
             // Browsing failed: open the game's mods on Nexus instead.
             Rectangle {
                 id: fallbackCard
@@ -156,7 +107,68 @@ Item {
                 onMovementEnded: gm.scrolled(indexAt(gm.ui.px(10), contentY + gm.ui.px(10)), indexAt(width - gm.ui.px(10), contentY + height - gm.ui.px(10)))
                 // A touch or wheel scroll (not the focus moving): Main.qml hides or shows the bars.
                 property real lastY: 0
-                onContentYChanged: { if (moving) gm.contentScrolled(contentY, lastY, contentHeight > height + gm.ui.px(40)); lastY = contentY }
+                onContentYChanged: { if (moving) gm.contentScrolled(contentY - originY, lastY, contentHeight > height + gm.ui.px(40)); lastY = contentY - originY }
+                // Flicks stop on a row; the bars going (the view grows) puts a whole row at the top too.
+                snapMode: GridView.SnapToRow
+                onHeightChanged: if (gm.focusArea === "grid") { positionViewAtIndex(gm.focusIndex, GridView.Contain); snapRow() }
+                function snapRow() {
+                    const hh = headerItem ? headerItem.height : 0
+                    const top = contentY - originY - hh
+                    if (top <= 0 || cellHeight <= 0) return
+                    const r = Math.floor(top / cellHeight)
+                    if (top - r * cellHeight < 1) return
+                    const focusRow = Math.floor(gm.focusIndex / Math.max(1, gm.columns))
+                    const next = originY + hh + (r + 1) * cellHeight
+                    if (originY + hh + (focusRow + 1) * cellHeight <= next + height) contentY = Math.min(next, originY + contentHeight - height)
+                    else contentY = originY + hh + r * cellHeight
+                }
+                header: Column {
+            visible: gm.showRecent
+            width: grid.width
+            height: visible ? implicitHeight + gm.ui.px(8) : 0
+            spacing: gm.ui.px(4)
+            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(14); font.weight: Font.DemiBold }
+            ListView {
+                id: recentList
+                width: parent.width
+                height: gm.ui.px(52)
+                orientation: ListView.Horizontal
+                spacing: gm.ui.px(6)
+                clip: true
+                model: gm.recent
+                currentIndex: gm.focusArea === "recent" ? gm.focusIndex : -1
+                onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
+                delegate: Rectangle {
+                    id: rc
+                    required property int index
+                    required property var modelData
+                    readonly property bool foc: gm.active && gm.focusArea === "recent" && gm.focusIndex === index
+                    width: gm.ui.px(250); height: recentList.height; radius: gm.ui.px(6)
+                    color: foc ? gm.ui.c.focusFill : gm.ui.c.card
+                    border.color: gm.ui.c.accent
+                    border.width: foc ? gm.ui.px(2) : 0
+                    Thumb { id: rthumb; x: gm.ui.px(4); y: gm.ui.px(4); width: gm.ui.px(78); height: parent.height - gm.ui.px(8); src: rc.modelData.icon || ""; name: rc.modelData.name || "" }
+                    Column {
+                        x: rthumb.x + rthumb.width + gm.ui.px(8)
+                        width: parent.width - x - gm.ui.px(6)
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text {
+                            width: parent.width; elide: Text.ElideRight
+                            text: rc.modelData.name || ""
+                            color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(13); font.weight: Font.DemiBold
+                        }
+                        Text {
+                            visible: text !== ""
+                            width: parent.width; elide: Text.ElideRight
+                            text: rc.modelData.what || ""
+                            color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.px(12)
+                        }
+                    }
+                    HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
+                    TapHandler { onTapped: gm.recentClicked(rc.index) }
+                }
+            }
+        }
                 footer: Item {
                     width: grid.width
                     height: gm.loadingMore ? gm.ui.px(36) : 0
