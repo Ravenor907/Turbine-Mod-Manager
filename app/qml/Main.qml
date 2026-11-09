@@ -4579,7 +4579,11 @@ Window {
                     steps.push(() => { Turbine.pointerHide(); sheet = ""; if (wheelOpen) wheelOpen = false; page = "game"; tab = 0; zone = "main"; cs[1]() })
                     steps.push(() => {
                         if (sheet === "" && !wheelOpen) return false
-                        const it = target === "Play" ? playBtn : railList.itemAtIndex(Math.max(0, games.findIndex(g => game && g.id !== game.id)))
+                        // The rail: a tile of another game that is on screen now (tiles out of view aren't made).
+                        const railTile = () => { for (let i = 0; i < games.length; i++) { if (game && games[i].id === game.id) continue
+                                                 const t = railList.itemAtIndex(i); if (!t || !t.visible) continue
+                                                 const y0 = t.mapToItem(null, 0, 0).y; if (y0 >= 0 && y0 + t.height <= height) return t } return null }
+                        const it = target === "Play" ? playBtn : railTile()
                         if (!it || !it.visible) { m.skip = target + " not shown"; return }
                         m.skip = ""
                         m.before = state(); m.open = sheet || "wheel"
