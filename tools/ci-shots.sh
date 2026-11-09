@@ -454,6 +454,15 @@ for size in $SIZES; do
   echo "::notice title=First frame with and without the splash ($size)::without ${a:-?} ms, with ${b:-?} ms"
   if [ -n "$a" ] && [ -n "$b" ] && [ "$b" -gt $((a + 400)) ]; then echo "::warning title=The splash made the first frame later ($size)::$a ms to $b ms"; fi
 done
+# 0.6: every sheet and menu ends above the bottom bar (its last row too) at 50%, 100% and 150%, and at 1024 wide.
+for size in $SIZES $( [ "$MODE" = 1280x800 ] && echo 1024x700 ); do
+  for u in 50 100 150; do
+    n="menufit-u$u-$size"
+    rm -rf "$PWD/fh/$n"; python3 tools/fake-home.py "$PWD/fh/$n" > /dev/null; hm="$PWD/fh/$n"
+    shoot "$n" "$size" menufit "$hm" --game=$skyrim --uisize=$u "--selftest-import=$hm/Downloads/Brighter Lanterns 1.2.zip,$hm/Downloads/Lantern Glow SKSE 2.0.zip"
+    need "$n" "Menus end above the bar ($size, $u%)" "Menu fit \\([0-9]+x[0-9]+, size [0-9]+%\\): [0-9]+ menus, 0 problems"
+  done
+done
 # 0.58: every size reflows instead of clipping: pictures at 50% and 150%, each with the bar check.
 for size in $SIZES; do
   for u in 50 150; do

@@ -23,7 +23,7 @@ Overlay {
     // 24 x 24 grid), danger (bool, label in the warning color), more (bool, shows › for a next step) }
     property var items: []
     property int focusIndex: 0
-    property real bottomInset: ui.px(56)  // room left for the legend under the sheet
+    property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar
 
     // Overlaps: plain lines, e.g. "4 files from SkyUI". Both empty hides the block unless showOverlaps is set.
     property var overlapWins: []

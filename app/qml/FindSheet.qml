@@ -39,7 +39,7 @@ Overlay {
     Rectangle {
         id: box
         anchors.horizontalCenter: parent.horizontalCenter
-        y: Math.max(fs.ui.px(16), (parent.height - fs.ui.px(56) - height) / 2)
+        y: Math.max(fs.ui.px(16), (parent.height - height) / 2)
         width: Math.min(parent.width - fs.ui.px(40), fs.ui.px(560))
         height: Math.min(parent.height - fs.ui.px(80), col.implicitHeight + fs.ui.px(40))
         radius: fs.ui.px(8)

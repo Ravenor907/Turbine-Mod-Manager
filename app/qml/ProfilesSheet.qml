@@ -29,7 +29,7 @@ Overlay {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: ps.ui.px(56)
+        anchors.bottomMargin: ps.ui.px(8)
         width: Math.min(parent.width * 0.55, ps.ui.px(520))
         color: ps.ui.c.panel
         border.color: ps.ui.c.line

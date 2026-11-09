@@ -36,7 +36,7 @@ Overlay {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: vs.ui.px(56)
+        anchors.bottomMargin: vs.ui.px(8)
         width: Math.min(parent.width * 0.6, vs.ui.px(560))
         color: vs.ui.c.panel
         border.color: vs.ui.c.line

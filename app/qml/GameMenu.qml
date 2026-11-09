@@ -24,7 +24,7 @@ Overlay {
     property var items: []
     property int focusIndex: 0
     property string placement: "center"   // center or side
-    property real bottomInset: ui.px(56)  // side placement: room left for the legend
+    property real bottomInset: ui.px(8)   // side placement: the sheet layer already ends above the bar
 
     // index is the row's place in items; key is its key.
     signal activated(int index, string key)

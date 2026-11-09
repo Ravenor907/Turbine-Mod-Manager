@@ -129,7 +129,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -4363,6 +4363,46 @@ Window {
                     if (m.without) { modIndex = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.without.id) }
                     check("Edit button for a mod without settings (" + (m.without ? m.without.name : "none") + "): " + (panelEdit.visible ? "PROBLEM: shown" : "none")) }
         ]
+        // 0.6: every sheet and menu ends above the bottom bar at this Interface size and window: its card, and its
+        // last row once scrolled to the end.
+        else if (name === "menufit") {
+            const cases = [
+                ["Mod menu", () => { tab = 0; zone = "main"; modIndex = 0; menuIndex = 0; sheet = "modmenu" }],
+                ["Game menu", () => { menuIndex = 0; sheet = "gamemenu" }],
+                ["Game menu, last row", () => { sheet = "gamemenu"; for (let i = 0; i < gameMenuItems.length; i++) act("down") }],
+                ["Add from Downloads", () => { openAdd() }],
+                ["Loadouts", () => { openProfiles() }],
+                ["Play options", () => { openPlayOptions() }],
+                ["Find pop-up", () => { openFindPop() }],
+                ["Before you play", () => { checks = [{ level: "warn", title: "A test warning", detail: "" }, { level: "warn", title: "Another", detail: "" }]; checkIndex = 0; sheet = "check" }],
+                ["Loader", () => { loaderFor = ["Lantern Glow SKSE"]; openLoader() }],
+                ["Delete for good", () => { askDelete("check:none", "Test") }],
+                ["Activity log", () => { openActivity() }]
+            ]
+            let steps = [() => { if (mods.length < 2 || !modsLoaded) return false; page = "game"; zone = "main"; tab = 0; m.bad = 0; m.n = 0 }]
+            for (const cs of cases) {
+                steps.push(() => { sheet = ""; cs[1]() })
+                steps.push(() => {
+                    const barTop = legend.visible ? legend.mapToItem(null, 0, 0).y : height
+                    let worst = -1e9, what = ""
+                    const walk = (it, depth) => {
+                        if (!it || !it.visible || depth > 3) return
+                        for (const ch of it.children) {
+                            if (!ch.visible || ch.width <= 0 || ch.height <= 0) continue
+                            const b = ch.mapToItem(null, 0, ch.height).y
+                            if (b > worst) { worst = b; what = (ch.objectName || ch.toString().split("(")[0]) }
+                        }
+                    }
+                    for (const ov of sheetLayer.children) if (ov.visible) walk(ov, 0)
+                    m.n++
+                    const ok = worst <= barTop + 1
+                    if (!ok) m.bad++
+                    check("Menu fit " + cs[0] + ": bottom " + Math.round(worst) + ", bar top " + Math.round(barTop) + (ok ? "" : "  PROBLEM: under the bar (" + what + ")"))
+                })
+            }
+            steps.push(() => { sheet = ""; check("Menu fit (" + width + "x" + height + ", size " + sizeNow + "%): " + m.n + " menus, " + m.bad + " problems") })
+            script = steps
+        }
         else if (name === "sheetcheck") script = [
             () => { if (mods.length < 2) return false
                 const cases = [
@@ -5235,7 +5275,8 @@ Window {
     // Every "open Nexus" goes through here: in Turbine by default, the player's own browser when he chose it
     // (Desktop Mode), or the old Game Mode ways when Labs has them on.
     function openNexus(url, opener) {
-        const outside = forceMyBrowser || (!Turbine.gamemode && browserSet.openIn === "mine") || (Turbine.gamemode && labsOn && (browserSet.labsChrome || browserSet.alwaysSteam))
+        // 0.6 (I13): Game Mode always opens Nexus inside Turbine (Chrome and Steam's browser routes are retired).
+        const outside = forceMyBrowser || (!Turbine.gamemode && browserSet.openIn === "mine")
         if (outside) return openNexusOutside(url)
         return openBrowser(url, opener || "page")
     }
@@ -6438,25 +6479,17 @@ Window {
         { kind: "action", key: "ownFold", title: "Using your own browser (Desktop Mode)",
           how: "Not needed in Game Mode: Nexus opens right in Turbine. These are for Chrome or Firefox in Desktop Mode.", action: "Show" }
     ]).concat(!ownRowsShown ? [] : [
-        { kind: "action", key: "helper", title: "Browser helper", action: "Set up",
-          how: "For Chrome: brings a Google (or other) sign-in back to Turbine, and saves Nexus downloads from Chrome into Game Mods folders." }
+        // 0.6 (I13): the helper stays only for signing in (Google blocks sign-in inside Turbine's page).
+        { kind: "action", key: "helper", title: "Browser helper (for signing in)", action: "Set up",
+          how: "For Chrome: brings a Google (or other) sign-in on Nexus back to Turbine." }
     ]).concat(ownRowsShown && bridge.outdated ? [
         { kind: "info", key: "helperOld", title: "Your browser helper is out of date" + (bridge.helper ? " (" + bridge.helper + ", Turbine has " + bridge.bundled + ")" : ""),
           how: bridge.manual ? "In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper. After that it updates by itself."
                              : "Turbine put the new version in its folder and asks it to reload when it connects." }
-    ] : []).concat(!ownRowsShown ? [] : [
-        { kind: "toggle", key: "overlay", title: "Show status over other apps",
-          how: "A small Turbine card shows download progress and Added while you're in the browser.",
-          value: browserSet.overlay, options: [false, true], names: ["Off", "On"] }
-    ]).concat(ownRowsShown && (bridge.paired || bridge.connected > 0 || shot.page === "browser") ? [
+    ] : []).concat(ownRowsShown && (bridge.paired || bridge.connected > 0 || shot.page === "browser") ? [
         { kind: "action", key: "pair", title: bridgeTitle, how: bridgeWords, action: bridge.paired ? "Pair again" : "Pair" }
     ] : []).concat(!ownRowsShown ? [] : [
-        { kind: "action", key: "browser", title: "Web browser", how: browserWords, action: browserFound ? "Check again" : "How to get one" },
-        { kind: "action", key: "nxmHandler", title: "Use Turbine for Mod Manager Download",
-          how: handler.state === "yes" ? "Turbine gets Mod Manager Download links from the browser (they need a Nexus key)."
-             : handler.state === "no" ? "Mod Manager Download links now go to " + (handler.current || "another program") + ". A makes Turbine get them."
-             : "Makes the browser's Mod Manager Download button send files to Turbine (it needs your Nexus key; Slow download works without one).",
-          action: handler.state === "yes" ? "Set again" : "Use Turbine" }
+        { kind: "action", key: "browser", title: "Web browser", how: browserWords, action: browserFound ? "Check again" : "How to get one" }
     ])
     readonly property string selfWords: selfUpd.state === "checking" ? "Looking for a newer Turbine..."
         : selfUpd.state === "available" ? "Turbine " + selfUpd.version + (selfUpd.prerelease ? " (pre-release)" : "") + " is ready to install"
@@ -6734,11 +6767,7 @@ Window {
         { kind: "action", key: "activity", title: "Activity log", how: "The last 500 lines of what Turbine did, to read, copy or save to Downloads", action: "Open" },
         { kind: "toggle", key: "noGpu", title: "Nexus page: draw without the GPU", how: "For a black or frozen Nexus page in Turbine. Takes effect the next time Turbine starts.",
           value: webNoGpu, options: [false, true], names: ["Off", "On"] },
-        { kind: "toggle", key: "labsChrome", title: "Game Mode: open Nexus in Chrome through Steam", how: "The 0.53 way, with the browser helper, instead of inside Turbine",
-          value: browserSet.labsChrome, options: [false, true], names: ["Off", "On"] },
-        { kind: "toggle", key: "alwaysSteam", title: "Game Mode: open Nexus in Steam's browser", how: "Steam's own browser right away, instead of inside Turbine",
-          value: browserSet.alwaysSteam, options: [false, true], names: ["Off", "On"] },
-        { kind: "action", key: "addChrome", title: "Use Chrome in Game Mode", how: "How to add Chrome to Steam once (for the two ways above, and for signing in with Google)", action: "Show how" }
+        { kind: "action", key: "addChrome", title: "Use Chrome in Game Mode", how: "How to add Chrome to Steam once (for signing in with Google)", action: "Show how" }
     ].concat(updates.prerelease ? [
         { kind: "action", key: "stable", title: "Go back to stable", how: "Installs the latest stable Turbine, even if it's older, and turns Pre-release off", action: "Go back" }
     ] : []).concat(labsItems.map((x, i) => Object.assign({ kind: "item", head: i === 0 ? "To confirm on your device" : "" }, x)))
@@ -7351,8 +7380,9 @@ Window {
                     id: header
                     width: parent.width + app.px(28)
                     x: -app.px(14)
-                    height: app.gameScreen ? 0 : app.px(72)
-                    visible: height > 0
+                    // 0.6 (I11): no top bar anywhere: the bottom bar names the place, has the result caps and Play.
+                    height: 0
+                    visible: false
                     Behavior on height { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                     color: c.panel
                     clip: true
@@ -8360,7 +8390,9 @@ Window {
     // 0.59: every sheet, menu and prompt in one layer: off under the quick wheel and the tutorial (see topLayer).
     Item {
         id: sheetLayer
+        // 0.6: every sheet and menu ends above the bottom bar, so its last row is never under it (150%, 1024 wide).
         anchors.fill: parent
+        anchors.bottomMargin: legend.visible ? legend.height : 0
         enabled: app.topLayer <= 2
         Overlay {
             visible: app.sheet === "details" || app.sheet === "notice"
@@ -8522,7 +8554,7 @@ Window {
             visible: app.sheet === "fomod" && app.fomod !== null
             x: rail.width
             width: parent.width - rail.width
-            height: parent.height - legend.height - app.px(16)
+            height: parent.height - app.px(8)
             info: app.fomod
             onChoose: (g, o) => { if (!app.gate(2, "sheet onChoose")) return; app.note("action", "Installer: question " + (g + 1) + ", option " + (o + 1)); Turbine.fomodChoose(g, o) }
             onNext: { if (!app.gate(2, "sheet onNext")) return; app.note("action", "Installer: next step"); Turbine.fomodNext() }
@@ -8848,7 +8880,13 @@ Window {
     // hide until the next press (the game's name, the tabs and Play stay). Scrolling down hides it with the rail.
     // Declared after the menus so their backdrop never dims it.
     readonly property var legendHints: legendFor(binds())
-    readonly property bool barGame: page === "game" && game !== null && !modPage
+    // 0.6 (I11): the bar keeps one shape on every game page, the mod page included (Play bottom right).
+    readonly property bool barGame: page === "game" && game !== null
+    // Where the player is, for the bar's left when it isn't a game screen (Settings, Where do these files go?).
+    // On a mod page, its place in the results (LB and RB step through them).
+    readonly property int pageResultAt: modPage && detailsItem ? getItems.findIndex(x => String(x.id) === String(detailsItem.id)) : -1
+    readonly property string pageResultWords: pageResultAt >= 0 && getItems.length > 1 ? " · Mod " + (pageResultAt + 1) + " of " + getItems.length : ""
+    readonly property string barPlace: page === "settings" ? "Settings" : page === "place" ? (placeMode === "move" ? "Change where it goes" : "Where do these files go?") : page === "perf" ? "Scrolling test" : ""
     // "My mods · Basic support · 2 mods on", or the problem in the status's own color.
     // The chip comes last, so a long line cuts it before the status words.
     // 0.59 (T19): no tab name (the lit tab is right beside it), so the status itself has the room.
@@ -8917,7 +8955,7 @@ Window {
             spacing: legend.gap
             Column {
                 id: barGameCol
-                visible: app.barGame
+                visible: app.barGame || app.barPlace !== ""
                 // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
                 TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
                 TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
@@ -8932,13 +8970,15 @@ Window {
                     wrapMode: Text.Wrap
                     maximumLineCount: 2
                     elide: Text.ElideRight
-                    text: app.game ? app.shortGame(app.game.name) : ""
+                    text: app.barPlace !== "" ? app.barPlace : app.game ? app.shortGame(app.game.name) : ""
                     color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true
                 }
                 Text {
                     id: barSub
                     width: barGameCol.want; elide: Text.ElideRight
-                    text: app.barStatus
+                    // On a mod page: where it is ("Get mods > SkyUI", "Mod 3 of 30"); Settings: the section.
+                    text: app.page === "settings" ? app.sec : app.page === "place" ? (app.placeData && app.placeData.pending ? app.placeData.pending.name : "")
+                          : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "") + app.pageResultWords : app.barStatus
                     color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
                     font.family: app.bodyFont; font.pixelSize: app.fpx(12)
                     font.underline: app.barTappable && (app.statusNow.level === "warn" || app.statusNow.level === "stop")
@@ -8952,7 +8992,8 @@ Window {
             // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
             Row {
                 id: barTabs
-                visible: app.barGame
+                // On a mod page LB and RB step through the results (the line on the left says which).
+                visible: app.barGame && !app.modPage
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: app.px(6)
                 // Dimmed where they do nothing (one tab, or a sheet open).

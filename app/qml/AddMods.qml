@@ -37,7 +37,7 @@ Overlay {
     // Y's action as a button too (touch has no Y): "Show every mod file" or "Only this game's files" (0.59).
     property string otherLabel: ""
     signal otherClicked()
-    property real bottomInset: ui.px(56)  // room left for the legend under the sheet
+    property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar
 
     signal activated(int index)
     signal closed()

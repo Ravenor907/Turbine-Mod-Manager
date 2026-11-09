@@ -21,7 +21,7 @@ Overlay {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: sheet.ui.px(56)
+        anchors.bottomMargin: sheet.ui.px(8)
         width: Math.min(parent.width * 0.6, sheet.ui.px(560))
         color: sheet.ui.c.panel
         border.color: sheet.ui.c.line
