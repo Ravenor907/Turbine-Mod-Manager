@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.58" date="2026-11-09" type="development">
+      <description>
+        <p>Modded launches through Steam, Edit settings and a roomier bar:</p>
+        <ul>
+          <li>Elden Ring and other me3 games start with mods from Steam's own Play, so Game Mode shows them; a one-time Launch Options line, with Undo</li>
+          <li>Seamless Co-op button beside Play, with a settings page</li>
+          <li>Edit settings for any mod or game config file, with controller-friendly controls</li>
+          <li>Launch check, Report a problem, game update warning, and separate normal, modded and co-op saves</li>
+          <li>Interface size from 50% to 150% with real buttons; a taller, spaced-out bottom bar; Activity log opens again</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.57" date="2026-11-09" type="development">
       <description>
         <p>Full screen mods and anti-cheat games:</p>
