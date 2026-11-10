@@ -11689,7 +11689,7 @@ Window {
                     color: c.raised; border.color: c.accentLo; border.width: Math.max(1, app.px(1))
                     Label { id: reqBtnText; anchors.centerIn: parent; text: parent.modelData[0]; font.pixelSize: app.fpx(14); color: c.text }
                     Accessible.role: Accessible.Button
-                    Accessible.name: parent.modelData[0]
+                    Accessible.name: modelData[0]
                     HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                     TapHandler { onTapped: { app.note("touch", "Requirements strip: " + parent.modelData[0]); parent.modelData[1]() } }
                 }

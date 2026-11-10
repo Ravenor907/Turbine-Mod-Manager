@@ -788,6 +788,12 @@ pub fn pill(state: &str, name: &str, got: i64, total: i64, game: &str) -> String
 
 #[cfg(test)]
 mod tests {
+    // The permits, used links and asks are shared statics: tests that touch them take turns (run in parallel, one
+    // could clear another's permit between its two steps).
+    static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
@@ -809,6 +815,7 @@ mod tests {
 
     #[test]
     fn a_slow_download_goes_into_its_games_folder() {
+        let _serial = serial();
         let dl = temp("plan");
         let p = planned(&req("https://cf-files.nexus-cdn.com/files/1/Bigger.zip?md5=x", "TurbineTest-Bigger_Pockets-1.0.3.zip", 1000), &dl, Some("Skyrim Special Edition"), Some(1 << 30), &[]).unwrap();
         assert_eq!(p.path(), dl.join("Game Mods/Skyrim Special Edition/TurbineTest-Bigger_Pockets-1.0.3.zip"));
@@ -820,6 +827,7 @@ mod tests {
 
     #[test]
     fn only_nexus_file_hosts_after_a_press_are_a_sure_match() {
+        let _serial = serial();
         let dl = temp("sure");
         let now = Instant::now();
         let press = Some(now - Duration::from_secs(6));
@@ -839,6 +847,7 @@ mod tests {
 
     #[test]
     fn no_download_starts_without_a_press() {
+        let _serial = serial();
         let dl = temp("nopress");
         let now = Instant::now();
         let r = req("https://cf-files.nexus-cdn.com/x/A.zip", "A.zip", 10);
@@ -851,6 +860,7 @@ mod tests {
 
     #[test]
     fn refusals_say_why() {
+        let _serial = serial();
         let dl = temp("refuse");
         assert_eq!(planned(&req("https://x.nexus-cdn.com/a.exe", "setup.exe", 10), &dl, None, None, &[]).unwrap_err(), ONLY_ARCHIVES);
         assert!(planned(&req("http://x.nexus-cdn.com/a.zip", "a.zip", 10), &dl, None, None, &[]).unwrap_err().contains("https"));
@@ -862,6 +872,7 @@ mod tests {
 
     #[test]
     fn unknown_sizes_need_free_space_and_running_downloads_count() {
+        let _serial = serial();
         let dl = temp("space");
         let now = Instant::now();
         let p = Some(now);
@@ -881,6 +892,7 @@ mod tests {
 
     #[test]
     fn a_stopped_download_leaves_nothing_behind() {
+        let _serial = serial();
         let dl = temp("stopped");
         let f = dl.join("Big.zip");
         std::fs::write(dl.join("Big.zip.download"), b"x").unwrap();
@@ -893,6 +905,7 @@ mod tests {
 
     #[test]
     fn names_are_cleaned_and_made_unique() {
+        let _serial = serial();
         assert_eq!(clean_name("../../etc/evil.zip", ""), "evil.zip");
         assert_eq!(clean_name("..hidden.zip", ""), "hidden.zip");
         assert_eq!(clean_name("a<b>c|d?.zip", ""), "a_b_c_d_.zip");
@@ -912,6 +925,7 @@ mod tests {
 
     #[test]
     fn long_and_non_english_names_fit_in_255_bytes_and_keep_their_ending() {
+        let _serial = serial();
         let dl = temp("long");
         let worst = |n: &str| format!("{n} (999).download").len();
         // 150 CJK characters (450 bytes), 126 Cyrillic (252 bytes), 300 ASCII: each cut on a character boundary.
@@ -932,6 +946,7 @@ mod tests {
 
     #[test]
     fn nexus_pages_and_hosts() {
+        let _serial = serial();
         assert_eq!(page_ids("https://www.nexusmods.com/skyrimspecialedition/mods/266?tab=files&file_id=9"), Some(("skyrimspecialedition".into(), 266, Some(9))));
         assert_eq!(page_ids("https://www.nexusmods.com/games/valheim/mods/7"), Some(("valheim".into(), 7, None)));
         assert_eq!(page_ids("https://evil.example/skyrimspecialedition/mods/266"), None);
@@ -946,6 +961,7 @@ mod tests {
 
     #[test]
     fn the_stand_in_counts_only_when_set() {
+        let _serial = serial();
         // Before it is set, the stand-in's address is an ordinary http page.
         assert!(!is_test_url("http://127.0.0.1:47800/skyrimspecialedition/mods/1"));
         assert!(!initiator_ok("http://127.0.0.1:47800"));
@@ -976,6 +992,7 @@ mod tests {
 
     #[test]
     fn nxm_from_the_page_needs_the_main_frame_on_nexus_a_press_and_a_fresh_link_and_always_asks() {
+        let _serial = serial();
         let mut got = Vec::new();
         let now = Instant::now();
         let l = "nxm://skyrimspecialedition/mods/1/files/5?key=abc&expires=4102444800&user_id=1";
@@ -1008,6 +1025,7 @@ mod tests {
 
     #[test]
     fn nxm_from_the_page_needs_a_press_in_the_last_30_seconds() {
+        let _serial = serial();
         let mut got = Vec::new();
         let now = Instant::now();
         let l = "nxm://skyrimspecialedition/mods/1/files/6?key=abc&expires=4102444800&user_id=1";
@@ -1030,6 +1048,7 @@ mod tests {
 
     #[test]
     fn nxm_from_the_page_needs_key_expiry_and_account() {
+        let _serial = serial();
         let mut got = Vec::new();
         let now = Instant::now();
         for l in [
@@ -1050,6 +1069,7 @@ mod tests {
     /// Download address (&nmm=1), and Nexus's page goes to the nxm link by itself.
     #[test]
     fn a_bounce_off_nexus_and_back_never_spends_the_press() {
+        let _serial = serial();
         let mut got = Vec::new();
         let t0 = Instant::now();
         let mut p = pressed_on("https://www.nexusmods.com/skyrimspecialedition/mods/4?tab=description", t0, 0);
@@ -1075,6 +1095,7 @@ mod tests {
     /// nmm=1 page: it asks (as every link does).
     #[test]
     fn a_tap_off_nexus_or_another_mod_asks() {
+        let _serial = serial();
         let mut got = Vec::new();
         let now = Instant::now();
         let mut p = pressed(now, 0);
@@ -1102,6 +1123,7 @@ mod tests {
     /// changed under the finger, so it isn't a press at all, and the link that follows never downloads.
     #[test]
     fn a_frame_change_under_a_held_finger_is_no_press() {
+        let _serial = serial();
         let mut got = Vec::new();
         let now = Instant::now();
         let mut p = Presses::default();
@@ -1132,6 +1154,7 @@ mod tests {
 
     #[test]
     fn going_off_nexus_drops_the_press_and_nexus_pages_keep_it() {
+        let _serial = serial();
         let now = Instant::now();
         let mut p = pressed(now, 0);
         assert!(p.for_download().is_some());
@@ -1158,6 +1181,7 @@ mod tests {
 
     #[test]
     fn a_turbine_started_during_a_steam_menu_request_waits_for_it() {
+        let _serial = serial();
         let d = std::env::temp_dir().join(format!("turbine-quickmark-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -1191,6 +1215,7 @@ mod tests {
 
     #[test]
     fn a_second_steam_menu_request_is_not_read_as_turbine_open() {
+        let _serial = serial();
         let d = std::env::temp_dir().join(format!("turbine-quicktwo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -1212,6 +1237,7 @@ mod tests {
 
     #[test]
     fn one_turbine_holds_the_lock_and_only_it_removes_partials() {
+        let _serial = serial();
         let d = temp("lock");
         let first = lock_instance(&d.join(LOCK_FILE));
         assert!(first.mine(), "{first:?}");
@@ -1233,6 +1259,7 @@ mod tests {
 
     #[test]
     fn logged_addresses_keep_no_signed_parts() {
+        let _serial = serial();
         assert_eq!(
             log_url("https://cf-files.nexus-cdn.com/files/1/Big.zip?md5=SECRET&expires=1&user_id=1234567"),
             "https://cf-files.nexus-cdn.com/files/1/Big.zip"
@@ -1252,6 +1279,7 @@ mod tests {
 
     #[test]
     fn same_page_ignores_the_order_of_the_query() {
+        let _serial = serial();
         assert!(same_page(
             "https://www.nexusmods.com/skyrimspecialedition/mods/1?tab=files&file_id=2",
             "https://www.nexusmods.com/skyrimspecialedition/mods/1?file_id=2&tab=files#x"
@@ -1262,6 +1290,7 @@ mod tests {
 
     #[test]
     fn the_link_must_be_for_the_signed_in_account() {
+        let _serial = serial();
         assert!(user_matches(Some(1234), 1234).is_ok());
         assert!(user_matches(Some(1234), 0).is_ok());
         assert!(user_matches(None, 1234).is_ok());
@@ -1270,6 +1299,7 @@ mod tests {
 
     #[test]
     fn start_pages_zoom_and_pill() {
+        let _serial = serial();
         assert_eq!(start_url("witcher3", 2109, 1), "https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1");
         assert_eq!(start_url("witcher3", 2109, 0), "https://www.nexusmods.com/witcher3/mods/2109?tab=files");
         assert_eq!(zoom_default(800.0, 100.0), 1.25);
@@ -1284,6 +1314,7 @@ mod tests {
 
     #[test]
     fn percent_decoding_keeps_odd_input() {
+        let _serial = serial();
         assert_eq!(percent_decode("a%20b"), "a b");
         assert_eq!(percent_decode("a%2"), "a%2");
         assert_eq!(percent_decode("%zz"), "%zz");
@@ -1292,6 +1323,7 @@ mod tests {
 
     #[test]
     fn leftovers_of_a_stopped_download_go_and_nothing_else() {
+        let _serial = serial();
         let dl = temp("partials");
         let dir = dl.join("Game Mods/Valheim");
         std::fs::create_dir_all(&dir).unwrap();
