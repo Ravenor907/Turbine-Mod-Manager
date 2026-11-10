@@ -4280,10 +4280,14 @@ Window {
     // 0.63: a double-click on a mod opens it: its details (what it needs, what it wins or loses, where it goes), or
     // its options when there is nothing more to tell. Each of the two clicks was A on the row, so the mod is first
     // put back the way it was before the first one.
+    // Counted here, not by the row: the first click turns the mod on or off, which can make the list build the row
+    // again, and a new row never sees the second click as a double-click.
     property var clickWas: null
-    function rowClickSeen(m) {
-        if (!m || !m.id) return
-        if (!clickWas || clickWas.id !== m.id || Date.now() - clickWas.at > 700) clickWas = { id: m.id, enabled: m.enabled === true, at: Date.now() }
+    function rowClickSeen(i, m) {
+        if (!m || !m.id) return false
+        if (clickWas && clickWas.id === m.id && Date.now() - clickWas.at <= Qt.styleHints.mouseDoubleClickInterval) { rowOpen(i, m.id); return true }
+        clickWas = { id: m.id, enabled: m.enabled === true, at: Date.now() }
+        return false
     }
     function rowOpen(i, id) {
         if (moving || orderMoving || selecting || wheelOpen || sheet !== "") return
@@ -6109,8 +6113,9 @@ Window {
                 () => { K(Qt.Key_Z, Qt.ControlModifier); const on = mods.filter(x => x.enabled).length
                         say(m.g === "Ctrl+Z" && on === m.wasOn && m.wasOn > 0, "the toast says " + m.g + " Undo; Ctrl+Z: " + on + " of " + m.wasOn + " back on") },
                 // The mouse: hover, click, right-click, Back, Ctrl with the wheel.
+                // A real mouse comes to the row from somewhere else (it may already rest on that spot from an earlier check).
                 () => { const it = modList.itemAtIndex(1); if (!it) return false
-                        const p = at(it, 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
+                        const p = at(it, 0.4); Turbine.selftestMouse(0, p.x + 40, p.y, 0, 0, 0); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
                 () => { say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, F, Q, E", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
                         m.on = mods[1].enabled; mouse(at(modList.itemAtIndex(1), 0.4), Qt.LeftButton) },
                 () => { say(mods[1].enabled !== m.on && modIndex === 1, "a click on a row is A: row " + (modIndex + 1) + " turned " + (mods[1].enabled ? "on" : "off"))
@@ -9663,8 +9668,7 @@ Window {
                                 // The legend says what A and X do: nothing printed twice.
                                 showHints: false
                                 // A click or tap anywhere on the row is A on it (turns it on or off; ticks it in Select several).
-                                onOpened: { if (entry.kind !== "mod" || app.sheet !== "" || app.wheelOpen || !app.gate(0, "onOpened")) return; app.rowOpen(entry.index, entry.m.id) }
-                                onClicked: { if (!app.gate(0, "onClicked")) return; if (app.moving && entry.kind === "mod") { app.moveByTap(entry.index); return } if (entry.kind === "mod" && !app.selecting) app.rowClickSeen(entry.m); app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
+                                onClicked: { if (!app.gate(0, "onClicked")) return; if (app.moving && entry.kind === "mod") { app.moveByTap(entry.index); return } if (entry.kind === "mod" && !app.selecting && app.rowClickSeen(entry.index, entry.m)) return; app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
                                 // A right-click (LT with the pointer) opens the mod's menu, like X.
                                 onMenuClicked: { if (!app.gate(0, "onMenuClicked")) return; if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" } }
                             }

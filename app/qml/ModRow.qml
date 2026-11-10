@@ -30,7 +30,6 @@ Rectangle {
     // A tap or click anywhere on the row (the pill included) is clicked(): Main.qml runs A on it.
     signal clicked()
     signal menuClicked()
-    signal opened()                       // 0.63: a double-click with the mouse: open the mod
     readonly property Item pillItem: pill
 
     function levelColor(level) {
@@ -96,9 +95,8 @@ Rectangle {
 
     HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
     // Touch: hold a moment for the mod's options (like X).
-    // A double-click opens the mod (0.63): counted by the same handler that sees every click (a second handler
-    // of its own never saw them).
-    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onDoubleTapped: root.opened(); onLongPressed: root.menuClicked() }
+    // A double-click opens the mod (0.63): Main counts it from the clicks (the row may be built again between them).
+    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
 
     Row {
