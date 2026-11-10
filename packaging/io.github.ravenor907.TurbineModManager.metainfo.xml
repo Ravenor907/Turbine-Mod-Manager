@@ -15,6 +15,26 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.62" date="2026-11-10" type="development">
+      <description>
+        <p>Start, pages, keys and a safer way into Steam:</p>
+        <ul>
+          <li>Start opens Settings; hold it for 3 seconds to play (A on Play still plays)</li>
+          <li>Get mods is a page of its own: My mods to the left, Load order to the right</li>
+          <li>The quick wheel's middle picks nothing and closes it</li>
+          <li>Keyboard and mouse work everywhere, and the hints follow what you used last</li>
+          <li>Smoother animations, with Full, Reduced or Off in Settings, Look</li>
+          <li>Elden Ring and other me3 games: a fix for the game closing by itself soon after it starts with mods</li>
+          <li>A Steam tool, Turbine (mods), picked once in the game's Properties, in place of restarting Steam in Game Mode</li>
+          <li>Seamless Co-op: never starts without a session password, one copy per game, and its screens say it loads only with Play Seamless Co-op</li>
+          <li>The Co-op tile is asked about once and added in Desktop Mode</li>
+          <li>A game that started and closed says so, with the Proton it ran on, instead of "didn't start"</li>
+          <li>One Nexus sign-in status everywhere, and better matching of games to Nexus</li>
+          <li>A new icon: the brass mark on a clear background</li>
+          <li>A quieter activity log, fuller bug reports, and one Downloads folder everywhere</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.61" date="2026-11-10" type="development">
       <description>
         <p>Smaller fixes after 0.6:</p>
