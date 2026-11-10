@@ -1422,7 +1422,18 @@ impl Worker {
             slot.store.mods().iter().filter(|m| !m.enabled && ids.contains(&m.id)).map(|m| quote(&m.id)).collect()
         };
         let held = held.join(",");
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}]}}", &mods[..mods.len() - 1]);
+        // 0.64: mods that are frameworks or loaders (My mods puts them under Dependencies with what other mods need).
+        let core: Vec<String> = {
+            let mut ids = slot.store.loader_mods(&slot.rules);
+            if slot.rules.family == rules::Family::Cyberpunk {
+                ids.extend(slot.store.mod_files().iter().filter(|m| !turbine_engine::cyberpunk::provides(&m.files).is_empty()).map(|m| m.id.clone()));
+            }
+            ids.sort();
+            ids.dedup();
+            ids.iter().map(|i| quote(i)).collect()
+        };
+        let core = core.join(",");
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}],\"core\":[{core}]}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);

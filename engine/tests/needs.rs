@@ -19,16 +19,21 @@ fn needs_and_needed_by() {
     ];
     let l = needs::links(&mods);
     assert_eq!(l[2].1, vec![
-        Need { name: "SkyUI".into(), id: Some("skyui".into()) },
-        Need { name: "Address Library".into(), id: Some("addr".into()) },
-        Need { name: "Missing Thing".into(), id: None },
+        Need { name: "SkyUI".into(), id: Some("skyui".into()), domain: "skyrimspecialedition".into(), mod_id: 12604 },
+        Need { name: "Address Library".into(), id: Some("addr".into()), domain: "skyrimspecialedition".into(), mod_id: 32444 },
+        Need { name: "Missing Thing".into(), id: None, domain: "skyrimspecialedition".into(), mod_id: 777 },
     ]);
     assert_eq!(l[0].2, vec!["hud".to_string()]);
     assert_eq!(l[1].2, vec!["hud".to_string()]);
     // Thunderstore: the loader pack left out, versions dropped, case ignored.
-    assert_eq!(l[3].1, vec![Need { name: "LethalLib".into(), id: Some("lib".into()) }, Need { name: "More Suits Core".into(), id: None }]);
+    assert_eq!(l[3].1, vec![
+        Need { name: "LethalLib".into(), id: Some("lib".into()), domain: String::new(), mod_id: 0 },
+        Need { name: "More Suits Core".into(), id: None, domain: String::new(), mod_id: 0 }
+    ]);
     assert_eq!(l[4].2, vec!["suits".to_string()]);
     let j = needs::links_json(&l);
-    assert!(j.contains("\"hud\":{\"needs\":[{\"name\":\"SkyUI\",\"id\":\"skyui\"}") && j.contains("\"neededBy\":[\"hud\"]"), "{j}");
+    assert!(j.contains("\"hud\":{\"needs\":[{\"name\":\"SkyUI\",\"id\":\"skyui\",\"domain\":\"skyrimspecialedition\",\"modId\":12604}") && j.contains("\"neededBy\":[\"hud\"]"), "{j}");
+    // 0.64: a missing Nexus requirement says where to get it.
+    assert!(j.contains("{\"name\":\"Missing Thing\",\"id\":null,\"domain\":\"skyrimspecialedition\",\"modId\":777}"), "{j}");
     assert!(!j.contains("\"zip\""));
 }

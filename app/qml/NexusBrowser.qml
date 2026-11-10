@@ -87,6 +87,17 @@ Item {
         walk(bar)
         return out
     }
+    // 0.64: the file page's Slow download button brought into view (scrolled to the middle, never pressed). `done`
+    // gets its middle in window pixels, or null when the page has none.
+    function lineUpSlow(done) {
+        if (!view) { done(null); return }
+        view.runJavaScript(
+            "(function(){var l=document.querySelectorAll('button,a');for(var i=0;i<l.length;i++){var e=l[i];" +
+            "if(/^\\s*slow download\\s*$/i.test(e.textContent||'')&&e.offsetParent!==null){e.scrollIntoView({block:'center'});" +
+            "var r=e.getBoundingClientRect();return [r.left+r.width/2,r.top+r.height/2]}}return null})()",
+            WebEngineScript.ApplicationWorld,
+            function (r) { done(r && r.length === 2 ? pagePoint(r[0], r[1]) : null) })
+    }
     function pagePoint(cx, cy) { return view ? view.mapToItem(null, cx * view.zoomFactor, cy * view.zoomFactor) : Qt.point(-1, -1) }
 
     Rectangle { anchors.fill: parent; color: nb.ui.c.ground }

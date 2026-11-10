@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*|protoncheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*|protoncheck*|reqcheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -232,7 +232,7 @@ done
 if [ "$MODE" = 1280x800 ]; then
 # 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
 # A new home for each (not a copy of the shared one, whose mods earlier pictures turned on and off): both mods start on.
-for p in controls legendcheck sheetcheck inputcheck startcheck keycheck; do
+for p in controls legendcheck sheetcheck inputcheck startcheck keycheck reqcheck; do
   rm -rf "$PWD/fh/$p"; python3 tools/fake-home.py "$PWD/fh/$p" > /dev/null; h="$PWD/fh/$p"
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 done
@@ -287,6 +287,19 @@ need $s "Start: the bar's hint is a 44 px button" "Start check: a click on the S
 need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck, .* 0 problems \| .*start, wheel, Play"
 need $s "Start checks" "Start check done: 0 problems"
 # 0.62: the keyboard and the mouse drive every screen, and the bar's hints follow the last input used.
+y=reqcheck-1280x800
+need $y "Requirements: one sheet after the add, Get them all" "Requirements check: after the add: This mod needs 2 others \| Get them all; Later"
+need $y "Requirements: Get them all lines them up and turns the installed one on" "Requirements check: Get them all: Getting 1 of 1: Test Library, the installed one turned on$"
+need $y "Requirements: the queue's first step" "Requirements: getting 1 of 1: Test Library"
+need $y "Requirements: Stop keeps a row in My mods" "Requirements check: Stop: stopped; My mods rows: needsq,"
+need $y "Requirements: the row goes on where it left off" "Requirements check: A on the row goes on: Getting 1 of 1: Test Library$"
+need $y "Requirements: Skip on the last one ends it" "Requirements check: Skip on the last one: done, rows: mod,"
+need $y "Requirements: Before you play warns, Get what they need first" "Requirements check: Before you play: Mods need others that aren't on: .*Test Library.* \| Get what they need; "
+need $y "Dependencies: a collapsed row at the bottom, A opens it" "Requirements check: Dependencies: rows mod,deps; A opens it: mod,deps,mod"
+need $y "Dependencies: X options move a mod out" "Requirements check: X options of a dependency: Move out of Dependencies"
+need $y "Dependencies: moved out, the load order unchanged" "Requirements check: moved out: rows mod,mod, the load order unchanged$"
+need $y "Dependencies: turning off a mod another needs warns" "Requirements check: turning off a mod another needs warns: [0-9a-z ]*needs? "
+need $y "Requirements and Dependencies checks" "Requirements check done: 0 problems"
 y=keycheck-1280x800
 need $y "Keys: arrows move the ring" "Key check: Down and Up: row 2 then row 1, last input keys$"
 need $y "Keys: the hints say the keys" "Key check: the hints after a key: Enter, Esc, R, F, Q, E$"
@@ -779,6 +792,7 @@ if command -v Xvfb > /dev/null; then
     fi
     need $n "2: WebEngine set up before the app ($size)" "WebEngine ready"
     need $n "Nexus page loaded in Turbine ($size)" "Browser check: the file page loaded in Turbine"
+    need $n "Get it: the file page's Slow download is lined up ($size)" "Slow download lined up: scrolled into view"
     need $n "9: legend, no field: Y Keyboard and R stick Pointer, no LT ($size)" "Browser legend \(no field\): A Click · B [^·]* · X Options · Y Keyboard · RS Pointer, 0 problems"
     need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Keyboard.*, 0 problems"
     if grep -Eq "Browser legend .*LT " "$log"; then echo "::error title=9: LT Menu is still in the legend ($size)::"; fail=1; fi

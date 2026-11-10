@@ -53,6 +53,8 @@ Window {
         property string lastGame: ""
         property string launchDone: "[]"    // games whose one-time Steam Launch Option note was seen
         property string onceDone: "[]"      // "<game id>|<title>": check lines read once (REDmod)
+        property string reqQueue: ""        // 0.64: the requirements being got: {game, forName, items: [{name, modId, domain}], index}
+        property string depMoves: "{}"      // 0.64: {game id: {mod id: "in" | "out"}}: the player moved a mod into or out of Dependencies
         property string played: "[]"        // game ids, last played first (the rail's order)
         property string bannerDone: "[]"    // games whose "No mods yet" line on Get mods was seen
         property bool tutorialDone: false
@@ -133,7 +135,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck", "oldercheck", "protoncheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck", "oldercheck", "protoncheck", "reqcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -1628,8 +1630,40 @@ Window {
         pickNoStart = true
     }
     // My mods: the pinned "+ Get mods" row, the mods, then one collapsed row for Recently removed.
+    // 0.64: mods that are mainly what other mods need (another installed mod lists it, or it is a known framework or
+    // loader) go into one collapsed row at the bottom, "Dependencies (5)"; A opens it. X options move a mod in or
+    // out. Only the list changes: the load order stays exactly as it is. Moving, Select several and Find show the
+    // whole list.
+    readonly property bool depsGrouped: !moving && !orderMoving && !selecting && findText === ""
+    property bool depsOpen: false
+    readonly property var depMoveMap: { const all = parse(seen.depMoves, {}); return game && all[game.id] ? all[game.id] : {} }
+    function isDep(m) {
+        const mv = depMoveMap[m.id]
+        if (mv === "out") return false
+        if (mv === "in") return true
+        if (coreIds.indexOf(m.id) >= 0) return true
+        const l = linksMap[m.id]
+        return !!l && (l.neededBy || []).some(id => mods.some(x => x.id === id))
+    }
+    function moveDep(m, into) {
+        let all = parse(seen.depMoves, {})
+        let g = Object.assign({}, all[game.id] || {})
+        g[m.id] = into ? "in" : "out"
+        all[game.id] = g
+        seen.depMoves = JSON.stringify(all)
+        note("action", m.name + (into ? ": moved into Dependencies" : ": moved out of Dependencies"))
+        toast.done(into ? m.name + " is in Dependencies now." : m.name + " is with your mods now.")
+        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.id)
+        if (i >= 0) modIndex = i
+    }
+    property var coreIds: []
+    readonly property var depMods: depsGrouped ? shownMods.filter(m => isDep(m)) : []
     readonly property var listItems: {
-        let l = shownMods.map(m => ({ kind: "mod", m: m }))
+        const deps = depMods
+        let l = shownMods.filter(m => deps.indexOf(m) < 0).map(m => ({ kind: "mod", m: m }))
+        if (deps.length > 0) l = l.concat([{ kind: "deps", m: { id: "", name: "" } }]).concat(depsOpen ? deps.map(m => ({ kind: "mod", m: m, dep: true })) : [])
+        // 0.64: requirements still to get (Later, Stop, or Turbine closed meanwhile): one row at the top goes on.
+        if (reqLeft && !reqRunning && !selecting) l.unshift({ kind: "needsq", m: { id: "", name: "" } })
         // 0.6: mods turned off from Steam's menu (Mods off) say so first, with the way back on that row.
         if (heldOff.length > 0 && !selecting) l.unshift({ kind: "held", m: { id: "", name: "" } })
         // Just uninstalled: the row stays, dimmed, for 8 seconds ("Removed", A puts it back), then the next row.
@@ -1987,6 +2021,7 @@ Window {
             app.setups = v.setups || []
             app.overlapsMap = v.overlaps || {}
             app.linksMap = v.links || {}
+            app.coreIds = v.core || []
             app.modWarns = v.warns || {}
             app.kcdRestore = v.kcdRestore === true
             app.placements = v.placements || {}
@@ -2646,6 +2681,9 @@ Window {
         const lfNow = launchFinding(healthNow())
         if (lfNow ? lfNow.info === true : launchSeen()) list = list.filter(x => x.title !== launchTitle)
         list = list.filter(x => !(x.once && x.title !== launchTitle && onceSeen(x.title)))
+        // 0.64: mods that are on but miss what they need (Virtual Car Dealer without Codeware and TweakXL).
+        const need = reqOnAll()
+        if (need.words !== "") list = list.filter(x => x.level !== "ok").concat([{ level: "warn", title: reqCheckTitle, detail: need.words + " Without them those mods may not load, or stop the game." }])
         // 0.6 (I14): one warning for one game update. Once its sheet was answered (Play without mods until they
         // update, or Keep my mods on), Before you play doesn't ask again about the same update.
         if (game && gameUpdate && (modHold || parse(seen.updateWarned, []).some(k => k.indexOf(game.id + "|" + gameUpdate.now) === 0)))
@@ -2693,6 +2731,7 @@ Window {
         if (w) return { label: w.offer.label, mod: w.offer.mod }
         // 0.64: Cyberpunk's frameworks without Microsoft's Visual C++ runtime in the game's Proton setup (error 998).
         if (checks.some(x => x.title === vcTitle)) return { label: "Install the Visual C++ runtime", vc: true }
+        if (checks.some(x => x.title === reqCheckTitle) && (reqOnAll().get.length > 0 || reqOnAll().off.length > 0)) return { label: "Get what they need", reqs: true }
         if (loaderMissing && needLoader.length > 0) return { label: (loaderCanGet ? "Install " : "Get ") + loaderShort, loader: true }
         // 0.6 (I25): low space, and Turbine is keeping removed mods: the way to free that space is one press.
         if (removedMods.length > 0 && checks.some(x => x.title === "Low space on the game's drive")) return { label: "Free space: Removed mods", removed: true }
@@ -2731,6 +2770,7 @@ Window {
             startPlay()
         } else if (o.loader) getLoader()
         else if (o.removed) openRemoved()
+        else if (o.reqs) { const r = reqOnAll(); reqStart({ name: r.names[0] || "your mods" }, r) }
         else if (o.vc) { note("action", "Install the Visual C++ runtime for " + gameTitle); if (!shot.on) Turbine.installVcRuntime() }
     }
     // Install the missing loader (from the check, the mod menu or the game menu); where it can't be fetched, the
@@ -2820,6 +2860,151 @@ Window {
         if (chainQueue.length === 0) return
         chainAfter = arrived
         if (sheet === "") { infoIndex = 0; sheet = "chain" }
+    }
+
+    // ---------------------------------------------------------------- 0.64: requirements, lined up
+    // A mod that needs others: one sheet, "This mod needs N others", with Get them all. The whole chain is followed
+    // (each mod got adds what it needs in turn), installed mods that are off are turned on, and the rest are got one
+    // after another: with Nexus Premium (or Thunderstore) with no press, with a free account on the mod's own file
+    // page, lined up on its Slow download button; after that press and the add, the next page opens by itself. A
+    // strip says "Getting 2 of 3: <name>" with Skip and Stop. The list is kept (Later, Stop, closing Turbine) and My
+    // mods keeps a row to go on where it left off. Where requirements come from: each mod author's list on Nexus.
+    property bool reqRunning: false
+    property var reqLookFor: null         // {id, name}: a mod just added, looked at once its requirements are known
+    readonly property var reqQ: { const q = parse(seen.reqQueue, null); return q && q.items ? q : null }
+    readonly property bool reqLeft: !!reqQ && !!game && reqQ.game === game.id && reqQ.index < reqQ.items.length
+    readonly property var reqItem: reqQ && reqQ.index < reqQ.items.length ? reqQ.items[reqQ.index] : null
+    readonly property string reqStripWords: reqRunning && reqItem ? "Getting " + (reqQ.index + 1) + " of " + reqQ.items.length + ": " + reqItem.name : ""
+    function reqSave(q) { seen.reqQueue = q ? JSON.stringify(q) : "" }
+    // What a mod needs that isn't on: installed but off (turned on by Get them all), and not installed (got).
+    function reqSplit(m) {
+        const miss = missingNeeds(m)
+        return { off: miss.filter(n => !!n.id && mods.some(x => x.id === n.id)).map(n => mods.find(x => x.id === n.id)),
+                 get: miss.filter(n => !n.id && n.modId > 0).map(n => ({ name: n.name, modId: n.modId, domain: n.domain || (rules ? rules.domain : "") })) }
+    }
+    Timer { id: reqLook; interval: 900; onTriggered: app.reqLookNow() }
+    function reqLookNow() {
+        const w = reqLookFor
+        if (w && sheet !== "" && !reqRunning) { reqLook.restart(); return }
+        reqLookFor = null
+        if (!w || !game) return
+        const m = mods.find(x => x.id === w.id)
+        if (!m) return
+        const r = reqSplit(m)
+        if (r.off.length === 0 && r.get.length === 0) { if (reqRunning) reqNextSoon(); return }
+        if (reqRunning && reqQ) {
+            // The chain: what this one needs comes right after it, before the rest of the list.
+            for (const x of r.off) if (!x.enabled) toggle(x, true)
+            const q = Object.assign({}, reqQ)
+            const fresh = r.get.filter(x => !q.items.some(y => y.modId === x.modId))
+            q.items = q.items.slice(0, q.index).concat(fresh).concat(q.items.slice(q.index))
+            reqSave(q)
+            note("action", "Requirements: " + m.name + " needs " + plural(fresh.length, "more mod", "more mods") + ": " + fresh.map(x => x.name).join(", "))
+            reqNextSoon()
+            return
+        }
+        reqOffer(m, r)
+    }
+    function reqOffer(m, r) {
+        const n = r.off.length + r.get.length
+        note("action", "Requirements: " + m.name + " needs " + n + ": " + r.off.map(x => x.name + " (off)").concat(r.get.map(x => x.name)).join(", "))
+        openMsg({ title: "This mod needs " + (n === 1 ? "1 other" : n + " others"), reason: "requirements",
+                  text: m.name + " needs these to work. Get them all gets each one in turn" + (account.premium === true ? "." : ": for each, press Slow download on its page and the next one opens by itself."),
+                  notes: r.off.map(x => x.name + ": installed, turned off (it is turned on)").concat(r.get.map(x => x.name + ": not installed")),
+                  footnote: "From the list the mod's author keeps on Nexus.",
+                  buttons: [{ key: "a", label: "Get them all", run: () => reqStart(m, r) },
+                            { key: "b", label: "Later", run: () => { reqSave({ game: game.id, forName: m.name, items: r.get, index: 0 }); for (const x of r.off) if (!x.enabled) toggle(x, true); note("action", "Requirements: later (My mods keeps a row)") } }] })
+    }
+    function reqStart(m, r) {
+        for (const x of r.off) if (!x.enabled) toggle(x, true)
+        if (r.get.length === 0) { toast.done("Turned on what " + m.name + " needs."); return }
+        reqSave({ game: game.id, forName: m.name, items: r.get, index: 0 })
+        reqRunning = true
+        note("action", "Requirements: get them all for " + m.name + " (" + r.get.map(x => x.name).join(", ") + ")")
+        reqNext()
+    }
+    function reqGoOn() {
+        if (!reqLeft) return
+        reqRunning = true
+        note("action", "Requirements: go on where it left off (" + (reqQ.index + 1) + " of " + reqQ.items.length + ")")
+        reqNext()
+    }
+    Timer { id: reqNextTimer; interval: 900; onTriggered: if (app.reqRunning) app.reqNext() }
+    function reqNextSoon() { reqNextTimer.restart() }
+    function reqNext() {
+        if (!reqRunning) return
+        const q = reqQ
+        if (!q || !game || q.game !== game.id) { reqRunning = false; return }
+        if (q.index >= q.items.length) { reqFinish(); return }
+        const it = q.items[q.index]
+        // Got meanwhile (another way): the next one.
+        if (mods.some(x => linksMapHas(x, it.modId))) { reqAdvance("already there"); return }
+        note("action", "Requirements: getting " + (q.index + 1) + " of " + q.items.length + ": " + it.name)
+        // The build's checks stop here (no internet): the step is in the log.
+        if (shot.on) return
+        if (account.premium === true && it.domain === (rules ? rules.domain : "")) {
+            Turbine.install(String(it.modId), "nexus")
+            edited()
+            return
+        }
+        if (it.domain && rules && it.domain !== rules.domain) { openNexus("https://www.nexusmods.com/" + it.domain + "/mods/" + it.modId + "?tab=files", "page"); return }
+        page = "game"; tab = 1; zone = "main"
+        openDetails({ id: String(it.modId), name: it.name, source: "nexus", icon: "" }, modPage)
+        pendingGet = true
+    }
+    // An installed mod that is this Nexus mod (its links entry names it as a provider for another mod, or its id).
+    function linksMapHas(m, modId) { return nexusModOf(m) === String(modId) }
+    function reqAdvance(why) {
+        const q = reqQ
+        if (!q) return
+        const done = q.items[q.index]
+        reqSave(Object.assign({}, q, { index: q.index + 1 }))
+        note("action", "Requirements: " + (done ? done.name : "") + " " + why)
+        reqNextSoon()
+    }
+    function reqSkip() {
+        if (!reqRunning) return
+        if (browserOpen) closeBrowser("back")
+        if (modPage) { modPage = false; history = [] }
+        reqAdvance("skipped")
+    }
+    function reqStop() {
+        if (!reqRunning) return
+        reqRunning = false
+        reqNextTimer.stop()
+        if (browserOpen) closeBrowser("back")
+        note("action", "Requirements: stopped at " + (reqQ ? (reqQ.index + 1) + " of " + reqQ.items.length : "the end"))
+        toast.info("Stopped. My mods keeps a row to go on where you left off.")
+    }
+    function reqFinish() {
+        const q = reqQ
+        reqRunning = false
+        reqSave(null)
+        if (modPage) { modPage = false; history = [] }
+        page = "game"; tab = 0; zone = "play"
+        note("action", "Requirements: done for " + (q ? q.forName : ""))
+        toast.done("Got everything " + (q ? q.forName : "it") + " needs. Hold " + glyph("start") + " to play.")
+    }
+    // Every mod that is on: what they miss together (each once), and words naming who needs what.
+    readonly property string reqCheckTitle: "Mods need others that aren't on"
+    function reqOnAll() {
+        let off = [], get = [], names = [], lines = []
+        for (const m of mods.filter(x => x.enabled)) {
+            const miss = missingNeeds(m)
+            if (miss.length === 0) continue
+            names.push(m.name)
+            if (lines.length < 3) lines.push(m.name + " needs " + miss.map(n => n.name).join(" and ") + ".")
+            const r = reqSplit(m)
+            for (const x of r.off) if (!off.some(y => y.id === x.id)) off.push(x)
+            for (const x of r.get) if (!get.some(y => y.modId === x.modId)) get.push(x)
+        }
+        if (names.length > 3) lines.push("And " + plural(names.length - 3, "more mod", "more mods") + ".")
+        return { off: off, get: get, names: names, words: lines.join(" ") }
+    }
+    // A mod arrived: its requirements are looked at once they are known (the list comes a moment after the add).
+    function reqArrived(id, name) {
+        reqLookFor = { id: id, name: name }
+        reqLook.restart()
     }
 
     // ---------------------------------------------------------------- game menu
@@ -3113,6 +3298,17 @@ Window {
         if (shot.on && shot.page !== "newmod" && shot.page !== "presscount" && shot.page.indexOf("browser") !== 0) return
         // Nexus is open in Turbine: the landing waits for it to close (by itself 2.5 seconds after a single file).
         if (browserOpen && page === "browser" && !landing) { browserArrived(gameId, id, name, on); return }
+        // 0.64: the requirements being got: the next one comes (and what this one needs goes in after it).
+        if (reqRunning && game && gameId === game.id) {
+            note("focus", "New mod while getting requirements: " + name)
+            if (reqItem) reqSave(Object.assign({}, reqQ, { index: reqQ.index + 1 }))
+            if (modPage) { modPage = false; history = [] }
+            busyHere = false
+            toast.done("Added " + name + ".")
+            reqArrived(id, name)
+            return
+        }
+        if (game && gameId === game.id) reqArrived(id, name)
         // A download that went on after Nexus was closed: the screen never jumps there by itself; a toast says so.
         if (!browserOpen && !landing && browserBackground.length > 0) {
             browserBackground = browserBackground.slice(1)
@@ -3263,7 +3459,10 @@ Window {
         ] : []
         const names = [{ icon: "info", title: "Rename", detail: menuMod.renamed ? "Now " + menuMod.name : "A name of your own for the list", act: "rename" }]
         const select = mods.length > 1 ? [{ icon: "files", title: "Select several", detail: "Tick this and others to change them together", act: "select" }] : []
-        const more = page.concat(check)
+        // 0.64: in or out of the Dependencies group (only the list changes, never the load order).
+        const dep = isDep(menuMod) ? [{ icon: "move", title: "Move out of Dependencies", detail: "Show it with your mods", act: "depout" }]
+                                   : [{ icon: "move", title: "Move into Dependencies", detail: "For a mod that is mainly what others need", act: "depin" }]
+        const more = page.concat(check).concat(dep)
             .concat(src === "nexus" ? [{ icon: "update", title: "Other files", detail: "Another version or file from its page", act: "files", src: src }] : [])
             .concat([{ icon: "files", title: "Show its files", detail: plural(menuMod.files || 0, "file", "files") + " it puts in the game", act: "showfiles" }])
             .concat(placements[menuMod.id] ? [{ icon: "move", title: "Change where it goes", detail: "Now in " + folderWords(placements[menuMod.id].to), act: "place" }] : [])
@@ -3328,9 +3527,15 @@ Window {
         else if (item.act === "loader") getLoader()
         else if (item.act === "needs") {
             note("action", "Get what it needs: " + item.need)
-            sheet = ""; page = "game"; modPage = false; history = []; tab = 1; zone = "main"
+            sheet = ""
+            // 0.64: the same sheet as after an add (Get them all); a need Turbine can't name on Nexus is searched.
+            const r = reqSplit(m)
+            if (r.get.length > 0 || r.off.length > 0) { reqOffer(m, r); return }
+            page = "game"; modPage = false; history = []; tab = 1; zone = "main"
             getText = String(item.need); getCategory = ""; browseNow()
         }
+        else if (item.act === "depout") moveDep(m, false)
+        else if (item.act === "depin") moveDep(m, true)
         else if (item.act === "check") startPlay()
         else if (item.act === "top") moveMod(m, 0)
         else if (item.act === "bottom") moveMod(m, mods.length - 1)
@@ -4825,6 +5030,14 @@ Window {
                 o.x = bind("Options", () => { menuIndex = 0; sheet = "modmenu" })
             } else if (it && it.kind === "ghost") o.a = bind("Put back", () => putBack(it.m.id))
             else if (it && it.kind === "held") o.a = bind("Turn them back on", turnHeldBackOn)
+            else if (it && it.kind === "deps") o.a = bind(depsOpen ? "Close" : "Open", () => { depsOpen = !depsOpen; note("action", "Dependencies " + (depsOpen ? "opened" : "closed")) })
+            else if (it && it.kind === "needsq") {
+                o.a = bind("Go on", reqGoOn)
+                o.x = bind("Options", () => openPick("Requirements for " + reqQ.forName, plural(reqQ.items.length - reqQ.index, "mod left", "mods left"), [
+                    { icon: "update", title: "Go on", detail: reqItem ? "Next: " + reqItem.name : "", run: () => reqGoOn() },
+                    { icon: "remove", title: "Forget them", detail: "The row goes; the mod's warning stays until they are in", run: () => { reqSave(null); note("action", "Requirements: forgotten") } }
+                ], ""))
+            }
             else if (it && it.kind === "removed") {
                 o.a = bind("Open", openRemoved)
                 o.x = bind("Options", openRemoved)
@@ -6181,6 +6394,60 @@ Window {
         }
         // 0.62: the Co-op tile's rows follow the engine's answer for where Turbine runs: in Desktop Mode one press
         // (at once with Steam closed, or one restart, asked first), in Game Mode words only with OK.
+        // 0.64: requirements lined up and the Dependencies group, by real presses. The build has no internet, so the
+        // requirement is given to the first mod here (as Nexus's list would after an add); the queue's first step
+        // is read from the log instead of a page opening.
+        else if (name === "reqcheck") {
+            m.bad = 0
+            const say = (ok, text) => { if (!ok) m.bad++; check("Requirements check: " + text + (ok ? "" : "  PROBLEM")) }
+            const give = () => { const l = Object.assign({}, linksMap); l[mods[0].id] = { needs: [{ name: "Test Library", id: null, domain: rules.domain, modId: 4242 }], neededBy: [] }
+                                 l[mods[1].id] = { needs: [], neededBy: [mods[0].id] }; l[mods[0].id].needs.push({ name: mods[1].name, id: mods[1].id, domain: "", modId: 0 }); linksMap = l }
+            const rowKinds = () => listItems.map(x => x.kind).join(",")
+            script = [
+                () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0
+                        if (!mods[0].enabled) toggle(mods[0], true)
+                        if (mods[1].enabled) toggle(mods[1], true)
+                        reqSave(null); reqRunning = false },
+                // An add of a mod that needs one mod that isn't installed and one that is but is off.
+                () => { give(); reqArrived(mods[0].id, mods[0].name); m.t = Date.now() },
+                () => { if (sheet !== "msg" && Date.now() - m.t < 4000) return false
+                        say(sheet === "msg" && !!msgData && msgData.title === "This mod needs 2 others" && msgData.buttons.map(b => b.label).join("; ") === "Get them all; Later",
+                            "after the add: " + (sheet === "msg" && msgData ? msgData.title + " | " + msgData.buttons.map(b => b.label).join("; ") + " | " + (msgData.notes || []).join("; ") : "sheet \"" + sheet + "\""))
+                        pad("a") },
+                () => { say(reqRunning && reqStripWords === "Getting 1 of 1: Test Library" && mods[1].enabled, "Get them all: " + (reqStripWords || "nothing running") + ", the installed one turned " + (mods[1].enabled ? "on" : "off"))
+                        reqStop() },
+                () => { say(!reqRunning && listItems[0] && listItems[0].kind === "needsq", "Stop: " + (reqRunning ? "still running" : "stopped") + "; My mods rows: " + rowKinds())
+                        modIndex = 0; zone = "main"; pad("a") },
+                () => { say(reqRunning && reqStripWords === "Getting 1 of 1: Test Library", "A on the row goes on: " + (reqStripWords || "nothing running"))
+                        reqSkip() },
+                () => { if (reqRunning) return false },
+                () => { say(!reqRunning && !reqLeft, "Skip on the last one: " + (reqRunning ? "still running" : "done") + ", rows: " + rowKinds()) },
+                // Before you play names what is missing, with Get what they need first.
+                () => { give(); m.c = playAsks; startPlay() },
+                () => { if (sheet !== "check") return false
+                        const row = checks.find(x => x.title === reqCheckTitle)
+                        say(!!row && checkChoices[0] === "Get what they need", "Before you play: " + (row ? row.title + ": " + row.detail : "no row") + " | " + checkChoices.join("; "))
+                        pad("b") },
+                // Dependencies: the mod another one needs goes into the group at the bottom, A opens it, X moves it out.
+                () => { if (sheet !== "") return false; give(); depsOpen = false; zone = "main"
+                        m.k1 = rowKinds(); modIndex = listItems.findIndex(x => x.kind === "deps"); pad("a") },
+                () => { const i = listItems.findIndex(x => x.kind === "mod" && x.dep)
+                        say(m.k1 === "mod,deps" && depsOpen && i >= 0, "Dependencies: rows " + m.k1 + "; A opens it: " + rowKinds() + (i >= 0 ? " (" + listItems[i].m.name + ")" : ""))
+                        if (i >= 0) { modIndex = i; pad("x") } },
+                () => { if (sheet !== "modmenu") return false
+                        const more = modMenuItems.find(x => x.act === "more"), rows = more ? more.rest : []
+                        const out = rows.find(x => x.act === "depout")
+                        say(!!out, "X options of a dependency: " + (out ? out.title : "no Move out row") + "; order before: " + mods.map(x => x.name).join(", "))
+                        m.order = mods.map(x => x.id).join(",")
+                        if (out) modMenuDo(out, focusedItem.m); sheet = "" },
+                () => { give()
+                        say(rowKinds() === "mod,mod" && mods.map(x => x.id).join(",") === m.order, "moved out: rows " + rowKinds() + ", the load order " + (mods.map(x => x.id).join(",") === m.order ? "unchanged" : "CHANGED"))
+                        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === mods[1].id); modIndex = i; m.warnBefore = sheet; pad("a") },
+                () => { say(sheet === "pick" && /need/.test(pickTitle), "turning off a mod another needs warns: " + (sheet === "pick" ? pickTitle : "sheet \"" + sheet + "\""))
+                        pad("b"); seen.depMoves = "{}" },
+                () => { check("Requirements check done: " + m.bad + " problems") }
+            ]
+        }
         else if (name === "tilecheck") script = [
             () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0
                     const o = coopTileOffer
@@ -6795,7 +7062,7 @@ Window {
                  premium: false, page: page, filePage: page, partial: true, problem: problem, versions: [], needs: null }
     }
     onDetailsDataChanged: {
-        if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails() }
+        if (pendingGet && detailsData && !detailsData.loading) { pendingGet = false; if (!detailsData.error) installFromDetails(); else if (reqRunning) reqAdvance("couldn't be opened (" + detailsData.error + ")") }
         if (pendingFiles && detailsData && !detailsData.loading) { pendingFiles = false; if (otherVersions.length > 0) openVersions(); else toast.info("No other files for this mod.") }
     }
     readonly property bool pageInstalled: !!detailsData && (detailsData.installed === true || (detailsItem && detailsItem.installed === true))
@@ -6913,11 +7180,8 @@ Window {
         if (detailsData.source === "nexus" && detailsData.premium === false) {
             const url = detailsData.filePage || detailsData.page
             note("action", "Get it on Nexus: " + detailsData.name + " (" + url + ")")
-            const miss = (detailsData.needs && detailsData.needs.missing ? detailsData.needs.missing : []).filter(r => r.modId > 0 && r.url)
-            // What it needs comes next, one at a time (the chain sheet after it arrives). Opened from the chain, the
-            // rest of the earlier queue stays after this mod's own needs.
-            const fresh = miss.map(r => ({ name: r.name, modId: r.modId, url: r.url + (r.url.indexOf("?") < 0 ? "?tab=files" : "") }))
-            chainQueue = chainKeep ? fresh.concat(chainQueue.filter(x => !fresh.some(y => y.modId === x.modId))) : fresh
+            // 0.64: what it needs is offered once it is in ("This mod needs N others", Get them all).
+            chainQueue = []
             chainKeep = false
             openNexus(url, "getit")
             return
@@ -7076,6 +7340,22 @@ Window {
     property var browserBackground: []      // downloads still running when the page closed (their paths)
     property real browserStartMod: 0        // the Nexus mod of the page Turbine opened (0: not a mod's page)
     property real closedAddedAt: 0
+    // 0.64: a mod's file page opened by Get it: its Slow download button is scrolled into view and the pointer put on
+    // it (the page draws it a moment after it loads, so it is looked for a few times). Pressing stays the player's.
+    property int slowTries: 0
+    Timer {
+        id: slowLineUp
+        interval: 700
+        onTriggered: {
+            if (!app.browserOpen || !app.nexusView || app.browserOpener !== "getit") return
+            app.nexusView.lineUpSlow(p => {
+                if (p && p.x >= 0) {
+                    app.note("browser", "Slow download lined up: scrolled into view" + (shot.on ? " (the build's check leaves the pointer where its steps put it)" : ", the pointer on it"))
+                    if (!shot.on) Turbine.pointerShowAt(p.x, p.y)
+                } else if (++app.slowTries < 4) slowLineUp.restart()
+            })
+        }
+    }
     // View, Game menu, Nexus downloads (and a tap on "Getting 1 mod" at the top): the page again, on its Downloads tab.
     function openNexusDownloads() {
         sheet = ""
@@ -7328,7 +7608,10 @@ Window {
     function openBrowserMenu(keep) {
         if (!browserOpen) return
         const zoomWords = Math.round(browserZoom * 100) + "% · Left, Right change it" + (Math.abs(browserZoom - browserZoomSaved) > 0.001 ? " · A keeps it" : "")
-        openPick("Nexus", nexusView ? nexusView.title : "", (nexusView && nexusView.canGoForward ? [
+        openPick("Nexus", nexusView ? nexusView.title : "", (reqRunning ? [
+            { icon: "update", title: "Skip this one", detail: reqStripWords, run: () => reqSkip() },
+            { icon: "remove", title: "Stop getting them", detail: "My mods keeps a row to go on later", run: () => reqStop() }
+        ] : []).concat(nexusView && nexusView.canGoForward ? [
             { icon: "info", title: "Forward", detail: "The page you went back from", run: () => { if (nexusView) nexusView.forward() } }
         ] : []).concat([
             { icon: "update", title: "Reload", detail: "", run: () => { if (nexusView) nexusView.reload() } },
@@ -7393,6 +7676,7 @@ Window {
             if (what === "upload") app.browserSay("Uploading files isn't possible here.", "warn")
             if (what === "crashed") app.browserSay("The page stopped. X, Reload brings it back.", "warn")
             if (what === "loaded" && app.launching) app.launching = false
+            if (what === "loaded" && app.browserOpener === "getit") { app.slowTries = 0; slowLineUp.restart() }
         }
         function onDialogWanted(request) { app.browserDialog(request) }
         function onMenuWanted() { app.openBrowserMenu() }
@@ -9656,8 +9940,9 @@ Window {
                                 id: row
                                 visible: entry.kind === "mod"
                                 ui: kit
-                                x: app.px(4)
-                                width: parent.width - app.px(8)
+                                // 0.64: rows inside the open Dependencies group sit a little in.
+                                x: app.px(entry.modelData.dep ? 24 : 4)
+                                width: parent.width - app.px(entry.modelData.dep ? 28 : 8)
                                 name: entry.m.name || ""
                                 detail: entry.kind === "mod" ? app.rowLine(entry.m).text : ""
                                 detailLevel: entry.kind === "mod" ? app.rowLine(entry.m).level : ""
@@ -9701,8 +9986,10 @@ Window {
                                     elide: Text.ElideRight
                                     text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
                                           : entry.kind === "held" ? app.heldWords
+                                          : entry.kind === "deps" ? "Dependencies (" + app.depMods.length + ") · what your mods need" + (app.depsOpen ? "" : " · A opens it")
+                                          : entry.kind === "needsq" && app.reqQ ? app.reqQ.forName + " still needs " + app.plural(app.reqQ.items.length - app.reqQ.index, "mod", "mods") + " · A goes on where you left off"
                                           : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
-                                    color: entry.kind === "ghost" ? c.soft : entry.kind === "held" ? c.warn : c.muted
+                                    color: entry.kind === "ghost" ? c.soft : entry.kind === "held" || entry.kind === "needsq" ? c.warn : entry.kind === "deps" ? c.soft : c.muted
                                     font.pixelSize: app.fpx(15)
                                     font.italic: entry.kind === "ghost"
                                 }
@@ -11370,6 +11657,41 @@ Window {
     property var toastAction: null
     function runToastAction() { const f = toastAction; if (!f) return; note("action", "Toast: " + toast.actionLabel); toastAction = null; toast.hide(); f() }
     property real lastToastAt: 0
+    // 0.64: "Getting 2 of 3: <name>" while requirements are got one after another, with Skip and Stop (also in X
+    // options on the Nexus page).
+    Rectangle {
+        id: reqStrip
+        visible: app.reqStripWords !== ""
+        z: 95
+        anchors.horizontalCenter: parent.horizontalCenter
+        y: app.px(8)
+        width: reqStripRow.implicitWidth + app.px(20)
+        height: Math.max(app.px(40), app.tpx(34))
+        radius: app.px(8)
+        color: c.panel
+        border.color: c.accent
+        border.width: Math.max(1, app.px(1.5))
+        Row {
+            id: reqStripRow
+            anchors.centerIn: parent
+            spacing: app.px(12)
+            Label { text: app.reqStripWords; font.pixelSize: app.fpx(15); color: c.text; anchors.verticalCenter: parent.verticalCenter }
+            Repeater {
+                model: [["Skip", () => app.reqSkip()], ["Stop", () => app.reqStop()]]
+                Rectangle {
+                    required property var modelData
+                    width: reqBtnText.implicitWidth + app.px(20); height: Math.max(app.px(30), app.tpx(30)); radius: app.px(6)
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: c.raised; border.color: c.accentLo; border.width: Math.max(1, app.px(1))
+                    Label { id: reqBtnText; anchors.centerIn: parent; text: parent.modelData[0]; font.pixelSize: app.fpx(14); color: c.text }
+                    Accessible.role: Accessible.Button
+                    Accessible.name: parent.modelData[0]
+                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                    TapHandler { onTapped: { app.note("touch", "Requirements strip: " + parent.modelData[0]); parent.modelData[1]() } }
+                }
+            }
+        }
+    }
     Toast {
         id: toast
         ui: kit
