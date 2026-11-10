@@ -866,8 +866,10 @@ Window {
         note("action", "Anti-cheat guide: " + gameTitle)
         openMsg({ title: "Play " + gameTitle + " with mods", text: gameTitle + " has its own switch for this, in Steam's Play menu.", steps: acInfo.guide || [], buttons: [{ key: "b", label: "Close", run: () => {} }] })
     }
-    readonly property bool seamlessIn: mods.some(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless")
-    readonly property var seamlessMod: mods.find(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless") || null
+    // 0.62: the engine marks the one Seamless Co-op the game loads ("seamless": true in the mods' JSON), whatever
+    // it came from: Turbine's own download or a copy from Nexus count the same. Every test for it reads that mark.
+    readonly property bool seamlessIn: mods.some(m => m.seamless === true)
+    readonly property var seamlessMod: mods.find(m => m.seamless === true) || null
     // 0.58: Play Seamless Co-op (Elden Ring through Steam and me3, its own .co2 saves). Turns it on first if it's off.
     // 0.62: every co-op start comes through here (the Play choice, Start held, Play options, the Co-op tile and
     // Steam's menu, "Use it again"): with no session password the mod stops with an error, so its settings open
@@ -1068,7 +1070,7 @@ Window {
             icon: "info", title: f.rel.split("/").pop(), detail: f.rel + (f.edited ? " · changed by you" : ""), aLabel: "Edit",
             run: () => openSettingsFile("", f.rel, gameTitle + ": " + f.rel.split("/").pop(), [], "") })), "gamemenu")
     }
-    function isSeamless(m) { return !!m && m.sourceKind === "loader" && String(m.sourceId || "") === "seamless" }
+    function isSeamless(m) { return !!m && m.seamless === true }
     function openCoopSettings() {
         if (!seamlessMod) { openMsg({ title: "Seamless Co-op isn't installed", text: "Get it first: Turbine downloads it from its official release and checks it.", steps: [], notes: [], footnote: "",
                                       buttons: [{ key: "a", label: "Get Seamless Co-op", run: () => { const i = gameMenuItems.findIndex(x => x.act === "seamless"); if (i >= 0) gameMenuRun(i) } }, { key: "b", label: "Not now", run: () => {} }] }); return }
@@ -5604,7 +5606,10 @@ Window {
                                           say(sheet === "" && !coopAfterSettings && playAsks === m.asks, how + ", then B and B: sheet \"" + sheet + "\", waiting " + coopAfterSettings + ", Play asked " + (playAsks - m.asks) + " times") }
             script = [
                 () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); m.asks = playAsks
-                        say(Turbine.coopPasswordState(seamlessMod.id) === 0, "at the start the password is " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1]) },
+                        say(Turbine.coopPasswordState(seamlessMod.id) === 0, "at the start the password is " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1])
+                        // 0.62: this copy came from Nexus, not Turbine's own download: it counts just the same.
+                        say(seamlessMod.seamless === true && seamlessMod.sourceKind === "nexus" && isSeamless(seamlessMod) && rowLine(seamlessMod).text === "Loads only with Play Seamless Co-op" && settingsFilesOf(seamlessMod.id).length > 0,
+                            "Seamless Co-op from " + seamlessMod.sourceKind + ": marked " + (seamlessMod.seamless === true ? "seamless" : "not seamless") + ", its row says " + rowLine(seamlessMod).text + ", settings files " + settingsFilesOf(seamlessMod.id).length) },
                 // 1: the Play choice (A on Play, then Play Seamless Co-op).
                 () => { zone = "play"; pad("a") },
                 () => { if (sheet !== "pick") return false; menuIndex = pickItems.findIndex(x => x.key === "coop"); m.t = Date.now(); pad("a") },

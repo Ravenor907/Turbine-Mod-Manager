@@ -974,10 +974,12 @@ for size in $SIZES; do
   # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
   # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
   rm -rf "$PWD/fh/cooppw-$size"; python3 tools/fake-home.py "$PWD/fh/cooppw-$size" --anticheat > /dev/null; hp="$PWD/fh/cooppw-$size"
-  shoot "cooppw-$size" "$size" cooppw "$hp" --game=$er "--selftest-import=$hp/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  # (0.62: this copy is added as a Nexus download, so every co-op path here also proves it counts as Seamless Co-op.)
+  shoot "cooppw-$size" "$size" cooppw "$hp" --game=$er "--selftest-import=$hp/Downloads/Seamless Co-op 2.0.1.zip|nexus|eldenring:510:1|2.0.1"
   n="cooppw-$size"
   stop="nothing started, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true$"
   need $n "Co-op password: empty at the start ($size)" "Co-op password check: at the start the password is empty$"
+  need $n "Seamless Co-op from Nexus counts like Turbine's own ($size)" "Co-op password check: Seamless Co-op from nexus: marked seamless, its row says Loads only with Play Seamless Co-op, settings files [1-9]"
   need $n "Co-op password: the Play choice stops for it ($size)" "Co-op password check: The Play choice: $stop"
   need $n "Co-op password: Start held stops for it ($size)" "Co-op password check: Start held \\(last choice coop\\): $stop"
   need $n "Co-op password: Play options stops for it ($size)" "Co-op password check: Play options \\(wheel slot Play options\\): $stop"
