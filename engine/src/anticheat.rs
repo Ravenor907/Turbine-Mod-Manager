@@ -42,6 +42,8 @@ pub const ME3_FILES: &[&str] = &["bin/me3", "bin/win64/me3-launcher.exe", "bin/w
 /// so a pinned release can never be right for long: Turbine gets the newest release its repository lists
 /// (loaders::fetch_seamless, size and SHA-256 recorded at the download) or the player gets it from Nexus.
 pub const SEAMLESS_PAGE: &str = "https://www.nexusmods.com/eldenring/mods/510";
+/// Seamless Co-op on Nexus: the game's domain and the mod's number (its page usually has the newest version first).
+pub const SEAMLESS_NEXUS: (&str, u64) = ("eldenring", 510);
 /// Seamless Co-op's DLL inside its zip; me3 loads it as a native.
 pub const SEAMLESS_DLL: &str = "SeamlessCoop/ersc.dll";
 
@@ -1121,6 +1123,32 @@ pub fn arm_coop_once(data: &Path, store_root: &Path, app_id: &str, args: &[Strin
 /// Is this path Seamless Co-op's DLL (whatever folder it is in)?
 pub fn is_seamless_file(rel: &str) -> bool {
     rel.replace('\\', "/").rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("ersc.dll"))
+}
+
+/// Is this list of files Seamless Co-op's own package: its ersc.dll in a SeamlessCoop folder with ersc_settings.ini
+/// beside it, at the top or one folder down ("Game/SeamlessCoop/...")? A bigger mod that merely carries an
+/// ersc.dll somewhere is not (0.62 break test M3: such a bundle took Seamless Co-op's place in the list).
+pub fn is_seamless_package(files: &[String]) -> bool {
+    let lower: Vec<String> = files.iter().map(|f| f.replace('\\', "/").to_ascii_lowercase()).collect();
+    lower.iter().any(|f| {
+        let Some(prefix) = f.strip_suffix("seamlesscoop/ersc.dll") else { return false };
+        let folders = prefix.split('/').filter(|p| !p.is_empty()).count();
+        (prefix.is_empty() || prefix.ends_with('/')) && folders <= 1 && lower.contains(&format!("{prefix}seamlesscoop/ersc_settings.ini"))
+    })
+}
+
+/// The words when an older Seamless Co-op download is not put over a newer installed one. The app asks ("Keep
+/// <have>" by default, or "Use <this>", which is `Store::allow_older_seamless` and adding the file again).
+pub fn older_seamless_words(have: &str, this: &str) -> String {
+    format!("You have Seamless Co-op {have}. This file is {this}, which is older, so Turbine kept {have}.")
+}
+
+/// (the version installed, the older file's version) from `older_seamless_words`, for the app's question.
+pub fn older_seamless_in(words: &str) -> Option<(String, String)> {
+    let rest = &words[words.find("You have Seamless Co-op ")? + "You have Seamless Co-op ".len()..];
+    let (have, rest) = rest.split_once(". This file is ")?;
+    let (this, _) = rest.split_once(", which is older")?;
+    Some((have.to_string(), this.to_string()))
 }
 
 /// The version a Windows program file says it is ("2.0.2"), from its version block (VS_FIXEDFILEINFO: the file

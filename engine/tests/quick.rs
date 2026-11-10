@@ -181,7 +181,7 @@ fn mods_off_then_on_brings_back_exactly_those() {
     // The plugin's read-only look sees the same, in the same folder.
     assert_eq!(quick::existing_root(&g, &data).as_deref(), Some(s.root()));
     let p = quick::peek(s.root());
-    assert_eq!(p, Peek { mods: 3, on: 0, held: 2, seamless: false, seamless_on: false });
+    assert_eq!(p, Peek { mods: 3, on: 0, held: 2, seamless: false, seamless_on: false, seamless_version: None });
 
     // Reopened (as the next run sees it): still held.
     drop(s);
@@ -217,7 +217,7 @@ fn status_says_what_the_panel_shows() {
     )
     .unwrap();
     let p = quick::peek(&root);
-    assert_eq!(p, Peek { mods: 3, on: 1, held: 0, seamless: true, seamless_on: false });
+    assert_eq!(p, Peek { mods: 3, on: 1, held: 0, seamless: true, seamless_on: false, seamless_version: None });
     let x = Extra { has_store: true, running: Some(false), turbine_open: false, turbine_url: "steam://rungameid/1".into(), anti_cheat: "me3".into(), coop_game: true, words: String::new() };
     let l = Launch { at: 5, how: "mods".into(), result: "closed".into(), seconds: Some(8), words: String::new() };
     let j = turbine_engine::json::parse(&quick::status_json(&g, &p, Some(&l), &x)).unwrap();

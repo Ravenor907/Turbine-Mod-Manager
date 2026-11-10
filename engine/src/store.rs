@@ -127,6 +127,18 @@ pub struct SeamlessMod {
     pub enabled: bool,
     /// "loader" (Turbine's own download), "nexus", "zip" and so on.
     pub source_kind: String,
+    /// Seamless Co-op's own package (anticheat::is_seamless_package), not a bigger mod that carries its DLL.
+    pub package: bool,
+}
+
+impl SeamlessMod {
+    /// "Seamless Co-op 2.0.2" (the name alone without a version).
+    pub fn shown(&self) -> String {
+        match &self.version {
+            Some(v) => format!("{} {v}", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 /// What `Store::coop_check` found.
@@ -599,6 +611,8 @@ pub struct Store {
     merged_in_place: std::sync::Mutex<Vec<PathBuf>>,
     /// 0.62: what the merge of in-place settings changes has to tell the player (for the next apply's report).
     settings_notes: std::sync::Mutex<Vec<String>>,
+    /// 0.62: the player allowed one older Seamless Co-op over a newer one (`allow_older_seamless`).
+    older_seamless_ok: bool,
 }
 
 /// A staged folder's files by folder, with its inode and modification time when read.
@@ -1037,6 +1051,7 @@ impl Store {
             files_cache: std::sync::Mutex::new(HashMap::new()),
             merged_in_place: std::sync::Mutex::new(Vec::new()),
             settings_notes: std::sync::Mutex::new(Vec::new()),
+            older_seamless_ok: false,
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -1481,7 +1496,16 @@ impl Store {
             return Err(why);
         }
         let target = self.target_for(archive, source, None)?;
-        self.begin(archive, target)
+        let done = self.begin(archive, target)?;
+        // 0.62: one Seamless Co-op per game. A new copy of it (from anywhere) takes the place of the copies
+        // installed, with their settings; they go to Removed mods, so the change can be put back.
+        if let Import::Added(d) = &done {
+            if self.rules.me3_game().is_some() {
+                let id = d.item.id.clone();
+                self.supersede_seamless(&id).map_err(|e| format!("Seamless Co-op was added, but the copy it replaces couldn't be moved to Removed mods ({e})."))?;
+            }
+        }
+        Ok(done)
     }
 
     /// Replaces a mod's files with a new download (an update), keeping its place, on/off state and name.
@@ -1872,9 +1896,8 @@ impl Store {
             if files.is_empty() {
                 return Err(fail(format!("the {} file is empty", target.format_label)));
             }
-            // 0.62: one Seamless Co-op per game. A new download of it (from anywhere) takes the place of the one
-            // installed, keeping its settings, instead of becoming a second mod with the same files.
-            let target = self.one_seamless(&target, &files);
+            // 0.62: an older Seamless Co-op is never put over a newer installed copy without the player's word.
+            self.older_seamless_stop(&target, &files)?;
             let mut work = unpacked.clone();
             let mut notes = Vec::new();
 
@@ -2300,66 +2323,104 @@ impl Store {
 
     // ---- Seamless Co-op (0.62): one copy, whatever its source ----
 
-    /// The installed mods that are Seamless Co-op (they hold its ersc.dll), in list order. Only for a game me3
-    /// starts. Turbine's own download and one from Nexus count the same.
+    /// The installed mods that hold Seamless Co-op's ersc.dll, in list order. Only for a game me3 starts. Turbine's
+    /// own download and one from Nexus count the same; `package` tells Seamless Co-op itself from a bigger mod that
+    /// carries the DLL.
     pub fn seamless_mods(&self) -> Vec<SeamlessMod> {
         if self.rules.me3_game().is_none() {
             return Vec::new();
         }
         self.mods
             .iter()
-            .filter(|m| self.staged_files(&self.mod_dir(&m.id)).iter().any(|f| crate::anticheat::is_seamless_file(f)))
-            .map(|m| SeamlessMod { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), enabled: m.enabled, source_kind: self.source_of(&m.id).kind })
+            .filter_map(|m| {
+                let files = self.staged_files(&self.mod_dir(&m.id));
+                files.iter().any(|f| crate::anticheat::is_seamless_file(f)).then(|| SeamlessMod {
+                    id: m.id.clone(),
+                    name: m.name.clone(),
+                    version: m.version.clone(),
+                    enabled: m.enabled,
+                    source_kind: self.source_of(&m.id).kind,
+                    package: crate::anticheat::is_seamless_package(&files),
+                })
+            })
             .collect()
     }
 
-    /// The Seamless Co-op the game loads: among the copies that are on (or among all, when none is on) the newest
-    /// version; with the same version, the one later in the list.
+    /// The Seamless Co-op for this game: its own package before a bigger mod that carries the DLL, then the newest
+    /// version, whether it is on or off (0.62 break test M2: with the newest copy off, the older one that was on
+    /// was called "the one the game loads" and Tidy up kept it); with the same version, the one later in the list.
+    /// Its files are the only Seamless Co-op files that go into the game's mod folder, and only while it is on.
     pub fn seamless(&self) -> Option<SeamlessMod> {
-        let all = self.seamless_mods();
-        let any_on = all.iter().any(|m| m.enabled);
         let mut best: Option<SeamlessMod> = None;
-        for m in all.into_iter().filter(|m| m.enabled || !any_on) {
-            let newer = match &best {
+        for m in self.seamless_mods() {
+            let better = match &best {
                 None => true,
+                Some(b) if m.package != b.package => m.package,
                 Some(b) => crate::updates::compare_versions(m.version.as_deref().unwrap_or("0"), b.version.as_deref().unwrap_or("0")) != std::cmp::Ordering::Less,
             };
-            if newer {
+            if better {
                 best = Some(m);
             }
         }
         best
     }
 
-    /// Older copies of Seamless Co-op that are on next to the one the game loads: none of their files go into the
-    /// game's mod folder, so an older ersc.dll or its settings file can never win over the newer one.
-    fn seamless_passed_over(&self) -> Vec<String> {
-        let Some(used) = self.seamless() else { return Vec::new() };
-        self.seamless_mods().into_iter().filter(|m| m.enabled && m.id != used.id).map(|m| m.id).collect()
+    /// Other mods that are on and hold Seamless Co-op's files next to the one for this game: (whole mods to leave
+    /// out, mods of which only the Seamless Co-op files are left out). Another copy of Seamless Co-op itself stays
+    /// out whole, so an older ersc.dll or its settings file can never win; a bigger mod that carries the DLL keeps
+    /// everything else it has.
+    fn seamless_passed_over(&self) -> (Vec<String>, Vec<String>) {
+        let Some(used) = self.seamless() else { return (Vec::new(), Vec::new()) };
+        let others: Vec<SeamlessMod> = self.seamless_mods().into_iter().filter(|m| m.enabled && m.id != used.id).collect();
+        (others.iter().filter(|m| m.package).map(|m| m.id.clone()).collect(), others.iter().filter(|m| !m.package).map(|m| m.id.clone()).collect())
     }
 
-    /// A new download that is Seamless Co-op takes the place of the copy installed (the one the game loads).
-    fn one_seamless(&self, target: &Target, files: &[String]) -> Target {
-        let mut t = target.clone();
-        if t.existing.is_some() || self.rules.me3_game().is_none() || !files.iter().any(|f| crate::anticheat::is_seamless_file(f)) {
-            return t;
+    /// 0.62: before a download that is Seamless Co-op's own package goes in: an older one is never put over a
+    /// newer installed copy without the player's word (`allow_older_seamless`, good for one add).
+    fn older_seamless_stop(&mut self, target: &Target, files: &[String]) -> Result<(), String> {
+        if self.rules.me3_game().is_none() || !crate::anticheat::is_seamless_package(files) {
+            return Ok(());
         }
-        if let Some(i) = self.seamless().and_then(|m| self.mods.iter().position(|x| x.id == m.id)) {
-            t.existing = Some(i);
-            t.id = self.mods[i].id.clone();
+        let allowed = std::mem::take(&mut self.older_seamless_ok);
+        let Some(this) = target.version.as_deref() else { return Ok(()) };
+        let newest = self
+            .seamless_mods()
+            .into_iter()
+            .filter(|m| m.package && m.id != target.id)
+            .filter_map(|m| m.version)
+            .max_by(|a, b| crate::updates::compare_versions(a, b));
+        match newest {
+            Some(have) if !allowed && crate::updates::compare_versions(this, &have) == std::cmp::Ordering::Less => Err(crate::anticheat::older_seamless_words(&have, this)),
+            _ => Ok(()),
         }
-        t
     }
 
-    /// Takes every other copy of Seamless Co-op out of the list (into Removed mods, where each can be put back for
-    /// 7 days) and keeps the one the game loads. A session password set in a copy that goes is carried over when
-    /// the kept copy has none. Answers the names taken out.
-    pub fn seamless_tidy(&mut self) -> io::Result<Vec<String>> {
-        let Some(used) = self.seamless() else { return Ok(Vec::new()) };
-        let others: Vec<SeamlessMod> = self.seamless_mods().into_iter().filter(|m| m.id != used.id).collect();
-        if others.is_empty() {
+    /// The player said "Use the older one": the next Seamless Co-op added may be older than the copy installed.
+    pub fn allow_older_seamless(&mut self) {
+        self.older_seamless_ok = true;
+    }
+
+    /// 0.62: a Seamless Co-op package just added (`new_id`) takes the place of the other copies of Seamless Co-op:
+    /// the player's settings come along (Turbine's copies of the newest other copy's settings files, the session
+    /// password among them), and the other copies go to Removed mods, where each can be put back for 7 days. A
+    /// bigger mod that carries the DLL is left alone. Answers the names moved.
+    fn supersede_seamless(&mut self, new_id: &str) -> io::Result<Vec<String>> {
+        let all = self.seamless_mods();
+        if !all.iter().any(|m| m.id == new_id && m.package) {
             return Ok(Vec::new());
         }
+        let mut olds: Vec<SeamlessMod> = all.into_iter().filter(|m| m.id != new_id && m.package).collect();
+        olds.sort_by(|a, b| crate::updates::compare_versions(b.version.as_deref().unwrap_or("0"), a.version.as_deref().unwrap_or("0")));
+        for o in &olds {
+            if crate::settings::carry_edits(&self.root, &o.id, new_id)? {
+                break;
+            }
+        }
+        self.seamless_keep_only(new_id, &olds)
+    }
+
+    /// Moves `others` to Removed mods, after carrying a session password over to `keep` when it has none.
+    fn seamless_keep_only(&mut self, keep: &str, others: &[SeamlessMod]) -> io::Result<Vec<String>> {
         let ini_of = |s: &Store, id: &str| -> Option<(String, PathBuf, PathBuf)> {
             let dir = s.mod_dir(id);
             let (rel, src) = walk_files(&dir).into_iter().find(|(rel, _)| rel.to_ascii_lowercase().ends_with("ersc_settings.ini"))?;
@@ -2367,12 +2428,12 @@ impl Store {
             Some((rel, src, now))
         };
         let password_of = |f: &Path| fs::read(f).ok().and_then(|b| crate::anticheat::coop_password_in(&String::from_utf8_lossy(&b))).filter(|p| !p.is_empty());
-        if let Some((rel, src, now)) = ini_of(self, &used.id) {
+        if let Some((rel, src, now)) = ini_of(self, keep) {
             if password_of(&now).is_none() {
                 let carried = others.iter().filter_map(|o| ini_of(self, &o.id)).find_map(|(_, _, f)| password_of(&f));
                 if let (Some(pw), Ok(text)) = (carried, fs::read(&now).map(|b| String::from_utf8_lossy(&b).into_owned())) {
                     if let Some(new_text) = crate::anticheat::coop_password_put(&text, &pw) {
-                        crate::settings::save_edit(&self.root, &used.id, &rel, &src, &new_text)?;
+                        crate::settings::save_edit(&self.root, keep, &rel, &src, &new_text)?;
                     }
                 }
             }
@@ -2380,12 +2441,34 @@ impl Store {
         let mut gone = Vec::new();
         for o in others {
             self.remove(&o.id)?;
-            gone.push(match &o.version {
-                Some(v) => format!("{} {v}", o.name),
-                None => o.name.clone(),
-            });
+            gone.push(o.shown());
         }
         Ok(gone)
+    }
+
+    /// Tidy up: keeps the copy of Seamless Co-op with the highest version, whichever is on or off, turns it on,
+    /// and moves every other copy of Seamless Co-op itself to Removed mods (each can be put back for 7 days). A
+    /// session password set in a copy that goes is carried over when the kept copy has none. A bigger mod that
+    /// carries the DLL stays in the list (its copy of the DLL stays out of the game). Answers the names moved;
+    /// `seamless()` afterwards is the copy kept, for the words ("Kept Seamless Co-op 2.0.2").
+    pub fn seamless_tidy(&mut self) -> io::Result<Vec<String>> {
+        let Some(used) = self.seamless() else { return Ok(Vec::new()) };
+        let others: Vec<SeamlessMod> = self.seamless_mods().into_iter().filter(|m| m.id != used.id && m.package).collect();
+        if others.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !used.enabled {
+            self.set_enabled(&used.id, true)?;
+        }
+        self.seamless_keep_only(&used.id, &others)
+    }
+
+    /// The words after Tidy up: which version was kept (and is on), and what went to Removed mods.
+    pub fn tidy_words(&self, gone: &[String]) -> String {
+        match self.seamless() {
+            Some(k) => format!("Kept {} and turned it on. Moved to Removed mods: {}.", k.shown(), gone.join(", ")),
+            None => format!("Moved to Removed mods: {}.", gone.join(", ")),
+        }
     }
 
     /// The check before a co-op Play: which Seamless Co-op is in the list, which file the game will load, what
@@ -2393,7 +2476,8 @@ impl Store {
     pub fn coop_check(&self) -> CoopCheck {
         let used = self.seamless();
         let others = match &used {
-            Some(u) => self.seamless_mods().into_iter().filter(|m| m.id != u.id).map(|m| match &m.version {
+            // Other copies of Seamless Co-op itself (Tidy up moves those); a bigger mod that carries the DLL isn't one.
+            Some(u) => self.seamless_mods().into_iter().filter(|m| m.id != u.id && m.package).map(|m| match &m.version {
                 Some(v) => format!("{} {v}", m.name),
                 None => m.name.clone(),
             }).collect(),
@@ -2477,10 +2561,16 @@ impl Store {
         let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
         let guarded = self.rules.guarded();
         let mut out = Vec::new();
-        let passed_over = self.seamless_passed_over();
+        let (passed_over, passed_dll) = self.seamless_passed_over();
         for m in self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id) && !passed_over.contains(&m.id)) {
+            let no_seamless_files = passed_dll.contains(&m.id);
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
+                // A bigger mod's own copy of Seamless Co-op's DLL and settings stays out while Seamless Co-op
+                // itself is installed.
+                if no_seamless_files && (crate::anticheat::is_seamless_file(&rel) || rel.to_ascii_lowercase().ends_with("ersc_settings.ini")) {
+                    continue;
+                }
                 // 0.58: the player's edited copy of a config file (Edit settings) goes in place of the mod's own.
                 let default_src = source;
                 let source = crate::settings::effective(&self.root, &m.id, &rel, &default_src);

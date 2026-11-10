@@ -1060,18 +1060,27 @@ impl Net {
     /// the mod refuses to run when it is out of date), checked against the size and digest GitHub gives for it. It
     /// is added like a loader: a mod in My mods that me3 loads from the profile folder. With a copy installed
     /// already (from anywhere), the store puts this one in its place.
-    pub fn fetch_seamless(&mut self, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
+    ///
+    /// 0.62: `have` is the version installed, if any. GitHub's newest release can be older than the copy from the
+    /// mod's Nexus page: then nothing is downloaded and the words say so (None with the words). Otherwise the
+    /// download, with the words that say which version it is.
+    pub fn fetch_seamless(&mut self, have: Option<&str>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<(Option<Fetched>, String), String> {
         self.no_downloads()?;
         CANCEL.store(false, Ordering::SeqCst);
+        let rel = loaders::seamless_latest(&self.client).map_err(err)?;
+        if let loaders::SeamlessGet::HaveIt(words) = loaders::seamless_get(have, &rel) {
+            crate::log::line("net", &format!("Seamless Co-op: GitHub's newest release is {}, installed is {}: nothing downloaded", rel.version, have.unwrap_or("none")));
+            return Ok((None, words));
+        }
+        let label = format!("Seamless Co-op {}", rel.version);
         let mut cb = |got: u64, total: Option<u64>| {
-            progress("Seamless Co-op", got, total);
+            progress(&label, got, total);
             !CANCEL.load(Ordering::SeqCst)
         };
-        let (d, source) = loaders::fetch_seamless(&self.client, Some(&mut cb)).map_err(err)?;
-        let label = format!("Seamless Co-op {}", source.version.clone().unwrap_or_default());
+        let (d, source) = loaders::fetch_seamless_release(&self.client, &rel, Some(&mut cb)).map_err(err)?;
         crate::log::line("net", &format!("{label} from {} ({} bytes, SHA-256 {})", source.url.clone().unwrap_or_default(), d.size, d.sha256));
         let path = rename(&d, &label, "zip");
-        Ok(Fetched { path, source, label, replaces: None })
+        Ok((Some(Fetched { path, source, label, replaces: None }), loaders::seamless_download_words(&rel)))
     }
 
     // ------------------------------------------------------------------------------------------------ updates

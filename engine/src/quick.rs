@@ -374,6 +374,8 @@ pub struct Peek {
     /// Seamless Co-op is among the mods (Turbine's own install of it).
     pub seamless: bool,
     pub seamless_on: bool,
+    /// 0.62: the highest version among the Seamless Co-op copies in the list, when one says its version.
+    pub seamless_version: Option<String>,
 }
 
 /// The game's store folder when Turbine has made one (read only: nothing is created, unlike `Store::root_for`).
@@ -412,6 +414,11 @@ pub fn peek(store_root: &Path) -> Peek {
         if own || staged_has_seamless(&crate::store::staged_dir(store_root, id), 4) {
             p.seamless = true;
             p.seamless_on |= on;
+            if let Some(v) = m.str_at("version").filter(|v| !v.is_empty()) {
+                if p.seamless_version.as_deref().is_none_or(|have| crate::updates::compare_versions(v, have) == std::cmp::Ordering::Greater) {
+                    p.seamless_version = Some(v.to_string());
+                }
+            }
         }
     }
     let held = read_held(store_root);

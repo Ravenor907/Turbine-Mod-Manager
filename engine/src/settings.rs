@@ -1073,6 +1073,33 @@ fn settings_root(store_root: &Path) -> PathBuf {
     store_root.join("settings")
 }
 
+/// 0.62: Turbine's copies of one mod's settings files (with what belongs to them) carried over to another mod's
+/// entry, when that one has none yet: a new copy of the same mod under a new entry keeps the player's settings.
+/// The new mod's own files then count as an update of the old ones (`effective` merges). Answers whether it copied.
+pub fn carry_edits(store_root: &Path, from_id: &str, to_id: &str) -> io::Result<bool> {
+    fn copy_tree(from: &Path, to: &Path, depth: usize) -> io::Result<()> {
+        fs::create_dir_all(to)?;
+        for e in fs::read_dir(from)?.flatten() {
+            let t = e.file_type()?;
+            if t.is_dir() && depth < 12 {
+                copy_tree(&e.path(), &to.join(e.file_name()), depth + 1)?;
+            } else if t.is_file() {
+                fs::copy(e.path(), to.join(e.file_name()))?;
+            }
+        }
+        Ok(())
+    }
+    if !safe_rel(from_id) || !safe_rel(to_id) || from_id == to_id {
+        return Ok(false);
+    }
+    let (from, to) = (settings_root(store_root).join(from_id), settings_root(store_root).join(to_id));
+    if !from.is_dir() || to.exists() {
+        return Ok(false);
+    }
+    copy_tree(&from, &to, 0)?;
+    Ok(true)
+}
+
 /// Turbine's copy of a mod's config file.
 pub fn edited_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     settings_root(store_root).join(mod_id).join(rel)

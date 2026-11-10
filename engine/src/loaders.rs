@@ -484,16 +484,53 @@ pub fn parse_seamless_release(text: &str) -> Result<SeamlessRelease, String> {
     Err(format!("Seamless Co-op release {tag} has no zip file"))
 }
 
-/// Downloads Seamless Co-op's newest release, checked against the size and digest GitHub lists for it. The record
-/// keeps the version, the address and the SHA-256 of what was downloaded.
-pub fn fetch_seamless(client: &Client, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
+/// What "Get Seamless Co-op" should do, given the version installed (if any) and the newest release Turbine can
+/// download itself. GitHub's release can lag behind the mod's Nexus page (0.62: GitHub had 2.0.1 while Nexus had
+/// 2.0.2), so a copy that is as new or newer is never touched.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SeamlessGet {
+    /// Installed and as new or newer than what Turbine can download: nothing to do. The words say so.
+    HaveIt(String),
+    /// Download this release (not installed, or the installed copy is older).
+    Download,
+}
+
+pub fn seamless_get(have: Option<&str>, release: &SeamlessRelease) -> SeamlessGet {
+    match have {
+        Some(h) if crate::updates::compare_versions(h, &release.version) != std::cmp::Ordering::Less => SeamlessGet::HaveIt(if crate::updates::compare_versions(h, &release.version) == std::cmp::Ordering::Equal {
+            format!("You have Seamless Co-op {h}, the newest Turbine can download itself. Nothing to do.")
+        } else {
+            format!("You have Seamless Co-op {h}, which is newer than the {} Turbine can download itself. Nothing to do.", release.version)
+        }),
+        _ => SeamlessGet::Download,
+    }
+}
+
+/// The words while Turbine downloads Seamless Co-op itself: which version, and that its Nexus page may be ahead.
+pub fn seamless_download_words(release: &SeamlessRelease) -> String {
+    format!("Getting Seamless Co-op {} from its GitHub release. Its Nexus page may have a newer one.", release.version)
+}
+
+/// Seamless Co-op's newest release as its GitHub repository lists it (no download).
+pub fn seamless_latest(client: &Client) -> Result<SeamlessRelease, NetError> {
     let text = client.send(&Request::get(SEAMLESS_LATEST).header("Accept", "application/vnd.github+json").max_bytes(4 << 20), None)?.take_text()?;
-    let rel = parse_seamless_release(&text).map_err(|e| NetError::Failed(format!("{e}.")))?;
+    parse_seamless_release(&text).map_err(|e| NetError::Failed(format!("{e}.")))
+}
+
+/// Downloads one Seamless Co-op release, checked against the size and digest GitHub lists for it. The record keeps
+/// the version, the address and the SHA-256 of what was downloaded.
+pub fn fetch_seamless_release(client: &Client, rel: &SeamlessRelease, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
     let check = Expect { max_bytes: if rel.size > 0 { rel.size } else { 64 << 20 }, size: (rel.size > 0).then_some(rel.size), sha256: rel.sha256.clone() };
     let d = client.download(&rel.url, &check, progress)?;
     let mut source = loader_source("seamless", &rel.version, &rel.url, &d.sha256);
     source.title = Some("Seamless Co-op".into());
     Ok((d, source))
+}
+
+/// Downloads Seamless Co-op's newest release (`seamless_latest`, then `fetch_seamless_release`).
+pub fn fetch_seamless(client: &Client, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
+    let rel = seamless_latest(client)?;
+    fetch_seamless_release(client, &rel, progress)
 }
 
 /// SMAPI's newest release as GitHub lists it.

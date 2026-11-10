@@ -586,7 +586,9 @@ impl qobject::Turbine {
                     Ok(g) => {
                         if !g.is_empty() {
                             crate::log::line("engine", &format!("{}: Seamless Co-op tidied: moved to Removed mods: {}", game.name, g.join(", ")));
-                            w.say(format!("Kept the newest Seamless Co-op. Moved to Removed mods: {}.", g.join(", ")), "ok");
+                            // 0.62: the words name the version kept (the highest, turned on).
+                            let words = w.slot(&game).map(|s| s.store.tidy_words(&g)).unwrap_or_else(|_| format!("Moved to Removed mods: {}.", g.join(", ")));
+                            w.say(words, "ok");
                         }
                         g
                     }
@@ -678,19 +680,25 @@ impl qobject::Turbine {
         );
     }
 
-    /// Gets Seamless Co-op (pinned, checked) and adds it to the current game like a loader.
+    /// Gets Seamless Co-op from its GitHub release (the newest one, checked) and adds it to the current game like a
+    /// loader. 0.62: GitHub can lag behind the mod's Nexus page, so with a copy installed that is as new or newer
+    /// nothing is downloaded and the toast says so; otherwise the toast says which version is coming. (Opening the
+    /// Nexus page first, anticheat::SEAMLESS_NEXUS, is the interface's choice; this is the download without Nexus.)
     pub fn install_seamless(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
-        self.as_mut().say("Getting Seamless Co-op from its GitHub release...", "work");
+        let have = turbine_engine::quick::existing_root(&game, &crate::backend::data_home()).and_then(|r| turbine_engine::quick::peek(&r).seamless_version);
+        self.as_mut().say("Looking at Seamless Co-op's newest GitHub release...", "work");
         self.net_send(
             "Install Seamless Co-op",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let mut prog = crate::actions::progress_for(qt);
-                match net.fetch_seamless(&mut prog) {
-                    Ok(f) => {
+                match net.fetch_seamless(have.as_deref(), &mut prog) {
+                    Ok((Some(f), words)) => {
+                        crate::log::line("net", &words);
                         let g = game.clone();
                         crate::actions::post_for(qt, move |t| t.add_fetched(g, f));
                     }
+                    Ok((None, words)) => crate::actions::say_for(qt, words, "ok"),
                     Err(e) => crate::actions::say_for(qt, format!("Couldn't get Seamless Co-op: {e}"), "error"),
                 }
             }),

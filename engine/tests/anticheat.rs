@@ -571,11 +571,13 @@ fn a_newer_seamless_coop_replaces_the_older_copy_and_keeps_the_password() {
     assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.1");
     assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set);
 
-    // The player gets 2.0.2 from Nexus: it replaces the copy in the list (no second mod), under the same entry.
+    // The player gets 2.0.2 from Nexus: it takes the place of the copy in the list (no second mod there); the
+    // older copy goes to Removed mods, where it can be put back.
     let new = w.root.join("dl/Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z gn8dtBhTy.zip");
     write_zip(&new, &[("SeamlessCoop/ersc.dll", "dll 2.0.2"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
     let second = added(store.import_archive(&new, nexus("2.0.2")));
-    assert_eq!(second.id, first.id, "the same entry in the list");
+    assert_ne!(second.id, first.id);
+    assert_eq!(store.removed().iter().map(|r| r.item.id.clone()).collect::<Vec<_>>(), vec![first.id.clone()], "the replaced copy is in Removed mods");
     assert_eq!(second.version.as_deref(), Some("2.0.2"));
     let all = store.seamless_mods();
     assert_eq!(all.len(), 1, "{all:?}");
@@ -604,6 +606,7 @@ fn a_newer_seamless_coop_replaces_the_older_copy_and_keeps_the_password() {
     // Steam's menu (which reads the store without opening it) sees a Nexus copy as Seamless Co-op too.
     let peek = turbine_engine::quick::peek(store.root());
     assert!(peek.seamless && peek.seamless_on);
+    assert_eq!(peek.seamless_version.as_deref(), Some("2.0.2"));
     let _ = fs::remove_dir_all(&w.root);
 }
 
@@ -708,6 +711,15 @@ fn seamless_coop_is_the_newest_release_never_a_fixed_one() {
     assert!(loaders::parse_seamless_release(r#"{"tag_name":"v2.0.3","assets":[]}"#).is_err());
     assert!(loaders::parse_seamless_release(r#"{"tag_name":"latest build!","assets":[]}"#).is_err());
     assert!(loaders::parse_seamless_release("{}").is_err());
+    // 0.62 break test: GitHub's newest (2.0.1 today) can be older than the copy from Nexus (2.0.2). "Get Seamless
+    // Co-op" then does nothing and says so; with no copy, or an older one, it downloads and says which version.
+    let github = loaders::SeamlessRelease { version: "2.0.1".into(), url: r.url.clone(), size: 1, sha256: None };
+    assert_eq!(loaders::seamless_get(Some("2.0.2"), &github), loaders::SeamlessGet::HaveIt("You have Seamless Co-op 2.0.2, which is newer than the 2.0.1 Turbine can download itself. Nothing to do.".into()));
+    assert!(matches!(loaders::seamless_get(Some("2.0.1"), &github), loaders::SeamlessGet::HaveIt(w) if w.contains("the newest Turbine can download itself")));
+    assert_eq!(loaders::seamless_get(Some("2.0.0"), &github), loaders::SeamlessGet::Download);
+    assert_eq!(loaders::seamless_get(None, &github), loaders::SeamlessGet::Download);
+    assert_eq!(loaders::seamless_download_words(&github), "Getting Seamless Co-op 2.0.1 from its GitHub release. Its Nexus page may have a newer one.");
+    assert_eq!(anticheat::SEAMLESS_NEXUS, ("eldenring", 510));
 }
 
 fn touch_later(p: &Path, secs: u64) {
@@ -871,5 +883,119 @@ fn a_damaged_settings_file_never_empties_turbines_copy() {
     assert!(report.settings_notes[0].contains("Turbine kept its own copy"), "{:?}", report.settings_notes);
     assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set);
     assert_eq!(fs::read_to_string(settings::in_place_path(store.root(), &m.id, &rel)).unwrap(), "", "the damaged file is kept beside it");
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+fn coop_zip(w: &World, file: &str, version: &str, ini: &str) -> PathBuf {
+    let p = w.root.join("dl").join(file);
+    write_zip(&p, &[("SeamlessCoop/ersc.dll", &format!("dll {version}")), ("SeamlessCoop/ersc_settings.ini", ini), ("ersc_launcher.exe", "exe")]);
+    p
+}
+
+/// The owner's two copies (0.62 break test M2): Turbine's own 2.0.1 and Nexus's 2.0.2, made here the way they came
+/// to be (the second added in place of a placeholder entry, so both are in the list).
+fn two_copies(w: &World) -> (Store, String, String) {
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(Me3Rules(Some("eldenring"), false))).unwrap();
+    let other = w.root.join("dl/Placeholder 1.0.zip");
+    write_zip(&other, &[("Game/other.bin", "x")]);
+    let a = store.import_zip(&other).unwrap();
+    let b = added(store.import_archive(&coop_zip(w, "Seamless Co-op 2.0.1.zip", "2.0.1", &INI_201.replace("cooppassword = ", "cooppassword = dragon")), own_download("2.0.1")));
+    added(store.replace_mod(&a.id, &coop_zip(w, "Seamless Co-op 2.0.2.zip", "2.0.2", INI_202), nexus("2.0.2")));
+    assert_eq!(store.seamless_mods().len(), 2);
+    (store, a.id, b.id)
+}
+
+/// 0.62 break test M2: with the 2.0.2 copy off and 2.0.1 on, Tidy up moved 2.0.2 to Removed mods and said it kept
+/// the newest. The highest version is kept whichever is on or off, turned on, and named.
+#[test]
+fn tidy_up_keeps_the_highest_version_whichever_is_on() {
+    let w = world("tidy-newest");
+    let (mut store, new_id, old_id) = two_copies(&w);
+    store.set_enabled(&new_id, false).unwrap();
+    assert!(store.mods().iter().any(|m| m.id == old_id && m.enabled));
+    // The Seamless Co-op for this game is the newest one even while it is off (a co-op start turns it on); the
+    // older copy that is on doesn't go into the game's mod folder in its place.
+    assert_eq!(store.seamless().unwrap().id, new_id);
+    store.apply().unwrap();
+    assert!(!anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc.dll").exists(), "never the older DLL");
+    let gone = store.seamless_tidy().unwrap();
+    assert_eq!(gone, vec!["Seamless Co-op 2.0.1".to_string()]);
+    let left = store.seamless_mods();
+    assert_eq!(left.len(), 1);
+    assert_eq!((left[0].id.as_str(), left[0].version.as_deref(), left[0].enabled), (new_id.as_str(), Some("2.0.2"), true), "kept, and on");
+    assert_eq!(store.removed().iter().map(|r| r.item.id.clone()).collect::<Vec<_>>(), vec![old_id.clone()]);
+    let words = store.tidy_words(&gone);
+    // (The entry kept its first name in this test; on the device it is "Seamless Co-op (Elden Ring) 2.0.2".)
+    assert!(words.starts_with("Kept ") && words.ends_with(" 2.0.2 and turned it on. Moved to Removed mods: Seamless Co-op 2.0.1."), "{words}");
+    store.apply().unwrap();
+    assert_eq!(fs::read_to_string(anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+    assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set, "the password came over from the copy that went");
+    // The copy that went can be put back.
+    store.undo_remove(&old_id).unwrap();
+    assert_eq!(store.seamless_mods().len(), 2);
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+/// 0.62 break test M3: any archive holding an ersc.dll took Seamless Co-op's place in the list with nothing to put
+/// back, and an older download replaced a newer copy without a word.
+#[test]
+fn only_seamless_coop_itself_replaces_it_and_never_an_older_one_unasked() {
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+    assert!(anticheat::is_seamless_package(&s(&["SeamlessCoop/ersc.dll", "SeamlessCoop/ersc_settings.ini", "ersc_launcher.exe"])));
+    assert!(anticheat::is_seamless_package(&s(&["Game/SeamlessCoop/ersc.dll", "Game/SeamlessCoop/ersc_settings.ini"])));
+    assert!(anticheat::is_seamless_package(&s(&["seamlesscoop\\ERSC.DLL", "SeamlessCoop/ERSC_settings.ini"])));
+    assert!(!anticheat::is_seamless_package(&s(&["overhaul/regulation.bin", "overhaul/extra/ersc.dll"])), "a bundle with the DLL");
+    assert!(!anticheat::is_seamless_package(&s(&["SeamlessCoop/ersc.dll"])), "no settings file beside it");
+    assert!(!anticheat::is_seamless_package(&s(&["a/b/SeamlessCoop/ersc.dll", "a/b/SeamlessCoop/ersc_settings.ini"])), "too deep");
+    assert!(!anticheat::is_seamless_package(&s(&["NotSeamlessCoop/ersc.dll", "NotSeamlessCoop/ersc_settings.ini"])));
+
+    let w = world("replace-rules");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(Me3Rules(Some("eldenring"), false))).unwrap();
+    let have = added(store.import_archive(&coop_zip(&w, "Seamless Co-op 2.0.2.zip", "2.0.2", &INI_202.replace("cooppassword = ", "cooppassword = dragon")), nexus("2.0.2")));
+
+    // 1. A bigger mod that carries its own ersc.dll is added as its own mod; Seamless Co-op stays.
+    let big = w.root.join("dl/Big Overhaul 1.0.zip");
+    write_zip(&big, &[("Game/overhaul/regulation.bin", "big"), ("Game/overhaul/extra/ersc.dll", "bundled dll")]);
+    let bundle = store.import_zip(&big).unwrap();
+    assert_ne!(bundle.id, have.id);
+    assert!(store.mods().iter().any(|m| m.id == have.id), "Seamless Co-op is still in the list");
+    assert!(store.removed().is_empty());
+    assert_eq!(store.seamless().unwrap().id, have.id, "Seamless Co-op itself, whatever the bundle's version says");
+    store.apply().unwrap();
+    let mods = anticheat::profile_mods(store.root());
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+    assert_eq!(fs::read_to_string(mods.join("overhaul/regulation.bin")).unwrap(), "big", "the rest of the bigger mod goes in");
+    assert!(!mods.join("overhaul/extra/ersc.dll").exists(), "its own copy of the DLL stays out");
+
+    // 2. An older Seamless Co-op is not put over the newer one: nothing changes, and the words say both versions.
+    let older = coop_zip(&w, "Seamless Co-op 2.0.1.zip", "2.0.1", INI_201);
+    let err = store.import_archive(&older, own_download("2.0.1")).unwrap_err();
+    assert_eq!(err, "You have Seamless Co-op 2.0.2. This file is 2.0.1, which is older, so Turbine kept 2.0.2.");
+    assert_eq!(anticheat::older_seamless_in(&err), Some(("2.0.2".to_string(), "2.0.1".to_string())));
+    assert_eq!(store.seamless_mods().iter().filter(|m| m.package).count(), 1);
+    assert_eq!(store.seamless().unwrap().version.as_deref(), Some("2.0.2"));
+    assert!(store.removed().is_empty());
+
+    // 3. The player says "Use 2.0.1" (good for one add): it goes in, and 2.0.2 is in Removed mods to put back.
+    store.allow_older_seamless();
+    let old = added(store.import_archive(&older, own_download("2.0.1")));
+    assert_eq!(store.seamless().unwrap().id, old.id);
+    assert_eq!(store.removed().iter().map(|r| r.item.id.clone()).collect::<Vec<_>>(), vec![have.id.clone()]);
+    store.apply().unwrap();
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.1");
+    assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set, "the settings came along");
+    // The word was for one add only: a still older file is refused again.
+    let oldest = coop_zip(&w, "Seamless Co-op 1.9.0.zip", "1.9.0", INI_201);
+    assert!(store.import_archive(&oldest, turbine_engine::net::SourceInfo { kind: "zip".into(), version: Some("1.9.0".into()), ..Default::default() }).is_err());
+    // Put back: the newer copy returns to the list and is the one for the game again.
+    store.undo_remove(&have.id).unwrap();
+    assert_eq!(store.seamless().unwrap().id, have.id);
+    store.apply().unwrap();
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+
+    // 4. A newer one replaces without a question.
+    let newer = added(store.import_archive(&coop_zip(&w, "Seamless Co-op 2.0.3.zip", "2.0.3", INI_202), nexus("2.0.3")));
+    assert_eq!(store.seamless_mods().iter().filter(|m| m.package).map(|m| m.id.clone()).collect::<Vec<_>>(), vec![newer.id.clone()]);
+    assert!(store.mods().iter().any(|m| m.id == bundle.id), "the bigger mod is never moved out by it");
     let _ = fs::remove_dir_all(&w.root);
 }

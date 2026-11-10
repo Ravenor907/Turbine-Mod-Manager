@@ -926,7 +926,7 @@ Window {
         coopAfterTidy = null
         if ((d.tidied || []).length > 0) {
             note("action", "Seamless Co-op tidied: " + d.tidied.join(", ") + " moved to Removed mods")
-            toast.done("Kept the newest Seamless Co-op. " + d.tidied.join(", ") + " moved to Removed mods.")
+            toast.done("Kept " + (d.name || "Seamless Co-op") + (d.listVersion ? " " + d.listVersion : "") + " and turned it on. " + d.tidied.join(", ") + " moved to Removed mods.")
         }
         // The co-op start that waited for the tidy goes on (whatever the tidy found to do).
         if (then) { then(); return }
