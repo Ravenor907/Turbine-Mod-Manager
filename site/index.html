@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Turbine Mod Manager: mods for SteamOS handhelds</title>
-<meta name="description" content="Turbine is a controller-first mod manager for SteamOS handhelds. Elden Ring with Seamless Co-op, Nexus Mods built in, Steam and Heroic games, safe by design. Pick a game, add a mod, press Play.">
+<title>Turbine Mod Manager: mod any game on your SteamOS handheld</title>
+<meta name="description" content="Turbine is a mod manager for SteamOS handhelds. Mod your Steam and Heroic games from the couch, in Game Mode, with the controller. Nexus Mods and Thunderstore built in, load orders, safe installs and one-press undo.">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0a08">
 <meta property="og:title" content="Turbine Mod Manager">
-<meta property="og:description" content="Mods for your SteamOS handheld, with the controller, in Game Mode. Pick a game, add a mod, press Play.">
+<meta property="og:description" content="Mod any of your games on a SteamOS handheld. From the couch, in Game Mode, with the controller.">
 <meta property="og:image" content="https://ravenor907.github.io/Turbine-Mod-Manager/img/banner.png">
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="apple-touch-icon" href="img/icon.png">
@@ -16,229 +17,196 @@
 <body>
 <a class="skip" href="#main">Skip to the page</a>
 
+<!-- Icons, drawn here so the page loads nothing else. -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-library" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><path d="M17.5 5.2l3.3.9-3.7 14-3.3-.9"/></symbol>
+  <symbol id="i-get" viewBox="0 0 24 24"><path d="M12 3v11m-4.5-4.5L12 14l4.5-4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/></symbol>
+  <symbol id="i-order" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5l1.5-1v4M3.5 12.2a1.3 1.3 0 1 1 2 1.1L3.5 15H6"/><path d="M3.6 17h2l-1 1.2a1 1 0 1 1-1 1.6"/></symbol>
+  <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4h-4v-2a2 2 0 1 0-4 0v2H6v-4h2a2 2 0 1 0 0-4H6V6h4z"/></symbol>
+  <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21c-3.9 0-6.5-2.6-6.5-6 0-3.3 2.4-5.2 3.7-8.2.7 1.6 1.6 2.5 2.6 3 .2-2.6 1.4-5 3.2-6.8.4 3.2 4.5 6.2 4.5 11.4 0 4-2.9 6.6-7.5 6.6z"/><path d="M12 21c-1.7 0-2.8-1.2-2.8-2.8 0-1.8 1.6-2.7 2.3-4.4.9 1.2 3.3 2.4 3.3 4.4 0 1.6-1.1 2.8-2.8 2.8z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3.1-3.1a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3.1 3.1a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z"/><path d="M9.2 12.6a3.3 3.3 0 1 0 1-3.6M9 7.8V10h2.2"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></symbol>
+  <symbol id="i-pad" viewBox="0 0 24 24"><path d="M7.5 7h9a4.5 4.5 0 0 1 4.4 3.6l.9 4.8a2.7 2.7 0 0 1-4.7 2.3L15 15.5H9l-2.1 2.2a2.7 2.7 0 0 1-4.7-2.3l.9-4.8A4.5 4.5 0 0 1 7.5 7z"/><path d="M8 9.5v4M6 11.5h4"/><circle cx="15.5" cy="10.5" r=".6"/><circle cx="17.5" cy="12.5" r=".6"/></symbol>
+</svg>
+
 <header class="hero">
-  <div class="wrap">
-    <img class="logo" src="img/logo.png" width="634" height="194" alt="Turbine Mod Manager">
-    <p class="lead">Mods for your SteamOS handheld. With the controller, in Game Mode.
-      Pick a game, add a mod, press Play.</p>
+  <h1 class="banner"><img src="img/banner.png" width="1280" height="413" alt="Turbine Mod Manager"></h1>
+  <div class="wrap hero-text">
+    <p class="tagline">Mod any of your games on a SteamOS handheld. <br>From the couch, in Game Mode, with the controller.</p>
     <p class="actions">
-      <a class="button" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/TurbineModManager.flatpak">Download Turbine</a>
-      <a class="button ghost" href="#install">How to install</a>
+      <a class="button" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/TurbineModManager.flatpak">Download</a>
+      <a class="button ghost" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases">Releases on GitHub</a>
     </p>
-    <p class="small">Free and open source (GPL 3.0 or later). For SteamOS on the Steam Deck, Legion Go, ROG Ally and
-      other handhelds.</p>
+    <p class="small">Free and open source. For SteamOS on the Steam Deck, Legion Go, ROG Ally and other handhelds.</p>
   </div>
 </header>
 
 <nav class="toc" aria-label="On this page">
   <div class="wrap">
     <a href="#features">Features</a>
-    <a href="#souls">Elden Ring</a>
-    <a href="#coop">Seamless Co-op</a>
+    <a href="#stories">How people use it</a>
+    <a href="#games">Games</a>
     <a href="#install">Install</a>
     <a href="#controls">Controls</a>
-    <a href="#games">Games</a>
     <a href="#faq">Questions</a>
-    <a href="#help">Help</a>
   </div>
 </nav>
 
 <main id="main">
 
 <section id="features" class="wrap">
-  <h2>Everything a handheld modder needs</h2>
+  <h2>One app for every game you mod</h2>
+  <p class="intro">Pick a game, find a mod, press Play. Turbine handles where the files go, what each mod needs, and
+    how to take it all back out.</p>
+  <div class="features">
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg>
+      <h3>Your whole library</h3>
+      <p>Steam games and Heroic games (Epic and GOG), on internal storage or an SD card. Games Turbine has no rules for
+        still work: it reads a mod's files to see where they go, and asks once when it can't tell.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-get"/></svg>
+      <h3>Get mods in the app</h3>
+      <p>Nexus Mods is built in: browse with pictures, likes and downloads, then get a mod with one press. Thunderstore
+        for the games that use it, plus zip, 7z and rar files you already have. A free Nexus account works.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-order"/></svg>
+      <h3>Load orders and installers</h3>
+      <p>Skyrim's plugin load order with one-press sort. Mod installers with options show their choices on screen.
+        Script loaders like SKSE, SMAPI and BepInEx come from their official sources.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-puzzle"/></svg>
+      <h3>Frameworks, checked</h3>
+      <p>Cyberpunk 2077's RED4ext, Cyber Engine Tweaks, ArchiveXL and TweakXL are checked before Play. The Witcher 3
+        gets its mod priority and script conflicts, Kingdom Come its mod order.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-flame"/></svg>
+      <h3>FromSoftware games</h3>
+      <p>Elden Ring, Nightreign, Armored Core VI, Dark Souls III and Sekiro run their mods through me3. The game folder
+        is never touched, and you start them from Steam's own Play.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-link"/></svg>
+      <h3>Needs and updates</h3>
+      <p>See what each mod needs, whether you have it, and which mods need it. Mod updates from Nexus and Thunderstore
+        show in one place, and Turbine updates itself.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>
+      <h3>Safe, with one-press undo</h3>
+      <p>Turbine only removes files it placed and backs up any game file a mod replaces. Saves are backed up before a
+        modded Play. Play without mods, go back to a setup that worked, or turn every mod off.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg>
+      <h3>Loadouts</h3>
+      <p>Keep named setups per game and switch between them. Share one as a file, or as a Thunderstore code your
+        friends can paste in.</p>
+    </article>
+    <article class="feature">
+      <svg class="icon" aria-hidden="true"><use href="#i-pad"/></svg>
+      <h3>Made for your hands</h3>
+      <p>Controller first, with touch, keyboard and mouse just as good. Interface size from 50% to 150%. An optional
+        Steam menu plugin turns mods on or off from Quick Access.</p>
+    </article>
+  </div>
+</section>
+
+<section id="screens" class="wrap" aria-label="Screens">
   <div class="shots">
     <figure>
       <img src="img/shot-getmods.png" width="1280" height="800" loading="lazy"
-           alt="Get mods: a grid of mod cards with pictures, likes and downloads, good first mods along the top, and My mods and Load order named down the page edges.">
-      <figcaption>Get mods: Nexus Mods built in. Browse by game, open a mod, get it.</figcaption>
+           alt="Get mods for Skyrim Special Edition: a grid of mod cards with pictures, likes and downloads, and good first mods along the top.">
+      <figcaption>Get mods: browse Nexus by game without leaving the couch.</figcaption>
     </figure>
     <figure>
       <img src="img/shot-mymods.png" width="1280" height="800" loading="lazy"
-           alt="My mods: two mods turned on, with the selected mod's details on the right and Play at the bottom right.">
-      <figcaption>My mods: A turns a mod on or off. Play is always bottom right.</figcaption>
+           alt="My mods: a rail of games down the left (Lethal Company, Risk of Rain 2, Stardew Valley from GOG, Skyrim, Witcher 3, Valheim) and the selected mod's details on the right.">
+      <figcaption>My mods: every game in one rail. A turns a mod on or off.</figcaption>
     </figure>
-  </div>
-  <div class="grid">
-    <div class="card">
-      <h3>Built for your handheld</h3>
-      <p>Controller first, in Game Mode and Desktop Mode. A selects and B goes back, everywhere. Touch works for every
-        button.</p>
-    </div>
-    <div class="card">
-      <h3>Keyboard and mouse, the PC way</h3>
-      <p>W A S D, Q and E for pages, F to find, R for options, hold Tab for the wheel, hold Space to play.
-        Click, double-click and right-click work as you expect.</p>
-    </div>
-    <div class="card">
-      <h3>Nexus Mods built in</h3>
-      <p>Browse with pictures, likes and downloads. Sign in through Chrome. Mod Manager Download always asks first, so
-        nothing downloads without your say.</p>
-    </div>
-    <div class="card">
-      <h3>Steam, Epic and GOG</h3>
-      <p>Games from Steam and Heroic, on internal storage and SD cards. Mods from Nexus, Thunderstore, or zip, 7z and
-        rar files you already have.</p>
-    </div>
-    <div class="card">
-      <h3>Safe by design</h3>
-      <p>Nothing installs without you and everything can be undone. Saves are backed up before a modded Play, and any
-        game file a mod replaces is backed up too.</p>
-    </div>
-    <div class="card">
-      <h3>Mods apply themselves</h3>
-      <p>Changes go into the game a few seconds after your last one. No Save button to forget. Play checks the game
-        first and offers any fix as a button.</p>
-    </div>
-    <div class="card">
-      <h3>Mod settings with real controls</h3>
-      <p>Edit a mod's settings file with switches, sliders and lists. Your changes are kept when the mod updates.</p>
-    </div>
-    <div class="card">
-      <h3>Fits right into Steam</h3>
-      <p>Optional Steam menu plugin (Decky), Steam library art, interface size from 50% to 150%, and animations Full,
-        Reduced or Off.</p>
-    </div>
-  </div>
-  <div class="shots">
     <figure>
-      <img src="img/shot-find.png" width="1280" height="800" loading="lazy"
-           alt="Find mods for Skyrim Special Edition: a search field, Sort choices and Category choices.">
-      <figcaption>Find (Y or F): search, sort and categories in one place, working at once.</figcaption>
+      <img src="img/shot-coop.png" width="1280" height="800" loading="lazy"
+           alt="Elden Ring with Seamless Co-op on: Co-op settings one press away and Play Co-op at the bottom right.">
+      <figcaption>Elden Ring: solo with mods, or Seamless Co-op, chosen at Play.</figcaption>
     </figure>
     <figure>
       <img src="img/shot-wheel.png" width="1280" height="800" loading="lazy"
            alt="The quick wheel: Find, Updates, Add from Downloads, Play options, Game menu, Settings, Games and Loadouts.">
-      <figcaption>The quick wheel (View, or hold Tab): everything else, one flick away.</figcaption>
+      <figcaption>The quick wheel: everything else, one flick away.</figcaption>
     </figure>
   </div>
-  <p class="small">Real Turbine screens with made-up sample mods.</p>
-  <p class="note"><b>What's coming:</b> 0.64 lines up a mod's required mods for you, one press each.</p>
+  <p class="small center">Real Turbine screens with made-up sample mods.</p>
 </section>
 
-<section id="souls" class="wrap">
-  <h2>Elden Ring and the other FromSoftware games</h2>
-  <p>Elden Ring, Nightreign, Armored Core VI, Dark Souls III and Sekiro run their mods through <b>me3</b>, and the game
-    folder is never touched. Start them from Steam's own Play: pick <b>Turbine (mods)</b> once in the game's
-    Compatibility settings (Turbine shows the steps and sees when it's set), and Game Mode shows the game as usual.
-    With no mods on, the game starts clean.</p>
-  <div class="callout">
-    <p><b>Online play stays clean.</b> Turbine never adds mods to a game that needs its anti-cheat online: the Get mods
-      page isn't there, Play with a mod on is refused, and the game's status says why. The FromSoftware games play
-      their mods offline, and Turbine says so plainly before the first modded Play.</p>
+<section id="stories" class="wrap">
+  <h2>How people use it</h2>
+  <div class="stories">
+    <article class="story">
+      <p class="tag">Big modded RPG</p>
+      <h3>"I want my Skyrim setup on the Deck."</h3>
+      <p>Get SkyUI and a few lighting mods from Nexus. Turbine shows the installer choices on screen, tells you a mod
+        needs SKSE and helps you get it, and sorts the load order.</p>
+    </article>
+    <article class="story">
+      <p class="tag">Framework mods</p>
+      <h3>"This Cyberpunk mod needs three other things."</h3>
+      <p>Turbine knows the frameworks and what each one needs, and checks them before Play. If something is missing,
+        you hear it from Turbine, not from a crash.</p>
+    </article>
+    <article class="story">
+      <p class="tag">Friends night</p>
+      <h3>"The group's Lethal Company mods, please."</h3>
+      <p>Paste the Thunderstore code your friends use. Turbine fetches the same mods with BepInEx. Valheim and Risk of
+        Rain 2 work the same way.</p>
+    </article>
+    <article class="story">
+      <p class="tag">Co-op</p>
+      <h3>"Seamless Co-op without the setup."</h3>
+      <p>Get it for Elden Ring, set the session password, then choose Play Seamless Co-op or solo with mods. The game
+        folder stays as it was.</p>
+    </article>
+    <article class="story">
+      <p class="tag">Any game</p>
+      <h3>"Turbine has never heard of my game."</h3>
+      <p>Add the mod anyway. Turbine reads its files and puts them where they belong, or asks once with its best guess
+        ready. Undo is still one press.</p>
+    </article>
+    <article class="story">
+      <p class="tag">Something broke</p>
+      <h3>"It crashed after my last mod."</h3>
+      <p>Play without mods to check, or go back to the last setup that played fine. Your saves were backed up before
+        you started.</p>
+    </article>
   </div>
-</section>
-
-<section id="coop" class="wrap">
-  <h2>Seamless Co-op made easy</h2>
-  <div class="shots">
-    <figure>
-      <img src="img/shot-coop.png" width="1280" height="800" loading="lazy"
-           alt="Elden Ring with Seamless Co-op on: it loads only with Play Seamless Co-op, Co-op settings is one press away, and Play says Co-op.">
-      <figcaption>Choose Play with mods (solo) or Play Seamless Co-op right at Play.</figcaption>
-    </figure>
-    <figure>
-      <img src="img/shot-coopsettings.png" width="1280" height="800" loading="lazy"
-           alt="Seamless Co-op settings: session password first, then gameplay settings with switches and choices.">
-      <figcaption>Co-op settings one press away, session password first.</figcaption>
-    </figure>
-  </div>
-  <ul>
-    <li>Co-op never starts without a session password.</li>
-    <li>Turbine gets the newest version and keeps only one copy per game.</li>
-    <li>Optional Co-op tile in your Steam library, asked about once.</li>
-  </ul>
-</section>
-
-<section id="install" class="wrap">
-  <h2>Install on SteamOS</h2>
-  <p>You do this once, in Desktop Mode. After that Turbine lives in your Steam library and keeps itself up to date.</p>
-  <ol class="steps">
-    <li>
-      <h3>Switch to Desktop Mode</h3>
-      <p>Press the Steam button, then Power, then <b>Switch to Desktop</b>.</p>
-    </li>
-    <li>
-      <h3>Download Turbine</h3>
-      <p>Download <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/TurbineModManager.flatpak">TurbineModManager.flatpak</a>
-        from the latest release. It goes to your Downloads folder.</p>
-    </li>
-    <li>
-      <h3>Install it</h3>
-      <p>Open Downloads and double-click <b>TurbineModManager.flatpak</b>. Discover opens; press <b>Install</b>. The
-        first install also downloads the parts Turbine runs on from Flathub, so give it a few minutes.</p>
-      <details>
-        <summary>Prefer a terminal?</summary>
-        <pre><code>flatpak install --user ~/Downloads/TurbineModManager.flatpak</code></pre>
-      </details>
-    </li>
-    <li>
-      <h3>Add it to Steam</h3>
-      <p>Open the app launcher (bottom left), find <b>Turbine Mod Manager</b>, right-click it and choose
-        <b>Add to Steam</b>.</p>
-    </li>
-    <li>
-      <h3>Play in Game Mode</h3>
-      <p>Double-click <b>Return to Gaming Mode</b> on the desktop. Turbine is in your Library under
-        <b>Non-Steam</b>. Start it like any game.</p>
-    </li>
-  </ol>
-  <p class="note">The first time it starts, Turbine shows a short tour of the buttons. Settings, Help, Beginner
-    tutorial brings it back any time.</p>
-
-  <h3 class="sub" id="decky">Steam menu plugin (optional)</h3>
-  <p>With Decky Loader, Turbine gets a panel in the Quick Access menu: Mods on or off and Play for the game you're in,
-    without opening Turbine. In Decky, open the gear, then Developer, then <b>Install Plugin From URL</b>, and paste:</p>
-  <p><code class="addr">https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip</code></p>
-  <p class="small">No Developer tab? In General, turn on Developer Mode first. Turbine's Settings, Help, Steam menu
-    plugin shows the same step with a Copy button.</p>
-</section>
-
-<section id="controls" class="wrap">
-  <h2>Controls</h2>
-  <table class="keys">
-    <thead>
-      <tr><th scope="col">Do</th><th scope="col">Controller</th><th scope="col">Keyboard</th><th scope="col">Mouse</th></tr>
-    </thead>
-    <tbody>
-      <tr><th scope="row">Select</th><td>A</td><td>Enter or Space</td><td>Click</td></tr>
-      <tr><th scope="row">Back</th><td>B</td><td>Esc</td><td>Back side button</td></tr>
-      <tr><th scope="row">Options</th><td>X</td><td>R</td><td>Right-click</td></tr>
-      <tr><th scope="row">Find</th><td>Y</td><td>F</td><td></td></tr>
-      <tr><th scope="row">Pages</th><td>LB / RB</td><td>Q / E</td><td>Page names, Forward side button</td></tr>
-      <tr><th scope="row">Page up, down</th><td>LT / RT</td><td></td><td>Wheel</td></tr>
-      <tr><th scope="row">Quick wheel</th><td>View</td><td>Hold Tab</td><td></td></tr>
-      <tr><th scope="row">Settings</th><td>Start</td><td>Esc on a game's first page</td><td></td></tr>
-      <tr><th scope="row">Play</th><td>Hold Start 3 seconds, or A on Play</td><td>Hold Space 3 seconds</td><td>Click Play</td></tr>
-      <tr><th scope="row">Pointer</th><td>Right stick</td><td></td><td>Mouse</td></tr>
-      <tr><th scope="row">Size</th><td></td><td>Ctrl and + or -</td><td>Ctrl and wheel</td></tr>
-    </tbody>
-  </table>
-  <p class="small">The hints at the bottom follow whatever you used last. Touch works for everything: tap to do,
-    long-press for options.</p>
 </section>
 
 <section id="games" class="wrap">
   <h2>Games</h2>
   <div class="cols">
     <div class="card">
-      <h3>Full rules</h3>
-      <p class="small">Where every file goes, load order, loaders and checks before Play.</p>
-      <ul>
+      <h3>Full support</h3>
+      <p class="small">Where every file goes, loaders, load or mod order, and checks before Play.</p>
+      <ul class="tags">
         <li>Skyrim Special Edition</li>
         <li>Cyberpunk 2077</li>
         <li>The Witcher 3</li>
+        <li>Kingdom Come: Deliverance I and II</li>
         <li>Stardew Valley</li>
         <li>Valheim</li>
         <li>Lethal Company</li>
         <li>Risk of Rain 2</li>
-        <li>Kingdom Come: Deliverance I and II</li>
       </ul>
     </div>
     <div class="card">
-      <h3>Through me3, game folder untouched</h3>
-      <ul>
-        <li>Elden Ring, with Seamless Co-op</li>
+      <h3>Through me3</h3>
+      <p class="small">Mods offline, game folder untouched, started from Steam's own Play.</p>
+      <ul class="tags">
+        <li>Elden Ring</li>
         <li>Elden Ring Nightreign</li>
         <li>Armored Core VI</li>
         <li>Dark Souls III</li>
@@ -247,12 +215,76 @@
     </div>
     <div class="card">
       <h3>Every other game</h3>
-      <p class="small">Every other Steam and Heroic game gets Basic support: mods go where their files say, and Turbine
-        asks once, with its best guess ready, when it can't tell.</p>
-      <p class="small">Never modded: games that need their anti-cheat online, such as Apex Legends, Destiny 2,
-        Fortnite and Rainbow Six Siege.</p>
+      <p class="small">Basic support for every other Steam and Heroic game: mods go where their files say, and Turbine
+        asks once when it can't tell.</p>
     </div>
   </div>
+  <div class="callout">
+    <p><b>Online play stays clean.</b> Turbine never adds mods to a game that needs its anti-cheat online, such as Apex
+      Legends, Destiny 2 or Fortnite. Those games say why, and Play with mods is refused.</p>
+  </div>
+</section>
+
+<section id="install" class="wrap">
+  <h2>Install on SteamOS</h2>
+  <p>You do this once, in Desktop Mode. After that Turbine lives in your Steam library and keeps itself up to date.</p>
+  <ol class="steps">
+    <li>
+      <h3>Download</h3>
+      <p>In Desktop Mode, download
+        <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/TurbineModManager.flatpak">TurbineModManager.flatpak</a>.
+        It goes to your Downloads folder.</p>
+    </li>
+    <li>
+      <h3>Install</h3>
+      <p>Double-click it in Downloads and press <b>Install</b> in Discover. The first install takes a few minutes.</p>
+      <details>
+        <summary>Prefer a terminal?</summary>
+        <pre><code>flatpak install --user ~/Downloads/TurbineModManager.flatpak</code></pre>
+      </details>
+    </li>
+    <li>
+      <h3>Add to Steam</h3>
+      <p>In the app launcher, right-click <b>Turbine Mod Manager</b> and choose <b>Add to Steam</b>.</p>
+    </li>
+    <li>
+      <h3>Play</h3>
+      <p>Go back to Game Mode. Turbine is in your Library under <b>Non-Steam</b>. A short tour shows the buttons the
+        first time.</p>
+    </li>
+  </ol>
+
+  <h3 class="sub" id="decky">Steam menu plugin (optional)</h3>
+  <p>With Decky Loader, Turbine gets a panel in Quick Access: mods on or off and Play for the game you're in. In Decky,
+    open the gear, then Developer, then <b>Install Plugin From URL</b>, and paste:</p>
+  <p><code class="addr">https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip</code></p>
+  <p class="small">No Developer tab? Turn on Developer Mode in Decky's General settings first.</p>
+</section>
+
+<section id="controls" class="wrap">
+  <h2>Controls</h2>
+  <div class="table-wrap">
+    <table class="keys">
+      <thead>
+        <tr><th scope="col">Do</th><th scope="col">Controller</th><th scope="col">Keyboard</th><th scope="col">Mouse</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Select</th><td>A</td><td>Enter or Space</td><td>Click</td></tr>
+        <tr><th scope="row">Back</th><td>B</td><td>Esc</td><td>Back side button</td></tr>
+        <tr><th scope="row">Options</th><td>X</td><td>R</td><td>Right-click</td></tr>
+        <tr><th scope="row">Find</th><td>Y</td><td>F</td><td></td></tr>
+        <tr><th scope="row">Pages</th><td>LB / RB</td><td>Q / E</td><td>Page names, Forward side button</td></tr>
+        <tr><th scope="row">Page up, down</th><td>LT / RT</td><td></td><td>Wheel</td></tr>
+        <tr><th scope="row">Quick wheel</th><td>View</td><td>Hold Tab</td><td></td></tr>
+        <tr><th scope="row">Settings</th><td>Start</td><td>Esc on a game's first page</td><td></td></tr>
+        <tr><th scope="row">Play</th><td>Hold Start 3 seconds, or A on Play</td><td>Hold Space 3 seconds</td><td>Click Play</td></tr>
+        <tr><th scope="row">Pointer</th><td>Right stick</td><td></td><td>Mouse</td></tr>
+        <tr><th scope="row">Size</th><td></td><td>Ctrl and + or -</td><td>Ctrl and wheel</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small">The hints at the bottom follow whatever you used last. Touch works for everything: tap to do,
+    long-press for options.</p>
 </section>
 
 <section id="faq" class="wrap">
@@ -260,34 +292,28 @@
   <details>
     <summary>Can I get banned?</summary>
     <p>Turbine never adds mods to a game that needs its anti-cheat to play online. The FromSoftware games run mods
-      offline through me3, and Turbine tells you plainly before the first modded Play. Don't take a save you modded
+      offline through me3, and Turbine says so plainly before the first modded Play. Don't take a save you modded
       offline into online play.</p>
   </details>
   <details>
-    <summary>How do I play Seamless Co-op?</summary>
-    <p>Get Seamless Co-op for Elden Ring in Turbine, set a session password in Co-op settings (everyone in your group
-      uses the same one), then choose Play Seamless Co-op. It loads only that way, so Play with mods stays solo.</p>
-  </details>
-  <details>
     <summary>Do I need Nexus Premium?</summary>
-    <p>No. A free Nexus account works: Nexus's own download page opens inside Turbine, you press Slow download, and
-      the mod is added and turned on. Premium skips that page so a mod installs with one press. Thunderstore mods and
-      files you already have need no account.</p>
+    <p>No. With a free account, Nexus's own download page opens, you press Slow download, and the mod is added and
+      turned on. Premium skips that page. Thunderstore mods and files you already have need no account.</p>
   </details>
   <details>
-    <summary>How do I sign in to Nexus with Google?</summary>
-    <p>Google won't sign in inside an app, so Turbine signs in through Chrome with a small browser helper. Set it up
-      once in Desktop Mode from Settings, Getting mods; Turbine shows the steps. It talks only to Turbine on your own
-      device and only reads Nexus's pages.</p>
+    <summary>Will it mess up my game?</summary>
+    <p>Turbine writes down every file it places and only ever removes those. Any game file a mod replaces is backed up
+      and put back when the mod goes. Nothing inside a mod archive is ever run.</p>
   </details>
   <details>
     <summary>Does it work on Windows or other Linux systems?</summary>
     <p>No. Turbine is made for SteamOS handhelds.</p>
   </details>
   <details>
-    <summary>How does it update?</summary>
-    <p>Turbine checks the Releases page and updates itself. In Game Mode it closes when the update is ready, and you
-      start it again from Steam.</p>
+    <summary>Something isn't working. What do I do?</summary>
+    <p>In Turbine open Settings, Help, <b>Report a problem</b> and press <b>Save report</b>. Then
+      <a href="https://github.com/Ravenor907/Turbine-Mod-Manager/issues/new">open an issue</a> and attach the file. It
+      holds no keys or passwords.</p>
   </details>
   <details>
     <summary>How do I uninstall it?</summary>
@@ -296,29 +322,13 @@
   </details>
 </section>
 
-<section id="help" class="wrap">
-  <h2>Help</h2>
-  <div class="cols two">
-    <div class="card">
-      <h3>A game won't start</h3>
-      <ul>
-        <li>Press View, then <b>Play options</b>, and play without mods. If that starts, a mod is the cause.</li>
-        <li>Press View, then <b>Game menu</b>, then <b>Why won't it start?</b> It checks the usual causes and offers
-          each fix.</li>
-        <li><b>Go back to a setup that worked</b>, in the same Game menu, puts back the last mods that played
-          fine.</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h3>Report a problem</h3>
-      <ol>
-        <li>In Turbine, open Settings, Help, <b>Report a problem</b> and press <b>Save report</b>. It saves one text
-          file in Downloads. No keys or passwords.</li>
-        <li><a href="https://github.com/Ravenor907/Turbine-Mod-Manager/issues/new">Open a new issue</a>, say what
-          happened, and attach that file.</li>
-      </ol>
-    </div>
-  </div>
+<section class="wrap final">
+  <img src="img/icon.png" width="96" height="96" alt="" loading="lazy">
+  <p class="tagline">Ready when you are.</p>
+  <p class="actions center">
+    <a class="button" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/TurbineModManager.flatpak">Download</a>
+    <a class="button ghost" href="https://github.com/Ravenor907/Turbine-Mod-Manager/releases">Releases on GitHub</a>
+  </p>
 </section>
 
 </main>
@@ -331,8 +341,8 @@
       <a href="https://github.com/Ravenor907/Turbine-Mod-Manager">Source code</a>
     </p>
     <p class="small">Turbine Mod Manager is made by Ravenor907. Free software under the GNU GPL, version 3 or later.
-      Not made by or affiliated with Valve, Nexus Mods or any game's publisher. This page has no trackers and sets no
-      cookies.</p>
+      Not made by or affiliated with Valve, Nexus Mods, Thunderstore or any game's publisher. This page has no trackers
+      and sets no cookies.</p>
   </div>
 </footer>
 </body>
