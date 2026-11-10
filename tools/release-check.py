@@ -16,6 +16,10 @@ need("pnpm install --frozen-lockfile", "the Decky job must install from the comm
 if "--no-frozen-lockfile" in wf:
     problems.append("the Decky job may not resolve new package versions")
 need('if [ "$greens" -lt 3 ]', "a release needs three green runs of its commit")
+# 0.62: an attempt made by "Re-run failed jobs" carries the passed jobs over; it is not a green run of everything.
+need('select(.run_attempt != $a)', "only full attempts may count toward the three green runs (not re-runs of the failed jobs alone)")
+if 'carried' in wf and wf.index('[ "$carried" = 0 ] || continue') > wf.index('greens=$((greens + 1))'):
+    problems.append("the full-attempt check must come before a green run is counted")
 need("Turbine-Decky.zip.sha256", "the Decky zip needs its checksum beside it")
 rel = wf[wf.index("  release:"):]
 # Both files come from the reused green run: one download step by their exact artifact ids, and the reuse

@@ -48,7 +48,7 @@ jobs:
           if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
             sha="${{ github.sha }}"
             # The standing method: a release needs every check green three times on this commit (fresh runs or
-            # reruns), and ships the bundle and plugin those runs built, never a new build.
+            # full reruns), and ships the bundle and plugin those runs built, never a new build.
             # 0.61: dispatched runs (not releases) count as well as pushes. A run counts only when it built the
             # bundle (a release that reused a build has none). The run shipped is one whose latest attempt is green,
             # and its files must come from that attempt (made between its start and its end), never from an
@@ -63,6 +63,11 @@ jobs:
               for a in $(seq 1 "$n"); do
                 read -r c from to < <(gh api "repos/$repo/actions/runs/$r/attempts/$a" --jq '"\(.conclusion) \(.run_started_at) \(.updated_at)"')
                 [ "$c" = success ] || continue
+                # 0.62: only a full attempt counts. "Re-run failed jobs" makes an attempt in which the jobs that
+                # passed before are carried over (they keep their earlier attempt's number): that attempt checked
+                # only part of the build again.
+                carried=$(gh api "repos/$repo/actions/runs/$r/attempts/$a/jobs?per_page=100" --jq "[.jobs[] | select(.run_attempt != $a)] | length")
+                [ "$carried" = 0 ] || continue
                 greens=$((greens + 1))
                 if [ -z "$run" ] && [ "$a" = "$n" ]; then
                   ok=1
