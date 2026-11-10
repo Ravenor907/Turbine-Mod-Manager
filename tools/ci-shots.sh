@@ -870,6 +870,7 @@ for size in $SIZES; do
   need "anticheat-$size" "Any game: a subtitle asks ($size)" "Nexus game for Lantern Hollow: ask \(2 candidates\)"
   SHOOT_ENV="$NG" shoot "nexuspick-$size" "$size" nexuspick "$PWD/home" --game=$lh
   need "nexuspick-$size" "Any game: Which game on Nexus ($size)" "Which game on Nexus: Lantern Hollow \(2 candidates\)"
+  need "nexuspick-$size" "Any game: asked once by itself when Get mods shows ($size)" "Nexus game question: asked by itself 1 times, sheet Which game on Nexus is Lantern Hollow\?, 4 rows; a second time: not asked"
   SHOOT_ENV="$NG" shoot "basicdetails-$size" "$size" details "$PWD/home" --game=$bp
   fresh "place-$size"; h="$PWD/fh/place-$size"
   SHOOT_ENV="$NG" shoot "place-$size" "$size" place "$h" --game=$bp "--selftest-import=$h/Downloads/Odd Layout 1.0.zip"

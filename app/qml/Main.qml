@@ -63,6 +63,7 @@ Window {
         property string modHold: "{}"       // 0.58: games played without mods until their mods update: {build, versions}
         property string playChoice: "{}"    // 0.6: per game, the last Play choice with Seamless Co-op: mods, coop or plain
         property string coopTileAsked: "[]" // 0.62: games whose "Add a Co-op tile to Steam?" was asked once
+        property string nexusGameAsked: "[]" // 0.62: games whose "Which game on Nexus is this?" was asked once
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
     Settings {
@@ -331,7 +332,12 @@ Window {
             // (Skip those files); the Nexus game question; and a Basic game's mod menu.
             else if (shot.page === "placestart") { app.note("shot", "Place page open: " + (app.page === "place")); app.placeAct("start"); Turbine.applyNow() }
             else if (shot.page === "overwriteskip") { app.note("shot", "Overwrite sheet open: " + (app.sheet === "msg")); app.act("a"); Turbine.applyNow() }
-            else if (shot.page === "nexuspick") app.openNexusPick()
+            else if (shot.page === "nexuspick") {
+                // 0.62: it was asked by itself once (the game opened on Get mods); a second try doesn't ask again.
+                const again = app.maybeAskNexusGame("a second time")
+                app.note("shot", "Nexus game question: asked by itself " + app.nexusAsks + " times, sheet " + (app.sheet === "pick" ? app.pickTitle : "\"" + app.sheet + "\"") + ", " + app.pickItems.length + " rows; a second time: " + (again ? "asked again" : "not asked"))
+                app.sheet = ""; app.openNexusPick()
+            }
             else if (shot.page === "why") app.openWhy()
             // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
             else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false })
@@ -677,7 +683,7 @@ Window {
         modPage = false
         history = []
         // A Basic game Turbine couldn't match on Nexus: asked once, when the player opens Get mods.
-        if (tab === 1 && game && rules && rules.domainState === "ask" && !nexusAsked[game.id] && sheet === "" && pressRecent()) Qt.callLater(openNexusPick)
+        if (tab === 1) Qt.callLater(() => app.maybeAskNexusGame("Get mods opened"))
         if (tab === 1 && !browseData) {
             // A first visit lands on the first card (Y opens Search, Sort and Category).
             if (!restoreFocus && getText === "") restoreFocus = { area: "grid", index: 0 }
@@ -1717,7 +1723,10 @@ Window {
             app.maybeCheckUpdates()
         }
         function onRulesJsonChanged() {
+            app.rulesFor = app.game ? app.game.id : ""
             app.rules = app.parse(Turbine.rulesJson, null)
+            // 0.62: a game that opens on Get mods before its rules are read is asked about once they are.
+            if (app.tab === 1) Qt.callLater(() => app.maybeAskNexusGame("its rules were read"))
             app.maybeLandOnGet()
             app.offerLoader()
             app.maybeAntiCheat()
@@ -3445,6 +3454,28 @@ Window {
     // "Which game on Nexus is this?": once, on opening Get mods for a game Turbine couldn't match; B asks again later.
     property var nexusAsked: ({})
     property var nexusFound: null         // the search's games, in place of the candidates
+    // 0.62: a game whose Nexus page Turbine can't tell for sure (several Nexus games fit its name: the engine's
+    // candidates, rules.nexusCandidates with domainState "ask") is asked about once, with a simple pick, the first
+    // time its Get mods shows: on a tab change, and when the game's rules arrive with Get mods already open (a
+    // game that opens there was never asked before). Once per game, ever; Get mods keeps its Pick the Nexus game
+    // button after a Not now.
+    property string rulesFor: ""          // the game the rules on hand are for
+    property int nexusAsks: 0
+    function maybeAskNexusGame(why) {
+        if (!game || !rules || rulesFor !== game.id) return false
+        // (The build's pictures of other things stay as they are: only its own picture asks.)
+        if (shot.on && shot.page !== "nexuspick") return false
+        if (page !== "game" || tab !== 1 || modPage || sheet !== "" || wheelOpen) return false
+        if (rules.domainState !== "ask" || (rules.nexusCandidates || []).length === 0) return false
+        const asked = parse(seen.nexusGameAsked, [])
+        if (nexusAsked[game.id] || asked.indexOf(game.id) >= 0) return false
+        asked.push(game.id)
+        if (!shot.on) seen.nexusGameAsked = JSON.stringify(asked)
+        nexusAsks++
+        note("action", "Which game on Nexus: asked once for " + game.name + " (" + why + ")")
+        openNexusPick()
+        return true
+    }
     function openNexusPick() {
         if (!game || !rules) return
         let a = Object.assign({}, nexusAsked); a[game.id] = true; nexusAsked = a
