@@ -489,7 +489,13 @@ impl Client {
             fs::write(&out, b"").map_err(|e| NetError::Failed(format!("Couldn't save the answer ({e}).")))?;
         }
         if let Some(p) = progress.as_mut() {
-            p(len, Some(len));
+            // A stop asked for at the very end counts too. A transfer that finished before it was first looked at
+            // was never asked whether to go on, so a download the player had stopped could still come back whole
+            // (and the check of exactly that failed now and then on a fast machine).
+            if !p(len, Some(len)) {
+                let _ = fs::remove_file(&out);
+                return Err(NetError::Cancelled);
+            }
         }
         Ok(Response { status, headers, effective_url, body: out })
     }
