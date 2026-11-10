@@ -31,6 +31,11 @@ if "No checksum beside" not in rel or "exit 1" not in rel.split("No checksum bes
     problems.append("a missing checksum must stop the release")
 if "::warning title=No checksum" in rel:
     problems.append("a missing checksum only warns")
+# 0.63: Turbine's own update check reads the checksum file beside the bundle (it no longer asks GitHub's API, whose
+# hourly limit refused it), so the release must publish both checksum files.
+for f in ("TurbineModManager.flatpak.sha256", "Turbine-Decky.zip.sha256"):
+    if ("\n            " + f + "\n") not in rel:
+        problems.append(f"the release must publish {f} beside its file: Turbine's updater checks the download against it")
 decky = wf[wf.index("  decky:"):wf.index("  vendor:")]
 if "needs.reuse.outputs.run == ''" not in decky:
     problems.append("the Decky job must not build again for a release that reuses a green run")

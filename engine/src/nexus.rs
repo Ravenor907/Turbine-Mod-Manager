@@ -159,6 +159,15 @@ pub fn headers_public(app_version: &str) -> Vec<(String, String)> {
 /// What a call that needs the key says when there is none.
 pub const NEEDS_KEY: &str = "This needs a Nexus Mods key (Settings, Getting mods).";
 
+/// 0.63: a refusal from Nexus's API (401 or 403) that nothing more exact explains: here, and only here, the
+/// account or the key is what to look at. Refusals from other sites never say so.
+pub fn refused_words(e: NetError) -> NetError {
+    match e {
+        NetError::Denied(c) => NetError::Failed(format!("Nexus refused the request ({c}). Check your account or key in Settings.")),
+        e => e,
+    }
+}
+
 /// How long Turbine waits after Nexus says "too many requests" (seconds).
 pub const BACKOFF_SECS: u64 = 60;
 
@@ -1342,13 +1351,13 @@ impl Nexus {
 
     pub fn mod_info(&self, domain: &str, mod_id: u64) -> Result<ModInfo, NetError> {
         Self::check_domain(domain)?;
-        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}.json"))?;
+        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}.json")).map_err(refused_words)?;
         parse_mod(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 
     pub fn files(&self, domain: &str, mod_id: u64) -> Result<FileList, NetError> {
         Self::check_domain(domain)?;
-        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}/files.json"))?;
+        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}/files.json")).map_err(refused_words)?;
         parse_files(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 
@@ -1358,7 +1367,7 @@ impl Nexus {
         if !matches!(period, "1d" | "1w" | "1m") {
             return Err(NetError::Failed("Nexus only lists updates for a day, a week or a month.".into()));
         }
-        let text = self.get(&format!("/v1/games/{domain}/mods/updated.json?period={period}"))?;
+        let text = self.get(&format!("/v1/games/{domain}/mods/updated.json?period={period}")).map_err(refused_words)?;
         parse_updated(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 
@@ -1414,7 +1423,7 @@ impl Nexus {
     /// One file's details (size, version, category).
     pub fn file_info(&self, domain: &str, mod_id: u64, file_id: u64) -> Result<FileInfo, NetError> {
         Self::check_domain(domain)?;
-        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}/files/{file_id}.json"))?;
+        let text = self.get(&format!("/v1/games/{domain}/mods/{mod_id}/files/{file_id}.json")).map_err(refused_words)?;
         parse_file(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 

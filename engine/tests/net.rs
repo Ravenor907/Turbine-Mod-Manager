@@ -293,7 +293,26 @@ fn failures_become_net_errors_and_leave_no_files() {
     let u = "https://api.github.com/limited";
     f.serve(u, b"slow down");
     f.extra(u, "status", "429");
-    assert_eq!(f.client.get_text(u, &[]), Err(NetError::RateLimited));
+    // 0.63: a limit or refusal from GitHub is its own failure, with the minutes it says to wait.
+    f.extra(u, "headers", "Retry-After: 61\r\n");
+    assert_eq!(f.client.get_text(u, &[]), Err(NetError::GitHubLimit(2)));
+    assert_eq!(NetError::GitHubLimit(2).to_string(), "GitHub is limiting requests right now. Try again in about 2 minutes.");
+    assert_eq!(NetError::GitHubLimit(1).to_string(), "GitHub is limiting requests right now. Try again in about 1 minute.");
+    f.extra(u, "status", "403");
+    f.extra(u, "headers", "X-RateLimit-Remaining: 0\r\n");
+    assert_eq!(f.client.get_text(u, &[]), Err(NetError::GitHubLimit(15)));
+    let h = |k: &str, v: &str| vec![(k.to_string(), v.to_string())];
+    assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.github.com/x", &h("x-ratelimit-reset", "1600"), 1000), Some(10));
+    assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.github.com/x", &h("x-ratelimit-reset", "900000"), 1000), Some(60));
+    assert_eq!(net::github_limit(&NetError::Denied(403), "https://api.nexusmods.com/x", &[], 1000), None);
+    assert_eq!(net::github_limit(&NetError::NotFound, "https://github.com/x", &[], 1000), None);
+    let other = "https://thunderstore.io/limited";
+    f.serve(other, b"slow down");
+    f.extra(other, "status", "429");
+    assert_eq!(f.client.get_text(other, &[]), Err(NetError::RateLimited));
+    f.extra(other, "status", "403");
+    let refused = f.client.get_text(other, &[]).unwrap_err().to_string();
+    assert!(!refused.contains("account") && !refused.contains("key"), "{refused}");
     let u = "https://api.github.com/offline";
     f.extra(u, "exit", "6");
     assert_eq!(f.client.get_text(u, &[]), Err(NetError::Offline));

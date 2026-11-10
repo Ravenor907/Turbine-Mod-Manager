@@ -128,10 +128,17 @@ while [ $# -gt 0 ]; do
   shift
 done
 key=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
+printf '%s\n' "$url" >> "$SERVED/requests.log"
+if [ -f "$SERVED/$key.status" ]; then
+  { printf 'HTTP/2 %s\r\n' "$(cat "$SERVED/$key.status")"; cat "$SERVED/$key.headers" 2>/dev/null; printf '\r\n'; } > "$hdr"
+  printf '%s %s' "$(cat "$SERVED/$key.status")" "$url"; exit 22
+fi
 if [ ! -f "$SERVED/$key" ]; then printf 'HTTP/2 404\r\n\r\n' > "$hdr"; printf '404 %s' "$url"; exit 22; fi
 printf 'HTTP/2 200\r\n\r\n' > "$hdr"
 cp "$SERVED/$key" "$out"
-printf '200 %s' "$url"
+eff=$url
+if [ -f "$SERVED/$key.effective" ]; then eff=$(cat "$SERVED/$key.effective"); fi
+printf '200 %s' "$eff"
 "#;
 
 fn fake(tag: &str) -> (PathBuf, Client) {
@@ -150,36 +157,101 @@ fn serve(dir: &Path, url: &str, body: &[u8]) {
     fs::write(dir.join("served").join(key), body).unwrap();
 }
 
+fn extra(dir: &Path, url: &str, ext: &str, text: &str) {
+    let key: String = url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    fs::write(dir.join("served").join(format!("{key}.{ext}")), text).unwrap();
+}
+
+fn requests(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join("served/requests.log")).unwrap_or_default().lines().map(str::to_string).collect()
+}
+
+const TAG: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/tag/";
+const DL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/";
+
 #[test]
 fn checks_downloads_and_verifies() {
     let (dir, client) = fake("flow");
-    // Only pre-releases so far: the latest endpoint answers 404, which means up to date.
+    // Only pre-releases so far: the latest page answers 404, which means up to date.
     assert_eq!(su::check(&client, "0.1", false).unwrap(), Check::UpToDate);
-    serve(&dir, su::LIST_URL, data("github_turbine_releases.json").as_bytes());
-    assert_eq!(su::check(&client, "0.1", true).unwrap(), Check::UpToDate);
+    // 0.63: the newest release is read from where the latest page ends up, never from GitHub's API.
+    serve(&dir, su::LATEST_PAGE, b"<html>the release page</html>");
+    extra(&dir, su::LATEST_PAGE, "effective", &format!("{TAG}v0.31"));
+    let Check::Available(r) = su::check(&client, "0.3", false).unwrap() else { panic!("0.31 is newer than 0.3") };
+    assert_eq!((r.version.as_str(), r.tag.as_str(), r.prerelease), ("0.31", "v0.31", false));
+    assert_eq!(r.asset_url, format!("{DL}v0.31/TurbineModManager.flatpak"));
+    assert_eq!(su::check(&client, "0.31", false).unwrap(), Check::UpToDate);
+    assert_eq!(fs::read_dir(dir.join("cache")).unwrap().count(), 0, "the page isn't kept");
+    // Labs mode: the feed's tags count too, and one that isn't the latest full release is a pre-release.
+    serve(&dir, su::FEED_URL, format!("<feed><entry><link rel=\"alternate\" href=\"{TAG}v0.32\"/></entry><entry><link href=\"{TAG}v0.31\"/></entry><entry><link href=\"{TAG}nightly\"/></entry></feed>").as_bytes());
+    let Check::Available(pre) = su::check(&client, "0.31", true).unwrap() else { panic!("0.32 is newer than 0.31") };
+    assert_eq!((pre.version.as_str(), pre.prerelease), ("0.32", true));
+    assert!(requests(&dir).iter().all(|u| !u.contains("api.github.com")), "{:?}", requests(&dir));
 
+    // The checksum file beside the bundle is what the download is checked against.
     let bundle = b"0123456789".to_vec();
     let sha = turbine_engine::sha256::digest_hex(&bundle);
-    serve(&dir, su::LATEST_URL, release("v0.31", false, "", &format!("sha256 {sha}")).as_bytes());
-    let Check::Available(r) = su::check(&client, "0.3", false).unwrap() else { panic!("0.31 is newer than 0.3") };
+    let sha_url = format!("{DL}v0.31/TurbineModManager.flatpak.sha256");
+    assert_eq!(r.sha256_asset_url.as_deref(), Some(sha_url.as_str()));
+    serve(&dir, &sha_url, format!("{sha}  TurbineModManager.flatpak\n").as_bytes());
     serve(&dir, &r.asset_url, &bundle);
     let d = su::download(&client, &r, None).unwrap();
     assert_eq!(fs::read(&d.path).unwrap(), bundle);
     assert!(d.path.starts_with(dir.join("cache")));
+    assert!(requests(&dir).iter().all(|u| !u.contains("api.github.com")));
 
     // A bundle that doesn't match is deleted.
     serve(&dir, &r.asset_url, b"9876543210");
     assert_eq!(su::download(&client, &r, None), Err(NetError::Mismatch("its SHA-256 is different".into())));
-    // No published hash at all: refused before downloading.
-    let mut bare = (*r).clone();
-    bare.sha256 = None;
-    assert!(su::download(&client, &bare, None).unwrap_err().to_string().contains("doesn't publish a SHA-256"));
-    // A .sha256 asset is used when the notes have none.
-    let url = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/v0.31/TurbineModManager.flatpak.sha256";
-    bare.sha256_asset_url = Some(url.into());
-    serve(&dir, url, format!("{sha}  TurbineModManager.flatpak\n").as_bytes());
+    // No checksum file (a release from before 0.63): GitHub's own digest and size for that tag's bundle.
+    fs::remove_file(dir.join("served").join(sha_url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>())).unwrap();
+    let api = format!("{}v0.31", su::TAG_API);
+    serve(&dir, &api, release("v0.31", false, "", &format!("sha256 {sha}")).as_bytes());
     serve(&dir, &r.asset_url, &bundle);
-    assert!(su::download(&client, &bare, None).is_ok());
+    assert!(su::download(&client, &r, None).is_ok());
+    serve(&dir, &r.asset_url, b"01234");
+    assert!(matches!(su::download(&client, &r, None), Err(NetError::Mismatch(why)) if why.starts_with("size")));
+    // No published hash at all: refused before downloading.
+    fs::remove_file(dir.join("served").join(api.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>())).unwrap();
+    assert!(su::download(&client, &r, None).unwrap_err().to_string().contains("doesn't publish a SHA-256"));
+    let mut bare = (*r).clone();
+    bare.sha256_asset_url = None;
+    bare.tag = String::new();
+    assert!(su::download(&client, &bare, None).unwrap_err().to_string().contains("doesn't publish a SHA-256"));
+}
+
+#[test]
+fn a_limit_from_github_has_its_own_words() {
+    let (dir, client) = fake("limit");
+    serve(&dir, su::LATEST_PAGE, b"");
+    extra(&dir, su::LATEST_PAGE, "status", "429");
+    extra(&dir, su::LATEST_PAGE, "headers", "Retry-After: 700\r\n");
+    let e = su::check(&client, "0.3", false).unwrap_err();
+    assert_eq!(e.to_string(), "GitHub is limiting update checks right now. Try again in about 12 minutes.");
+    extra(&dir, su::LATEST_PAGE, "status", "403");
+    extra(&dir, su::LATEST_PAGE, "headers", "X-RateLimit-Remaining: 0\r\n");
+    let e = su::check(&client, "0.3", false).unwrap_err().to_string();
+    assert!(e.starts_with("GitHub is limiting update checks right now. Try again in about ") && !e.contains("account") && !e.contains("key"), "{e}");
+}
+
+#[test]
+fn a_start_within_six_hours_uses_the_last_answer() {
+    let newer = su::release_for_tag("v0.64", false).unwrap();
+    let kept = su::Remembered::of(Some(&newer), false, 1_000_000);
+    assert_eq!(su::Remembered::parse(&kept.to_text()), Some(kept.clone()));
+    assert!(kept.fresh(false, 1_000_000 + su::CHECK_EVERY_SECS - 1));
+    assert!(!kept.fresh(false, 1_000_000 + su::CHECK_EVERY_SECS), "six hours on, GitHub is asked again");
+    assert!(!kept.fresh(true, 1_000_100), "another channel asks again");
+    assert!(!kept.fresh(false, 999_999), "an answer from the future isn't trusted");
+    assert!(matches!(kept.answer("0.63"), Check::Available(r) if r.version == "0.64"));
+    assert_eq!(kept.answer("0.64"), Check::UpToDate, "after the update the remembered release is the running one");
+    let none = su::Remembered::of(None, true, 5);
+    assert_eq!(su::Remembered::parse(&none.to_text()), Some(none.clone()));
+    assert_eq!(none.answer("0.1"), Check::UpToDate);
+    assert_eq!(su::Remembered::parse("junk"), None);
+    assert_eq!(su::Remembered::parse("5 0 0 v1.2.3"), None, "a tag that isn't a Turbine version");
+    assert_eq!(su::tag_from_url("https://github.com/Ravenor907/Turbine-Mod-Manager/releases"), None);
+    assert_eq!(su::tag_from_url("https://github.com/Someone/Else/releases/tag/v9.9"), None);
 }
 
 #[test]

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
-use turbine_engine::net::{Client, Request};
+use turbine_engine::net::{Client, NetError, Request};
 use turbine_engine::plugins::{Files, LoadOrder};
 use turbine_engine::Game;
 
@@ -97,9 +97,28 @@ fn check_lists(masterlist: &Path, prelude: &Path, scratch: &Path) -> Result<(), 
     db.load_masterlist_with_prelude(masterlist, prelude).map_err(|e| format!("LOOT couldn't read it ({e})"))
 }
 
-fn fetch(client: &Client, url: &str, to: &Path) -> Result<(), String> {
-    let req = Request::get(url).header("Accept", "application/vnd.github.raw").max_bytes(MAX_LIST_BYTES).max_time(120);
-    let resp = client.send(&req, None).map_err(|e| e.to_string())?;
+/// 0.63: fetches one list. With the copy from before and the tag GitHub gave for it, GitHub is asked only whether it
+/// changed (If-None-Match): "not changed" (304) keeps that copy and doesn't count against GitHub's hourly limit. A
+/// limit from GitHub gets its own words. Returns the tag of what is now in `to`.
+fn fetch(client: &Client, url: &str, to: &Path, have: &Path) -> Result<Option<String>, String> {
+    let tag_file = etag_file(have);
+    let known = fs::read_to_string(&tag_file).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && have.is_file());
+    let mut req = Request::get(url).header("Accept", "application/vnd.github.raw").max_bytes(MAX_LIST_BYTES).max_time(120);
+    if let Some(tag) = &known {
+        req = req.header("If-None-Match", tag);
+    }
+    let resp = match client.send(&req, None) {
+        Ok(r) => r,
+        Err(NetError::Http(304)) if known.is_some() => {
+            fs::copy(have, to).map_err(|e| format!("couldn't keep it ({e})"))?;
+            return Ok(known);
+        }
+        Err(NetError::GitHubLimit(m)) => {
+            return Err(format!("GitHub is limiting how often the list can be fetched, try again in about {}", turbine_engine::net::minutes_words(m)))
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    let tag = resp.header("etag").map(str::to_string);
     let len = fs::metadata(&resp.body).map(|m| m.len()).unwrap_or(0);
     if len < 16 {
         let _ = fs::remove_file(&resp.body);
@@ -107,7 +126,14 @@ fn fetch(client: &Client, url: &str, to: &Path) -> Result<(), String> {
     }
     fs::rename(&resp.body, to).or_else(|_| fs::copy(&resp.body, to).map(|_| ())).map_err(|e| format!("couldn't keep it ({e})"))?;
     let _ = fs::remove_file(&resp.body);
-    Ok(())
+    Ok(tag)
+}
+
+/// Where the tag GitHub gave for a list is kept, beside the list.
+fn etag_file(list: &Path) -> PathBuf {
+    let mut name = list.file_name().unwrap_or_default().to_os_string();
+    name.push(".etag");
+    list.with_file_name(name)
 }
 
 /// The masterlist to sort with: the copy on this device when it's under a day old (or `force` is false and there is
@@ -126,11 +152,12 @@ pub fn lists(client: &Client, dir: &Path, force: bool) -> (Option<Lists>, String
         let _ = fs::remove_dir_all(&new);
         fs::create_dir_all(&new).map_err(|e| format!("couldn't make its folder ({e})"))?;
         let (ml, pre) = (new.join("masterlist.yaml"), new.join("prelude.yaml"));
-        fetch(client, MASTERLIST_URL, &ml)?;
-        fetch(client, PRELUDE_URL, &pre)?;
+        let ml_tag = fetch(client, MASTERLIST_URL, &ml, &dir.join("masterlist.yaml"))?;
+        let pre_tag = fetch(client, PRELUDE_URL, &pre, &dir.join("prelude.yaml"))?;
         check_lists(&ml, &pre, &new.join("check"))?;
-        for (from, name) in [(&ml, "masterlist.yaml"), (&pre, "prelude.yaml")] {
+        for (from, name, tag) in [(&ml, "masterlist.yaml", ml_tag), (&pre, "prelude.yaml", pre_tag)] {
             fs::rename(from, dir.join(name)).map_err(|e| format!("couldn't keep it ({e})"))?;
+            let _ = fs::write(etag_file(&dir.join(name)), tag.unwrap_or_default());
         }
         let at = now_secs();
         let _ = fs::write(stamp_file(dir), at.to_string());

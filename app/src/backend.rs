@@ -619,6 +619,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selfCheck"]
         fn self_check(self: Pin<&mut Self>, labs: bool, back: bool);
+        /// 0.63: the same check as Turbine starts: GitHub is asked at most once every six hours.
+        #[qinvokable]
+        #[cxx_name = "selfCheckAtStart"]
+        fn self_check_at_start(self: Pin<&mut Self>, labs: bool);
         #[qinvokable]
         #[cxx_name = "selfInstall"]
         fn self_install(self: Pin<&mut Self>);

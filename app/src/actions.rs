@@ -1839,12 +1839,21 @@ impl qobject::Turbine {
 
     // ------------------------------------------------------------------------------------------------ Turbine itself
 
-    pub fn self_check(mut self: Pin<&mut Self>, labs: bool, back: bool) {
+    pub fn self_check(self: Pin<&mut Self>, labs: bool, back: bool) {
+        self.self_check_how(labs, back, false)
+    }
+
+    /// 0.63: the check at start: at most one question to GitHub every six hours (online::Net::self_check).
+    pub fn self_check_at_start(self: Pin<&mut Self>, labs: bool) {
+        self.self_check_how(labs, false, true)
+    }
+
+    fn self_check_how(mut self: Pin<&mut Self>, labs: bool, back: bool, at_start: bool) {
         self.as_mut().set_self_json(QString::from("{\"state\":\"checking\"}"));
         self.net_send(
             if back { "Look for the latest stable Turbine" } else { "Look for a newer Turbine" },
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let j = match net.self_check(crate::VERSION, labs, back) {
+                let j = match net.self_check(crate::VERSION, labs, back, at_start) {
                     Ok(Some(r)) => {
                         let j = online::release_json(if back { "stable" } else { "available" }, Some(&r), "");
                         net.release = Some(r);

@@ -38,6 +38,9 @@ pub enum NetError {
     Denied(u16),
     /// Too many requests; try again later.
     RateLimited,
+    /// 0.63: GitHub is limiting or refusing requests from this connection (a 429, or a 401/403 from one of its
+    /// hosts); never the player's account or key. The minutes until it says to ask again.
+    GitHubLimit(u32),
     TooBig { limit: u64 },
     Timeout,
     /// The address isn't HTTPS or its host isn't on Turbine's list of allowed hosts.
@@ -60,7 +63,8 @@ impl std::fmt::Display for NetError {
         match self {
             NetError::Offline => write!(f, "No internet connection. Check Wi-Fi and try again."),
             NetError::NotFound => write!(f, "The server says that file or page doesn't exist (404)."),
-            NetError::Denied(c) => write!(f, "The server refused the request ({c}). Check your account or key in Settings."),
+            NetError::Denied(c) => write!(f, "The server refused the request ({c}). Try again later."),
+            NetError::GitHubLimit(m) => write!(f, "GitHub is limiting requests right now. Try again in about {}.", minutes_words(*m)),
             NetError::RateLimited => write!(f, "The server says too many requests were made. Try again in a few minutes."),
             NetError::TooBig { limit } => {
                 write!(f, "The download was bigger than the {} limit, so it was stopped.", human_size(*limit))
@@ -312,6 +316,32 @@ pub fn site_down(e: &NetError, headers: &[(String, String)], body_start: &[u8]) 
     }
 }
 
+/// "1 minute", "12 minutes".
+pub fn minutes_words(m: u32) -> String {
+    if m == 1 {
+        "1 minute".into()
+    } else {
+        format!("{m} minutes")
+    }
+}
+
+/// 0.63: is this a limit or refusal from GitHub (the owner's 403 at Check for updates: 60 requests an hour for a
+/// connection that isn't signed in)? The minutes to wait: from Retry-After (seconds), else X-RateLimit-Reset (the
+/// time it lifts, seconds since 1970) against `now`, else 15. At least 1, at most 60. None for other sites and
+/// other failures.
+pub fn github_limit(e: &NetError, url: &str, headers: &[(String, String)], now: u64) -> Option<u32> {
+    if !matches!(e, NetError::Denied(_) | NetError::RateLimited) {
+        return None;
+    }
+    let host = https_host(url)?;
+    if host != "github.com" && !host.ends_with(".github.com") {
+        return None;
+    }
+    let h = |k: &str| headers.iter().rev().find(|(n, _)| n == k).and_then(|(_, v)| v.trim().parse::<u64>().ok());
+    let secs = h("retry-after").or_else(|| h("x-ratelimit-reset").map(|at| at.saturating_sub(now))).unwrap_or(15 * 60);
+    Some(secs.div_ceil(60).clamp(1, 60) as u32)
+}
+
 /// Turns curl's exit code and the HTTP status into a result (pure).
 pub fn classify(exit: i32, status: u16, max_bytes: u64) -> Result<(), NetError> {
     match exit {
@@ -473,7 +503,14 @@ impl Client {
         if let Err(e) = classify(exit, status, req.max_bytes) {
             let page = fs::read(&out).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
             let _ = fs::remove_file(&out);
-            return Err(if site_down(&e, &headers, &page) { NetError::Down } else { e });
+            if site_down(&e, &headers, &page) {
+                return Err(NetError::Down);
+            }
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            return Err(match github_limit(&e, &req.url, &headers, now) {
+                Some(m) => NetError::GitHubLimit(m),
+                None => e,
+            });
         }
         if !effective_url.is_empty() && !allowed_url(&effective_url) {
             let _ = fs::remove_file(&out);

@@ -2333,7 +2333,7 @@ Window {
             Turbine.accountStatus()
             Turbine.startCatching()
             Qt.callLater(steamSetupAtStart)
-            if (updates.auto) { selfAuto = true; Turbine.selfCheck(labsOn && updates.prerelease, false) }
+            if (updates.auto) { selfAuto = true; Turbine.selfCheckAtStart(labsOn && updates.prerelease) }
         }
         load()
         note("app", "Qt platform " + Qt.platform.pluginName + (Turbine.gamemode ? ", Game Mode" : ""))
@@ -8173,7 +8173,7 @@ Window {
         Turbine.gamemode ? { kind: "action", key: "restart", title: "Close Turbine", how: "Then start it again from Steam to use the new version", action: "Close" }
                          : { kind: "action", key: "restart", title: "Restart Turbine", how: "Closes Turbine and opens the new version", action: "Restart" }
     ] : []).concat([
-        { kind: "toggle", key: "auto", title: "Check when Turbine starts", how: "Looks once at each start. Nothing installs without you.", value: updates.auto, options: [false, true], names: ["Off", "On"] },
+        { kind: "toggle", key: "auto", title: "Check when Turbine starts", how: "Looks at a start, at most once every 6 hours. Nothing installs without you.", value: updates.auto, options: [false, true], names: ["Off", "On"] },
         { kind: "info", key: "channel", title: "Update channel: " + (labsOn && updates.prerelease ? "Pre-release" : "Stable"), how: labsOn ? "Change it in Labs" : "Stable releases only" }
     ])
     function rowStep(r, d) {

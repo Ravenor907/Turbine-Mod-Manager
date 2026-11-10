@@ -1232,7 +1232,9 @@ impl Net {
     // ------------------------------------------------------------------------------------------------ Turbine itself
 
     /// Looks for a newer Turbine. `back`: the newest stable release even if it's older (Go back to stable).
-    pub fn self_check(&mut self, current: &str, labs: bool, back: bool) -> Result<Option<selfupdate::Release>, String> {
+    /// 0.63: `at_start`: the check Turbine makes by itself when it starts. It asks GitHub at most once every six
+    /// hours; in between the last answer is used. Check for updates (the button) always asks.
+    pub fn self_check(&mut self, current: &str, labs: bool, back: bool, at_start: bool) -> Result<Option<selfupdate::Release>, String> {
         if let Some(t) = self.sample_text("github_turbine_releases.json") {
             let t = t?;
             if back {
@@ -1244,18 +1246,25 @@ impl Net {
             };
         }
         if back {
-            let text = self
-                .client
-                .send(&net::Request::get(selfupdate::LATEST_URL).header("Accept", "application/vnd.github+json").max_bytes(8 << 20).max_time(30), None)
-                .map_err(err)?
-                .take_text()
-                .map_err(err)?;
-            return selfupdate::pick_release(&text, false);
+            return selfupdate::latest(&self.client).map_err(err);
         }
-        match selfupdate::check(&self.client, current, labs).map_err(err)? {
-            selfupdate::Check::Available(r) => Ok(Some(*r)),
-            selfupdate::Check::UpToDate => Ok(None),
+        let kept = self.cache.join("update-check");
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let answer = |c: selfupdate::Check| match c {
+            selfupdate::Check::Available(r) => Some(*r),
+            selfupdate::Check::UpToDate => None,
+        };
+        if at_start {
+            if let Some(last) = fs::read_to_string(&kept).ok().and_then(|t| selfupdate::Remembered::parse(&t)).filter(|r| r.fresh(labs, now)) {
+                crate::log::line("update", &format!("Checked {} minutes ago: the answer from then is used (GitHub is asked again six hours after it)", (now - last.at) / 60));
+                return Ok(answer(last.answer(current)));
+            }
         }
+        let newest = selfupdate::newest(&self.client, labs).map_err(err)?;
+        let last = selfupdate::Remembered::of(newest.as_ref(), labs, now);
+        let _ = fs::create_dir_all(&self.cache);
+        let _ = fs::write(&kept, last.to_text());
+        Ok(answer(last.answer(current)))
     }
 
     /// Downloads a release into Turbine's cache (a folder the host can read) and installs it on the host.
@@ -1380,7 +1389,7 @@ mod tests {
         let nd = n.details_nexus(&game(), 2400).unwrap();
         assert!(json::parse(&nd).is_ok(), "{nd}");
         assert!(n.install_ts(&game(), &[first], false, &mut |_| {}, &mut |_, _, _| {}).is_err());
-        let r = n.self_check("0.2", false, false).unwrap();
+        let r = n.self_check("0.2", false, false, false).unwrap();
         println!("{:?}", r.map(|r| r.version));
         let u = n.check_updates(&game()).unwrap();
         assert!(json::parse(&u).is_ok());

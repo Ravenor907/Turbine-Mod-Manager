@@ -1,5 +1,5 @@
 //! Turbine's own updates from its GitHub releases: find the newest release (pre-releases only when Labs mode opts
-//! in), compare one-dot versions, download TurbineModManager.flatpak and check its size and SHA-256. Installing is
+//! in; from the releases page and feed, not GitHub's API), compare one-dot versions, download TurbineModManager.flatpak and check its size and SHA-256. Installing is
 //! done by the app with `install_args`.
 
 use crate::json::{self, Json};
@@ -9,8 +9,19 @@ use std::cmp::Ordering;
 use std::path::Path;
 
 pub const REPO: &str = "Ravenor907/Turbine-Mod-Manager";
-pub const LATEST_URL: &str = "https://api.github.com/repos/Ravenor907/Turbine-Mod-Manager/releases/latest";
-pub const LIST_URL: &str = "https://api.github.com/repos/Ravenor907/Turbine-Mod-Manager/releases?per_page=30";
+/// 0.63: the newest full release's own page. GitHub redirects it to ".../releases/tag/<tag>", so the tag is read
+/// from where the request ends up and GitHub's API (60 requests an hour for a connection that isn't signed in,
+/// which Check for updates ran into as a 403) isn't asked.
+pub const LATEST_PAGE: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest";
+/// Every release with its tag, pre-releases included (Labs mode), as the repository's feed.
+pub const FEED_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases.atom";
+const TAG_MARK: &str = "/Ravenor907/Turbine-Mod-Manager/releases/tag/";
+const DOWNLOAD_BASE: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/";
+/// One release by its tag from GitHub's API: asked only while installing a release that has no checksum file
+/// beside its bundle (releases before 0.63), for GitHub's own digest.
+pub const TAG_API: &str = "https://api.github.com/repos/Ravenor907/Turbine-Mod-Manager/releases/tags/";
+/// A check at start asks GitHub at most this often; in between the last answer is used.
+pub const CHECK_EVERY_SECS: u64 = 6 * 60 * 60;
 pub const ASSET: &str = "TurbineModManager.flatpak";
 /// No Turbine bundle comes near this; anything bigger is stopped.
 pub const MAX_BUNDLE: u64 = 1 << 30;
@@ -161,35 +172,182 @@ pub fn decide(list_json: &str, current: &str, labs: bool) -> Result<Check, Strin
     })
 }
 
-/// Asks GitHub for the newest release. Without Labs mode only full releases count (the "latest" endpoint, which
-/// answers 404 while there are only pre-releases); with Labs mode the release list is read so pre-releases count.
-pub fn check(client: &Client, current: &str, labs: bool) -> Result<Check, NetError> {
-    let url = if labs { LIST_URL } else { LATEST_URL };
-    let req = Request::get(url).header("Accept", "application/vnd.github+json").max_bytes(8 << 20).max_time(30);
-    let text = match client.send(&req, None) {
-        Ok(r) => r.take_text()?,
-        Err(NetError::NotFound) if !labs => return Ok(Check::UpToDate),
-        Err(e) => return Err(e),
-    };
-    decide(&text, current, labs).map_err(|e| NetError::Failed(format!("{e}.")))
+/// "v0.63" from ".../releases/tag/v0.63" (where the latest page ends up). None for any other address or a tag
+/// that isn't a one-dot version.
+pub fn tag_from_url(url: &str) -> Option<String> {
+    let at = url.find(TAG_MARK)?;
+    let tag: String = url[at + TAG_MARK.len()..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '.').collect();
+    parse_version(&tag)?;
+    Some(tag)
 }
 
-/// Downloads the bundle to a temp file and checks it: size from the release, SHA-256 from the asset digest, the
-/// notes, or a .sha256 asset. A release without any published SHA-256 is refused, so nothing unchecked is installed.
+/// Every one-dot tag the releases feed names, in its order (newest first).
+pub fn tags_from_feed(feed: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (at, _) in feed.match_indices(TAG_MARK) {
+        if let Some(tag) = tag_from_url(&feed[at..]) {
+            if !out.contains(&tag) {
+                out.push(tag);
+            }
+        }
+    }
+    out
+}
+
+/// The release a tag names, with the addresses its bundle and the bundle's checksum file have on GitHub. The size
+/// isn't known this way; the SHA-256 (required before anything installs) covers it.
+pub fn release_for_tag(tag: &str, prerelease: bool) -> Option<Release> {
+    let version = tag.trim_start_matches(['v', 'V']).to_string();
+    parse_version(&version)?;
+    Some(Release {
+        version,
+        tag: tag.to_string(),
+        name: String::new(),
+        prerelease,
+        notes: String::new(),
+        asset_url: format!("{DOWNLOAD_BASE}{tag}/{ASSET}"),
+        asset_size: 0,
+        sha256: None,
+        sha256_asset_url: Some(format!("{DOWNLOAD_BASE}{tag}/{ASSET}.sha256")),
+        page_url: format!("https://github.com{TAG_MARK}{tag}"),
+    })
+}
+
+/// The words for a limit or refusal from GitHub at an update check; other failures keep their own.
+pub fn limit_words(e: NetError) -> NetError {
+    match e {
+        NetError::GitHubLimit(m) => {
+            NetError::Failed(format!("GitHub is limiting update checks right now. Try again in about {}.", crate::net::minutes_words(m)))
+        }
+        e => e,
+    }
+}
+
+/// The newest full release (never a pre-release), or None while there is none. Asks the latest page and reads the
+/// tag from where GitHub redirects it; the page itself is thrown away.
+pub fn latest(client: &Client) -> Result<Option<Release>, NetError> {
+    match client.send(&Request::get(LATEST_PAGE).max_bytes(8 << 20).max_time(30), None) {
+        Ok(r) => {
+            let _ = std::fs::remove_file(&r.body);
+            Ok(tag_from_url(&r.effective_url).and_then(|t| release_for_tag(&t, false)))
+        }
+        Err(NetError::NotFound) => Ok(None),
+        Err(e) => Err(limit_words(e)),
+    }
+}
+
+/// The newest release: full releases only, or with Labs mode whatever the feed lists (a tag that isn't the latest
+/// full release is a pre-release).
+pub fn newest(client: &Client, labs: bool) -> Result<Option<Release>, NetError> {
+    let mut best = latest(client)?;
+    if labs {
+        let stable = best.as_ref().map(|r| r.tag.clone());
+        let feed = client.send(&Request::get(FEED_URL).max_bytes(8 << 20).max_time(30), None).map_err(limit_words)?.take_text()?;
+        for tag in tags_from_feed(&feed) {
+            let Some(r) = release_for_tag(&tag, stable.as_deref() != Some(tag.as_str())) else { continue };
+            if best.as_ref().is_none_or(|b| compare(&r.version, &b.version) == Some(Ordering::Greater)) {
+                best = Some(r);
+            }
+        }
+    }
+    Ok(best)
+}
+
+/// Asks GitHub for the newest release, without its API. Without Labs mode only full releases count; with it the
+/// releases feed is read too, so pre-releases count.
+pub fn check(client: &Client, current: &str, labs: bool) -> Result<Check, NetError> {
+    Ok(match newest(client, labs)? {
+        Some(r) if is_newer(&r.version, current) => Check::Available(Box::new(r)),
+        _ => Check::UpToDate,
+    })
+}
+
+/// 0.63: the last answer of an update check, kept so a start within `CHECK_EVERY_SECS` of it doesn't ask GitHub
+/// again. Check for updates (the button) always asks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Remembered {
+    /// When GitHub answered (seconds since 1970).
+    pub at: u64,
+    /// Whether pre-releases counted.
+    pub labs: bool,
+    /// The newest release's tag, "" when there was none.
+    pub tag: String,
+    pub prerelease: bool,
+}
+
+impl Remembered {
+    pub fn of(newest: Option<&Release>, labs: bool, at: u64) -> Remembered {
+        Remembered { at, labs, tag: newest.map(|r| r.tag.clone()).unwrap_or_default(), prerelease: newest.is_some_and(|r| r.prerelease) }
+    }
+
+    /// One line: "<at> <labs 0/1> <prerelease 0/1> <tag>".
+    pub fn to_text(&self) -> String {
+        format!("{} {} {} {}\n", self.at, self.labs as u8, self.prerelease as u8, self.tag)
+    }
+
+    pub fn parse(text: &str) -> Option<Remembered> {
+        let mut w = text.split_whitespace();
+        let at = w.next()?.parse().ok()?;
+        let labs = w.next()? == "1";
+        let prerelease = w.next()? == "1";
+        let tag = w.next().unwrap_or("").to_string();
+        if !tag.is_empty() {
+            release_for_tag(&tag, prerelease)?;
+        }
+        Some(Remembered { at, labs, tag, prerelease })
+    }
+
+    /// May a start at `now` use this instead of asking? Only for the same channel, and not from the future.
+    pub fn fresh(&self, labs: bool, now: u64) -> bool {
+        self.labs == labs && self.at <= now && now - self.at < CHECK_EVERY_SECS
+    }
+
+    /// What it says to a Turbine running `current`.
+    pub fn answer(&self, current: &str) -> Check {
+        match release_for_tag(&self.tag, self.prerelease) {
+            Some(r) if is_newer(&r.version, current) => Check::Available(Box::new(r)),
+            _ => Check::UpToDate,
+        }
+    }
+}
+
+/// Downloads the bundle to a temp file and checks it: size when the release gave one, SHA-256 from the release
+/// (GitHub's asset digest or the notes), the checksum file beside the bundle, or, for a release without that file,
+/// GitHub's digest for the bundle. A release without any published SHA-256 is refused, so nothing unchecked is
+/// installed.
 pub fn download(client: &Client, release: &Release, progress: Option<Progress>) -> Result<Download, NetError> {
     let mut sha = release.sha256.clone();
+    let mut size = release.asset_size;
     if sha.is_none() {
         if let Some(url) = &release.sha256_asset_url {
-            let text = client.send(&Request::get(url).max_bytes(4096).max_time(30), None)?.take_text()?;
-            sha = parse_sha256_file(&text);
+            match client.send(&Request::get(url).max_bytes(4096).max_time(30), None) {
+                Ok(r) => sha = parse_sha256_file(&r.take_text()?),
+                Err(NetError::NotFound) => {}
+                Err(e) => return Err(limit_words(e)),
+            }
+        }
+    }
+    if sha.is_none() && !release.tag.is_empty() {
+        let req = Request::get(&format!("{TAG_API}{}", release.tag)).header("Accept", "application/vnd.github+json").max_bytes(8 << 20).max_time(30);
+        match client.send(&req, None) {
+            Ok(r) => {
+                if let Ok(Some(listed)) = pick_release(&r.take_text()?, true) {
+                    if listed.tag == release.tag && listed.asset_url == release.asset_url {
+                        sha = listed.sha256;
+                        size = listed.asset_size;
+                    }
+                }
+            }
+            Err(NetError::NotFound) => {}
+            Err(e) => return Err(limit_words(e)),
         }
     }
     let Some(sha) = sha else {
         return Err(NetError::Failed("This release doesn't publish a SHA-256 for its bundle, so Turbine won't install it.".into()));
     };
     let check = Expect {
-        max_bytes: if release.asset_size > 0 { release.asset_size } else { MAX_BUNDLE },
-        size: (release.asset_size > 0).then_some(release.asset_size),
+        max_bytes: if size > 0 { size } else { MAX_BUNDLE },
+        size: (size > 0).then_some(size),
         sha256: Some(sha),
     };
     client.download(&release.asset_url, &check, progress)

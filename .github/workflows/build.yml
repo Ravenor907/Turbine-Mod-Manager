@@ -505,6 +505,8 @@ jobs:
           prerelease: false
           files: |
             TurbineModManager.flatpak
+            TurbineModManager.flatpak.sha256
             Turbine-Decky.zip
+            Turbine-Decky.zip.sha256
           body: |
             Test build for SteamOS handhelds. Download TurbineModManager.flatpak in Desktop Mode and open it to install.

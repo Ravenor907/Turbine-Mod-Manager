@@ -567,10 +567,40 @@ pub fn parse_smapi_release(text: &str) -> Result<SmapiRelease, String> {
     Err(format!("SMAPI release {tag} has no installer zip"))
 }
 
+/// SMAPI's newest release page: GitHub redirects it to ".../releases/tag/<version>".
+pub const SMAPI_LATEST_PAGE: &str = "https://github.com/Pathoschild/SMAPI/releases/latest";
+
+/// 0.63: SMAPI's newest release without GitHub's API, from where its latest page ends up. Its installer is always
+/// "SMAPI-<version>-installer.zip" under that tag. No size or digest comes this way, so the download is checked
+/// against Turbine's own list of known files when it has that version.
+pub fn smapi_release_from_page(effective_url: &str) -> Option<SmapiRelease> {
+    let ver = effective_url.strip_prefix("https://github.com/Pathoschild/SMAPI/releases/tag/")?;
+    if ver.is_empty() || !ver.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return None;
+    }
+    Some(SmapiRelease {
+        version: ver.to_string(),
+        url: format!("https://github.com/Pathoschild/SMAPI/releases/download/{ver}/SMAPI-{ver}-installer.zip"),
+        size: 0,
+        sha256: None,
+        installer_folder: format!("SMAPI {ver} installer"),
+    })
+}
+
+fn smapi_latest_from_page(client: &Client) -> Option<SmapiRelease> {
+    let r = client.send(&Request::get(SMAPI_LATEST_PAGE).max_bytes(8 << 20).max_time(30), None).ok()?;
+    let _ = std::fs::remove_file(&r.body);
+    smapi_release_from_page(&r.effective_url)
+}
+
 /// Downloads the latest SMAPI release zip, checked against GitHub's size and digest.
 pub fn fetch_smapi(client: &Client, native_linux: bool, progress: Option<Progress>) -> Result<LoaderDownload, NetError> {
-    let text = client.send(&Request::get(SMAPI_LATEST).header("Accept", "application/vnd.github+json").max_bytes(4 << 20), None)?.take_text()?;
-    let rel = parse_smapi_release(&text).map_err(|e| NetError::Failed(format!("{e}.")))?;
+    let rel = match client.send(&Request::get(SMAPI_LATEST).header("Accept", "application/vnd.github+json").max_bytes(4 << 20), None) {
+        Ok(r) => parse_smapi_release(&r.take_text()?).map_err(|e| NetError::Failed(format!("{e}.")))?,
+        // 0.63: GitHub is limiting its API for this connection: the release page says which version is the newest.
+        Err(NetError::GitHubLimit(m)) => smapi_latest_from_page(client).ok_or(NetError::GitHubLimit(m))?,
+        Err(e) => return Err(e),
+    };
     let known = rel.sha256.clone().or_else(|| known_sha256(file_name_of(&rel.url)).map(str::to_string));
     let check = Expect {
         max_bytes: if rel.size > 0 { rel.size } else { 128 << 20 },
