@@ -190,8 +190,10 @@ figcaption { margin-top: 10px; color: var(--muted); font-size: .95rem; }
 .card ul, .card ol { padding-left: 1.2em; }
 .card li { margin-bottom: .35em; }
 
-/* Buttons table */
-.keys { border-collapse: collapse; width: 100%; max-width: 640px; }
+/* Controls table */
+.keys { border-collapse: collapse; width: 100%; max-width: 900px; }
+.keys thead th { color: var(--muted); font-size: .92rem; font-weight: 600; }
+.keys + p { margin-top: 12px; }
 .keys th, .keys td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .keys th { width: 8.5em; color: var(--brass-hi); white-space: nowrap; }
 
