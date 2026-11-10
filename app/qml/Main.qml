@@ -6421,7 +6421,9 @@ Window {
                 () => { say(reqRunning && reqStripWords === "Getting 1 of 1: Test Library" && mods[1].enabled, "Get them all: " + (reqStripWords || "nothing running") + ", the installed one turned " + (mods[1].enabled ? "on" : "off"))
                         reqStop() },
                 () => { say(!reqRunning && listItems[0] && listItems[0].kind === "needsq", "Stop: " + (reqRunning ? "still running" : "stopped") + "; My mods rows: " + rowKinds())
-                        modIndex = 0; zone = "main"; pad("a") },
+                        modIndex = 0; zone = "main" },
+                // A press of its own: one in the same moment as a sheet closing is held back on purpose.
+                () => { pad("a") },
                 () => { say(reqRunning && reqStripWords === "Getting 1 of 1: Test Library", "A on the row goes on: " + (reqStripWords || "nothing running"))
                         reqSkip() },
                 () => { if (reqRunning) return false },
