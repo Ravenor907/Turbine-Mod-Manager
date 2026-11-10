@@ -341,7 +341,15 @@ Window {
             else if (shot.page === "why") app.openWhy()
             // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
             else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false })
-            else if (shot.page === "notstarted") { app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; ")) }
+            else if (shot.page === "notstarted") {
+                app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; "))
+                // 0.62: it shows up late: the sheet goes. It started and closed: "closed after N seconds", never "didn't start".
+                app.gameSeenLate(app.game.id, 31)
+                app.note("shot", "Launch check, the game showed up late: sheet \"" + app.sheet + "\"")
+                app.openNotStarted(app.game.id); app.quickExit(app.game.id, 24)
+                app.note("shot", "Launch check, it started then closed: sheet " + app.sheet + ", " + infoView.title + " | " + app.quickText + " | " + app.infoButtons.map(b => b.label).join("; "))
+                app.quick = null; app.sheet = ""; app.openNotStarted(app.game.id)
+            }
             // 0.56: a mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
             else if (shot.page === "tucked" && app.mods.length > 1) {
                 app.tab = 0; app.zone = "main"; app.modIndex = 0
@@ -1317,11 +1325,24 @@ Window {
         }
     }
     // 0.58, the launch check: the game didn't show about 20 seconds after Play.
+    // 0.62: said only while it is true. A game that shows up later (a slow start) takes the sheet away, and one
+    // that started and then closed is told as "<game> closed after N seconds", with the likely cause and its
+    // buttons, never as "didn't start".
+    property string notStartedFor: ""     // the game the "didn't start" sheet on screen is about
+    function notStartedShowing(gameId) { return sheet === "pick" && notStartedFor === gameId && / didn't start$/.test(pickTitle) }
+    function gameSeenLate(gameId, seconds) {
+        const g = games.find(x => x.id === gameId)
+        const name = g ? shortGame(g.name) : gameTitle
+        note("launch", name + " showed up " + seconds + " seconds after Play" + (notStartedShowing(gameId) ? ": the didn't start sheet goes" : ""))
+        if (notStartedShowing(gameId)) { sheet = ""; toast.info(name + " is running now. It took " + seconds + " seconds to start.") }
+        notStartedFor = ""
+    }
     function openNotStarted(gameId) {
         const g = games.find(x => x.id === gameId)
         const name = g ? shortGame(g.name) : gameTitle
         note("action", "Launch check: " + name + " didn't start")
         if (sheet !== "" && sheet !== "pick") return
+        notStartedFor = gameId
         const me3 = acMode === "me3" && game && game.id === gameId
         let rows = []
         if (me3) {
@@ -1756,6 +1777,7 @@ Window {
         }
         function onLaunchSetup(gameId, json) { const o = app.parse(json, null); if (o) app.openLaunchSetup(o) }
         function onNotStarted(gameId) { app.openNotStarted(gameId) }
+        function onGameSeen(gameId, seconds) { app.gameSeenLate(gameId, seconds) }
         function onSettingsLoaded(json) { app.settingsLoaded(app.parse(json, { error: "Couldn't open it." })) }
         function onGameEnded(gameId, seconds, known) {
             if (known) { if (seconds < 60) app.quickExit(gameId, seconds) }
@@ -2473,11 +2495,14 @@ Window {
         if (!shot.on) Turbine.markNotWorking()
         quick = { game: gameId, name: shortName, seconds: secs, added: added, worked: worked }
         page = "game"; zone = "main"; tab = 0; modPage = false
+        // 0.62: it started and closed: a "didn't start" sheet still up for it gives way to "closed after N seconds".
+        if (notStartedShowing(gameId)) { note("launch", "The didn't start sheet gives way: it started, then closed"); sheet = "" }
+        notStartedFor = ""
         if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
     }
     readonly property string quickText: !quick ? "" : quick.added.length === 1 ? "Since it last worked, you added " + quick.added[0].name + "."
         : quick.added.length > 1 ? "Since it last worked (" + when(quick.worked.savedAt) + "), you added or turned on " + nameList(quick.added.map(m => m.name)) + "."
-        : "A mod may have stopped it from starting. Playing without mods shows whether the game itself is fine."
+        : "It started, then closed by itself. A mod is the likely cause: playing without mods shows whether the game itself is fine."
     // "Bright Torches, Faster Roach and 1 more"
     function nameList(names) {
         if (names.length <= 1) return names.join("")

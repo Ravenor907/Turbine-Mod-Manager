@@ -947,6 +947,12 @@ pub mod qobject {
         #[cxx_name = "setProtonLog"]
         fn set_proton_log(self: &Self, on: bool);
 
+        /// 0.62: the game showed up after the launch check had already said it didn't start (a slow start):
+        /// `seconds` after Play. The sheet goes; what happens next (still running, or closed) is said as usual.
+        #[qsignal]
+        #[cxx_name = "gameSeen"]
+        fn game_seen(self: Pin<&mut Self>, game: QString, seconds: i32);
+
         /// 0.58: the game wasn't seen running about 20 seconds after Play.
         #[qsignal]
         #[cxx_name = "notStarted"]
@@ -3277,6 +3283,7 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
         let mut seen: Option<std::time::Instant> = None;
         let mut unknown = 0;
         let mut told = false;
+        let mut said_not_started = false;
         // Up to 3 minutes for the game to start, then until it closes (at most 10 minutes of watching).
         for i in 0..300 {
             std::thread::sleep(tick);
@@ -3286,6 +3293,7 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
                 if seen.is_none() {
                     crate::log::line("launch", &format!("{name} wasn't seen running {wait} seconds after Play: the launch check opens"));
                     record("not-started", None);
+                    said_not_started = true;
                     let gid = id.clone();
                     let _ = qt.queue(move |t| t.not_started(QString::from(gid.as_str())));
                 }
@@ -3296,6 +3304,11 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
                         seen = Some(std::time::Instant::now());
                         crate::log::line("launch", &format!("{name} is running ({} seconds after Play)", started.elapsed().as_secs()));
                         record("running", None);
+                        // 0.62: it started after all (a slow start): the "didn't start" sheet is wrong now.
+                        if said_not_started {
+                            let (gid, secs) = (id.clone(), started.elapsed().as_secs() as i32);
+                            let _ = qt.queue(move |t| t.game_seen(QString::from(gid.as_str()), secs));
+                        }
                     }
                     if seen.is_some_and(|t| t.elapsed() > Duration::from_secs(90)) {
                         crate::log::line("launch", &format!("{name} is still running after 90 seconds"));
