@@ -130,7 +130,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -621,7 +621,54 @@ Window {
         else barsHidden = false
         tuckGetBefore = getIndex
     }
+    // ---- 0.62: Get mods is a page of a book. No game list there: My mods is the page to the left (its name and an
+    // arrow down the left edge) and Load order the page to the right. Left from the first column, LB, a swipe to
+    // the right or a click on the edge turns back; Right from the last column, RB, a swipe to the left or the right
+    // edge turns forward. The page coming in slides over the one it covers, a brass line at its edge.
+    readonly property bool bookTab: page === "game" && !!game && tab === 1
+    readonly property bool bookPage: bookTab && !modPage
+    readonly property bool bookHasNext: tabs.length > 2
+    // The game list steps aside on Get mods (it stays while the focus is in it).
+    readonly property bool railAway: barsHidden || (bookTab && zone !== "rail")
+    property bool padRepeat: false        // the press being handled is a held D-pad or key repeating
+    property int pageTurns: 0
+    function turnPage(d) {
+        // A held D-pad stops at the edge of the page; a new press turns it.
+        if (padRepeat) return false
+        const t = tab + d
+        if (t < 0 || t >= tabs.length) return false
+        pageTurns++
+        note("action", "Page turned " + (d < 0 ? "back" : "forward") + " to " + tabs[t].replace(/ \(\d+\)$/, ""))
+        switchTab(d)
+        return true
+    }
+    property int turnFrom: -1             // the tab being covered while a page turns, else -1
+    property int turnTo: -1
+    property int turnDir: 0               // -1: the page comes in from the left (back), 1: from the right
+    property real turnPart: 1
+    property int turnsShown: 0
+    property bool turnForced: false       // the build's check runs the animation in its pictures too
+    property int tabBefore: 0
+    property real gameChangedAt: 0        // a tab that changes with the game is no page turn
+    readonly property real turnX: turnTo < 0 ? 0 : turnDir * (1 - turnPart) * content.width
+    NumberAnimation {
+        id: turnAnim
+        target: app; properties: "turnPart"
+        from: 0; to: 1; duration: 280; easing.type: Easing.OutCubic
+        onFinished: { app.turnFrom = -1; app.turnTo = -1 }
+    }
+    function turnStart(from, to) {
+        turnAnim.stop()
+        turnFrom = from; turnTo = to; turnDir = to > from ? 1 : -1
+        turnPart = 0
+        turnsShown++
+        turnAnim.start()
+    }
     onTabChanged: {
+        // One page to the next in the same game: the turn. (Not in the build's pictures, but for its own check.)
+        if (page === "game" && !!game && Date.now() - gameChangedAt > 150 && Math.abs(tab - tabBefore) === 1 && !reduceMotion && (!shot.on || turnForced)) turnStart(tabBefore, tab)
+        else { turnAnim.stop(); turnFrom = -1; turnTo = -1 }
+        tabBefore = tab
         barsHidden = false
         note("page", "Tab " + (tabs[tab] || tab))
         stopDangerHolds()
@@ -1835,6 +1882,7 @@ Window {
         lastFocusId[game.id] = focusedItem.m.id
     }
     onGameChanged: {
+        gameChangedAt = Date.now()
         allOffWas = []
         disarm()
         barsHidden = false
@@ -3468,7 +3516,9 @@ Window {
                 return
             }
             const n = fast ? 5 : 1
+            app.padRepeat = true
             for (let i = 0; i < n; i++) app.act(app.repeatButton)
+            app.padRepeat = false
         }
     }
     // 0.59 (the owner's rule: A selects, B goes back one step, nothing else): holding B no longer goes home. goHome
@@ -3696,7 +3746,7 @@ Window {
             if (b === "a" && !e.isAutoRepeat) app.aHeld = true
             // Holding a key repeats it, except A (Reset waits for A to be held down).
             if (b === "a" && app.sheet === "confirm" && app.confirmIndex === 0) { if (!e.isAutoRepeat) app.startConfirm(); return }
-            if (!(b === "a" && e.isAutoRepeat)) app.act(b)
+            if (!(b === "a" && e.isAutoRepeat)) { app.padRepeat = e.isAutoRepeat; app.act(b); app.padRepeat = false }
         }
         Keys.onReleased: (e) => {
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
@@ -4222,7 +4272,9 @@ Window {
             orderAct(b); return
         }
         if (tab === 1 || listItems.length === 0) {
-            if (b === "left") { zone = "rail"; railIndex = current }
+            // Get mods with nowhere to get them: still a page of the book.
+            if (tab === 1) { if (b === "left") turnPage(-1); else if (b === "right") turnPage(1) }
+            else if (b === "left") { zone = "rail"; railIndex = current }
             return
         }
         if (selecting) { if (b === "left") { selecting = false; ticked = {}; zone = "rail"; railIndex = current } else selectAct(b); return }
@@ -5125,6 +5177,50 @@ Window {
                         check("Start check done: " + m.bad + " problems") }
             ]
         }
+        // 0.62: Get mods as a page of a book, by real presses and clicks: no game list there, the edges name the pages
+        // beside it, Left from the first column and Right from the last turn the page (a held D-pad stops at the
+        // edge), LB and RB and a click on an edge turn it too, and the page coming in slides over the other.
+        else if (name === "bookcheck") {
+            m.bad = 0
+            const say = (ok, text) => { if (!ok) m.bad++; check("Book check: " + text + (ok ? "" : "  PROBLEM")) }
+            const tabName = () => (tabs[tab] || "").replace(/ \(\d+\)$/, "")
+            const click = it => { const p = it.mapToItem(null, it.width / 2, it.height / 2)
+                                  Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0); Turbine.selftestMouse(1, p.x, p.y, Qt.LeftButton, 0, 0); Turbine.selftestMouse(2, p.x, p.y, Qt.LeftButton, 0, 0) }
+            script = [
+                () => { if (!game || !modsLoaded || mods.length < 1) return false; turnForced = true; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0 },
+                () => { say(rail.width > 0 && !edgeBack.visible, "My mods: the game list is " + (rail.width > 0 ? "there" : "gone") + ", page edges " + (edgeBack.visible ? "shown" : "none")); m.turns = turnsShown; pad("rb")
+                        say(tab === 1 && turnTo === 1 && turnDir === 1 && turnLine.visible && turnsShown === m.turns + 1, "RB: " + tabName() + " comes in from the " + (turnDir > 0 ? "right" : "left") + ", turning " + (turnTo >= 0)) },
+                () => { if (getItems.length < gridColumns || turnTo >= 0 || rail.width > 0) return false
+                        say(rail.width === 0 && edgeBack.visible && edgeBack.width >= 44 && edgeNext.visible === bookHasNext && bookHasNext,
+                            "Get mods: the game list is " + (rail.width === 0 ? "gone" : "there") + ", left edge " + (edgeBack.visible ? edgeBack.label : "none") + " (" + Math.round(edgeBack.width) + " px), right edge " + (edgeNext.visible ? edgeNext.label : "none"))
+                        zone = "main"; getArea = "grid"; getIndex = 1; pad("left")
+                        say(tab === 1 && getIndex === 0, "Left inside the row: card " + (getIndex + 1) + ", still " + tabName())
+                        pad("left")
+                        say(tab === 0 && zone === "main" && turnTo === 0 && turnDir === -1 && getView.visible && modList.visible && turnLine.visible,
+                            "Left from the first column: " + tabName() + " comes in from the " + (turnDir < 0 ? "left" : "right") + " over Get mods (" + (getView.visible ? "still showing" : "gone") + "), zone " + zone) },
+                () => { if (turnTo >= 0 || rail.width < px(72)) return false
+                        say(tab === 0 && !getView.visible && rail.width > 0, "The turn done: " + tabName() + ", Get mods " + (getView.visible ? "still showing" : "put away") + ", the game list back"); pad("rb") },
+                () => { if (turnTo >= 0 || tab !== 1) return false
+                        getArea = "grid"; getIndex = 0; pad("right")
+                        say(tab === 1 && getIndex === 1, "Right inside the row: card " + (getIndex + 1) + ", still " + tabName())
+                        getIndex = gridColumns - 1; pad("right")
+                        say(tab === 2 && turnDir === 1, "Right from the last column: " + tabName() + " comes in from the " + (turnDir > 0 ? "right" : "left")) },
+                () => { if (turnTo >= 0) return false; pad("lb"); say(tab === 1 && turnDir === -1, "LB from Load order: " + tabName() + " comes in from the " + (turnDir < 0 ? "left" : "right")) },
+                // A held D-pad runs to the first column and stops there: the page stays.
+                () => { if (turnTo >= 0) return false; getArea = "grid"; getIndex = gridColumns - 1; m.t = Date.now(); Turbine.selftestPad("left", true) },
+                () => { if (Date.now() - m.t < 1500) return false; Turbine.selftestPad("left", false)
+                        say(tab === 1 && getIndex === 0, "Left held 1.5 s: card " + (getIndex + 1) + ", " + (tab === 1 ? "the page stayed" : "the page turned to " + tabName())) },
+                // The edges are buttons.
+                () => { click(edgeBack) },
+                () => { if (turnTo >= 0) return false; say(tab === 0, "A click on the left edge: " + tabName()); pad("rb") },
+                () => { if (turnTo >= 0 || tab !== 1) return false; click(edgeNext) },
+                () => { if (turnTo >= 0) return false; say(tab === 2, "A click on the right edge: " + tabName()); pad("lb") },
+                () => { if (turnTo >= 0 || tab !== 1 || rail.width > 0) return false; getArea = "grid"; getIndex = 0; zone = "main"
+                        legend.check("bookcheck")
+                        say(legendHints.some(h => h[0] === "b" && h[1] === "My mods"), "The bar on Get mods: " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
+                        check("Book check done: " + m.bad + " problems, " + turnsShown + " page turns shown") }
+            ]
+        }
         else if (name === "presscount") script = [
             // After the tutorial: the rail, the game with no mods focused. Count every press to a mod added and Play.
             () => { if (!game || !modsLoaded) return false; sheet = ""; zone = "rail"; railIndex = current; m.start = inputCount; m.log = [] },
@@ -5512,20 +5608,22 @@ Window {
             if (b === "a") openNexusMods()
             else if (b === "x") retryBrowse()
             else if (b === "add") openAdd()
-            else if (b === "left") { zone = "rail"; railIndex = current }
+            else if (b === "left") turnPage(-1)
+            else if (b === "right") turnPage(1)
             return
         }
         if (getArea !== "recent" && getArea !== "grid") { getArea = "grid"; getIndex = 0 }
         if (getArea === "recent") {
-            if (b === "left") { if (getIndex > 0) getIndex--; else { zone = "rail"; railIndex = current } }
-            else if (b === "right") getIndex = Math.min(starterItems.length - 1, getIndex + 1)
+            if (b === "left") { if (getIndex > 0) getIndex--; else turnPage(-1) }
+            else if (b === "right") { if (getIndex < starterItems.length - 1) getIndex++; else turnPage(1) }
             else if (b === "up") barsHidden = false
             // Down keeps the column (the strip's 4th card goes to the grid's 4th).
             else if (b === "down" && getItems.length > 0) { getArea = "grid"; getIndex = Math.min(getItems.length - 1, getIndex % cols) }
             else if (b === "a" && starterItems[getIndex]) openDetails(starterItems[getIndex])
         } else {
-            if (b === "left") { if (getIndex % cols > 0) getIndex--; else { zone = "rail"; railIndex = current } }
-            else if (b === "right") { if (getIndex % cols < cols - 1) getIndex = Math.min(getItems.length - 1, getIndex + 1) }
+            if (b === "left") { if (getIndex % cols > 0) getIndex--; else turnPage(-1) }
+            // The last column (or the last card): Right turns the page forward.
+            else if (b === "right") { if (getIndex % cols < cols - 1 && getIndex < getItems.length - 1) getIndex++; else turnPage(1) }
             else if (b === "up") { if (getIndex >= cols) getIndex -= cols; else if (starterItems.length > 0) { getArea = "recent"; getIndex = Math.min(starterItems.length - 1, getIndex) } else barsHidden = false }
             else if (b === "down") getIndex = Math.max(0, Math.min(getItems.length - 1, getIndex + cols))
             else if (b === "a" && getItems[getIndex]) openDetails(getItems[getIndex])
@@ -7778,6 +7876,44 @@ Window {
         Key { visible: hint.k2 !== ""; k: hint.k2; anchors.verticalCenter: parent.verticalCenter }
         Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
     }
+    // The page edges on Get mods: the page to the left and the page to the right, each a button for a
+    // click or a finger (at least 44 px wide).
+    component PageEdge: Rectangle {
+        id: edge
+        property string label: ""
+        property int dir: -1
+        width: app.tpx(34); height: parent.height
+        z: app.turnTo === 1 ? 3 : 0
+        transform: Translate { x: app.turnTo === 1 ? app.turnX : 0 }
+        color: edgeHover.hovered ? c.focusFill : c.panel
+        Rectangle { x: edge.dir < 0 ? parent.width - width : 0; width: Math.max(1, app.px(1)); height: parent.height; color: c.line }
+        Text {
+            anchors.centerIn: parent
+            rotation: edge.dir < 0 ? -90 : 90
+            text: edge.label
+            color: edge.dir < 0 ? c.accentText : c.soft
+            font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.weight: Font.DemiBold
+        }
+        // The arrow, pointing off the page.
+        Shape {
+            width: app.px(14); height: app.px(18)
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: parent.height * 0.76
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeWidth: 0; strokeColor: "transparent"
+                fillColor: edge.dir < 0 ? c.accentText : c.soft
+                startX: edge.dir < 0 ? app.px(14) : 0; startY: 0
+                PathLine { x: edge.dir < 0 ? 0 : app.px(14); y: app.px(9) }
+                PathLine { x: edge.dir < 0 ? app.px(14) : 0; y: app.px(18) }
+                PathLine { x: edge.dir < 0 ? app.px(14) : 0; y: 0 }
+            }
+        }
+        Accessible.role: Accessible.Button
+        Accessible.name: edge.label + (edge.dir < 0 ? ", the page to the left" : ", the page to the right")
+        HoverHandler { id: edgeHover }
+        TapHandler { onTapped: { if (!app.gate(0, "page edge")) return; app.note("touch", "Page edge: " + edge.label); app.turnPage(edge.dir) } }
+    }
     component Icon: Shape {
         property string d: ""
         property color tint: c.muted
@@ -7828,7 +7964,8 @@ Window {
         Rectangle {
             id: rail
             // 0.57: full screen while scrolling down (the bottom bar goes too).
-            width: app.barsHidden ? 0 : app.px(72)
+            // 0.62: and on Get mods (a page of the book: no game list).
+            width: app.railAway ? 0 : app.px(72)
             Behavior on width { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
             visible: width > 0
             clip: true
@@ -8209,6 +8346,22 @@ Window {
                     // Seasonal leaves and snow fade out behind the lists and cards (they show in the margins).
                     Rectangle { anchors.fill: parent; color: c.ground; opacity: app.seasonKind !== "" ? 0.85 : 0 }
 
+                    // ---- 0.62: a page turning. The page being covered dims, the one coming in slides over it on its own
+                    // ground, and a brass line marks its edge.
+                    Rectangle { anchors.fill: parent; z: 1; visible: app.turnTo >= 0; color: c.ground; opacity: 0.55 }
+                    Rectangle { id: turnGround; x: app.turnX; width: parent.width; height: parent.height; z: 2; visible: app.turnTo >= 0; color: c.ground }
+                    Rectangle {
+                        id: turnLine
+                        z: 4
+                        visible: app.turnTo >= 0
+                        x: app.turnDir < 0 ? app.turnX + parent.width - width : app.turnX
+                        width: Math.max(2, app.px(3)); height: parent.height
+                        color: c.accentHi
+                    }
+                    // The page edges on Get mods (PageEdge, with the shared pieces).
+                    PageEdge { id: edgeBack; visible: app.bookPage; x: 0; label: "My mods"; dir: -1 }
+                    PageEdge { id: edgeNext; visible: app.bookPage && app.bookHasNext; x: parent.width - width; label: (app.tabs[2] || "Load order").replace(/ \(\d+\)$/, ""); dir: 1 }
+
                     // No games, mods being read.
                     EmptyState {
                         id: middle
@@ -8231,6 +8384,8 @@ Window {
                     Label {
                         id: moveLine
                         y: listBarRow.height
+                        z: app.turnTo === 0 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
                         visible: app.page === "game" && app.tab === 0 && (app.moving || app.selecting || app.listFiltered)
                         height: visible ? app.px(26) : 0
                         x: app.px(6)
@@ -8246,6 +8401,8 @@ Window {
                         id: modPanel
                         readonly property var m: app.menuMod
                         visible: app.showModPanel
+                        z: app.turnTo === 0 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
@@ -8334,6 +8491,8 @@ Window {
                     ListView {
                         id: modList
                         visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage
+                        z: app.turnTo === 0 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
                         anchors.fill: parent
                         anchors.rightMargin: modPanel.visible ? modPanel.width + app.px(10) : 0
                         anchors.topMargin: listBarRow.height + moveLine.height
@@ -8473,6 +8632,8 @@ Window {
                     Rectangle {
                         id: emptyCard
                         visible: app.emptyMods
+                        z: app.turnTo === 0 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
                         anchors.centerIn: parent
                         width: Math.min(parent.width - app.px(32), app.px(520))
                         height: emptyCol.implicitHeight + app.px(48)
@@ -8566,7 +8727,21 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length > 0 && !app.modPage
+                        // 0.62: between the page edges (My mods on the left; Load order on the right where the game has one).
+                        anchors.leftMargin: app.tpx(34) + app.px(6)
+                        anchors.rightMargin: app.bookHasNext ? app.tpx(34) + app.px(6) : 0
+                        visible: app.page === "game" && app.game !== null && (app.tab === 1 || app.turnFrom === 1) && app.sources.length > 0 && !app.modPage
+                        z: app.turnTo === 1 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 1 ? app.turnX : 0 }
+                        // Touch: a swipe to the right turns back to My mods, to the left forward to Load order.
+                        DragHandler {
+                            enabled: app.bookPage && app.sheet === "" && !app.wheelOpen
+                            target: null
+                            xAxis.enabled: true; yAxis.enabled: false
+                            acceptedDevices: PointerDevice.TouchScreen
+                            grabPermissions: PointerHandler.TakeOverForbidden
+                            onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(90)) { app.note("touch", "Swipe on Get mods"); app.turnPage(activeTranslation.x > 0 ? -1 : 1) }
+                        }
                         // The cards with Installed and Update ready worked out from My mods (getItems).
                         result: app.browseData ? Object.assign({}, app.browseData, { items: app.getItems }) : null
                         loading: app.browseLoading
@@ -8626,7 +8801,9 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.game !== null && app.tab === 2 && !app.modPage
+                        visible: app.page === "game" && app.game !== null && (app.tab === 2 || app.turnFrom === 2) && !app.modPage
+                        z: app.turnTo === 2 ? 3 : 0
+                        transform: Translate { x: app.turnTo === 2 ? app.turnX : 0 }
                         plugins: app.order
                         error: app.orderError
                         messages: app.orderMessages

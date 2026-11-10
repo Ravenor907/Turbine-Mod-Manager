@@ -46,6 +46,14 @@ the status is about), LB RB and the tab names, the legend, View Wheel, the Start
 long list or grid hides it and the rail (truly full screen); going up, the top, View, a tab change, a sheet or the
 rail bring them back, sliding unless Reduce motion is on.
 
+### Get mods is a page of a book (0.62)
+
+No game list on Get mods (`railAway`): My mods is the page to the left and Load order the page to the right, named
+down the page edges (`PageEdge`, at least 44 px wide, each a button). Left from the first column, LB, a swipe to the
+right or a click on the left edge turns back; Right from the last column, RB, a swipe to the left or the right edge
+turns forward (`turnPage(d)`; a held D-pad stops at the edge). The page coming in slides over the one it covers with
+a brass line at its edge (`turnStart`, 280 ms; none with Reduce motion). My mods and Load order keep the game list.
+
 ## FindSheet (0.57)
 
 Y's pop-up. Get mods: a Search field, Sort buttons and Category buttons (six, then More..., which lists them all),

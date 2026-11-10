@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -278,6 +278,26 @@ need $s "Start: never plays from a menu" "Start check: Start on the mod menu: sh
 need $s "Start: the bar's hint is a 44 px button" "Start check: a click on the Start hint \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px tall\): Settings$"
 need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck, .* 0 problems \| .*start, wheel, Play"
 need $s "Start checks" "Start check done: 0 problems"
+# 0.62: Get mods as a page of a book: no game list, the page edges, Left and Right at the ends of a row, LB and RB,
+# a held D-pad, clicks on the edges, and the page-turn itself.
+fresh "bookcheck"; h="$PWD/fh/bookcheck"
+shoot "bookcheck-1280x800" 1280x800 bookcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
+k=bookcheck-1280x800
+need $k "Book: My mods keeps the game list" "Book check: My mods: the game list is there, page edges none$"
+need $k "Book: RB turns forward to Get mods" "Book check: RB: Get mods comes in from the right, turning true$"
+need $k "Book: no game list on Get mods, the edges name the pages" "Book check: Get mods: the game list is gone, left edge My mods \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px\), right edge Load order$"
+need $k "Book: Left inside a row moves the ring" "Book check: Left inside the row: card 1, still Get mods$"
+need $k "Book: Left from the first column turns back" "Book check: Left from the first column: My mods comes in from the left over Get mods \(still showing\), zone main$"
+need $k "Book: the turn ends, the game list is back" "Book check: The turn done: My mods, Get mods put away, the game list back$"
+need $k "Book: Right inside a row moves the ring" "Book check: Right inside the row: card 2, still Get mods$"
+need $k "Book: Right from the last column turns forward" "Book check: Right from the last column: Load order comes in from the right$"
+need $k "Book: LB turns back from Load order" "Book check: LB from Load order: Get mods comes in from the left$"
+need $k "Book: a held D-pad stops at the edge" "Book check: Left held 1.5 s: card 1, the page stayed$"
+need $k "Book: a click on the left edge" "Book check: A click on the left edge: My mods$"
+need $k "Book: a click on the right edge" "Book check: A click on the right edge: Load order$"
+need $k "Book: the bar on Get mods, nothing overlaps" "Bar check \(bookcheck, .* 0 problems"
+need $k "Book: B is My mods" "Book check: The bar on Get mods: .*B My mods"
+need $k "Book checks" "Book check done: 0 problems, [1-9][0-9]* page turns shown"
 # 0.54 fixes: holds need a real press, a click on a row is A, the removed row, RT and R3, the tutorial, hidden games.
 i=inputcheck-1280x800
 need $i "Holds: a click never deletes" "Hold check: a click on Hold A to delete: only the highlight moved"
