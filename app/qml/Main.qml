@@ -2685,11 +2685,14 @@ Window {
         return (game ? game.id : "") + "|" + mods.filter(m => m.enabled).map(m => m.id).sort().join(",") + "|" + list.filter(x => x.level === "warn").map(x => x.title).sort().join(",")
     }
     readonly property bool checkStops: checks.some(x => x.level === "stop")
+    readonly property string vcTitle: "The Visual C++ runtime is missing"
     // One fix the check can do in a press (Y): turn off the newer of two Witcher 3 mods that change the same script,
     // or install the missing loader (SKSE, BepInEx, SMAPI).
     readonly property var checkOffer: {
         const w = checks.find(x => x.offer && x.offer.mod && mods.some(m => m.id === x.offer.mod && m.enabled))
         if (w) return { label: w.offer.label, mod: w.offer.mod }
+        // 0.64: Cyberpunk's frameworks without Microsoft's Visual C++ runtime in the game's Proton setup (error 998).
+        if (checks.some(x => x.title === vcTitle)) return { label: "Install the Visual C++ runtime", vc: true }
         if (loaderMissing && needLoader.length > 0) return { label: (loaderCanGet ? "Install " : "Get ") + loaderShort, loader: true }
         // 0.6 (I25): low space, and Turbine is keeping removed mods: the way to free that space is one press.
         if (removedMods.length > 0 && checks.some(x => x.title === "Low space on the game's drive")) return { label: "Free space: Removed mods", removed: true }
@@ -2728,6 +2731,7 @@ Window {
             startPlay()
         } else if (o.loader) getLoader()
         else if (o.removed) openRemoved()
+        else if (o.vc) { note("action", "Install the Visual C++ runtime for " + gameTitle); if (!shot.on) Turbine.installVcRuntime() }
     }
     // Install the missing loader (from the check, the mod menu or the game menu); where it can't be fetched, the
     // prompt says where it comes from.

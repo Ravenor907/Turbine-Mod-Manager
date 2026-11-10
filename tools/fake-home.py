@@ -64,6 +64,13 @@ def main(home):
         if proton:
             os.makedirs(os.path.join(apps, "compatdata", app_id, "pfx"), exist_ok=True)
         png(os.path.join(steam, "appcache/librarycache", app_id, "library_600x900.png"), 60, 90, top, bottom)
+    # 0.64: Cyberpunk's Proton setup has only Steam's 2019 Visual C++ runtime (14.29), the case RED4ext and Cyber Engine
+    # Tweaks fail with error 998: a vcruntime140.dll with that version in its version resource.
+    vc = bytearray(b"MZ" + b"\0" * 510) + bytes([0xBD, 0x04, 0xEF, 0xFE]) + (0x00010000).to_bytes(4, "little") \
+        + ((14 << 16) | 29).to_bytes(4, "little") + (30153 << 16).to_bytes(4, "little") + b"\0" * 64
+    os.makedirs(os.path.join(steam, "steamapps/compatdata/1091500/pfx/drive_c/windows/system32"), exist_ok=True)
+    with open(os.path.join(steam, "steamapps/compatdata/1091500/pfx/drive_c/windows/system32/vcruntime140.dll"), "wb") as f:
+        f.write(bytes(vc))
     heroic = os.path.join(home, ".var/app/com.heroicgameslauncher.hgl/config/heroic")
     cp = os.path.join(home, "Games/Heroic/Cyberpunk 2077")
     sv = os.path.join(home, "Games/Heroic/Stardew Valley")
@@ -247,6 +254,12 @@ def downloads(folder):
     zip_file(os.path.join(folder, "Quiet Streets CET 1.0.zip"), {
         "QuietStreets/init.lua": "-- placeholder, never run\nreturn {}\n",
         "QuietStreets/settings.json": "{}",
+    }, now - 4 * 86400)
+    # 0.64: Cyberpunk 2077: Cyber Engine Tweaks itself (its plugin and the ASI loader), for the Visual C++ runtime check.
+    zip_file(os.path.join(folder, "Cyber Engine Tweaks 1.35.zip"), {
+        "bin/x64/plugins/cyber_engine_tweaks.asi": b"MZ" + b"\0" * 62,
+        "bin/x64/version.dll": b"MZ" + b"\0" * 62,
+        "bin/x64/global.ini": "[GlobalSets]\nLoadPlugins=1\n",
     }, now - 4 * 86400)
     # Cyberpunk 2077: a REDmod mod (a folder with info.json), which loads through the game's own launcher.
     zip_file(os.path.join(folder, "Neon Signs REDmod 1.1.zip"), {

@@ -504,6 +504,11 @@ pub mod qobject {
         #[cxx_name = "antiCheatOff"]
         fn anti_cheat_off(self: Pin<&mut Self>, on: bool);
 
+        /// 0.64: Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk, error 998).
+        #[qinvokable]
+        #[cxx_name = "installVcRuntime"]
+        fn install_vc_runtime(self: Pin<&mut Self>);
+
         /// Gets me3 from its pinned GitHub release (SHA-256 checked); plays after when `then_play`.
         #[qinvokable]
         #[cxx_name = "installMe3"]
@@ -3248,6 +3253,11 @@ pub(crate) fn check_json(w: &mut Worker, game: &Game) -> String {
             // 0.57: games whose data file says how to play them with mods (me3, Halo's switch, offline,
             // refused), and whether the game folder is original for the normal launch.
             extra.extend(crate::anticheat::checks(s, &data));
+            // 0.64: Cyberpunk's RED4ext and Cyber Engine Tweaks stop with error 998 without Microsoft's Visual C++
+            // 2022 runtime in the game's Proton setup.
+            if let Some(c) = vc_runtime_check(s) {
+                extra.push(c);
+            }
             if !extra.is_empty() && list.len() == 1 && list[0].level == "ok" {
                 list.clear(); // "Everything checks out" no longer says it all
             }
@@ -3256,6 +3266,39 @@ pub(crate) fn check_json(w: &mut Worker, game: &Game) -> String {
         }
         Err(e) => checks_json(&[rules::Check { level: "stop".into(), title: "Mods couldn't be read".into(), detail: e }]),
     }
+}
+
+/// 0.64: RED4ext or Cyber Engine Tweaks is in the game folder or in a mod that is on, and the game's Proton prefix has
+/// no Visual C++ 2022 runtime that Wine uses (turbine_engine::vcrun).
+pub(crate) fn vc_runtime_needed(s: &Slot) -> Option<turbine_engine::vcrun::State> {
+    if s.rules.family != rules::Family::Cyberpunk || s.game.runtime != turbine_engine::Runtime::Windows {
+        return None;
+    }
+    let cp = turbine_engine::cyberpunk::framework;
+    let detect: Vec<&str> = ["red4ext", "cet"].iter().filter_map(|k| cp(k).map(|f| f.detect)).collect();
+    let in_game = detect.iter().any(|d| s.game.install_dir.join(d).is_file());
+    let in_mods = s.store.mod_files().iter().filter(|m| m.enabled).any(|m| {
+        let p = turbine_engine::cyberpunk::provides(&m.files);
+        p.contains(&"red4ext") || p.contains(&"cet")
+    });
+    if !in_game && !in_mods {
+        return None;
+    }
+    let state = turbine_engine::vcrun::state(s.game.prefix.as_deref());
+    state.needs_install().then_some(state)
+}
+
+fn vc_runtime_check(s: &Slot) -> Option<rules::Check> {
+    let state = vc_runtime_needed(s)?;
+    crate::log::line("engine", &format!("{}: Visual C++ runtime: {}", s.game.name, state.words()));
+    Some(rules::Check {
+        level: "warn".into(),
+        title: turbine_engine::vcrun::CHECK_TITLE.into(),
+        detail: format!(
+            "{} RED4ext and Cyber Engine Tweaks stop with error 998 without Microsoft's 2022 runtime. One press installs it into this game's Proton setup (about 25 MB from Microsoft).",
+            state.words()
+        ),
+    })
 }
 
 pub(crate) fn apply_job(game: Game, n: i32) -> Job {

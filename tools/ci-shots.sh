@@ -168,6 +168,10 @@ for size in $SIZES; do
   w3=steam:292030
   shoot "mods-cyberpunk-$size" "$size" mods "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
   shoot "check-cyberpunk-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
+  # 0.64: Cyber Engine Tweaks on, and the Proton setup has only the 2019 runtime: Before you play offers the install.
+  shoot "vccheck-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Cyber Engine Tweaks 1.35.zip"
+  need "vccheck-$size" "Visual C++ runtime: found missing ($size)" "Visual C\+\+ runtime: This game's Proton setup has an older Visual C\+\+ runtime \(14\.29\.30153\)"
+  need "vccheck-$size" "Visual C++ runtime: offered first ($size)" "Check before Play buttons: Install the Visual C\+\+ runtime; Play anyway"
   # The end of the check, scrolled there by wheel steps (REDmod's --launcher-skip in a fixed-width font).
   shoot "checkend-cyberpunk-$size" "$size" checkend "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
   shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"

@@ -44,6 +44,7 @@ pub mod steam_setup;
 pub mod store;
 pub mod thunderstore;
 pub mod updates;
+pub mod vcrun;
 pub mod vdf;
 pub mod watch;
 pub mod witcher;

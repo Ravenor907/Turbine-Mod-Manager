@@ -112,6 +112,10 @@ pub const ALLOWED_HOSTS: &[&str] = &[
     "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
+    // 0.64: Microsoft's Visual C++ runtime installer (its short link and its download server), for Cyberpunk's
+    // frameworks under Proton (vcrun.rs).
+    "aka.ms",
+    "download.visualstudio.microsoft.com",
 ];
 
 /// Domains where anyone can get a subdomain of their own, so a leading-dot entry for them would let in sites run by

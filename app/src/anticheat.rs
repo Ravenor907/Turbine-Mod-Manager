@@ -659,6 +659,73 @@ impl qobject::Turbine {
         );
     }
 
+    /// 0.64: installs Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk's RED4ext
+    /// and Cyber Engine Tweaks need it): download and check the installer, tell Wine to use Microsoft's DLLs, run the
+    /// installer through the game's Proton, then look again.
+    pub fn install_vc_runtime(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        let Some(prefix) = game.prefix.clone().filter(|p| p.join("drive_c").is_dir()) else {
+            self.as_mut().say("Start the game once from Steam (Proton sets it up then), then try again.", "error");
+            return;
+        };
+        if crate::system::game_running(&game.install_dir) == Some(true) {
+            self.as_mut().say(&format!("Close {} first: the runtime can't be installed while it runs.", game.name), "error");
+            return;
+        }
+        self.as_mut().say("Getting the Visual C++ runtime from Microsoft...", "work");
+        let data = crate::backend::data_home();
+        self.net_send(
+            "Install the Visual C++ runtime",
+            Box::new(move |net: &mut Net, qt: &Qt| {
+                use turbine_engine::vcrun;
+                let mut prog = crate::actions::progress_for(qt);
+                let exe = match net.fetch_vc_redist(&mut prog) {
+                    Ok(e) => e,
+                    Err(e) => return crate::actions::say_for(qt, format!("Couldn't get the Visual C++ runtime: {e}"), "error"),
+                };
+                let fail = |words: String| {
+                    crate::log::line("vcrun", &words);
+                    crate::actions::say_for(qt, words, "error");
+                };
+                let Some(root) = steam_root() else { return fail("Steam's folder wasn't found, so Proton can't be started.".into()) };
+                let libs = turbine_engine::compat_tool::library_folders(&root);
+                let recorded = turbine_engine::compat_tool::proton_choice(&data, &game.store_id);
+                let Some(proton) = vcrun::find_proton(&libs, recorded.as_deref()) else {
+                    return fail("No Proton was found. Start the game once from Steam (it installs Proton), then try again.".into());
+                };
+                let Some(runtime) = vcrun::runtime_command(&libs, &proton) else {
+                    return fail(format!("{} needs the Steam Linux Runtime, which isn't installed. Start the game once from Steam, then try again.", proton.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+                };
+                if let Err(e) = vcrun::set_overrides(&prefix) {
+                    return fail(format!("Couldn't tell Proton to use Microsoft's runtime: {e}"));
+                }
+                crate::actions::say_for(qt, "Installing the Visual C++ runtime into the game's Proton setup (about a minute)...", "work");
+                let compat = prefix.parent().map(Path::to_path_buf).unwrap_or_else(|| prefix.clone());
+                let args = vcrun::install_args(&compat, &root, &runtime, &proton, &exe);
+                crate::log::line("vcrun", &format!("Running: {}", args.join(" ")));
+                let out = std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()).output();
+                let _ = std::fs::remove_file(&exe);
+                let code = match out {
+                    Ok(o) => {
+                        let tail = String::from_utf8_lossy(&o.stderr).lines().rev().take(8).collect::<Vec<_>>().join(" | ");
+                        crate::log::line("vcrun", &format!("Installer finished with {:?}: {tail}", o.status.code()));
+                        o.status.code().unwrap_or(-1)
+                    }
+                    Err(e) => return fail(format!("Proton couldn't be started ({e}).")),
+                };
+                let after = vcrun::state(Some(&prefix));
+                crate::log::line("vcrun", &format!("After the installer: {}", after.words()));
+                if !after.needs_install() {
+                    crate::actions::say_for(qt, format!("The Visual C++ runtime is installed for {}. RED4ext and Cyber Engine Tweaks can load now.", game.name), "ok");
+                } else if !vcrun::installer_ok(code) {
+                    fail(vcrun::installer_words(code));
+                } else {
+                    fail(format!("The installer finished, but {} The details are in the activity log.", after.words().to_lowercase()));
+                }
+            }),
+        );
+    }
+
     /// Gets me3 (pinned, checked), then plays when `then_play`.
     pub fn install_me3(mut self: Pin<&mut Self>, then_play: bool) {
         let Some(game) = self.current_game() else { return };

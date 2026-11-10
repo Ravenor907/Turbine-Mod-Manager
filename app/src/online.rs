@@ -974,6 +974,27 @@ impl Net {
         Ok(1)
     }
 
+    /// 0.64: Microsoft's Visual C++ runtime installer, checked (vcrun::download), in Turbine's cache (a folder the
+    /// host can read, so Proton can run it).
+    pub fn fetch_vc_redist(&mut self, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<PathBuf, String> {
+        self.no_downloads()?;
+        let dir = self.cache.join("vcrun");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make a folder for the installer ({e})."))?;
+        let client = Client { temp_dir: dir.clone(), ..self.client.clone() };
+        CANCEL.store(false, Ordering::SeqCst);
+        let label = "Visual C++ runtime".to_string();
+        let mut cb = |got: u64, total: Option<u64>| {
+            progress(&label, got, total);
+            !CANCEL.load(Ordering::SeqCst)
+        };
+        let d = turbine_engine::vcrun::download(&client, Some(&mut cb)).map_err(err)?;
+        let exe = dir.join("vc_redist.x64.exe");
+        fs::rename(&d.path, &exe).map_err(|e| format!("Couldn't keep the installer ({e})."))?;
+        crate::log::line("vcrun", &format!("Microsoft's installer downloaded and checked: {} bytes, SHA-256 {}", d.size, d.sha256));
+        Ok(exe)
+    }
+
     // ------------------------------------------------------------------------------------------------ LOOT
 
     /// LOOT's masterlist for Skyrim Special Edition: the copy on this device, refreshed at most once a day (or the
