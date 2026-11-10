@@ -973,6 +973,130 @@ pub fn is_seamless_native(n: &str) -> bool {
     l.ends_with("/ersc.dll") || l == "ersc.dll"
 }
 
+// ---- Seamless Co-op's session password (0.62) ----
+//
+// The mod stops the game at once when its settings file has no session password ("Please enter a session password
+// in your settings file"). The file it reads is the ersc_settings.ini next to its ersc.dll, and under me3 that is
+// the copy inside Turbine's me3 profile for the game: so that copy, and no other, is what Turbine checks before a
+// co-op Play.
+
+/// What the player hears when co-op can't start for want of a password.
+pub const COOP_NEEDS_PASSWORD: &str = "Seamless Co-op needs a session password. Set one in its settings (every player uses the same one), then play.";
+
+/// The state of the session password in the file the mod will load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CoopPassword {
+    /// A password is set (never kept or logged here).
+    Set,
+    /// The settings file is there and the password is empty.
+    Empty(PathBuf),
+    /// Seamless Co-op is in the profile but its settings file isn't next to it (where it would be).
+    NoFile(PathBuf),
+    /// Seamless Co-op isn't in the profile's package folder.
+    NoMod,
+}
+
+impl CoopPassword {
+    /// Ok when co-op can start; otherwise the words for the player.
+    pub fn ready(&self) -> Result<(), String> {
+        match self {
+            CoopPassword::Set => Ok(()),
+            CoopPassword::Empty(_) => Err(COOP_NEEDS_PASSWORD.to_string()),
+            CoopPassword::NoFile(_) => Err(format!("Seamless Co-op's settings file isn't with the mod yet. {COOP_NEEDS_PASSWORD}")),
+            CoopPassword::NoMod => Err("Seamless Co-op isn't on in My mods".to_string()),
+        }
+    }
+
+    /// A short word for logs and the app: "set", "empty", "nofile" or "nomod".
+    pub fn word(&self) -> &'static str {
+        match self {
+            CoopPassword::Set => "set",
+            CoopPassword::Empty(_) => "empty",
+            CoopPassword::NoFile(_) => "nofile",
+            CoopPassword::NoMod => "nomod",
+        }
+    }
+}
+
+/// The session password in a settings file's text: the `cooppassword` key (any letter case, spaces around the key,
+/// the `=` and the value allowed), from the [PASSWORD] section when the file has one, else from anywhere. Quotes
+/// around the whole value come off; comment lines (`;` or `#`) are skipped. None when the key isn't in the file.
+pub fn coop_password_in(text: &str) -> Option<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut section = String::new();
+    let mut in_section: Option<String> = None;
+    let mut anywhere: Option<String> = None;
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.split(']').next()) {
+            section = name.trim().to_ascii_lowercase();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else { continue };
+        if !key.trim().eq_ignore_ascii_case("cooppassword") {
+            continue;
+        }
+        let mut v = value.trim();
+        for q in ['"', '\''] {
+            if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+                v = v[1..v.len() - 1].trim();
+            }
+        }
+        if section == "password" {
+            in_section.get_or_insert(v.to_string());
+        } else {
+            anywhere.get_or_insert(v.to_string());
+        }
+    }
+    in_section.or(anywhere)
+}
+
+/// The settings file the mod will load under me3: ersc_settings.ini (any letter case) in the folder of its ersc.dll
+/// inside the profile's package folder. Answers (the file or where it would be, is it there); None without the mod.
+pub fn coop_settings_file(store_root: &Path) -> Option<(PathBuf, bool)> {
+    let mods = profile_mods(store_root);
+    let native = natives(&mods).into_iter().find(|n| is_seamless_native(n))?;
+    let dll = profile_dir(store_root).join(native);
+    let dir = dll.parent()?.to_path_buf();
+    let found = fs::read_dir(&dir).ok().and_then(|rd| {
+        let mut names: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("ersc_settings.ini")) && p.is_file()).collect();
+        names.sort();
+        names.into_iter().next()
+    });
+    Some(match found {
+        Some(f) => (f, true),
+        None => (dir.join("ersc_settings.ini"), false),
+    })
+}
+
+/// The session password's state in the file the mod will load for this game.
+pub fn coop_password(store_root: &Path) -> CoopPassword {
+    let Some((file, there)) = coop_settings_file(store_root) else { return CoopPassword::NoMod };
+    if !there {
+        return CoopPassword::NoFile(file);
+    }
+    let bytes = fs::read(&file).unwrap_or_default();
+    match coop_password_in(&String::from_utf8_lossy(&bytes)) {
+        Some(p) if !p.is_empty() => CoopPassword::Set,
+        _ => CoopPassword::Empty(file),
+    }
+}
+
+/// Arms the next Play only for Seamless Co-op (the once file the helper and the Steam tool read), after the
+/// password check: with an empty password nothing is armed and an older once file goes, so no co-op Play can start
+/// into the mod's own error.
+pub fn arm_coop_once(data: &Path, store_root: &Path, app_id: &str, args: &[String]) -> Result<(), String> {
+    check_app_id(app_id).map_err(|e| e.to_string())?;
+    if let Err(why) = coop_password(store_root).ready() {
+        let _ = remove_if(&once_file(data, app_id));
+        return Err(why);
+    }
+    arm_once(data, app_id, args, "Seamless Co-op, this Play only").map_err(|e| format!("Couldn't get the launch helper ready: {e}"))
+}
+
 /// The profile file for each way.
 pub fn profile_file_for(store_root: &Path, coop: Coop) -> PathBuf {
     match coop {
@@ -982,7 +1106,8 @@ pub fn profile_file_for(store_root: &Path, coop: Coop) -> PathBuf {
 }
 
 /// Writes the profile for one way: Solo leaves Seamless Co-op out and uses Turbine's own save; Seamless takes it in
-/// and keeps its .co2 saves. Seamless without Seamless Co-op in the package folder is an error.
+/// and keeps its .co2 saves. Seamless without Seamless Co-op in the package folder is an error, and so is Seamless
+/// without a session password in the mod's settings file (`COOP_NEEDS_PASSWORD`; `coop_password` tells which).
 pub fn write_profile_for(store_root: &Path, game: &str, coop: Coop) -> io::Result<(PathBuf, Vec<String>)> {
     let mods = profile_mods(store_root);
     fs::create_dir_all(&mods)?;
@@ -990,7 +1115,11 @@ pub fn write_profile_for(store_root: &Path, game: &str, coop: Coop) -> io::Resul
     let has = all.iter().any(|n| is_seamless_native(n));
     let (nat, save): (Vec<String>, Option<&str>) = match coop {
         Coop::Solo => (all.into_iter().filter(|n| !is_seamless_native(n)).collect(), Some(ME3_SAVEFILE)),
-        Coop::Seamless if has => (all, None),
+        // 0.62: never a co-op profile for a Play the mod would stop at once (no session password in its file).
+        Coop::Seamless if has => match coop_password(store_root).ready() {
+            Ok(()) => (all, None),
+            Err(why) => return Err(io::Error::new(io::ErrorKind::InvalidInput, why)),
+        },
         Coop::Seamless => return Err(io::Error::new(io::ErrorKind::NotFound, "Seamless Co-op isn't on in My mods")),
     };
     let file = profile_file_for(store_root, coop);

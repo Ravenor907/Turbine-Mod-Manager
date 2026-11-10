@@ -458,7 +458,75 @@ fn every_me3_profile_turns_the_code_protection_off() {
     let d = std::env::temp_dir().join(format!("turbine-arxan-{}-coop", std::process::id()));
     let _ = fs::remove_dir_all(&d);
     write(&anticheat::profile_mods(&d).join("SeamlessCoop/ersc.dll"), "x");
+    write(&anticheat::profile_mods(&d).join("SeamlessCoop/ersc_settings.ini"), "[PASSWORD]\ncooppassword = dragon\n");
     let (file, _) = anticheat::write_profile_for(&d, "eldenring", anticheat::Coop::Seamless).unwrap();
     assert!(top_level(&fs::read_to_string(&file).unwrap()));
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// 0.62 (the owner's device): Play Seamless Co-op started with an empty session password and the mod stopped the
+/// game. The password is read from the file the mod itself loads under me3 (next to its ersc.dll in Turbine's me3
+/// profile), and no co-op profile or once file is written while it is empty.
+#[test]
+fn coop_needs_a_session_password_in_the_file_the_mod_loads() {
+    use anticheat::{Coop, CoopPassword};
+    // The key in its section, in any letter case, with spaces and quotes.
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\r\ncooppassword = dragon\r\n").as_deref(), Some("dragon"));
+    assert_eq!(anticheat::coop_password_in("\u{feff}[password]\n  CoopPassword=dragon  \n").as_deref(), Some("dragon"));
+    assert_eq!(anticheat::coop_password_in("[ Password ]\ncooppassword\t=\t\"two words\"\n").as_deref(), Some("two words"));
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\ncooppassword = 'x'\n").as_deref(), Some("x"));
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\ncooppassword = \n").as_deref(), Some(""));
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\ncooppassword =\"\"\n").as_deref(), Some(""));
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\ncooppassword = \"  \"\n").as_deref(), Some(""));
+    // A commented line is no password; the mod's own help text above the key doesn't count either.
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\n; cooppassword = old\n# cooppassword = older\ncooppassword =\n").as_deref(), Some(""));
+    // The [PASSWORD] section wins over the same key elsewhere; without the section the key still counts.
+    assert_eq!(anticheat::coop_password_in("[GAMEPLAY]\ncooppassword = wrong\n[PASSWORD]\ncooppassword = right\n").as_deref(), Some("right"));
+    assert_eq!(anticheat::coop_password_in("cooppassword = bare\n").as_deref(), Some("bare"));
+    assert_eq!(anticheat::coop_password_in("[GAMEPLAY]\nallow_invaders = 1\n"), None);
+    // A password with an = in it stays whole.
+    assert_eq!(anticheat::coop_password_in("[PASSWORD]\ncooppassword = a=b\n").as_deref(), Some("a=b"));
+
+    let d = std::env::temp_dir().join(format!("turbine-cooppw-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let store = d.join("store");
+    let data = d.join("data");
+    let mods = anticheat::profile_mods(&store);
+    // No Seamless Co-op in the profile.
+    fs::create_dir_all(&mods).unwrap();
+    assert_eq!(anticheat::coop_password(&store), CoopPassword::NoMod);
+    // The mod without its settings file.
+    write(&mods.join("SeamlessCoop/ersc.dll"), "x");
+    assert!(matches!(anticheat::coop_password(&store), CoopPassword::NoFile(_)));
+    assert!(anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).is_err());
+    // An edited copy somewhere else in the store doesn't count: only the file next to the mod does.
+    write(&store.join("settings/seamless/ersc_settings.ini"), "[PASSWORD]\ncooppassword = elsewhere\n");
+    assert!(matches!(anticheat::coop_password(&store), CoopPassword::NoFile(_)));
+    // The file with an empty password (any letter case in its name): refused everywhere, with the plain words.
+    let ini = mods.join("SeamlessCoop/ERSC_Settings.ini");
+    write(&ini, "[GAMEPLAY]\r\nallow_invaders = 1\r\n\r\n[PASSWORD]\r\n; Session password\r\ncooppassword = \r\n");
+    assert_eq!(anticheat::coop_password(&store), CoopPassword::Empty(ini.clone()));
+    assert_eq!(anticheat::coop_password(&store).word(), "empty");
+    let e = anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).unwrap_err();
+    assert_eq!(e.to_string(), anticheat::COOP_NEEDS_PASSWORD);
+    assert!(!anticheat::profile_file_for(&store, Coop::Seamless).exists(), "no co-op profile is written");
+    // The once file (what the helper and the Steam tool read for Play Seamless Co-op): not written, and one left
+    // from before goes.
+    let args = vec!["/x/me3.exe".to_string(), "launch".to_string()];
+    anticheat::arm_once(&data, "1245620", &args, "old").unwrap();
+    let e = anticheat::arm_coop_once(&data, &store, "1245620", &args).unwrap_err();
+    assert_eq!(e, anticheat::COOP_NEEDS_PASSWORD);
+    assert!(!anticheat::once_file(&data, "1245620").exists());
+    // Solo Play is not held up by it.
+    assert!(anticheat::write_profile_for(&store, "eldenring", Coop::Solo).is_ok());
+    // With a password: the profile and the once file are written.
+    write(&ini, "[PASSWORD]\r\ncooppassword = dragon\r\n");
+    assert_eq!(anticheat::coop_password(&store), CoopPassword::Set);
+    assert!(anticheat::coop_password(&store).ready().is_ok());
+    let (profile, natives) = anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).unwrap();
+    assert!(profile.exists() && natives.len() == 1);
+    anticheat::arm_coop_once(&data, &store, "1245620", &args).unwrap();
+    assert!(anticheat::once_file(&data, "1245620").exists());
+    assert!(anticheat::arm_coop_once(&data, &store, "12a", &args).is_err());
     let _ = fs::remove_dir_all(&d);
 }

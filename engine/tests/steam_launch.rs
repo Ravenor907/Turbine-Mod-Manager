@@ -488,6 +488,7 @@ fn once_files_and_plain_play() {
         let mods = anticheat::profile_mods(&store);
         fs::create_dir_all(mods.join("SeamlessCoop")).unwrap();
         fs::write(mods.join("SeamlessCoop/ersc.dll"), "x").unwrap();
+        fs::write(mods.join("SeamlessCoop/ersc_settings.ini"), "[PASSWORD]\ncooppassword = dragon\n").unwrap();
         anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).unwrap()
     };
     let coop = anticheat::helper_args_for(&c.me3, &coop_profile, Some(&c.game_exe));
@@ -570,6 +571,7 @@ fn solo_and_coop_profiles() {
     let mods = anticheat::profile_mods(&d);
     fs::create_dir_all(mods.join("SeamlessCoop")).unwrap();
     fs::write(mods.join("SeamlessCoop/ersc.dll"), "x").unwrap();
+    fs::write(mods.join("SeamlessCoop/ersc_settings.ini"), "[PASSWORD]\ncooppassword = dragon\n").unwrap();
     fs::write(mods.join("other.dll"), "x").unwrap();
     let (solo, n) = anticheat::write_profile_for(&d, "eldenring", Coop::Solo).unwrap();
     assert_eq!(n, vec!["mods/other.dll".to_string()]);
