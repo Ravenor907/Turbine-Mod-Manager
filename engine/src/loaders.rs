@@ -443,6 +443,59 @@ pub fn fetch_bepinex(
     Ok(LoaderDownload { download: d, source: info, plan: bepinex_plan(folder, native_linux), pinned: known.is_some() })
 }
 
+/// Seamless Co-op's releases (the repository moved from LukeYui to yuiamoroll, which GitHub redirects).
+pub const SEAMLESS_LATEST: &str = "https://api.github.com/repos/yuiamoroll/EldenRingSeamlessCoopRelease/releases/latest";
+
+/// Seamless Co-op's newest release as GitHub lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeamlessRelease {
+    pub version: String,
+    pub url: String,
+    pub size: u64,
+    /// GitHub's published digest for the file, when present.
+    pub sha256: Option<String>,
+}
+
+/// Reads GitHub's latest-release answer for Seamless Co-op: its one zip (the first .zip file listed), from GitHub
+/// itself. The version is the release's tag without a leading "v".
+pub fn parse_seamless_release(text: &str) -> Result<SeamlessRelease, String> {
+    let j = json::parse(text).map_err(|e| format!("GitHub's answer can't be read ({e})"))?;
+    let tag = j.str_at("tag_name").ok_or("GitHub's answer has no release")?;
+    let version = tag.trim().trim_start_matches(['v', 'V']).to_string();
+    if version.is_empty() || !version.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') || !version.as_bytes()[0].is_ascii_digit() {
+        return Err(format!("Seamless Co-op's release has a version Turbine can't read ({tag})"));
+    }
+    for a in j.get("assets").map(Json::as_array).unwrap_or(&[]) {
+        let Some(name) = a.str_at("name") else { continue };
+        if !name.to_ascii_lowercase().ends_with(".zip") {
+            continue;
+        }
+        let url = a.str_at("browser_download_url").ok_or("GitHub's answer has no download address")?;
+        if crate::net::https_host(url).as_deref() != Some("github.com") {
+            return Err("Seamless Co-op's release points somewhere other than GitHub".to_string());
+        }
+        let size = match a.get("size") {
+            Some(Json::Num(n)) if *n > 0.0 => *n as u64,
+            _ => 0,
+        };
+        let sha256 = a.str_at("digest").and_then(|d| d.strip_prefix("sha256:")).filter(|h| sha256::is_hex_digest(h)).map(str::to_ascii_lowercase);
+        return Ok(SeamlessRelease { version, url: url.to_string(), size, sha256 });
+    }
+    Err(format!("Seamless Co-op release {tag} has no zip file"))
+}
+
+/// Downloads Seamless Co-op's newest release, checked against the size and digest GitHub lists for it. The record
+/// keeps the version, the address and the SHA-256 of what was downloaded.
+pub fn fetch_seamless(client: &Client, progress: Option<Progress>) -> Result<(Download, SourceInfo), NetError> {
+    let text = client.send(&Request::get(SEAMLESS_LATEST).header("Accept", "application/vnd.github+json").max_bytes(4 << 20), None)?.take_text()?;
+    let rel = parse_seamless_release(&text).map_err(|e| NetError::Failed(format!("{e}.")))?;
+    let check = Expect { max_bytes: if rel.size > 0 { rel.size } else { 64 << 20 }, size: (rel.size > 0).then_some(rel.size), sha256: rel.sha256.clone() };
+    let d = client.download(&rel.url, &check, progress)?;
+    let mut source = loader_source("seamless", &rel.version, &rel.url, &d.sha256);
+    source.title = Some("Seamless Co-op".into());
+    Ok((d, source))
+}
+
 /// SMAPI's newest release as GitHub lists it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmapiRelease {

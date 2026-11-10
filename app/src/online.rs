@@ -1056,29 +1056,20 @@ impl Net {
         Ok(dir)
     }
 
-    /// Seamless Co-op for Elden Ring from its official GitHub release, pinned and checked by SHA-256. It is added
-    /// like a loader: a mod in My mods that me3 loads from the profile folder.
+    /// Seamless Co-op for Elden Ring: the newest release its GitHub repository lists (0.62: never a fixed version,
+    /// the mod refuses to run when it is out of date), checked against the size and digest GitHub gives for it. It
+    /// is added like a loader: a mod in My mods that me3 loads from the profile folder. With a copy installed
+    /// already (from anywhere), the store puts this one in its place.
     pub fn fetch_seamless(&mut self, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
         self.no_downloads()?;
         CANCEL.store(false, Ordering::SeqCst);
-        let label = format!("Seamless Co-op {}", anticheat::SEAMLESS_VERSION);
         let mut cb = |got: u64, total: Option<u64>| {
-            progress(&label, got, total);
+            progress("Seamless Co-op", got, total);
             !CANCEL.load(Ordering::SeqCst)
         };
-        let check = net::Expect { max_bytes: anticheat::SEAMLESS_SIZE, size: Some(anticheat::SEAMLESS_SIZE), sha256: Some(anticheat::SEAMLESS_SHA256.into()) };
-        let d = self.client.download(anticheat::SEAMLESS_URL, &check, Some(&mut cb)).map_err(err)?;
-        let source = SourceInfo {
-            kind: "loader".into(),
-            id: "seamless".into(),
-            version: Some(anticheat::SEAMLESS_VERSION.into()),
-            url: Some(anticheat::SEAMLESS_URL.into()),
-            sha256: Some(d.sha256.clone()),
-            needs: Vec::new(),
-            title: Some("Seamless Co-op".into()),
-            picture: None,
-        };
-        crate::log::line("net", &format!("{label} from {} (SHA-256 checked)", anticheat::SEAMLESS_URL));
+        let (d, source) = loaders::fetch_seamless(&self.client, Some(&mut cb)).map_err(err)?;
+        let label = format!("Seamless Co-op {}", source.version.clone().unwrap_or_default());
+        crate::log::line("net", &format!("{label} from {} ({} bytes, SHA-256 {})", source.url.clone().unwrap_or_default(), d.size, d.sha256));
         let path = rename(&d, &label, "zip");
         Ok(Fetched { path, source, label, replaces: None })
     }

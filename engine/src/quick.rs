@@ -385,6 +385,14 @@ pub fn existing_root(game: &Game, data_home: &Path) -> Option<PathBuf> {
         .find(|r| r.join("state.json").is_file())
 }
 
+/// Is Seamless Co-op's DLL somewhere in this staged mod folder (a few folders deep at most)?
+fn staged_has_seamless(dir: &Path, depth: usize) -> bool {
+    let Ok(rd) = fs::read_dir(dir) else { return false };
+    let entries: Vec<_> = rd.flatten().collect();
+    entries.iter().any(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("ersc.dll") && e.path().is_file())
+        || (depth > 0 && entries.iter().any(|e| e.path().is_dir() && staged_has_seamless(&e.path(), depth - 1)))
+}
+
 pub fn peek(store_root: &Path) -> Peek {
     let mut p = Peek::default();
     let Ok(text) = fs::read_to_string(store_root.join("state.json")) else { return p };
@@ -398,7 +406,10 @@ pub fn peek(store_root: &Path) -> Peek {
             p.on += 1;
         }
         let src = sources.and_then(|s| s.get(id));
-        if src.and_then(|s| s.str_at("kind")) == Some("loader") && src.and_then(|s| s.str_at("id")) == Some("seamless") {
+        // 0.62: Seamless Co-op is known by its files (its ersc.dll in the mod's staged folder), so one from Nexus
+        // counts like Turbine's own download.
+        let own = src.and_then(|s| s.str_at("kind")) == Some("loader") && src.and_then(|s| s.str_at("id")) == Some("seamless");
+        if own || staged_has_seamless(&crate::store::staged_dir(store_root, id), 4) {
             p.seamless = true;
             p.seamless_on |= on;
         }

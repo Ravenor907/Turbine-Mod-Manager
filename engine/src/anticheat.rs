@@ -8,7 +8,7 @@
 //!   unpacked by this module (gzip and tar, names checked, only the files it needs) into Turbine's own data folder,
 //!   and started on the host with fixed arguments (`launch_args`). The profile uses its own save file, so a
 //!   modded save never meets the online game. Seamless Co-op loads through me3 as a native from the same profile
-//!   folder (its documented way with me3), downloaded the same way (`SEAMLESS_*`); with it on, its own .co2 saves
+//!   folder (its documented way with me3), the newest release (loaders::fetch_seamless) or the player's own download; with it on, its own .co2 saves
 //!   are used and kept.
 //! - **official** (Halo MCC): the game has its own switch; Turbine shows which Play choice to pick.
 //! - **offline**: no anti-cheat program, but online play flags changed files; Turbine says how to start offline.
@@ -38,12 +38,10 @@ pub const ME3_SHA256: &str = "f31579deebf75b4702059694b664bdd8917c4773ab0c266715
 /// The files Turbine takes from the release (everything else in it is left out).
 pub const ME3_FILES: &[&str] = &["bin/me3", "bin/win64/me3-launcher.exe", "bin/win64/me3_mod_host.dll", "bin/win64/me3.exe"];
 
-/// Seamless Co-op for Elden Ring, pinned: the official GitHub release (v2.0.1, 2026-09-03; the repository moved
-/// from LukeYui to yuiamoroll, which GitHub redirects). Size and SHA-256 checked against the file itself.
-pub const SEAMLESS_VERSION: &str = "2.0.1";
-pub const SEAMLESS_URL: &str = "https://github.com/yuiamoroll/EldenRingSeamlessCoopRelease/releases/download/v2.0.1/Seamless.Co-op.v2.0.1.zip";
-pub const SEAMLESS_SIZE: u64 = 8_078_349;
-pub const SEAMLESS_SHA256: &str = "848ae27e1c77217590dac401c012a17d9b4f05b9b9a24aa33af54d8d7b8ba2a1";
+/// Seamless Co-op for Elden Ring. 0.62: no fixed version any more. The mod refuses to run when it is out of date,
+/// so a pinned release can never be right for long: Turbine gets the newest release its repository lists
+/// (loaders::fetch_seamless, size and SHA-256 recorded at the download) or the player gets it from Nexus.
+pub const SEAMLESS_PAGE: &str = "https://www.nexusmods.com/eldenring/mods/510";
 /// Seamless Co-op's DLL inside its zip; me3 loads it as a native.
 pub const SEAMLESS_DLL: &str = "SeamlessCoop/ersc.dll";
 
@@ -1110,6 +1108,81 @@ pub fn arm_coop_once(data: &Path, store_root: &Path, app_id: &str, args: &[Strin
         return Err(why);
     }
     arm_once(data, app_id, args, "Seamless Co-op, this Play only").map_err(|e| format!("Couldn't get the launch helper ready: {e}"))
+}
+
+// ---- Which Seamless Co-op the game loads (0.62) ----
+
+/// Is this path Seamless Co-op's DLL (whatever folder it is in)?
+pub fn is_seamless_file(rel: &str) -> bool {
+    rel.replace('\\', "/").rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("ersc.dll"))
+}
+
+/// The version a Windows program file says it is ("2.0.2"), from its version block (VS_FIXEDFILEINFO: the file
+/// version's four numbers). None when the file carries none. Trailing ".0" parts beyond the second are dropped.
+pub fn dll_version_in(bytes: &[u8]) -> Option<String> {
+    const SIGNATURE: [u8; 4] = [0xBD, 0x04, 0xEF, 0xFE];
+    let at = bytes.windows(4).position(|w| w == SIGNATURE)?;
+    let word = |o: usize| -> Option<u32> { bytes.get(at + o..at + o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) };
+    // dwStrucVersion must be 1.0.
+    if word(4)? != 0x0001_0000 {
+        return None;
+    }
+    let (ms, ls) = (word(8)?, word(12)?);
+    let mut parts = vec![ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF];
+    if parts.iter().all(|p| *p == 0) {
+        return None;
+    }
+    while parts.len() > 2 && parts.last() == Some(&0) {
+        parts.pop();
+    }
+    Some(parts.iter().map(u32::to_string).collect::<Vec<_>>().join("."))
+}
+
+/// `dll_version_in` for a file (at most 64 MB read).
+pub fn dll_version(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > 64 << 20 {
+        return None;
+    }
+    dll_version_in(&fs::read(path).ok()?)
+}
+
+/// Seamless Co-op's DLL as the game will load it: next to the settings file in the profile's package folder.
+pub fn coop_dll(store_root: &Path) -> Option<PathBuf> {
+    let native = natives(&profile_mods(store_root)).into_iter().find(|n| is_seamless_native(n))?;
+    Some(profile_dir(store_root).join(native))
+}
+
+/// Puts a session password into a settings file's text (the `cooppassword` line the mod reads, see
+/// `coop_password_in`), keeping everything else and the line endings. None when the file has no such line.
+pub fn coop_password_put(text: &str, password: &str) -> Option<String> {
+    if password.contains(['\n', '\r']) {
+        return None;
+    }
+    let mut section = String::new();
+    let mut hit: Option<(usize, bool)> = None;
+    let mut pos = 0;
+    for raw in text.split_inclusive('\n') {
+        let line = raw.trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.split(']').next()) {
+            section = name.trim().to_ascii_lowercase();
+        } else if !line.starts_with(';') && !line.starts_with('#') {
+            if let Some((key, _)) = line.split_once('=') {
+                if key.trim().trim_start_matches('\u{feff}').eq_ignore_ascii_case("cooppassword") {
+                    let in_section = section == "password";
+                    if hit.is_none() || (in_section && hit.is_some_and(|(_, s)| !s)) {
+                        hit = Some((pos, in_section));
+                    }
+                }
+            }
+        }
+        pos += raw.len();
+    }
+    let (start, _) = hit?;
+    let raw = text[start..].split_inclusive('\n').next()?;
+    let ending = if raw.ends_with("\r\n") { "\r\n" } else if raw.ends_with('\n') { "\n" } else { "" };
+    let key = raw.split_once('=')?.0;
+    Some(format!("{}{}= {password}{ending}{}", &text[..start], key, &text[start + raw.len()..]))
 }
 
 /// The profile file for each way.

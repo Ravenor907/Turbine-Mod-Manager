@@ -135,6 +135,10 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
         w.say(format!("{e}. Press Play again: Turbine gets me3 first."), "warn");
         return false;
     }
+    if let Err(why) = coop_ready(slot, coop) {
+        w.say(why, "warn");
+        return false;
+    }
     let (profile, natives) = match ac::write_profile_for(slot.store.root(), &game, coop) {
         Ok(p) => p,
         Err(e) => {
@@ -189,6 +193,36 @@ pub(crate) fn ensure_helper(data: &Path) {
             Ok(_) => {}
             Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam tool: {e}")),
         }
+    }
+}
+
+/// 0.62, before a co-op Play: the Seamless Co-op the game loads is the one in the list, and it has a session
+/// password. What the check found goes to the activity log (never the password); a version that disagrees is
+/// logged as a warning and doesn't stop the Play. Err: the words for the player.
+pub(crate) fn coop_ready(slot: &Slot, coop: ac::Coop) -> Result<(), String> {
+    if coop != ac::Coop::Seamless {
+        return Ok(());
+    }
+    let c = slot.store.coop_check();
+    crate::log::line(
+        "launch",
+        &format!(
+            "{}: Seamless Co-op in the list: {} {}; its file says {}; in the game's mod folder: {}; session password: {}{}",
+            slot.game.name,
+            c.name.clone().unwrap_or_else(|| "none".into()),
+            c.list_version.clone().unwrap_or_default(),
+            c.file_version.clone().unwrap_or_else(|| "no version".into()),
+            if c.profile_current { "the same file" } else { "a different file" },
+            c.password.word(),
+            if c.others.is_empty() { String::new() } else { format!("; not used: {}", c.others.join(", ")) }
+        ),
+    );
+    if let Some(w) = c.warning() {
+        crate::log::line("launch", &format!("{}: {w}", slot.game.name));
+    }
+    match c.blocks() {
+        Some(why) => Err(why),
+        None => Ok(()),
     }
 }
 
@@ -285,6 +319,7 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     // waiting from before goes: this is a Play with mods.
     sync_helper(w, slot);
     let _ = ac::clear_plain(data, &slot.game.store_id);
+    coop_ready(slot, coop)?;
     let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())))?;
     let args = ac::helper_args_for(&me3, &profile, game_exe(slot).as_deref());
     let r = match coop {

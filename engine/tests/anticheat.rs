@@ -530,3 +530,182 @@ fn coop_needs_a_session_password_in_the_file_the_mod_loads() {
     assert!(anticheat::arm_coop_once(&data, &store, "12a", &args).is_err());
     let _ = fs::remove_dir_all(&d);
 }
+
+fn nexus(version: &str) -> turbine_engine::net::SourceInfo {
+    turbine_engine::net::SourceInfo { kind: "nexus".into(), id: "510".into(), version: Some(version.into()), title: Some("Seamless Co-op (Elden Ring)".into()), ..Default::default() }
+}
+
+fn own_download(version: &str) -> turbine_engine::net::SourceInfo {
+    turbine_engine::net::SourceInfo { kind: "loader".into(), id: "seamless".into(), version: Some(version.into()), title: Some("Seamless Co-op".into()), ..Default::default() }
+}
+
+fn added(r: Result<turbine_engine::store::Import, String>) -> turbine_engine::store::Mod {
+    match r.unwrap() {
+        turbine_engine::store::Import::Added(done) => done.item,
+        _ => panic!("the mod wasn't simply added"),
+    }
+}
+
+const INI_201: &str = "[GAMEPLAY]\r\nallow_invaders = 1\r\n\r\n[PASSWORD]\r\n; Session password\r\ncooppassword = \r\n";
+const INI_202: &str = "[GAMEPLAY]\r\nallow_invaders = 1\r\nnew_in_202 = 5\r\n\r\n[PASSWORD]\r\n; Session password\r\ncooppassword = \r\n";
+
+/// 0.62 (the owner's device): the list showed Seamless Co-op 2.0.2 from Nexus, but the game loaded 2.0.1 and the mod
+/// stopped ("out of date"). Turbine only knew its own pinned download as Seamless Co-op, so that older copy was
+/// added as a second mod and its files won. Now there is one Seamless Co-op per game, known by its files: a new
+/// download takes the place of the old one and keeps the session password.
+#[test]
+fn a_newer_seamless_coop_replaces_the_older_copy_and_keeps_the_password() {
+    let w = world("seamless-update");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    // Turbine's own older download first, with a password set through Edit settings.
+    let old = w.root.join("dl/Seamless Co-op 2.0.1.zip");
+    write_zip(&old, &[("SeamlessCoop/ersc.dll", "dll 2.0.1"), ("SeamlessCoop/ersc_settings.ini", INI_201), ("ersc_launcher.exe", "exe")]);
+    let first = added(store.import_archive(&old, own_download("2.0.1")));
+    let staged = turbine_engine::store::staged_dir(store.root(), &first.id);
+    let rel = turbine_engine::settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")).unwrap();
+    let with_pw = anticheat::coop_password_put(INI_201, "dragon").unwrap();
+    assert_eq!(with_pw, INI_201.replace("cooppassword = \r\n", "cooppassword = dragon\r\n"));
+    turbine_engine::settings::save_edit(store.root(), &first.id, &rel, &staged.join(&rel), &with_pw).unwrap();
+    store.apply().unwrap();
+    let mods = anticheat::profile_mods(store.root());
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.1");
+    assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set);
+
+    // The player gets 2.0.2 from Nexus: it replaces the copy in the list (no second mod), under the same entry.
+    let new = w.root.join("dl/Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z gn8dtBhTy.zip");
+    write_zip(&new, &[("SeamlessCoop/ersc.dll", "dll 2.0.2"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    let second = added(store.import_archive(&new, nexus("2.0.2")));
+    assert_eq!(second.id, first.id, "the same entry in the list");
+    assert_eq!(second.version.as_deref(), Some("2.0.2"));
+    let all = store.seamless_mods();
+    assert_eq!(all.len(), 1, "{all:?}");
+    assert_eq!(all[0].source_kind, "nexus");
+    assert_eq!(store.mods().iter().filter(|m| m.name.to_lowercase().contains("seamless")).count(), 1);
+    // The older file is still in the game's mod folder until the apply: the check before a co-op Play says so.
+    let before = store.coop_check();
+    assert!(!before.profile_current);
+    assert!(before.blocks().unwrap().contains("isn't the one in your list (Seamless Co-op (Elden Ring) 2.0.2)"), "{:?}", before.blocks());
+    store.apply().unwrap();
+    // The game's mod folder now holds 2.0.2, and the password came along with the new file's new setting.
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+    let ini = fs::read_to_string(mods.join("SeamlessCoop/ersc_settings.ini")).unwrap();
+    assert!(ini.contains("cooppassword = dragon"), "{ini}");
+    assert!(ini.contains("new_in_202 = 5"), "{ini}");
+    let check = store.coop_check();
+    assert!(check.profile_current && check.blocks().is_none() && check.warning().is_none(), "{check:?}");
+    assert_eq!(check.list_version.as_deref(), Some("2.0.2"));
+    let j = turbine_engine::json::parse(&check.to_json()).unwrap();
+    assert_eq!((j.str_at("password"), j.str_at("listVersion")), (Some("set"), Some("2.0.2")));
+    // The list marks it as the Seamless Co-op the game loads, whatever its source.
+    let state = turbine_engine::json::parse(&store.to_json()).unwrap();
+    let marked: Vec<&turbine_engine::json::Json> = state.get("mods").unwrap().as_array().iter().filter(|m| m.get("seamless").and_then(|s| s.as_bool()) == Some(true)).collect();
+    assert_eq!(marked.len(), 1);
+    assert_eq!(marked[0].str_at("sourceKind"), Some("nexus"));
+    // Steam's menu (which reads the store without opening it) sees a Nexus copy as Seamless Co-op too.
+    let peek = turbine_engine::quick::peek(store.root());
+    assert!(peek.seamless && peek.seamless_on);
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+/// The state the owner's device is in now: two copies in the list, the older one later in the order. Only the
+/// newer one's files go into the game's mod folder, the check names both, and tidying keeps one.
+#[test]
+fn with_two_copies_in_the_list_the_newer_one_is_loaded() {
+    let w = world("seamless-two");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(Me3Rules(Some("eldenring"), false))).unwrap();
+    // An entry that becomes the Nexus 2.0.2 (replaced in place below), then Turbine's own 2.0.1 after it.
+    let other = w.root.join("dl/Placeholder 1.0.zip");
+    write_zip(&other, &[("Game/other.bin", "x")]);
+    let a = store.import_zip(&other).unwrap();
+    let old = w.root.join("dl/Seamless Co-op 2.0.1.zip");
+    write_zip(&old, &[("SeamlessCoop/ersc.dll", "dll 2.0.1"), ("SeamlessCoop/ersc_settings.ini", &INI_201.replace("cooppassword = ", "cooppassword = dragon")), ("ersc_launcher.exe", "exe")]);
+    let b = added(store.import_archive(&old, own_download("2.0.1")));
+    let new = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&new, &[("SeamlessCoop/ersc.dll", "dll 2.0.2"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    added(store.replace_mod(&a.id, &new, nexus("2.0.2")));
+    assert_eq!(store.seamless_mods().len(), 2);
+    assert_ne!(a.id, b.id);
+    // The older copy is later in the list (it would win by order alone): the newer version is the one loaded.
+    assert_eq!(store.seamless().unwrap().id, a.id);
+    store.apply().unwrap();
+    let mods = anticheat::profile_mods(store.root());
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+    // Its own settings file is the one in the folder: the password typed into the older copy is not there, and
+    // the check says exactly that instead of letting the mod stop the game.
+    let check = store.coop_check();
+    assert_eq!(check.password.word(), "empty");
+    assert_eq!(check.blocks().as_deref(), Some(anticheat::COOP_NEEDS_PASSWORD));
+    assert_eq!(check.others, vec!["Seamless Co-op 2.0.1".to_string()]);
+    // Tidying keeps the newer copy, moves the older one to Removed mods and carries its password over.
+    let gone = store.seamless_tidy().unwrap();
+    assert_eq!(gone, vec!["Seamless Co-op 2.0.1".to_string()]);
+    assert_eq!(store.seamless_mods().len(), 1);
+    assert!(store.seamless_tidy().unwrap().is_empty(), "nothing more to tidy");
+    store.apply().unwrap();
+    assert_eq!(fs::read_to_string(mods.join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.2");
+    let check = store.coop_check();
+    assert_eq!(check.password, anticheat::CoopPassword::Set);
+    assert!(check.blocks().is_none() && check.others.is_empty(), "{check:?}");
+    // With the newer copy turned off, the older one (still on) would be the one loaded: here it is gone, so none.
+    store.set_enabled(&a.id, false).unwrap();
+    store.apply().unwrap();
+    assert!(!mods.join("SeamlessCoop/ersc.dll").exists());
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+#[test]
+fn the_dll_says_its_own_version() {
+    // A version block: signature, structure version 1.0, file version 2.0.1.0.
+    let mut bytes = vec![0u8; 64];
+    bytes.extend_from_slice(&[0xBD, 0x04, 0xEF, 0xFE]);
+    bytes.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    bytes.extend_from_slice(&(2u32 << 16).to_le_bytes());
+    bytes.extend_from_slice(&(1u32 << 16).to_le_bytes());
+    bytes.extend_from_slice(&[0u8; 32]);
+    assert_eq!(anticheat::dll_version_in(&bytes).as_deref(), Some("2.0.1"));
+    assert_eq!(anticheat::dll_version_in(b"no version block here"), None);
+    assert_eq!(anticheat::dll_version_in(&[0xBD, 0x04, 0xEF, 0xFE, 1, 2]), None, "cut short");
+    assert!(anticheat::is_seamless_file("SeamlessCoop/ersc.dll") && anticheat::is_seamless_file("Game\\SeamlessCoop\\ERSC.DLL") && !anticheat::is_seamless_file("SeamlessCoop/ersc_settings.ini"));
+
+    // The list says 2.0.2 and the file says 2.0.1: said plainly before a co-op Play.
+    let w = world("seamless-version");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&zip, &[("SeamlessCoop/ersc.dll", "placeholder"), ("SeamlessCoop/ersc_settings.ini", &INI_202.replace("cooppassword = ", "cooppassword = dragon")), ("ersc_launcher.exe", "exe")]);
+    added(store.import_archive(&zip, nexus("2.0.2")));
+    store.apply().unwrap();
+    // The file the game loads carries the older number (written here straight into the game's mod folder; it is
+    // the same file as the mod's own when Turbine linked it).
+    fs::write(anticheat::coop_dll(store.root()).unwrap(), &bytes).unwrap();
+    let check = store.coop_check();
+    assert_eq!(check.file_version.as_deref(), Some("2.0.1"));
+    assert_eq!(check.version_differs(), Some(("2.0.2".to_string(), "2.0.1".to_string())));
+    let words = check.warning().unwrap();
+    assert!(words.contains("Your list says Seamless Co-op 2.0.2, but its file says it is 2.0.1"), "{words}");
+    if check.profile_current {
+        assert!(check.blocks().is_none(), "a warning, not a stop: the file's own number may lag behind");
+    }
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+#[test]
+fn seamless_coop_is_the_newest_release_never_a_fixed_one() {
+    use turbine_engine::loaders;
+    let answer = r#"{"tag_name":"v2.0.2","name":"Seamless Co-op v2.0.2","assets":[
+        {"name":"notes.txt","browser_download_url":"https://github.com/yuiamoroll/EldenRingSeamlessCoopRelease/releases/download/v2.0.2/notes.txt","size":10},
+        {"name":"Seamless.Co-op.v2.0.2.zip","browser_download_url":"https://github.com/yuiamoroll/EldenRingSeamlessCoopRelease/releases/download/v2.0.2/Seamless.Co-op.v2.0.2.zip","size":8100000,"digest":"sha256:848AE27E1C77217590DAC401C012A17D9B4F05B9B9A24AA33AF54D8D7B8BA2A1"}]}"#;
+    let r = loaders::parse_seamless_release(answer).unwrap();
+    assert_eq!(r.version, "2.0.2");
+    assert_eq!(r.url, "https://github.com/yuiamoroll/EldenRingSeamlessCoopRelease/releases/download/v2.0.2/Seamless.Co-op.v2.0.2.zip");
+    assert_eq!(r.size, 8_100_000);
+    assert_eq!(r.sha256.as_deref(), Some("848ae27e1c77217590dac401c012a17d9b4f05b9b9a24aa33af54d8d7b8ba2a1"));
+    assert!(turbine_engine::net::allowed_url(loaders::SEAMLESS_LATEST) && turbine_engine::net::allowed_url(&r.url));
+    // No digest listed: still the size; the SHA-256 of what was downloaded is recorded by the download itself.
+    let no_digest = answer.replace(",\"digest\":\"sha256:848AE27E1C77217590DAC401C012A17D9B4F05B9B9A24AA33AF54D8D7B8BA2A1\"", "");
+    assert_eq!(loaders::parse_seamless_release(&no_digest).unwrap().sha256, None);
+    // A file from anywhere but GitHub is refused; so is a release with no zip or an unreadable version.
+    assert!(loaders::parse_seamless_release(&answer.replace("https://github.com/yuiamoroll/EldenRingSeamlessCoopRelease/releases/download/v2.0.2/Seamless", "https://example.com/Seamless")).is_err());
+    assert!(loaders::parse_seamless_release(r#"{"tag_name":"v2.0.3","assets":[]}"#).is_err());
+    assert!(loaders::parse_seamless_release(r#"{"tag_name":"latest build!","assets":[]}"#).is_err());
+    assert!(loaders::parse_seamless_release("{}").is_err());
+}

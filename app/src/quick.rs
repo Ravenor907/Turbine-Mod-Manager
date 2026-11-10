@@ -264,7 +264,8 @@ fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
         }
         // Seamless Co-op: turned on first when it is off (Turbine's own Play Seamless Co-op does the same).
         if how == "coop" {
-            let id = slot.store.installed_sources().into_iter().find(|(_, s)| s.kind == "loader" && s.id == "seamless").map(|(id, _)| id);
+            // 0.62: Seamless Co-op from anywhere (known by its files), the copy the game loads.
+            let id = slot.store.seamless().map(|m| m.id);
             let Some(id) = id else {
                 return q::answer_json(false, "Seamless Co-op isn't installed. Open Turbine to get it (game menu).", ",\"needsTurbine\":true");
             };

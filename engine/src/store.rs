@@ -49,6 +49,98 @@ pub struct Mod {
     pub added: u64,
 }
 
+/// An installed mod that is Seamless Co-op (0.62: known by its files, not by where it came from).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeamlessMod {
+    pub id: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub enabled: bool,
+    /// "loader" (Turbine's own download), "nexus", "zip" and so on.
+    pub source_kind: String,
+}
+
+/// What `Store::coop_check` found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoopCheck {
+    /// The Seamless Co-op in the list that the game loads (None: not installed).
+    pub mod_id: Option<String>,
+    pub name: Option<String>,
+    pub enabled: bool,
+    /// The version the list shows for it.
+    pub list_version: Option<String>,
+    /// The version its ersc.dll says it is (the file in the game's mod folder; None when the file carries none).
+    pub file_version: Option<String>,
+    /// The file in the game's mod folder is the installed mod's own file (after an apply it always is).
+    pub profile_current: bool,
+    /// Other copies in the list ("Seamless Co-op 2.0.1"): not loaded.
+    pub others: Vec<String>,
+    pub password: crate::anticheat::CoopPassword,
+}
+
+impl CoopCheck {
+    /// The list's version and the file's own version disagree: both, as (list, file).
+    pub fn version_differs(&self) -> Option<(String, String)> {
+        let (list, file) = (self.list_version.as_deref()?, self.file_version.as_deref()?);
+        (crate::updates::compare_versions(list, file) != std::cmp::Ordering::Equal).then(|| (list.to_string(), file.to_string()))
+    }
+
+    /// Why a co-op Play can't start now, in words for the player. None: it can.
+    pub fn blocks(&self) -> Option<String> {
+        if self.mod_id.is_none() {
+            return Some("Seamless Co-op isn't installed. Get it on the Get mods page, then play.".to_string());
+        }
+        if !self.profile_current {
+            return Some(format!(
+                "The Seamless Co-op in the game's mod folder isn't the one in your list ({}). Turbine puts your mods in again when you press Play; if this stays, turn the mod off and on.",
+                self.shown()
+            ));
+        }
+        self.password.ready().err()
+    }
+
+    /// Something the player should know before a co-op Play that doesn't stop it: the versions disagree, or other
+    /// copies are in the list.
+    pub fn warning(&self) -> Option<String> {
+        if let Some((list, file)) = self.version_differs() {
+            return Some(format!(
+                "Your list says Seamless Co-op {list}, but its file says it is {file}. The mod doesn't run when it is out of date: get it again from its page if the game says so."
+            ));
+        }
+        if !self.others.is_empty() {
+            return Some(format!("The game loads {}. {} {} in your list too and {} not used.", self.shown(), self.others.join(", "), if self.others.len() == 1 { "is" } else { "are" }, if self.others.len() == 1 { "is" } else { "are" }));
+        }
+        None
+    }
+
+    fn shown(&self) -> String {
+        match (&self.name, &self.list_version) {
+            (Some(n), Some(v)) => format!("{n} {v}"),
+            (Some(n), None) => n.clone(),
+            _ => "Seamless Co-op".to_string(),
+        }
+    }
+
+    /// {"mod","name","on","listVersion","fileVersion","current","others":[..],"password":"set|empty|nofile|nomod",
+    ///  "blocks","warning"} for the app.
+    pub fn to_json(&self) -> String {
+        let others: Vec<String> = self.others.iter().map(|o| quote(o)).collect();
+        format!(
+            "{{\"mod\":{},\"name\":{},\"on\":{},\"listVersion\":{},\"fileVersion\":{},\"current\":{},\"others\":[{}],\"password\":{},\"blocks\":{},\"warning\":{}}}",
+            opt(&self.mod_id),
+            opt(&self.name),
+            self.enabled,
+            opt(&self.list_version),
+            opt(&self.file_version),
+            self.profile_current,
+            others.join(","),
+            quote(self.password.word()),
+            opt(&self.blocks()),
+            opt(&self.warning()),
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Removed {
     pub item: Mod,
@@ -1704,6 +1796,9 @@ impl Store {
             if files.is_empty() {
                 return Err(fail(format!("the {} file is empty", target.format_label)));
             }
+            // 0.62: one Seamless Co-op per game. A new download of it (from anywhere) takes the place of the one
+            // installed, keeping its settings, instead of becoming a second mod with the same files.
+            let target = self.one_seamless(&target, &files);
             let mut work = unpacked.clone();
             let mut notes = Vec::new();
 
@@ -2127,6 +2222,129 @@ impl Store {
         Ok(done)
     }
 
+    // ---- Seamless Co-op (0.62): one copy, whatever its source ----
+
+    /// The installed mods that are Seamless Co-op (they hold its ersc.dll), in list order. Only for a game me3
+    /// starts. Turbine's own download and one from Nexus count the same.
+    pub fn seamless_mods(&self) -> Vec<SeamlessMod> {
+        if self.rules.me3_game().is_none() {
+            return Vec::new();
+        }
+        self.mods
+            .iter()
+            .filter(|m| self.staged_files(&self.mod_dir(&m.id)).iter().any(|f| crate::anticheat::is_seamless_file(f)))
+            .map(|m| SeamlessMod { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), enabled: m.enabled, source_kind: self.source_of(&m.id).kind })
+            .collect()
+    }
+
+    /// The Seamless Co-op the game loads: among the copies that are on (or among all, when none is on) the newest
+    /// version; with the same version, the one later in the list.
+    pub fn seamless(&self) -> Option<SeamlessMod> {
+        let all = self.seamless_mods();
+        let any_on = all.iter().any(|m| m.enabled);
+        let mut best: Option<SeamlessMod> = None;
+        for m in all.into_iter().filter(|m| m.enabled || !any_on) {
+            let newer = match &best {
+                None => true,
+                Some(b) => crate::updates::compare_versions(m.version.as_deref().unwrap_or("0"), b.version.as_deref().unwrap_or("0")) != std::cmp::Ordering::Less,
+            };
+            if newer {
+                best = Some(m);
+            }
+        }
+        best
+    }
+
+    /// Older copies of Seamless Co-op that are on next to the one the game loads: none of their files go into the
+    /// game's mod folder, so an older ersc.dll or its settings file can never win over the newer one.
+    fn seamless_passed_over(&self) -> Vec<String> {
+        let Some(used) = self.seamless() else { return Vec::new() };
+        self.seamless_mods().into_iter().filter(|m| m.enabled && m.id != used.id).map(|m| m.id).collect()
+    }
+
+    /// A new download that is Seamless Co-op takes the place of the copy installed (the one the game loads).
+    fn one_seamless(&self, target: &Target, files: &[String]) -> Target {
+        let mut t = target.clone();
+        if t.existing.is_some() || self.rules.me3_game().is_none() || !files.iter().any(|f| crate::anticheat::is_seamless_file(f)) {
+            return t;
+        }
+        if let Some(i) = self.seamless().and_then(|m| self.mods.iter().position(|x| x.id == m.id)) {
+            t.existing = Some(i);
+            t.id = self.mods[i].id.clone();
+        }
+        t
+    }
+
+    /// Takes every other copy of Seamless Co-op out of the list (into Removed mods, where each can be put back for
+    /// 7 days) and keeps the one the game loads. A session password set in a copy that goes is carried over when
+    /// the kept copy has none. Answers the names taken out.
+    pub fn seamless_tidy(&mut self) -> io::Result<Vec<String>> {
+        let Some(used) = self.seamless() else { return Ok(Vec::new()) };
+        let others: Vec<SeamlessMod> = self.seamless_mods().into_iter().filter(|m| m.id != used.id).collect();
+        if others.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ini_of = |s: &Store, id: &str| -> Option<(String, PathBuf, PathBuf)> {
+            let dir = s.mod_dir(id);
+            let (rel, src) = walk_files(&dir).into_iter().find(|(rel, _)| rel.to_ascii_lowercase().ends_with("ersc_settings.ini"))?;
+            let now = crate::settings::effective(&s.root, id, &rel, &src);
+            Some((rel, src, now))
+        };
+        let password_of = |f: &Path| fs::read(f).ok().and_then(|b| crate::anticheat::coop_password_in(&String::from_utf8_lossy(&b))).filter(|p| !p.is_empty());
+        if let Some((rel, src, now)) = ini_of(self, &used.id) {
+            if password_of(&now).is_none() {
+                let carried = others.iter().filter_map(|o| ini_of(self, &o.id)).find_map(|(_, _, f)| password_of(&f));
+                if let (Some(pw), Ok(text)) = (carried, fs::read(&now).map(|b| String::from_utf8_lossy(&b).into_owned())) {
+                    if let Some(new_text) = crate::anticheat::coop_password_put(&text, &pw) {
+                        crate::settings::save_edit(&self.root, &used.id, &rel, &src, &new_text)?;
+                    }
+                }
+            }
+        }
+        let mut gone = Vec::new();
+        for o in others {
+            self.remove(&o.id)?;
+            gone.push(match &o.version {
+                Some(v) => format!("{} {v}", o.name),
+                None => o.name.clone(),
+            });
+        }
+        Ok(gone)
+    }
+
+    /// The check before a co-op Play: which Seamless Co-op is in the list, which file the game will load, what
+    /// version that file says it is, and the session password in the settings file next to it.
+    pub fn coop_check(&self) -> CoopCheck {
+        let used = self.seamless();
+        let others = match &used {
+            Some(u) => self.seamless_mods().into_iter().filter(|m| m.id != u.id).map(|m| match &m.version {
+                Some(v) => format!("{} {v}", m.name),
+                None => m.name.clone(),
+            }).collect(),
+            None => Vec::new(),
+        };
+        let staged = used.as_ref().and_then(|u| walk_files(&self.mod_dir(&u.id)).into_iter().find(|(rel, _)| crate::anticheat::is_seamless_file(rel)).map(|(_, p)| p));
+        let loaded = crate::anticheat::coop_dll(&self.root);
+        let same = match (&staged, &loaded) {
+            (Some(a), Some(b)) => match (fs::metadata(a), fs::metadata(b)) {
+                (Ok(x), Ok(y)) if x.ino() == y.ino() && x.dev() == y.dev() => true,
+                (Ok(x), Ok(y)) if x.len() == y.len() => crate::sha256::file_hex(a).ok().zip(crate::sha256::file_hex(b).ok()).is_some_and(|(p, q)| p == q),
+                _ => false,
+            },
+            _ => false,
+        };
+        CoopCheck {
+            name: used.as_ref().map(|u| u.name.clone()),
+            mod_id: used.as_ref().map(|u| u.id.clone()),
+            enabled: used.as_ref().is_some_and(|u| u.enabled),
+            list_version: used.and_then(|u| u.version),
+            file_version: loaded.as_deref().or(staged.as_deref()).and_then(crate::anticheat::dll_version),
+            profile_current: same,
+            others,
+            password: crate::anticheat::coop_password(&self.root),
+        }
+    }
+
     /// Every file the enabled mods put in the game, in order (later ones win).
     fn wanted(&self) -> Vec<Wanted> {
         self.wanted_except(&[])
@@ -2144,7 +2362,8 @@ impl Store {
         let ours: HashSet<String> = record.files.iter().map(|p| p.rel.to_lowercase()).collect();
         let guarded = self.rules.guarded();
         let mut out = Vec::new();
-        for m in self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id)) {
+        let passed_over = self.seamless_passed_over();
+        for m in self.mods.iter().filter(|m| m.enabled && !skip.contains(&m.id) && !passed_over.contains(&m.id)) {
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
                 // 0.58: the player's edited copy of a config file (Edit settings) goes in place of the mod's own.
@@ -2474,14 +2693,17 @@ impl Store {
 
     /// Everything the interface shows, as one JSON object: {"mods":[...],"removed":[...],"setups":[...]}.
     pub fn to_json(&self) -> String {
+        // 0.62: "seamless" marks the one Seamless Co-op the game loads, whatever its source.
+        let seamless = self.seamless().map(|m| m.id);
         let mods: Vec<String> = self
             .mods
             .iter()
             .map(|m| {
                 let src = self.source_of(&m.id);
                 format!(
-                    "{{{},\"sourceKind\":{},\"sourceId\":{},\"sourceTitle\":{},\"picture\":{}}}",
+                    "{{{},\"seamless\":{},\"sourceKind\":{},\"sourceId\":{},\"sourceTitle\":{},\"picture\":{}}}",
                     mod_json(m),
+                    seamless.as_deref() == Some(m.id.as_str()),
                     quote(&src.kind),
                     quote(&src.id),
                     opt(&src.title),
