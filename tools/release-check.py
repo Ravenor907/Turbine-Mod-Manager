@@ -2,7 +2,7 @@
 """0.6: the release rules in .github/workflows/build.yml, checked on every push (the release itself runs rarely).
 
 A release ships exactly what the green runs of its commit built and checked: the Flatpak and the Decky plugin from
-the reused run, each with its checksum, after three green runs; the plugin's packages are pinned by its lockfile."""
+the reused run, each with its checksum, after the green full builds a release needs (REQUIRED_GREEN_BUILDS); the plugin's packages are pinned by its lockfile."""
 import sys
 
 wf = open(".github/workflows/build.yml").read()
@@ -15,9 +15,14 @@ def need(text, why):
 need("pnpm install --frozen-lockfile", "the Decky job must install from the committed lockfile")
 if "--no-frozen-lockfile" in wf:
     problems.append("the Decky job may not resolve new package versions")
-need('if [ "$greens" -lt 3 ]', "a release needs three green runs of its commit")
+# 0.63 (owner): one green full build of the commit, a single named number at the top of the workflow.
+REQUIRED_GREEN_BUILDS = 1
+need(f"\nenv:\n  REQUIRED_GREEN_BUILDS: {REQUIRED_GREEN_BUILDS}\n", f"the workflow must set REQUIRED_GREEN_BUILDS to {REQUIRED_GREEN_BUILDS} near its top")
+if wf.count("REQUIRED_GREEN_BUILDS:") != 1:
+    problems.append("REQUIRED_GREEN_BUILDS must be set in exactly one place")
+need('if [ "$greens" -lt "$REQUIRED_GREEN_BUILDS" ]', "a release needs REQUIRED_GREEN_BUILDS green full builds of its commit")
 # 0.62: an attempt made by "Re-run failed jobs" carries the passed jobs over; it is not a green run of everything.
-need('select(.run_attempt != $a)', "only full attempts may count toward the three green runs (not re-runs of the failed jobs alone)")
+need('select(.run_attempt != $a)', "only full attempts may count as green builds (not re-runs of the failed jobs alone)")
 if 'carried' in wf and wf.index('[ "$carried" = 0 ] || continue') > wf.index('greens=$((greens + 1))'):
     problems.append("the full-attempt check must come before a green run is counted")
 need("Turbine-Decky.zip.sha256", "the Decky zip needs its checksum beside it")

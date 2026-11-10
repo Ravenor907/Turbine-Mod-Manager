@@ -16,6 +16,11 @@ on:
         type: boolean
         default: false
 
+# How many green full builds of a commit a release needs (owner, 0.63: one). Only full attempts count, and the
+# release ships exactly that run's files, by artifact id and checksum.
+env:
+  REQUIRED_GREEN_BUILDS: 1
+
 permissions:
   contents: read
 
@@ -47,8 +52,8 @@ jobs:
           ids=""
           if [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.release }}" = true ]; then
             sha="${{ github.sha }}"
-            # The standing method: a release needs every check green three times on this commit (fresh runs or
-            # full reruns), and ships the bundle and plugin those runs built, never a new build.
+            # The standing method: a release needs every check green on this commit REQUIRED_GREEN_BUILDS times
+            # (fresh runs or full reruns), and ships the bundle and plugin such a run built, never a new build.
             # 0.61: dispatched runs (not releases) count as well as pushes. A run counts only when it built the
             # bundle (a release that reused a build has none). The run shipped is one whose latest attempt is green,
             # and its files must come from that attempt (made between its start and its end), never from an
@@ -80,8 +85,8 @@ jobs:
               done
             done
             echo "::notice title=Green runs of this commit::$greens"
-            if [ "$greens" -lt 3 ]; then
-              echo "::error title=Not green three times::commit $sha has $greens green runs; run or rerun the build until every check is green three times"
+            if [ "$greens" -lt "$REQUIRED_GREEN_BUILDS" ]; then
+              echo "::error title=Not enough green builds::commit $sha has $greens green full builds and a release needs $REQUIRED_GREEN_BUILDS; run or rerun the build until every check is green"
               exit 1
             fi
             if [ -z "$run" ]; then
@@ -90,7 +95,7 @@ jobs:
             fi
             for name in TurbineModManager.flatpak Turbine-Decky.zip; do
               art=$(gh api "repos/$repo/actions/runs/$run/artifacts?per_page=100" --jq "[.artifacts[] | select(.name == \"$name\" and .expired == false)] | sort_by(.created_at) | last | \"\(.id) \(.digest)\"")
-              if [ -z "$art" ] || [ "$art" = "null null" ] || [ "${art#* }" = null ]; then echo "::error title=$name is gone::run $run's artifact expired or has no digest; push a new commit and get three greens"; exit 1; fi
+              if [ -z "$art" ] || [ "$art" = "null null" ] || [ "${art#* }" = null ]; then echo "::error title=$name is gone::run $run's artifact expired or has no digest; push a new commit and get it green"; exit 1; fi
               echo "::notice title=Release reuses run $run::$name, artifact $art"
               ids="${ids:+$ids,}${art%% *}"
             done
@@ -134,7 +139,7 @@ jobs:
       - name: QML syntax (seconds here instead of minutes into the Flatpak build)
         shell: bash
         run: node tools/qml-check.js app/qml/*.qml
-      - name: Release rules (three greens, the same Flatpak and Decky zip, checksums, a pinned plugin)
+      - name: Release rules (the green builds a release needs, the same Flatpak and Decky zip, checksums, a pinned plugin)
         shell: bash
         run: python3 tools/release-check.py
       - name: Commits are the owner's
