@@ -27,9 +27,14 @@ fn write(p: &Path, text: &str) {
 }
 
 fn script(p: &Path, body: &str) {
-    write(p, &format!("#!/bin/sh\n{body}"));
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    // Written by a child process, never by this one. A file this process holds open for writing is inherited, for
+    // a moment, by any child another test's thread starts just then; running the script in that moment fails with
+    // "Text file busy" (the build on GitHub hit exactly that). This process never holds it, so nothing inherits it.
+    use std::io::Write;
+    let mut c = Command::new("sh").arg("-c").arg("cat > \"$1\" && chmod 755 \"$1\"").arg("sh").arg(p).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    c.stdin.take().unwrap().write_all(format!("#!/bin/sh\n{body}").as_bytes()).unwrap();
+    assert!(c.wait().unwrap().success(), "couldn't write {}", p.display());
 }
 
 fn trace_line(name: &str, trace: &Path) -> String {
@@ -156,7 +161,16 @@ impl Steam {
             .env_remove("TURBINE_TOOL_REAPER")
             .env_remove("PROTON_LOG")
             .env_remove("PROTON_LOG_DIR");
-        let code = c.status().unwrap().code().unwrap_or(-1);
+        let mut code = c.status().unwrap().code().unwrap_or(-1);
+        // 126 with nothing run: the script Turbine had just written was still held open for writing by a child of
+        // another test's thread ("Text file busy"). Nothing was used up; once more after a moment.
+        for _ in 0..3 {
+            if code != 126 || fs::read_to_string(&self.trace).is_ok_and(|t| !t.is_empty()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            code = c.status().unwrap().code().unwrap_or(-1);
+        }
         let t = fs::read_to_string(&self.trace).unwrap_or_default();
         (code, t.lines().map(|l| l.split('|').map(str::to_string).collect()).collect())
     }
@@ -782,36 +796,51 @@ fn the_proton_record_follows_launches_and_the_players_pick() {
         return;
     }
     let s = Steam::new("record");
-    // No record: the tool chooses (Proton 11), and Turbine keeps what the game ran with.
+    // No record: the tool chooses (Proton 11) at each launch. Its own choice is never written down (the re-check's
+    // N3: such a record froze the game on the tool's first pick).
     assert_eq!(tool::proton_record(&s.data, APP), None);
     s.play();
     assert_eq!(tool::last_proton_seen_in(&s.log(), APP), Some((s.proton11.clone(), tool::ProtonHow::Tool)));
-    assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton11.clone()));
-    assert_eq!(tool::proton_record(&s.data, APP), Some((s.proton11.clone(), tool::ProtonHow::Tool)));
-    s.play();
-    assert!(s.log().contains("[why: the Proton this game last ran with, kept by Turbine]"), "{}", s.log());
-    // The player picks another one in Turbine: used, said, and never replaced by what a launch shows.
+    assert_eq!(tool::remember_proton(&s.data, APP), None);
+    assert_eq!(tool::proton_record(&s.data, APP), None);
+    // A record of the tool's pick left by an earlier build goes.
+    tool::write_proton_record(&s.data, APP, &s.proton11, tool::ProtonHow::Tool).unwrap();
+    assert_eq!(tool::remember_proton(&s.data, APP), None);
+    assert!(!tool::proton_file(&s.data, APP).exists());
+    // The player picks one in Turbine: used, said, and never replaced by what a launch shows.
     tool::set_proton_pick(&s.data, APP, Some(&s.proton9)).unwrap();
     let (_, t) = s.play();
     assert_eq!(names(&t), ["wrapper", "reaper", "sniper", "proton9", "game"], "{t:?}");
     assert!(s.log().contains("[why: your pick in Turbine for this game]"));
     assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton9.clone()));
     assert_eq!(tool::proton_record(&s.data, APP).unwrap().1, tool::ProtonHow::You);
-    // A pick that isn't a Proton is refused; Automatic takes the record away.
     assert!(tool::set_proton_pick(&s.data, APP, Some(&s.d.join("nothing"))).is_err());
+    assert!(tool::set_proton_pick(&s.data, "12a", None).is_err());
+
+    // The re-check's N3, its steps: a pick, one Play, then Automatic. Reading the row again (which looks at the
+    // log) must not bring a record back, and the row names the newest finished Proton.
     tool::set_proton_pick(&s.data, APP, None).unwrap();
     assert_eq!(tool::proton_record(&s.data, APP), None);
-    tool::set_proton_pick(&s.data, APP, None).unwrap();
-    assert!(tool::set_proton_pick(&s.data, "12a", None).is_err());
-    // Steam's own launch afterwards (the game back on a plain Proton with the Launch Options line): its Proton
-    // becomes the record, over the tool's earlier one.
-    s.play();
-    tool::remember_proton(&s.data, APP);
-    assert_eq!(tool::proton_record(&s.data, APP).unwrap().1, tool::ProtonHow::Tool);
-    let own = format!("2026-11-10 12:00:00 Steam started app {APP} in /g: /s/steam-launch-wrapper -- /s/reaper SteamLaunch AppId={APP} -- {}/_v2-entry-point --verb=waitforexitandrun -- {}/proton waitforexitandrun /g/x.exe\n", s.sniper.display(), s.proton9.display());
-    fs::write(anticheat::helper_log(&s.data), format!("{}{own}", s.log())).unwrap();
+    assert_eq!(tool::remember_proton_with(&s.root, &s.data, APP), None, "Automatic holds");
+    assert_eq!(tool::proton_record(&s.data, APP), None);
+    let j = turbine_engine::json::parse(&tool::proton_json(&s.root, &s.data, APP)).unwrap();
+    assert_eq!((j.str_at("how"), j.str_at("name")), (Some("auto"), Some("Proton 11.0")));
+    let (_, t) = s.play();
+    assert_eq!(names(&t), ["wrapper", "reaper", "slr4", "proton11", "game"], "{t:?}");
+    assert_eq!(tool::remember_proton(&s.data, APP), None, "still Automatic after a Play through the tool");
+    // A launch by Steam itself from BEFORE Automatic was chosen (still in the log) doesn't decide any more...
+    let own = |time: &str, p: &Path, rt: &Path| format!("{time} Steam started app {APP} in /g: /s/steam-launch-wrapper -- /s/reaper SteamLaunch AppId={APP} -- {}/_v2-entry-point --verb=waitforexitandrun -- {}/proton waitforexitandrun /g/x.exe\n", rt.display(), p.display());
+    fs::write(anticheat::helper_log(&s.data), format!("{}{}", own("2020-01-01 00:00:00", &s.proton9, &s.sniper), s.log())).unwrap();
+    assert_eq!(tool::remember_proton(&s.data, APP), None);
+    // ...but a later one does: in Automatic the game follows the Proton Steam last used for it, and moves when
+    // Steam moves.
+    fs::write(anticheat::helper_log(&s.data), format!("{}{}", s.log(), own("2999-01-01 00:00:00", &s.proton9, &s.sniper))).unwrap();
     assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton9.clone()));
     assert_eq!(tool::proton_record(&s.data, APP), Some((s.proton9.clone(), tool::ProtonHow::Steam)));
+    fs::write(anticheat::helper_log(&s.data), format!("{}{}", s.log(), own("2999-01-02 00:00:00", &s.proton11, &s.slr4))).unwrap();
+    assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton11.clone()), "Steam moved to a newer one: so does the record");
+    tool::set_proton_pick(&s.data, APP, None).unwrap();
+    assert_eq!(tool::remember_proton(&s.data, APP), None, "Automatic again: those launches are behind it now");
 
     // default.proton: the newest finished Proton, or Steam's own choice for all games when its settings name one.
     assert_eq!(tool::write_default_proton(&s.root, &s.data), Some(s.proton11.clone()));

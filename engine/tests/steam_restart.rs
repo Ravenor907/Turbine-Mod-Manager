@@ -18,9 +18,13 @@ fn tmp(name: &str) -> PathBuf {
 
 fn script(p: &Path, body: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
-    fs::write(p, format!("#!/bin/sh\n{body}")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+    // Written by a child process, never by this one. A file this process holds open for writing is inherited, for
+    // a moment, by any child another test's thread starts just then; running the script in that moment fails with
+    // "Text file busy" (the build on GitHub hit exactly that). This process never holds it, so nothing inherits it.
+    use std::io::Write;
+    let mut c = Command::new("sh").arg("-c").arg("cat > \"$1\" && chmod 755 \"$1\"").arg("sh").arg(p).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    c.stdin.take().unwrap().write_all(format!("#!/bin/sh\n{body}").as_bytes()).unwrap();
+    assert!(c.wait().unwrap().success(), "couldn't write {}", p.display());
 }
 
 fn tools_there() -> bool {
@@ -391,3 +395,46 @@ fn a_change_steam_wrote_again_and_kept_is_held() {
     let _ = fs::remove_dir_all(&d);
 }
 
+
+/// The build on GitHub failed once with "Text file busy": a stand-in script was run while a child started by
+/// another test's thread still held it open for writing. Scripts are written by a child process now; here many
+/// threads write scripts and run them at once, while others keep starting children, and none may fail.
+#[test]
+fn scripts_written_and_run_at_once_are_never_busy() {
+    let d = std::env::temp_dir().join(format!("turbine-busy-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    fs::create_dir_all(&d).unwrap();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Children being started all the time, as the other tests do.
+    let noise: Vec<_> = (0..4)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = Command::new("true").status();
+                }
+            })
+        })
+        .collect();
+    let workers: Vec<_> = (0..6)
+        .map(|t| {
+            let d = d.clone();
+            std::thread::spawn(move || {
+                for i in 0..25 {
+                    let p = d.join(format!("s-{t}-{i}"));
+                    script(&p, "exit 0\n");
+                    let st = Command::new(&p).status().unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                    assert!(st.success());
+                }
+            })
+        })
+        .collect();
+    for w in workers {
+        w.join().unwrap();
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    for n in noise {
+        n.join().unwrap();
+    }
+    let _ = fs::remove_dir_all(&d);
+}

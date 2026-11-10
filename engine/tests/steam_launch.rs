@@ -23,9 +23,13 @@ fn has_bash() -> bool {
 
 fn script(p: &Path, body: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
-    fs::write(p, format!("#!/bin/sh\n{body}")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(0o755)).unwrap();
+    // Written by a child process, never by this one. A file this process holds open for writing is inherited, for
+    // a moment, by any child another test's thread starts just then; running the script in that moment fails with
+    // "Text file busy" (the build on GitHub hit exactly that). This process never holds it, so nothing inherits it.
+    use std::io::Write;
+    let mut c = Command::new("sh").arg("-c").arg("cat > \"$1\" && chmod 755 \"$1\"").arg("sh").arg(p).stdin(std::process::Stdio::piped()).spawn().unwrap();
+    c.stdin.take().unwrap().write_all(format!("#!/bin/sh\n{body}").as_bytes()).unwrap();
+    assert!(c.wait().unwrap().success(), "couldn't write {}", p.display());
 }
 
 /// Writes `name|arg|arg...` as one line to the trace.
@@ -144,7 +148,16 @@ impl Chain {
         for (k, v) in env {
             c.env(k, v);
         }
-        let code = c.status().unwrap().code().unwrap_or(-1);
+        let mut code = c.status().unwrap().code().unwrap_or(-1);
+        // 126 with nothing run: the script Turbine had just written was still held open for writing by a child of
+        // another test's thread ("Text file busy"). Nothing was used up; once more after a moment.
+        for _ in 0..3 {
+            if code != 126 || fs::read_to_string(&self.trace).is_ok_and(|t| !t.is_empty()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            code = c.status().unwrap().code().unwrap_or(-1);
+        }
         let t = fs::read_to_string(&self.trace).unwrap_or_default();
         (code, t.lines().map(|l| l.split('|').map(str::to_string).collect()).collect())
     }

@@ -246,7 +246,9 @@ if [ ! -x "$helper" ]; then
 fi
 say "Turbine (mods): handing over to Turbine's launch helper (Steam's reaper above: $reaper)"
 export TURBINE_TOOL_REAPER="$reaper"
-exec "$helper" "${chain[@]}"
+# Read by bash, not started as a program of its own: a helper Turbine is rewriting at this very moment can't be
+# refused as "busy" that way.
+exec bash "$helper" "${chain[@]}"
 "##;
 
 /// What `install` did.
@@ -441,17 +443,24 @@ pub fn write_proton_choice(data: &Path, app_id: &str, proton_dir: &Path) -> io::
     write_proton_record(data, app_id, proton_dir, ProtonHow::Steam)
 }
 
-/// The player's pick for a game: a Proton folder, or None for "Automatic" (the record goes; the next launch
-/// chooses and keeps what it chose).
+/// The player's pick for a game: a Proton folder, or None for "Automatic" (the record goes and stays gone: the tool
+/// then takes default.proton at each launch, or the Proton of a later launch by Steam itself).
 pub fn set_proton_pick(data: &Path, app_id: &str, proton_dir: Option<&Path>) -> io::Result<()> {
     match proton_dir {
         Some(d) if is_proton(d) => write_proton_record(data, app_id, d, ProtonHow::You),
         Some(_) => Err(io::Error::new(io::ErrorKind::NotFound, "that Proton isn't installed any more")),
         None if !app_id_ok(app_id) => Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id")),
-        None => match fs::remove_file(proton_file(data, app_id)) {
-            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-            _ => Ok(()),
-        },
+        None => {
+            // Automatic: the record goes, and launches up to now stop deciding (the newest line's time is kept).
+            let log = fs::read_to_string(crate::anticheat::helper_log(data)).unwrap_or_default();
+            let newest = log.lines().rev().find_map(line_time).unwrap_or("");
+            fs::create_dir_all(crate::anticheat::launch_dir(data))?;
+            fs::write(proton_auto_file(data, app_id), format!("{newest}\n"))?;
+            match fs::remove_file(proton_file(data, app_id)) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
+        }
     }
 }
 
@@ -519,19 +528,49 @@ pub fn last_proton_seen_in(log: &str, app_id: &str) -> Option<(PathBuf, ProtonHo
     None
 }
 
-/// Keeps the Proton the game last ran with (0.62 break test M5: the record was written only from a Launch Options
-/// start and never moved once the game ran through the tool). Called at every Play. The player's own pick is never
-/// replaced. Otherwise the newest launch in the helper's log decides: Steam's own Proton, or what the tool chose
-/// by itself. Only a Proton that is still installed is written down. Answers the folder now on record.
+/// The file that says the player chose Automatic for a game, with the time of the newest line in the helper's log
+/// at that moment: launches before it no longer decide the game's Proton.
+pub fn proton_auto_file(data: &Path, app_id: &str) -> PathBuf {
+    crate::anticheat::launch_dir(data).join(format!("{app_id}.proton.auto"))
+}
+
+/// The time at the start of a log line ("2026-11-10 10:00:00"), when it has one.
+fn line_time(line: &str) -> Option<&str> {
+    let t = line.get(..19)?;
+    (t.as_bytes()[4] == b'-' && t.as_bytes()[10] == b' ' && t.as_bytes()[13] == b':').then_some(t)
+}
+
+/// Keeps the Proton Steam itself last used for the game (0.62 break test M5: the record never moved once it was
+/// written). Called at every Play and when the Proton row is read. Rules, after the re-check's N3:
+/// - The player's own pick is never replaced.
+/// - Only Steam's own launches count (the game started with a Proton of Steam's choosing, through the Launch
+///   Options line). What the tool chose by itself is never written down: a record of it froze the game on the
+///   tool's first pick and undid "Automatic" the moment the row was read. With no record the tool takes
+///   default.proton at each launch (Steam's choice for all games, or the newest finished Proton), so the game
+///   moves to a newer Proton when Steam does.
+/// - After the player chose Automatic, launches from before that moment don't count any more.
+///
+/// Only a Proton that is still installed is written down. Answers the folder now on record.
 pub fn remember_proton(data: &Path, app_id: &str) -> Option<PathBuf> {
     let now = proton_record(data, app_id);
-    if matches!(now, Some((ref d, ProtonHow::You)) if is_proton(d)) {
-        return now.map(|(d, _)| d);
+    match &now {
+        Some((d, ProtonHow::You)) if is_proton(d) => return Some(d.clone()),
+        // A record of the tool's own pick (written by a build that never shipped): gone.
+        Some((_, ProtonHow::Tool)) => {
+            let _ = fs::remove_file(proton_file(data, app_id));
+        }
+        _ => {}
     }
+    let now = now.filter(|(_, h)| *h != ProtonHow::Tool);
     let log = fs::read_to_string(crate::anticheat::helper_log(data)).unwrap_or_default();
-    if let Some((dir, how)) = last_proton_seen_in(&log, app_id) {
-        if is_proton(&dir) && now.as_ref().map(|(d, h)| (d.as_path(), *h)) != Some((dir.as_path(), how)) {
-            let _ = write_proton_record(data, app_id, &dir, how);
+    let since = fs::read_to_string(proton_auto_file(data, app_id)).ok().map(|t| t.trim().to_string());
+    let counted: String = match &since {
+        Some(mark) => log.lines().filter(|l| line_time(l).is_some_and(|t| t > mark.as_str())).map(|l| format!("{l}\n")).collect(),
+        None => log,
+    };
+    if let Some(dir) = last_steam_proton_in(&counted, app_id) {
+        if is_proton(&dir) && now.as_ref().map(|(d, _)| d.as_path()) != Some(dir.as_path()) {
+            let _ = write_proton_record(data, app_id, &dir, ProtonHow::Steam);
         }
     }
     proton_choice(data, app_id)
