@@ -934,6 +934,7 @@ for size in $SIZES; do
   shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   n="coopcheck-$size"
   need $n "I3: Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
+  need $n "Seamless Co-op loads only with its own Play: said at the Play choice and on its row ($size)" "Co-op only: the Play choice says \"Seamless Co-op loads only with Play Seamless Co-op. A plays the highlighted one.\"; Play with mods: Solo, [0-9]+ mods? on. Seamless Co-op stays out.; its row in My mods: Loads only with Play Seamless Co-op$"
   need $n "I3: no password: its settings open on it with the keyboard, nothing started ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true, Play asked 0 times"
   need $n "I3: with the password typed, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false, Play asked 1 times, co-op true"
   need $n "I3: the choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"

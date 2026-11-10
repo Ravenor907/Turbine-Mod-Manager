@@ -828,6 +828,7 @@ Window {
     // ---- 0.6 (I3): with Seamless Co-op installed, Play (Start or a tap) asks one small question: Play with mods, Play
     // Seamless Co-op, Play without mods, and Co-op settings (Y) with whether the password is set. The last choice is
     // remembered and has the ring, so A starts it at once; B goes back.
+    readonly property string coopOnlyWords: "Seamless Co-op loads only with Play Seamless Co-op"
     readonly property string lastPlayChoice: game ? (parse(seen.playChoice, {})[game.id] || "mods") : "mods"
     property string coopPassword: "?"     // "set", "not set" or "?" (not read yet)
     function rememberPlay(k) { if (!game) return; let c = parse(seen.playChoice, {}); c[game.id] = k; seen.playChoice = JSON.stringify(c) }
@@ -836,9 +837,10 @@ Window {
         if (!seamlessIn || acRefused) { startPlay(); return }
         readCoopPassword()
         const keys = ["mods", "coop", "plain"]
-        openPick("Play " + gameTitle, "A plays the highlighted one", [
-            { icon: "play", title: "Play with mods", detail: "Solo, " + plural(mods.filter(m => m.enabled && !isSeamless(m)).length, "mod", "mods") + " on", key: "mods", run: () => { rememberPlay("mods"); startPlay() } },
-            { icon: "play", title: "Play Seamless Co-op", detail: "With friends: everyone uses the same password and settings", key: "coop", run: () => { rememberPlay("coop"); startCoopChecked() } },
+        // 0.62: said where the choice is made: Seamless Co-op loads only with Play Seamless Co-op.
+        openPick("Play " + gameTitle, coopOnlyWords + ". A plays the highlighted one.", [
+            { icon: "play", title: "Play with mods", detail: "Solo, " + plural(mods.filter(m => m.enabled && !isSeamless(m)).length, "mod", "mods") + " on. Seamless Co-op stays out.", key: "mods", run: () => { rememberPlay("mods"); startPlay() } },
+            { icon: "play", title: "Play Seamless Co-op", detail: "With friends, and your mods. Everyone uses the same password and settings.", key: "coop", run: () => { rememberPlay("coop"); startCoopChecked() } },
             { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", key: "plain", run: () => { rememberPlay("plain"); Turbine.playOriginal() } },
             { icon: "info", title: "Co-op settings", detail: "Password: " + (coopPassword === "?" ? "not read yet" : coopPassword), key: "settings", aLabel: "Open", run: () => openCoopSettings() }
         ], "")
@@ -1568,7 +1570,7 @@ Window {
     function playOptionsNow() {
         const others = profileList.filter(p => !profileData || p.name !== profileData.active)
         openPick("Play options", gameTitle, [
-            { icon: "play", title: "Play with mods", detail: plural(mods.filter(m => m.enabled).length, "mod", "mods") + " on", run: () => startPlay() },
+            { icon: "play", title: "Play with mods", detail: seamlessIn ? plural(mods.filter(m => m.enabled && !isSeamless(m)).length, "mod", "mods") + " on. Seamless Co-op stays out." : plural(mods.filter(m => m.enabled).length, "mod", "mods") + " on", run: () => startPlay() },
             { icon: "play", title: "Play without mods", detail: "Your mods stay installed and come back next time", run: () => Turbine.playOriginal() }
         ].concat(seamlessIn ? [
             { icon: "play", title: "Play Seamless Co-op", detail: "With your mods and Seamless Co-op; co-op keeps its own saves, apart from solo", run: () => startCoop() }
@@ -3077,6 +3079,8 @@ Window {
         let out = []
         const line = rowLine(m)
         if (line.level !== "") out.push({ text: line.text, level: line.level })
+        // 0.62: Seamless Co-op's own fact, first when nothing is wrong (its row says it then).
+        if (isSeamless(m) && line.text.indexOf("Loads only") !== 0) out.push({ text: coopOnlyWords + ".", level: "" })
         const o = overlapsMap[m.id]
         if (o) {
             for (const w of (o.wins || []).slice(0, 2)) out.push({ text: "Wins " + plural(w.count, "file", "files") + " over " + w.name, level: "" })
@@ -3109,6 +3113,8 @@ Window {
         if (m.enabled && missingNeeds(m).length > 0) return { text: "Needs a mod that isn't on: " + missingNeeds(m).map(n => n.name || n).slice(0, 2).join(", "), level: "warn" }
         const cov = m.enabled ? coveredBy(m) : null
         if (cov) return { text: "Covered by " + cov.name + ": X to fix", level: "info" }
+        // 0.62: Seamless Co-op's row says when it loads (on or off, it only loads with its own Play).
+        if (isSeamless(m)) return { text: "Loads only with Play Seamless Co-op", level: "info" }
         const when = m.added > 0 ? "added " + Qt.formatDate(new Date(m.added * 1000), "MMM d") : ""
         return { text: [m.author ? "by " + m.author : "", when].filter(x => x !== "").join(" · "), level: "" }
     }
@@ -4766,6 +4772,7 @@ Window {
             () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); Turbine.selftestPad("start", true) },
             () => { if (sheet !== "pick") return false
                     Turbine.selftestPad("start", false)
+                    check("Co-op only: the Play choice says \"" + pickSub + "\"; Play with mods: " + pickItems[0].detail + "; its row in My mods: " + rowLine(seamlessMod).text)
                     check("Co-op choice: " + pickItems.map(x => x.title).join("; ") + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " | Y " + (pickY ? pickY.label : "none"))
                     pad("down"); m.focus = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; pad("a") },
             () => { if (sheet !== "ask") return false
