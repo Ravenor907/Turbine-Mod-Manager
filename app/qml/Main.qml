@@ -689,7 +689,7 @@ Window {
     onSetSectionChanged: {
         settingsFresh = true
         note("page", "Settings section " + (settingsSections[setSection] || setSection))
-        if (settingsSections[setSection] === "Getting mods") { Turbine.handlerStatus(); if (!shot.on) Turbine.bridgeRefresh(); browserSignedIn = Turbine.browserSignedIn() }
+        if (settingsSections[setSection] === "Getting mods") { Turbine.handlerStatus(); if (!shot.on) { Turbine.bridgeRefresh(); signinLoad("Settings") } signinRefresh() }
         if (settingsSections[setSection] === "Help" && !decky.checked) deckyCheck()
     }
     onWidthChanged: sizeNote.restart()
@@ -5522,6 +5522,10 @@ Window {
                         // 0.62: Desktop Mode with no controller: one line in the log, nothing on screen.
                         m.toastBefore = lastToastAt; m.noted = noPadNote(); m.again = noPadNote()
                         check("No controller in Desktop Mode: " + (Turbine.pads ? "a controller is seen" : Turbine.gamemode ? "Game Mode" : m.noted && !m.again ? "logged once" : "not logged") + ", " + (lastToastAt === m.toastBefore ? "no toast" : "a toast showed"))
+                        // 0.62: one sign-in status: Settings' row and the Nexus page's hints read the same thing.
+                        signinRefresh()
+                        say((accountRows[0].title === "Nexus Mods: Signed in") === Turbine.browserSignedIn() && browserSigninShown === (bridge.paired === true && !Turbine.browserSignedIn()),
+                            "sign-in status: Settings says " + accountRows[0].title + ", Turbine's browser is " + (Turbine.browserSignedIn() ? "signed in" : "not signed in"))
                         check("Key check done: " + m.bad + " problems") }
             ]
         }
@@ -6516,8 +6520,22 @@ Window {
         return { text: "", level: "ok", progress: -1 }
     }
     // Signed in to Nexus in Turbine's browser (its sign-in cookie), looked at while the page is open.
+    // 0.62: one sign-in status everywhere (Settings, the page's hints, the Nexus menu): whether Turbine's browser
+    // holds Nexus's sign-in. It is read all the time, not only while a Nexus page is open, and the browser's kept
+    // sign-in is read a moment after start (before 0.62 Settings said "Not signed in" until Nexus was opened once).
     property bool browserSignedIn: false
-    Timer { interval: 1000; repeat: true; running: app.browserOpen; triggeredOnStart: true; onTriggered: { const v = Turbine.browserSignedIn(); if (v !== app.browserSignedIn) app.browserSignedIn = v } }
+    function signinRefresh() { const v = Turbine.browserSignedIn(); if (v !== browserSignedIn) { browserSignedIn = v; note("web", "Sign-in status: " + (v ? "signed in" : "not signed in")) } }
+    Timer { interval: app.browserOpen ? 1000 : 3000; repeat: true; running: true; triggeredOnStart: true; onTriggered: app.signinRefresh() }
+    property bool signinRead: false
+    function signinLoad(why) {
+        if (signinRead) return
+        signinRead = true
+        // Touching the browser's profile makes it and reads its kept cookies (webglue.cpp); the status follows.
+        const p = NexusProfile
+        note("web", "Nexus sign-in read from Turbine's browser (" + why + "): " + (p ? "its profile is ready" : "no profile"))
+        signinRefresh()
+    }
+    Timer { interval: 3500; running: !shot.on; onTriggered: app.signinLoad("after start") }
     // "Google sign-in" (the player's own browser through the helper) shows only with a paired helper and while the
     // page isn't signed in.
     readonly property bool browserSigninShown: bridge.paired === true && !browserSignedIn
@@ -7496,7 +7514,7 @@ Window {
                                          || ["browser", "helper", "accounts", "nobrowser"].indexOf(shot.page) >= 0
     readonly property bool keyRowsShown: keyRowsOpen || account.hasKey === true || account.state === "checking" || account.state === "error" || shot.page === "accounts"
     readonly property string accountWords: account.state === "checking" ? "Checking the key with Nexus Mods..."
-        : account.state === "ok" ? "Signed in as " + account.name + (account.premium ? " · Premium: installs in one press with no browser" : " · Free account: Get it on Nexus opens the file's page")
+        : account.state === "ok" ? "Key works: " + account.name + (account.premium ? " · Premium: installs in one press with no browser" : " · Free account: Get it on Nexus opens the file's page")
         : account.state === "error" ? account.message
         : account.message ? account.message + " " + keyWhere : keyWhere
     // Where the Nexus key is, exactly (the Request Api Key buttons on that page are for other apps).
@@ -7513,6 +7531,7 @@ Window {
         // 0.59 (R5): first, whether you're signed in to Nexus, and the one button for it.
         { kind: "action", key: "nexusSign", title: "Nexus Mods: " + (browserSignedIn ? "Signed in" : "Not signed in"),
           how: browserSignedIn ? "Get it on Nexus opens the file's page here and adds the download by itself."
+                               : account.state === "ok" ? "Your Nexus key works (" + account.name + "), but Turbine's Nexus pages aren't signed in. Sign in (free) to use Slow download there."
                                : "Not needed to look around. Sign in (free) when you get your first mod.",
           action: browserSignedIn ? "Sign out" : "Sign in" }
     ].concat(!Turbine.gamemode || shot.page === "accounts" ? [
