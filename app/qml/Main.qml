@@ -894,10 +894,60 @@ Window {
     // 0.62: every co-op start comes through here (the Play choice, Start held, Play options, the Co-op tile and
     // Steam's menu, "Use it again"): with no session password the mod stops with an error, so its settings open
     // on the password first, with the keyboard, and the start goes on once it is set.
+    // ---- 0.62: two copies of Seamless Co-op in the list (one from Nexus and Turbine's own, or an old one). The
+    // engine looks (Turbine.coopCheck, answered as coopChecked): the game loads the newest, and the others only
+    // confuse. One sheet, on opening the game (once per run) and before a co-op start: Tidy up keeps the newest
+    // and moves the other to Removed mods, the password kept; Not now leaves them. A version that disagrees with
+    // its own file is a toast with both versions named (once per run).
+    property var coopFound: null          // the last answer for the game on screen
+    property var coopTidyAsked: ({})      // games asked on opening, this run
+    property var coopVersionSaid: ({})
+    property var coopAfterTidy: null      // the co-op start waiting for the sheet's answer
+    property int coopLooks: 0
+    property int coopModsSeen: -1
+    function coopLook() { if (game && seamlessIn) { coopModsSeen = mods.length; Turbine.coopCheck() } }
+    function coopLooked(gameId, d) {
+        if (!game || game.id !== gameId || !d) return
+        coopFound = Object.assign({ game: gameId }, d)
+        coopLooks++
+        const then = coopAfterTidy
+        coopAfterTidy = null
+        if ((d.tidied || []).length > 0) {
+            note("action", "Seamless Co-op tidied: " + d.tidied.join(", ") + " moved to Removed mods")
+            toast.done("Kept the newest Seamless Co-op. " + d.tidied.join(", ") + " moved to Removed mods.")
+        }
+        // The co-op start that waited for the tidy goes on (whatever the tidy found to do).
+        if (then) { then(); return }
+        if ((d.tidied || []).length > 0) return
+        if (d.versionWarning && !coopVersionSaid[gameId]) {
+            let s = Object.assign({}, coopVersionSaid); s[gameId] = true; coopVersionSaid = s
+            note("action", "Seamless Co-op version warning: list " + d.listVersion + ", file " + d.fileVersion)
+            toast.info(d.versionWarning)
+        }
+        if ((d.others || []).length > 0 && !coopTidyAsked[gameId] && sheet === "" && !wheelOpen && page === "game") {
+            let a = Object.assign({}, coopTidyAsked); a[gameId] = true; coopTidyAsked = a
+            openCoopTidy(null)
+        }
+    }
+    function coopCopies() { return coopFound && game && seamlessIn && coopFound.game === game.id ? (coopFound.others || []) : [] }
+    function openCoopTidy(then) {
+        const others = coopCopies()
+        const n = others.length + 1
+        const count = n === 2 ? "two" : n === 3 ? "three" : String(n)
+        note("action", "Seamless Co-op: " + n + " copies (" + (coopFound.name || "Seamless Co-op") + " " + (coopFound.listVersion || "") + " is used; not used: " + others.join(", ") + ")" + (then ? ", before a co-op start" : ""))
+        coopAfterTidy = null
+        openMsg({ title: "You have " + count + " copies of Seamless Co-op",
+                  text: "You have " + count + " copies of Seamless Co-op. Turbine keeps the newest and moves the other" + (n > 2 ? "s" : "") + " to Removed mods. Your password is kept.",
+                  notes: ["Kept: " + (coopFound.name || "Seamless Co-op") + (coopFound.listVersion ? " " + coopFound.listVersion : "")].concat(others.map(o => "Moved to Removed mods: " + o)),
+                  buttons: [{ key: "a", label: "Tidy up", run: () => { note("action", "Seamless Co-op: Tidy up"); coopAfterTidy = then; coopFound = Object.assign({}, coopFound, { others: [] }); Turbine.seamlessTidy() } },
+                            { key: "b", label: "Not now", run: () => { note("action", "Seamless Co-op copies: not now"); coopFound = Object.assign({}, coopFound, { others: [], skipped: true }); if (then) then() } }] })
+    }
     property int coopStops: 0
     function coopPasswordEmpty() { return !!seamlessMod && Turbine.coopPasswordState(seamlessMod.id) === 0 }
     function startCoop() {
         if (!game || !seamlessMod) return
+        // 0.62: two copies in the list: the one sheet first (Tidy up or Not now), then this start goes on.
+        if (coopCopies().length > 0) { openCoopTidy(() => startCoop()); return }
         if (coopPasswordEmpty()) { coopStops++; note("action", "Play Seamless Co-op: no session password, its settings open first"); openCoopPasswordFirst(); return }
         note("action", "Play Seamless Co-op")
         if (!seamlessMod.enabled) { Turbine.setEnabled(seamlessMod.id, true); mods = mods.map(x => x.id === seamlessMod.id ? Object.assign({}, x, { enabled: true }) : x) }
@@ -1299,7 +1349,13 @@ Window {
     property string seamlessWanted: ""    // the game Get Seamless Co-op was pressed for
     property int coopTileAsks: 0
     function installSeamless() { if (!game) return; seamlessWanted = game.id; Turbine.installSeamless() }
-    onSeamlessInChanged: if (seamlessIn && game && seamlessWanted === game.id) { seamlessWanted = ""; coopTileAskTimer.tries = 0; coopTileAskTimer.restart() }
+    onSeamlessInChanged: {
+        if (seamlessIn && game && seamlessWanted === game.id) { seamlessWanted = ""; coopTileAskTimer.tries = 0; coopTileAskTimer.restart() }
+        // 0.62: on opening a game with Seamless Co-op (and when it arrives): are there two copies?
+        if (seamlessIn) Qt.callLater(coopLook); else coopFound = null
+    }
+    // Another mod came or went while Seamless Co-op is in: looked at again.
+    onModsChanged: if (seamlessIn && modsLoaded && game && (mods.length !== coopModsSeen || !coopFound || coopFound.game !== game.id) && coopModsSeen >= 0) Qt.callLater(coopLook)
     Timer {
         id: coopTileAskTimer
         property int tries: 0
@@ -1897,6 +1953,7 @@ Window {
             if (url.indexOf("heroic://") === 0 && Turbine.gamemode) { app.note("action", "Play through Heroic in Game Mode"); toast.info("Heroic is starting it. If it doesn't show, press the Steam button and switch to it.") }
             if (!shot.on) Qt.openUrlExternally(url)
         }
+        function onCoopChecked(gameId, json) { app.coopLooked(gameId, app.parse(json, null)) }
         function onCoopPasswordNeeded(gameId) {
             app.note("action", "Play Seamless Co-op stopped: no session password in the settings the game loads")
             if (app.game && app.game.id === gameId && app.seamlessMod) { app.coopStops++; app.openCoopPasswordFirst() }
@@ -5721,6 +5778,29 @@ Window {
                 () => { askView.open("Session password", "", "\"\"", "", 2000, false, "Done"); askView.accept(); m.t = Date.now() },
                 () => { if (Date.now() - m.t < 1800) return false
                         say(playAsks === m.asks && Turbine.coopPasswordState(seamlessMod.id) === 0, "A password of two quotes: " + (playAsks === m.asks ? "nothing started" : "Play asked") + ", the password counts as " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1])
+                        if (sheet === "ask") pad("b") },
+                () => { if (sheet === "settingsedit") pad("b") },
+                // 0.62: two copies of Seamless Co-op. First the engine's own look, through the bridge and back.
+                () => { if (sheet !== "") return false; m.looks = coopLooks; coopFound = null; coopLook() },
+                () => { if (coopLooks === m.looks && !coopFound) return false
+                        say(!!coopFound && coopFound.installed === true && (coopFound.others || []).length === 0 && sheet === "", "the engine's look at Seamless Co-op: " + (coopFound && coopFound.installed ? "installed (" + coopFound.name + " " + coopFound.listVersion + ")" : "not found") + ", " + (coopFound ? (coopFound.others || []).length : "?") + " other copies, sheet \"" + sheet + "\"")
+                        // Then an answer with a second copy and a version that disagrees: the one sheet, and the toast.
+                        coopTidyAsked = ({}); coopVersionSaid = ({})
+                        m.two = { installed: true, name: "Seamless Co-op", listVersion: "2.0.1", fileVersion: "1.9.0", others: ["Seamless Co-op 1.9.1"], tidied: [],
+                                  versionWarning: "Your list says Seamless Co-op 2.0.1, but its file says it is 1.9.0. The mod doesn't run when it is out of date: get it again from its page if the game says so." }
+                        coopLooked(game.id, m.two) },
+                () => { say(sheet === "msg" && !!msgData && msgData.title === "You have two copies of Seamless Co-op" && /2\.0\.1.*1\.9\.0/.test(lastToast),
+                            "two copies, on opening the game: " + (sheet === "msg" && msgData ? msgData.text + " | " + msgData.buttons.map(b => b.label).join("; ") : "sheet \"" + sheet + "\"") + " | toast: " + lastToast.substring(0, 70))
+                        pad("b") },
+                // Before a co-op start: the same sheet first; Tidy up, and the start goes on (to the password here).
+                () => { say(sheet === "" && coopCopies().length === 0, "Not now: sheet \"" + sheet + "\"")
+                        coopLooked(game.id, m.two); m.auto = sheet; m.asks = playAsks; zone = "play"; pad("a") },
+                () => { if (sheet !== "pick") return false; menuIndex = pickItems.findIndex(x => x.key === "coop"); pad("a") },
+                () => { say(m.auto === "" && sheet === "msg" && !!msgData && msgData.title === "You have two copies of Seamless Co-op" && playAsks === m.asks,
+                            "two copies, before a co-op start: asked again by itself: " + (m.auto === "" ? "no" : "yes") + "; at the start: " + (sheet === "msg" && msgData ? msgData.title : "sheet \"" + sheet + "\"") + ", Play asked " + (playAsks - m.asks) + " times")
+                        m.t = Date.now(); pad("a") },
+                () => { if (sheet !== "ask" && Date.now() - m.t < 6500) return false
+                        say(sheet === "ask" && coopAfterSettings && playAsks === m.asks, "Tidy up, then the start goes on: " + (sheet === "ask" ? "to the session password (still empty)" : "sheet \"" + sheet + "\""))
                         if (sheet === "ask") pad("b") },
                 () => { if (sheet === "settingsedit") pad("b"); check("Co-op password check done: " + m.bad + " problems") }
             ]

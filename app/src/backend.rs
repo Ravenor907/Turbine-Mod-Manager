@@ -871,6 +871,22 @@ pub mod qobject {
         #[cxx_name = "launchSetup"]
         fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
 
+        /// 0.62: looks at the Seamless Co-op copies in the list of the game on screen (on the worker); the answer
+        /// comes as `coopChecked`.
+        #[qinvokable]
+        #[cxx_name = "coopCheck"]
+        fn coop_check(self: Pin<&mut Self>);
+        /// 0.62: keeps the Seamless Co-op the game loads and moves every other copy to Removed mods (a session
+        /// password in a copy that goes is carried over); then `coopChecked` again.
+        #[qinvokable]
+        #[cxx_name = "seamlessTidy"]
+        fn seamless_tidy(self: Pin<&mut Self>);
+        /// 0.62: what the look at Seamless Co-op found: {"installed","name","listVersion","fileVersion",
+        /// "others":[names of the copies not used],"versionWarning","tidied":[names just moved out]}.
+        #[qsignal]
+        #[cxx_name = "coopChecked"]
+        fn coop_checked(self: Pin<&mut Self>, game: QString, json: QString);
+
         /// 0.62: a Seamless Co-op start stopped because the session password is empty: Co-op settings open on it.
         #[qsignal]
         #[cxx_name = "coopPasswordNeeded"]

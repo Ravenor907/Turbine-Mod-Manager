@@ -997,6 +997,13 @@ for size in $SIZES; do
   need $n "Co-op password: the Play job says why ($size)" "Seamless Co-op not started: no session password"
   need $n "Co-op password: B and B leave nothing waiting ($size)" "Co-op password check: The tile, then B and B: sheet \"\", waiting false, Play asked 0 times$"
   need $n "Co-op password: two quotes are empty ($size)" "Co-op password check: A password of two quotes: nothing started, the password counts as empty$"
+  # 0.62: two copies of Seamless Co-op: the engine's look through the bridge, the one sheet on opening the game and
+  # before a co-op start, Tidy up and Not now, and the version warning as a toast with both versions.
+  need $n "Two copies: the engine's look comes back ($size)" "Co-op password check: the engine's look at Seamless Co-op: installed \\(.*\\), 0 other copies, sheet \"\"$"
+  need $n "Two copies: one sheet with Tidy up and Not now, and the version toast ($size)" "Co-op password check: two copies, on opening the game: You have two copies of Seamless Co-op. Turbine keeps the newest and moves the other to Removed mods. Your password is kept. \\| Tidy up; Not now \\| toast: Your list says Seamless Co-op 2.0.1, but its file says it is 1.9.0"
+  need $n "Two copies: Not now closes it ($size)" "Co-op password check: Not now: sheet \"\"$"
+  need $n "Two copies: asked before a co-op start, nothing started ($size)" "Co-op password check: two copies, before a co-op start: asked again by itself: no; at the start: You have two copies of Seamless Co-op, Play asked 0 times$"
+  need $n "Two copies: Tidy up, then the start goes on ($size)" "Co-op password check: Tidy up, then the start goes on: to the session password \\(still empty\\)$"
   need $n "Co-op password checks ($size)" "Co-op password check done: 0 problems"
   # The same from outside the window, as the Co-op tile and the Steam menu plugin ask: nothing is launched, the
   # answer says the password is missing, and the tile leaves a request for Turbine to open on the game.

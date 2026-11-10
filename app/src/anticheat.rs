@@ -226,6 +226,28 @@ pub(crate) fn coop_ready(slot: &Slot, coop: ac::Coop) -> Result<(), String> {
     }
 }
 
+/// 0.62: what the engine's look at Seamless Co-op found, for the interface (`coopChecked`). `tidied`: the copies a
+/// tidy just moved to Removed mods.
+fn post_coop_check(w: &mut Worker, game: &turbine_engine::Game, tidied: &[String]) {
+    let Ok(s) = w.slot(game) else { return };
+    let c = s.store.coop_check();
+    let names = |l: &[String]| l.iter().map(|n| quote(n)).collect::<Vec<_>>().join(",");
+    let version_warning = if c.version_differs().is_some() { c.warning().unwrap_or_default() } else { String::new() };
+    let json = format!(
+        "{{\"installed\":{},\"name\":{},\"listVersion\":{},\"fileVersion\":{},\"others\":[{}],\"versionWarning\":{},\"tidied\":[{}]}}",
+        c.mod_id.is_some(),
+        quote(c.name.as_deref().unwrap_or("")),
+        quote(c.list_version.as_deref().unwrap_or("")),
+        quote(c.file_version.as_deref().unwrap_or("")),
+        names(&c.others),
+        quote(&version_warning),
+        names(tidied),
+    );
+    crate::log::line("engine", &format!("{}: Seamless Co-op looked at: {} other copies{}", game.name, c.others.len(), if version_warning.is_empty() { "" } else { ", its version and its file's disagree" }));
+    let id = game.id();
+    w.post(move |t| t.coop_checked(QString::from(id.as_str()), QString::from(json.as_str())));
+}
+
 /// Steam's own folder (the first one Steam uses on this device).
 pub(crate) fn steam_root() -> Option<PathBuf> {
     turbine_engine::steam::steam_roots(&turbine_engine::home_dir()).into_iter().next()
@@ -542,6 +564,41 @@ impl qobject::Turbine {
         }
         let _ = ac::clear_plain(&data, &g.store_id);
         crate::log::line("launch", &format!("{}: Undo the launch options change: the helper starts nothing for it now; the player pastes back \"{}\"", g.name, ac::original_options(&data, &g.store_id)));
+    }
+
+    /// 0.62: the Seamless Co-op copies in this game's list (the engine's coop_check); answered as `coopChecked`.
+    pub fn coop_check(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().send(Some(game.id()), "Look at Seamless Co-op", false, Box::new(move |w: &mut Worker| post_coop_check(w, &game, &[])));
+    }
+
+    /// 0.62: two copies of Seamless Co-op: the one the game loads (the newest) stays, the others go to Removed mods
+    /// (the engine's seamless_tidy carries a session password over). Then the list and `coopChecked` again.
+    pub fn seamless_tidy(mut self: Pin<&mut Self>) {
+        let Some(game) = self.current_game() else { return };
+        self.as_mut().edited();
+        self.as_mut().send(
+            Some(game.id()),
+            "Tidy up Seamless Co-op",
+            false,
+            Box::new(move |w: &mut Worker| {
+                let gone = match w.slot(&game).and_then(|s| s.store.seamless_tidy().map_err(|e| e.to_string())) {
+                    Ok(g) => {
+                        if !g.is_empty() {
+                            crate::log::line("engine", &format!("{}: Seamless Co-op tidied: moved to Removed mods: {}", game.name, g.join(", ")));
+                            w.say(format!("Kept the newest Seamless Co-op. Moved to Removed mods: {}.", g.join(", ")), "ok");
+                        }
+                        g
+                    }
+                    Err(e) => {
+                        w.say(format!("Couldn't tidy up Seamless Co-op: {}", crate::log::plain(&e)), "error");
+                        Vec::new()
+                    }
+                };
+                w.show(&game, false);
+                post_coop_check(w, &game, &gone);
+            }),
+        );
     }
 
     /// Removes only another tool's "<starter>.backup" from the game folder, after a hold to confirm, and only while
