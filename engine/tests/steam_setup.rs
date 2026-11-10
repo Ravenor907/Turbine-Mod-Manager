@@ -113,3 +113,36 @@ fn changes_are_checked_after_steam_starts_again() {
     assert_eq!(held, vec![SteamChange::NoTile { file: sc, marker }]);
     let _ = fs::remove_dir_all(&d);
 }
+
+/// 0.62 (N1's edge): two changes to the same Steam file while Steam is running. The second write must not make the
+/// first look as if Steam had written the file again and kept it.
+#[test]
+fn a_second_write_to_the_same_file_is_not_taken_for_steams() {
+    use turbine_engine::steam_setup::SteamChange;
+    let d = std::env::temp_dir().join(format!("turbine-steamsetup-twice-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let data = d.join("data");
+    let cfg = d.join("userdata/42/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let local = cfg.join("localconfig.vdf");
+    fs::write(&local, CONFIG).unwrap();
+    let started = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    // The first change, then a second one to the same file a moment later (another game's Launch Options).
+    steam_setup::write_launch_options(&local, "1245620", &line(), false).unwrap();
+    steam_setup::note_change(&data, SteamChange::Options { file: local.clone(), app_id: "1245620".into(), value: line() }).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    steam_setup::write_launch_options(&local, "489830", "-windowed", false).unwrap();
+    steam_setup::note_change(&data, SteamChange::Options { file: local.clone(), app_id: "489830".into(), value: "-windowed".into() }).unwrap();
+    // Steam has been running the whole time (it started an hour ago): it will write its own copy back, so neither
+    // change is held, though the file holds both right now.
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(started));
+    assert!(held.is_empty(), "{held:?}");
+    assert_eq!(lost.len(), 2);
+    // Steam really writes the file again and keeps both: now they are held.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let text = fs::read_to_string(&local).unwrap();
+    fs::write(&local, text).unwrap();
+    let (held, lost) = steam_setup::check_after_restart_since(&data, Some(started));
+    assert_eq!((held.len(), lost.len()), (2, 0));
+    let _ = fs::remove_dir_all(&d);
+}

@@ -421,6 +421,14 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
     let mut list = pending_written(data);
     list.retain(|(c, _)| !same(c, &change));
     let written = stamp(change.file());
+    // 0.62 (N1's edge): this write also changed the file's time for every earlier change still waiting on the same
+    // file. Their noted time moves along, or the check would take Turbine's own second write for Steam's ("written
+    // again, so Steam kept it") and call a change held that Steam is about to write over.
+    for (c, w) in list.iter_mut() {
+        if c.file() == change.file() && !w.is_empty() {
+            *w = written.clone();
+        }
+    }
     list.push((change, written));
     save_pending(data, &list)
 }
