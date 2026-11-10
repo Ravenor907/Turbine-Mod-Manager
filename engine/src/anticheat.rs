@@ -855,6 +855,12 @@ pub fn launch_report_lines(data: &Path) -> Vec<String> {
             out.extend(lines);
         }
     };
+    // 0.62: first, in one sentence, which Proton Turbine's Steam tool used at the last launch and why (the tool
+    // chooses by itself when Turbine has no record of the one Steam used), or why it started nothing.
+    let recent = last_lines(&dir.join("steam-launch.log"), 80);
+    if let Some(w) = crate::compat_tool::nothing_started(&recent).map(|w| format!("Turbine's Steam tool: {w}")).or_else(|| crate::compat_tool::proton_words(&recent).map(|w| format!("Turbine's Steam tool: {w}"))) {
+        out.push(w);
+    }
     add("steam-launch.log", 80, &mut out);
     let mut names: Vec<String> = fs::read_dir(&dir)
         .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())

@@ -227,6 +227,11 @@ pub fn build(r: &ReportInput) -> String {
     if !r.crash.trim().is_empty() {
         section(&mut out, "Crash log (last lines)", &r.crash);
     }
+    // 0.62: the Steam launch logs (the helper's and the Steam tool's log, me3's output and own log, Proton's log),
+    // as the other report has them: without them a game that closed by itself can't be told from one that never
+    // started.
+    let launch: Vec<String> = turbine_engine::anticheat::launch_report_lines(&crate::backend::data_home()).iter().map(|l| turbine_engine::report::redact(l)).collect();
+    section(&mut out, "Steam launch logs", &launch.join("\n"));
     section(&mut out, "Activity (last 300 lines)", &crate::log::tail(300).join("\n"));
     out
 }

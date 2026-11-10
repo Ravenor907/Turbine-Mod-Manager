@@ -703,3 +703,26 @@ fn the_state_for_the_app_and_no_restart_in_game_mode() {
     assert_eq!(v.str_at("lastProton"), Some("Started with Proton 11.0: the Proton Steam last used for this game, kept by Turbine."));
     let _ = fs::remove_dir_all(&d);
 }
+
+/// 0.62: Report a bug (both reports use anticheat::launch_report_lines) holds the Steam launch logs, and says first
+/// which Proton the tool used and why.
+#[test]
+fn the_report_lines_hold_the_launch_logs_and_the_proton_pick() {
+    let d = tmp("report");
+    let data = d.join("data");
+    assert!(anticheat::launch_report_lines(&data).is_empty());
+    write(&anticheat::helper_log(&data), "2026-11-10 10:00:00 Turbine (mods): Steam started app 1245620 (waitforexitandrun) in /g: /g/x.exe\n2026-11-10 10:00:00 Turbine (mods): Proton for this game: /s/common/Proton 11.0 [why: the newest Proton installed (Turbine has no record of the one Steam used for this game; 2 numbered Proton found)]\n2026-11-10 10:00:20 me3 ended with exit code 0 after 20 s\n");
+    write(&anticheat::launch_dir(&data).join("me3-1245620.log"), "me3 line\n");
+    write(&anticheat::launch_dir(&data).join("me3-1245620-own.log"), "own line\n");
+    write(&anticheat::launch_dir(&data).join("steam-1245620.log"), "proton line\n");
+    let lines = anticheat::launch_report_lines(&data);
+    assert_eq!(lines[0], "Turbine's Steam tool: Started with Proton 11.0: the newest Proton installed (Turbine has no record of the one Steam used for this game; 2 numbered Proton found).");
+    assert_eq!(lines[1], "-- steam-launch.log (last 3 lines) --");
+    for want in ["me3 ended with exit code 0 after 20 s", "-- me3-1245620.log (last 1 lines) --", "me3 line", "own line", "-- steam-1245620.log (last 1 lines) --", "proton line"] {
+        assert!(lines.iter().any(|l| l.contains(want)), "{want}: {lines:?}");
+    }
+    // Nothing started: that sentence comes first.
+    write(&anticheat::helper_log(&data), "2026-11-10 10:00:00 Turbine (mods): no Proton that can run was found in /s: nothing started. In Steam, start any game with Proton once\n");
+    assert!(anticheat::launch_report_lines(&data)[0].starts_with("Turbine's Steam tool: no Proton that can run was found"));
+    let _ = fs::remove_dir_all(&d);
+}
