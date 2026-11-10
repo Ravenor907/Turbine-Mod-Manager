@@ -699,6 +699,8 @@ impl qobject::Turbine {
                 match net.fetch_seamless(have.as_deref(), &mut prog) {
                     Ok((Some(f), words)) => {
                         crate::log::line("net", &words);
+                        // 0.62: the toast names the version that is coming.
+                        crate::actions::say_for(qt, format!("Getting {}...", f.label), "work");
                         let g = game.clone();
                         crate::actions::post_for(qt, move |t| t.add_fetched(g, f));
                     }
