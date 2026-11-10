@@ -428,6 +428,8 @@ if [ "$MODE" = 1280x800 ]; then
 # 0.51: Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
 # the next requirement for a free account, and the bar over My mods.
 shoot "getmods-cyberpunk-1280x800" 1280x800 getmods "$PWD/home" --game=steam:1091500
+# 0.64: a non-Skyrim My mods for the site: Cyberpunk with Cyber Engine Tweaks under the Dependencies row.
+shoot "mods-cyberpunk-deps-1280x800" 1280x800 mods "$PWD/home" --game=steam:1091500 "--selftest-import=$dl/Cyber Engine Tweaks 1.35.zip,$dl/Quiet Streets CET 1.0.zip"
 fresh "overlaps"; h="$PWD/fh/overlaps"
 shoot "overlaps-1280x800" 1280x800 overlaps "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip"
 fresh "quickexit"; h="$PWD/fh/quickexit"
