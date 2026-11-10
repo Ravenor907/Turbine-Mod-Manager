@@ -591,15 +591,7 @@ for size in $SIZES; do
     need "mods-u$u-$size" "Bar at $u% ($size): nothing overlaps" "Bar check \(mods, $size, size $u%\): [0-9]+ items, 0 problems"
     need "getmods-u$u-$size" "Get mods bar at $u% ($size)" "Bar check \(getmods, $size, size $u%\): [0-9]+ items, 0 problems"
   done
-  # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text), and the launch check's sheet.
-  shoot "launchsetup-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
-  # 0.62: one sheet with the Steam tool's steps, Check again on A, Set it up myself as the other way; the restart
-  # way only in Desktop Mode, never in Game Mode; and the plain words when Steam has to start again first.
-  need "launchsetup-$size" "Steam tool: one sheet with the steps, Check again first ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, first: .* \| says after Steam's next start: (true \(restart first true\)|false \(restart first false\)) \| buttons Check again; Set it up myself; Restart Steam and set it up; Not now \| Game Mode false"
-  need "launchsetup-$size" "Steam tool: Check again keeps the steps until it is picked ($size)" "Tool steps, Check again: sheet msg, checks 1, Play asked 0 times, route (none|options)"
-  SHOOT_ENV="--env=SteamGamepadUI=1" shoot "launchsetupgm-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
-  need "launchsetupgm-$size" "Steam tool in Game Mode: no Steam restart offered ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, .* \| buttons Check again; Set it up myself; Not now \| Game Mode true"
-  need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
+  # 0.58: the launch check's sheet (the one-time Steam step for a me3 game is shot with Elden Ring, below).
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
   need "notstarted-$size" "Launch check: the Steam tool's words come first: nothing started, and which Proton ($size)" "Launch check with the tool's words: Turbine's Steam tool started nothing \(no Proton was found, so nothing started\); Proton at the last start \(Started with Proton 9.0 \(Beta\): Steam used it for this game last time.\); "
   need "notstarted-$size" "Why won't it start: the same words ($size)" "Why won't it start with the tool's words: .*Turbine's Steam tool started nothing: no Proton was found.*Proton at the last start: Started with Proton 9.0"
@@ -992,6 +984,16 @@ for size in $SIZES; do
   shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| .* · Mods offline$"
   need "acask-$size" "I2: one question before the first modded Play, A plays ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Not now$"
+  # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text). 0.62: one sheet with the Steam
+  # tool's steps, Check again on A, Set it up myself as the other way; the restart way only in Desktop Mode, never in
+  # Game Mode. 0.64: shot with Elden Ring itself (it was shot with Skyrim's id under Elden Ring's name, so its steps
+  # were Skyrim's).
+  shoot "launchsetup-$size" "$size" launchsetup "$h" --game=$er
+  need "launchsetup-$size" "Steam tool: one sheet with the steps, Check again first ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, first: .* \| says after Steam's next start: (true \(restart first true\)|false \(restart first false\)) \| buttons Check again; Set it up myself; Restart Steam and set it up; Not now \| Game Mode false"
+  need "launchsetup-$size" "Steam tool: Check again keeps the steps until it is picked ($size)" "Tool steps, Check again: sheet msg, checks 1, Play asked 0 times, route (none|options)"
+  SHOOT_ENV="--env=SteamGamepadUI=1" shoot "launchsetupgm-$size" "$size" launchsetup "$h" --game=$er
+  need "launchsetupgm-$size" "Steam tool in Game Mode: no Steam restart offered ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, .* \| buttons Check again; Set it up myself; Not now \| Game Mode true"
+  need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
   g="$h/.local/share/Steam/steamapps/common/ELDEN RING"
