@@ -28,6 +28,8 @@ The optional Decky plugin puts Mods on or off and Play in Steam's Quick Access m
 
 Touch works for everything the buttons do: tap to do, long-press for options.
 
+Keyboard and mouse work too: arrows, Enter, Esc or Backspace to go back, Tab and Shift+Tab for the next and the last page, Ctrl+F to find, the Menu key or a right-click for options, F1 for Help, Ctrl+Enter to play, Ctrl+= and Ctrl+- for the size. The hints at the bottom follow whatever you used last.
+
 ## Folders it uses
 
 The Flatpak can write to Steam's library folders (internal and SD cards under /run/media), ~/Games and Heroic's folders, because that is where mods go. It reads your Downloads folder to find mod files.

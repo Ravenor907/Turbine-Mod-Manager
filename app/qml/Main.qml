@@ -130,7 +130,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -3573,7 +3573,7 @@ Window {
     property real startHeld: 0            // 0 to 1 while Start is held
     property int startHoldsDone: 0
     readonly property bool startHoldPlays: look.holdStartDoes === "last"
-    readonly property string startHoldWords: "hold: " + (startHoldPlays ? "Play" : "Play choice")
+    readonly property string startHoldWords: (keysLegend ? "Ctrl+Enter: " : "hold: ") + (startHoldPlays ? "Play" : "Play choice")
     Timer {
         id: startHold
         interval: 50
@@ -3741,6 +3741,24 @@ Window {
     }
     function stopConfirm() { confirmHold.stop(); confirmHeld = 0 }
 
+    // A key was pressed: the hints follow the keyboard from here.
+    function keySeen(name) {
+        if (lastInput !== "keys") lastInput = "keys"
+        inputCount++; lastInputAt = Date.now(); lastInputName = name
+    }
+    // Ctrl+= and Ctrl+-, and Ctrl with the mouse wheel: the interface size, a step at a time.
+    function sizeBy(d, how) {
+        const v = sizeStep(d)
+        note("action", how + ": interface size " + sizeNow + "% to " + v + "%")
+        if (v !== sizeNow) sizePreview(v)
+    }
+    // The mouse's Back button is B, wherever the pointer is.
+    function mouseBack() {
+        if (lastInput !== "mouse") lastInput = "mouse"
+        inputCount++; lastInputAt = Date.now(); lastInputName = "b"
+        note("mouse", "Mouse Back: B")
+        act("b")
+    }
     Item {
         id: keyRoot
         anchors.fill: parent
@@ -3758,22 +3776,46 @@ Window {
                 if (app.startHoldReady()) { app.startHoldsDone++; app.startHoldDone() }
                 return
             }
+            // 0.62: the keyboard is as good as the controller. Arrows move, Enter (or Space) is A, Esc or Backspace
+            // is B, Tab and Shift+Tab (Page Down and Page Up too) flip pages, Ctrl+F or / finds, the Menu key or
+            // Shift+F10 opens options, F1 is Help, Ctrl+= and Ctrl+- change the size, Ctrl+Z is a toast's step
+            // (Undo), Home and End jump a screen. The letters stay: X, Y or F, Q and E, V the wheel, P Start.
+            const ctrl = (e.modifiers & Qt.ControlModifier) !== 0, shift = (e.modifiers & Qt.ShiftModifier) !== 0
+            if (ctrl && (e.key === Qt.Key_Equal || e.key === Qt.Key_Plus || e.key === Qt.Key_Minus)) {
+                e.accepted = true
+                app.keySeen("size")
+                app.sizeBy(e.key === Qt.Key_Minus ? -1 : 1, "Key Ctrl" + (e.key === Qt.Key_Minus ? "-" : "+"))
+                return
+            }
+            if (e.key === Qt.Key_F1) {
+                e.accepted = true
+                if (e.isAutoRepeat) return
+                app.keySeen("help"); app.note("key", "Key F1")
+                if (app.sheet === "" && !app.wheelOpen && app.page !== "browser") app.openSection("Help")
+                return
+            }
             const map = {}
             map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
             map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
             map[Qt.Key_Escape] = "b"; map[Qt.Key_Backspace] = "b"
-            // With no pad seen directly, Steam's desktop layout drives Turbine as a keyboard: Enter A, Escape or
-            // Backspace B, Tab X, arrows the D-pad, Page Up and Page Down LT and RT.
-            map[Qt.Key_X] = "x"; map[Qt.Key_Tab] = "x"; map[Qt.Key_Y] = "y"
-            map[Qt.Key_PageUp] = "lt"; map[Qt.Key_PageDown] = "rt"
+            map[Qt.Key_Tab] = "rb"; map[Qt.Key_Backtab] = "lb"; map[Qt.Key_PageDown] = "rb"; map[Qt.Key_PageUp] = "lb"
+            map[Qt.Key_Home] = "lt"; map[Qt.Key_End] = "rt"
+            map[Qt.Key_Slash] = "y"; map[Qt.Key_Menu] = "x"
+            map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F] = "y"
             map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"
-            map[Qt.Key_P] = "start"; map[Qt.Key_V] = "view"; map[Qt.Key_F] = "y"
-            const b = map[e.key]
+            map[Qt.Key_P] = "start"; map[Qt.Key_V] = "view"
+            let b = undefined
+            if (ctrl) b = e.key === Qt.Key_F ? "y" : e.key === Qt.Key_Z ? "r3" : undefined
+            else if (shift && e.key === Qt.Key_F10) b = "x"
+            else if (shift && e.key === Qt.Key_Tab) b = "lb"
+            else b = map[e.key]
             if (!b) return
             e.accepted = true
-            if (Turbine.pads && app.lastInput !== "keys") app.lastInput = "keys"
+            // Held down, only the arrows and the screen jumps repeat.
+            if (e.isAutoRepeat && ["up", "down", "left", "right", "lt", "rt", "a"].indexOf(b) < 0) return
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
-            app.inputCount++; app.lastInputAt = Date.now(); app.lastInputName = b
+            app.keySeen(b)
+            if (b === "r3") { app.r3Click(); return }
             if (b === "start" || b === "view") { if (!e.isAutoRepeat) app.press(b); return }
             if (b === "b" && !e.isAutoRepeat) app.bHeld = true
             if (b === "a" && !e.isAutoRepeat) app.aHeld = true
@@ -5326,6 +5368,73 @@ Window {
                         say(playAsks === m.asks && Turbine.coopPasswordState(seamlessMod.id) === 0, "A password of two quotes: " + (playAsks === m.asks ? "nothing started" : "Play asked") + ", the password counts as " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1])
                         if (sheet === "ask") pad("b") },
                 () => { if (sheet === "settingsedit") pad("b"); check("Co-op password check done: " + m.bad + " problems") }
+            ]
+        }
+        // 0.62: the keyboard and the mouse drive every screen, by real key presses and clicks: arrows, Enter, Esc
+        // and Backspace, Tab and Shift+Tab, Page Down and Page Up, Ctrl+F and /, the Menu key and Shift+F10, F1,
+        // Ctrl+= and Ctrl+-, P, V, Ctrl+Enter, Ctrl+Z; hover, click, right-click, the Back button, Ctrl with the
+        // wheel; and the bar's hints follow the last input used.
+        else if (name === "keycheck") {
+            m.bad = 0
+            const say = (ok, text) => { if (!ok) m.bad++; check("Key check: " + text + (ok ? "" : "  PROBLEM")) }
+            const K = (k, mods) => { Turbine.selftestKey(k, mods || 0, true); Turbine.selftestKey(k, mods || 0, false) }
+            const at = (it, fx) => it.mapToItem(null, it.width * (fx || 0.5), it.height / 2)
+            const mouse = (p, button) => { Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0); Turbine.selftestMouse(1, p.x, p.y, button, 0, 0); Turbine.selftestMouse(2, p.x, p.y, button, 0, 0) }
+            const hints = () => glyph("a") + ", " + glyph("b") + ", " + glyph("x") + ", " + glyph("y") + ", " + glyph("lb") + ", " + glyph("rb")
+            script = [
+                () => { if (mods.length < 2 || !modsLoaded) return false; keysTest = true; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0
+                        if (!mods[0].enabled) { Turbine.setEnabled(mods[0].id, true); mods = mods.map((x, i) => i === 0 ? Object.assign({}, x, { enabled: true }) : x) } },
+                // The keyboard.
+                () => { K(Qt.Key_Down); m.r1 = modIndex; K(Qt.Key_Up)
+                        say(m.r1 === 1 && modIndex === 0 && lastInput === "keys", "Down and Up: row " + (m.r1 + 1) + " then row " + (modIndex + 1) + ", last input " + lastInput)
+                        say(hints() === "Enter, Esc, X, Ctrl+F, PgUp, PgDn", "the hints after a key: " + hints())
+                        m.on = mods[0].enabled; K(Qt.Key_Return) },
+                () => { say(mods[0].enabled !== m.on, "Enter is A: the mod turned " + (mods[0].enabled ? "on" : "off")); K(Qt.Key_Return) },
+                () => { K(Qt.Key_Menu); m.s1 = sheet; K(Qt.Key_Escape); m.s2 = sheet; K(Qt.Key_F10, Qt.ShiftModifier); m.s3 = sheet; K(Qt.Key_Backspace)
+                        say(m.s1 === "modmenu" && m.s2 === "" && m.s3 === "modmenu" && sheet === "", "Menu key: sheet \"" + m.s1 + "\", Esc: \"" + m.s2 + "\", Shift+F10: \"" + m.s3 + "\", Backspace: \"" + sheet + "\"") },
+                () => { K(Qt.Key_F, Qt.ControlModifier); m.s1 = sheet; K(Qt.Key_Escape); m.s2 = sheet; K(Qt.Key_Slash); m.s3 = sheet; K(Qt.Key_Escape)
+                        say(m.s1 === "findpop" && m.s2 === "" && m.s3 === "findpop" && sheet === "", "Ctrl+F: sheet \"" + m.s1 + "\", Esc: \"" + m.s2 + "\", /: \"" + m.s3 + "\", Esc: \"" + sheet + "\"") },
+                () => { K(Qt.Key_Tab); say(tab === 1, "Tab: " + (tabs[tab] || "")) },
+                () => { if (getItems.length < gridColumns + 2 || turnTo >= 0) return false; zone = "main"; getArea = "grid"; getIndex = 0
+                        K(Qt.Key_Right); m.i1 = getIndex; K(Qt.Key_Down); m.i2 = getIndex; K(Qt.Key_Return) },
+                () => { say(m.i1 === 1 && m.i2 === 1 + gridColumns && modPage, "Get mods: Right to card " + (m.i1 + 1) + ", Down to card " + (m.i2 + 1) + ", Enter opens " + (modPage ? "the mod's page" : "nothing"))
+                        K(Qt.Key_Escape); say(!modPage && tab === 1, "Esc from the mod's page: " + (modPage ? "still there" : "back on " + (tabs[tab] || ""))) },
+                () => { K(Qt.Key_PageDown); m.t1 = tab; K(Qt.Key_PageUp); m.t2 = tab; K(Qt.Key_Backtab, Qt.ShiftModifier)
+                        say(m.t1 === 2 && m.t2 === 1 && tab === 0, "Page Down: tab " + m.t1 + ", Page Up: tab " + m.t2 + ", Shift+Tab: tab " + tab) },
+                () => { K(Qt.Key_F1); m.p = page + " " + sec; K(Qt.Key_Escape); say(m.p === "settings Help" && page === "game", "F1: " + m.p + ", Esc: " + page) },
+                () => { m.z = sizeNow; K(Qt.Key_Equal, Qt.ControlModifier); m.z1 = sizeNow; K(Qt.Key_Minus, Qt.ControlModifier)
+                        say(m.z1 === m.z + 10 && sizeNow === m.z, "Ctrl+=: " + m.z + "% to " + m.z1 + "%, Ctrl+-: back to " + sizeNow + "%") },
+                () => { K(Qt.Key_P); m.p = page; K(Qt.Key_P); m.p2 = page; K(Qt.Key_V); m.w = wheelOpen; K(Qt.Key_Right); m.ws = wheelSlot; K(Qt.Key_Escape)
+                        say(m.p === "settings" && m.p2 === "game" && m.w && m.ws === 2 && !wheelOpen, "P: " + m.p + ", P again: " + m.p2 + "; V: the wheel " + (m.w ? "open" : "closed") + ", Right picks slot " + m.ws + ", Esc: " + (wheelOpen ? "still open" : "closed")) },
+                () => { K(Qt.Key_Return, Qt.ControlModifier); m.s1 = sheet + " " + pickTitle; K(Qt.Key_Escape); say(m.s1 === "pick Play options" && sheet === "", "Ctrl+Enter: " + m.s1 + ", Esc: sheet \"" + sheet + "\"") },
+                // A toast's step (Undo) is Ctrl+Z.
+                () => { zone = "main"; tab = 0; m.wasOn = mods.filter(x => x.enabled).length; allOff(); m.g = toast.actionGlyph },
+                () => { K(Qt.Key_Z, Qt.ControlModifier); const on = mods.filter(x => x.enabled).length
+                        say(m.g === "Ctrl+Z" && on === m.wasOn && m.wasOn > 0, "the toast says " + m.g + " Undo; Ctrl+Z: " + on + " of " + m.wasOn + " back on") },
+                // The mouse: hover, click, right-click, Back, Ctrl with the wheel.
+                () => { const it = modList.itemAtIndex(1); if (!it) return false
+                        const p = at(it, 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
+                () => { say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, Ctrl+F, PgUp, PgDn", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
+                        m.on = mods[1].enabled; mouse(at(modList.itemAtIndex(1), 0.4), Qt.LeftButton) },
+                () => { say(mods[1].enabled !== m.on && modIndex === 1, "a click on a row is A: row " + (modIndex + 1) + " turned " + (mods[1].enabled ? "on" : "off"))
+                        mouse(at(modList.itemAtIndex(0), 0.4), Qt.RightButton) },
+                () => { m.s1 = sheet; m.row = modIndex; mouse({ x: width / 2, y: height / 3 }, Qt.BackButton)
+                        say(m.s1 === "modmenu" && m.row === 0 && sheet === "", "a right-click on row 1: sheet \"" + m.s1 + "\" for row " + (m.row + 1) + "; the Back button: sheet \"" + sheet + "\"")
+                        tab = 1 },
+                () => { if (getItems.length < 2 || turnTo >= 0) return false
+                        const cell = getView.gridItem(1)
+                        if (!cell) { say(false, "no card to right-click"); return }
+                        mouse(at(cell), Qt.RightButton) },
+                () => { m.s1 = sheet; m.gi = getIndex; mouse({ x: width / 2, y: height / 3 }, Qt.BackButton); m.s2 = sheet; mouse({ x: width / 2, y: height / 3 }, Qt.BackButton)
+                        say(m.s1 === "cardmenu" && m.gi === 1 && m.s2 === "" && tab === 0, "a right-click on card 2: sheet \"" + m.s1 + "\"; Back: sheet \"" + m.s2 + "\"; Back again: " + (tabs[tab] || "").replace(/ \(\d+\)$/, "")) },
+                () => { m.z = sizeNow; Turbine.selftestMouse(3, width / 2, height / 3, 0, 0, 1); m.z0 = sizeNow
+                        Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, -1); m.z1 = sizeNow; Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, 1)
+                        say(m.z0 === m.z && m.z1 === m.z + 10 && sizeNow === m.z, "the wheel alone: " + m.z0 + "%; Ctrl and the wheel up: " + m.z1 + "%, down: " + sizeNow + "%") },
+                // The hints follow the last input: a key, then the controller.
+                () => { K(Qt.Key_Down); m.h1 = hints(); legend.check("keycheck"); pad("up"); m.h2 = hints()
+                        say(m.h1 === "Enter, Esc, X, Ctrl+F, PgUp, PgDn" && m.h2 === "A, B, X, Y, LB, RB", "hints after a key: " + m.h1 + "; after a controller press: " + m.h2)
+                        keysTest = false
+                        check("Key check done: " + m.bad + " problems") }
             ]
         }
         else if (name === "presscount") script = [
@@ -7244,6 +7353,8 @@ Window {
         { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks." },
+        { kind: "info", key: "keys", title: "Keyboard and mouse",
+          how: "Arrows move. Enter: do it. Esc or Backspace: back. Tab and Shift+Tab: the next and the last page. Ctrl+F: find. Menu key or right-click: options. F1: Help. Ctrl+= and Ctrl+-: size. Ctrl+Enter: Play. V: quick wheel. The mouse's Back button goes back." },
         { kind: "info", key: "touch", title: "Touch",
           how: "Tap does it. Hold for options (Move is there: then tap where the mod goes). Swipe sideways on the bottom bar to switch tabs." }
     ].concat(steamArt.found ? [
@@ -7950,10 +8061,16 @@ Window {
     // Desktop Mode with a mouse or keyboard: the legend shows keys ("Enter Open · Esc Back · Q E Switch game").
     // Keys count only when Turbine sees the pad itself (otherwise Steam may be sending the pad as keys).
     property string lastInput: "pad"      // pad, keys, mouse
-    readonly property bool keysLegend: !Turbine.gamemode && !shot.on && (lastInput === "mouse" || (lastInput === "keys" && Turbine.pads))
-    readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "X", y: "Y", lb: "Q", rb: "E", lt: "PgUp", rt: "PgDn", view: "V", start: "P", r3: "F" })
+    // 0.62: the hints follow the last input used: the keyboard's keys after a key, the mouse's buttons after the
+    // mouse, the controller's after a press on it. (Never in Game Mode; the build's pictures keep the controller's
+    // unless a check asks.)
+    property bool keysTest: false
+    readonly property bool keysLegend: !Turbine.gamemode && (!shot.on || keysTest) && (lastInput === "mouse" || lastInput === "keys")
+    readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "X", y: "Ctrl+F", lb: "PgUp", rb: "PgDn", lt: "Home", rt: "End", view: "V", start: "P", r3: "Ctrl+Z" })
+    readonly property var mouseNames: ({ a: "Click", x: "Right-click" })
     function glyph(k) {
         if (k === "rs") return "R stick"
+        if (keysLegend && lastInput === "mouse" && mouseNames[k]) return mouseNames[k]
         if (keysLegend && keyNames[k]) return keyNames[k]
         if (k === "view" && padKind === "360") return "BACK"
         if (k === "start" && padKind === "menu") return "MENU"
@@ -9979,8 +10096,8 @@ Window {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: app.px(6)
                 // Dimmed where they do nothing (one tab, or a sheet open).
-                Key { k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-                Key { k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+                Key { id: barLb; k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+                Key { id: barRb; k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
                 // No room for every name: only the tab LB or RB goes to (and nothing when even that doesn't fit).
                 Text {
                     visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0
@@ -10198,7 +10315,8 @@ Window {
         TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
         TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: "Wheel" }
         TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
-        readonly property real capsW: app.px(70)
+        // (The keyboard's names for LB and RB are wider than the controller's.)
+        readonly property real capsW: Math.max(app.px(70), barLb.implicitWidth + barRb.implicitWidth + app.px(12))
         // 0.62: the Start hint's words ("Settings", "hold: Play choice") show when they fit beside the game, the
         // caps, the wheel's cap, Play and two hints. Measured from the words, never from the hint's own size.
         TextMetrics { id: startWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(13); text: app.startHoldWords + "  " }
@@ -10270,6 +10388,30 @@ Window {
         PointHandler {
             acceptedDevices: PointerDevice.TouchScreen
             onActiveChanged: if (active) app.touched()
+        }
+    }
+    // 0.62: the mouse's Back button is B everywhere, and Ctrl with the wheel changes the interface size. Over
+    // everything; other buttons and a plain wheel pass straight through.
+    Item {
+        anchors.fill: parent
+        z: 9998
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.BackButton
+            onClicked: app.mouseBack()
+        }
+        WheelHandler {
+            property real turned: 0
+            acceptedModifiers: Qt.ControlModifier
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: (w) => {
+                turned += w.angleDelta.y
+                if (Math.abs(turned) < 120) return
+                const d = turned > 0 ? 1 : -1
+                turned = 0
+                if (app.lastInput !== "mouse") app.lastInput = "mouse"
+                app.sizeBy(d, "Ctrl and the wheel")
+            }
         }
     }
     function touched() {

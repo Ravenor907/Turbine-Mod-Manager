@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|cooppw*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|cooppw*|keycheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -228,7 +228,7 @@ done
 if [ "$MODE" = 1280x800 ]; then
 # 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
 # A new home for each (not a copy of the shared one, whose mods earlier pictures turned on and off): both mods start on.
-for p in controls legendcheck sheetcheck inputcheck startcheck; do
+for p in controls legendcheck sheetcheck inputcheck startcheck keycheck; do
   rm -rf "$PWD/fh/$p"; python3 tools/fake-home.py "$PWD/fh/$p" > /dev/null; h="$PWD/fh/$p"
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 done
@@ -282,6 +282,30 @@ need $s "Start: never plays from a menu" "Start check: Start on the mod menu: sh
 need $s "Start: the bar's hint is a 44 px button" "Start check: a click on the Start hint \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px tall\): Settings$"
 need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck, .* 0 problems \| .*start, wheel, Play"
 need $s "Start checks" "Start check done: 0 problems"
+# 0.62: the keyboard and the mouse drive every screen, and the bar's hints follow the last input used.
+y=keycheck-1280x800
+need $y "Keys: arrows move the ring" "Key check: Down and Up: row 2 then row 1, last input keys$"
+need $y "Keys: the hints say the keys" "Key check: the hints after a key: Enter, Esc, X, Ctrl\+F, PgUp, PgDn$"
+need $y "Keys: Enter is A" "Key check: Enter is A: the mod turned (on|off)$"
+need $y "Keys: Menu and Shift+F10 open options, Esc and Backspace go back" "Key check: Menu key: sheet \"modmenu\", Esc: \"\", Shift\+F10: \"modmenu\", Backspace: \"\"$"
+need $y "Keys: Ctrl+F and / find" "Key check: Ctrl\+F: sheet \"findpop\", Esc: \"\", /: \"findpop\", Esc: \"\"$"
+need $y "Keys: Tab turns the page" "Key check: Tab: Get mods$"
+need $y "Keys: Get mods by arrows and Enter" "Key check: Get mods: Right to card 2, Down to card [0-9]+, Enter opens the mod's page$"
+need $y "Keys: Esc leaves the mod's page" "Key check: Esc from the mod's page: back on Get mods$"
+need $y "Keys: Page Down, Page Up and Shift+Tab turn pages" "Key check: Page Down: tab 2, Page Up: tab 1, Shift\+Tab: tab 0$"
+need $y "Keys: F1 is Help" "Key check: F1: settings Help, Esc: game$"
+need $y "Keys: Ctrl+= and Ctrl+- change the size" "Key check: Ctrl\+=: 100% to 110%, Ctrl\+-: back to 100%$"
+need $y "Keys: P is Start, V the wheel" "Key check: P: settings, P again: game; V: the wheel open, Right picks slot 2, Esc: closed$"
+need $y "Keys: Ctrl+Enter is the Play choice" "Key check: Ctrl\+Enter: pick Play options, Esc: sheet \"\"$"
+need $y "Keys: Ctrl+Z is the toast's Undo" "Key check: the toast says Ctrl\+Z Undo; Ctrl\+Z: [1-9] of [1-9] back on$"
+need $y "Mouse: hover outlines, the hints say the mouse" "Key check: the mouse over a row: last input mouse, the row is outlined, hints Click, Esc, Right-click, Ctrl\+F, PgUp, PgDn$"
+need $y "Mouse: a click is A" "Key check: a click on a row is A: row 2 turned (on|off)$"
+need $y "Mouse: right-click is options, Back is B" "Key check: a right-click on row 1: sheet \"modmenu\" for row 1; the Back button: sheet \"\"$"
+need $y "Mouse: right-click a card, Back twice" "Key check: a right-click on card 2: sheet \"cardmenu\"; Back: sheet \"\"; Back again: My mods$"
+need $y "Mouse: Ctrl and the wheel change the size" "Key check: the wheel alone: 100%; Ctrl and the wheel up: 110%, down: 100%$"
+need $y "The hints follow the last input" "Key check: hints after a key: Enter, Esc, X, Ctrl\+F, PgUp, PgDn; after a controller press: A, B, X, Y, LB, RB$"
+need $y "The bar with the keyboard's names: nothing overlaps" "Bar check \(keycheck, .* 0 problems"
+need $y "Key and mouse checks" "Key check done: 0 problems"
 # 0.62: Get mods as a page of a book: no game list, the page edges, Left and Right at the ends of a row, LB and RB,
 # a held D-pad, clicks on the edges, and the page-turn itself.
 fresh "bookcheck"; h="$PWD/fh/bookcheck"

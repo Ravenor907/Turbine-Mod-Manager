@@ -23,6 +23,12 @@ signals below, so touch works too.
 | Right stick | The pointer: hover moves the focus ring, it hides on any other press or a touch, or after 3 s still |
 | Grips | Only when a layout sends them: L4/R4 are LT/RT, L5 is Y, R5 is View. Never in the legend |
 
+Keyboard and mouse (0.62), through the same `binds()`: arrows the D-pad, Enter or Space A, Esc or Backspace B, Tab
+and Page Down RB, Shift+Tab and Page Up LB, Ctrl+F or / Y, the Menu key or Shift+F10 X, Home and End LT and RT, F1
+Help, Ctrl+= and Ctrl+- the size, Ctrl+Enter the hold of Start, Ctrl+Z a toast's step, V View, P Start; a click is A, a
+right-click X, the mouse's Back button B, Ctrl with the wheel the size. The caps in the bar follow the last input
+(`glyph()`: `keyNames`, `mouseNames`), never in Game Mode.
+
 The left stick (pointer.rs `left_stick`): pushed past 0.5 and kept within 25 degrees for 80 ms it is one D-pad
 press (released under 0.35); swept 40 degrees first it is the wheel until it comes back under 0.35.
 
