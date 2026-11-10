@@ -51,6 +51,7 @@ pub fn start(dir: PathBuf) {
         s.dir = Some(dir);
     }
     trim_crash_log();
+    clean_old_exits();
     if unclean {
         crash("The last run ended without closing (a crash, or it was stopped).");
     }
@@ -174,6 +175,23 @@ pub fn crash(text: &str) {
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{} {}", now_stamp(), text);
     }
+}
+
+/// 0.62, once: entries from before 0.6 that were Game Mode ending (the display going away), not crashes, leave
+/// crash.log (turbine_engine::report::clean_crash_log). A mark file beside it says it was done.
+fn clean_old_exits() {
+    let Some(path) = crash_path() else { return };
+    let mark = path.with_file_name("crash-cleaned-0.62");
+    if mark.exists() {
+        return;
+    }
+    if let Ok(text) = fs::read_to_string(&path) {
+        let (clean, gone) = turbine_engine::report::clean_crash_log(&text);
+        if gone > 0 && fs::write(&path, clean).is_ok() {
+            line("app", &format!("Crash log: {gone} old entries that were Game Mode ending, not crashes, removed"));
+        }
+    }
+    let _ = fs::write(&mark, b"");
 }
 
 fn trim_crash_log() {

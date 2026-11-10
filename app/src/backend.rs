@@ -1747,9 +1747,8 @@ impl qobject::Turbine {
             "scan",
             &format!("Found {} games in {} ms; {} problems", scan.games.len(), at.elapsed().as_millis(), scan.problems.len()),
         );
-        for g in &scan.games {
-            crate::log::line("scan", &format!("{} ({}), {:?}, {}, build {}", g.name, g.id(), g.runtime, g.drive_label(), g.build.as_deref().unwrap_or("?")));
-        }
+        // 0.62: one line in the activity log; the list itself is kept for the reports.
+        crate::labs::set_games(scan.games.iter().map(|g| format!("{} ({}), {:?}, {}, build {}", g.name, g.id(), g.runtime, g.drive_label(), g.build.as_deref().unwrap_or("?"))).collect());
         for p in &scan.problems {
             crate::log::line("scan", &format!("Problem: {p}"));
         }

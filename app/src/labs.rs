@@ -161,6 +161,16 @@ pub fn mods_lines(store: &Store) -> Vec<String> {
     out
 }
 
+/// The games found by the last scan, one line each: kept here for the report (the activity log only says how many).
+fn games_found() -> &'static std::sync::Mutex<Vec<String>> {
+    static GAMES: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
+    GAMES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+pub fn set_games(lines: Vec<String>) {
+    *games_found().lock().unwrap_or_else(|e| e.into_inner()) = lines;
+}
+
 /// Everything that goes into a report besides what Rust reads itself.
 pub struct ReportInput {
     /// What the report is about (a Labs checklist item: title, how to try it, what should happen); may be empty.
@@ -219,6 +229,8 @@ pub fn build(r: &ReportInput) -> String {
     section(&mut out, "Interface", &r.interface);
     section(&mut out, "Current game", &r.game.join("\n"));
     section(&mut out, "Mods", &r.mods.join("\n"));
+    let found = games_found().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    section(&mut out, &format!("Games found ({})", found.len()), &found.join("\n"));
     section(&mut out, "Last engine report", &r.last_report);
     section(&mut out, "Recent problems", &r.problems.join("\n"));
     if !r.perf.trim().is_empty() {

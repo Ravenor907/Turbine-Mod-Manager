@@ -228,7 +228,15 @@ impl qobject::Turbine {
         self.as_mut().net_send(
             "Nexus games",
             Box::new(move |net: &mut Net, qt: &Qt| {
-                for l in resolve(net, &games) {
+                // 0.62: one line for all the games' Nexus pages (the ones to ask about are named in it).
+                let lines = resolve(net, &games);
+                // The build's checks (a recorded game list) read each game's own line.
+                if std::env::var_os(nexus_games::FIXTURE_ENV).is_some() {
+                    for l in lines.iter().filter(|l| l.starts_with("Nexus game for ")) {
+                        crate::log::line("net", l);
+                    }
+                }
+                for l in turbine_engine::report::nexus_summary(&lines) {
                     crate::log::line("net", &l);
                 }
                 set_qt(qt, |t| t.reshow());

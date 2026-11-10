@@ -297,7 +297,12 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     if via_tool(slot, data, false) {
         crate::log::line("launch", &format!("{}: Steam starts it through Turbine's Steam tool (\"Turbine (mods)\")", slot.game.name));
     }
-    crate::log::line("launch", &format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name));
+    // 0.62: the long line once per run, and again only when the Launch Options changed.
+    static SAID: std::sync::OnceLock<std::sync::Mutex<turbine_engine::report::LogOnce>> = std::sync::OnceLock::new();
+    let text = format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name);
+    if SAID.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).changed(&slot.game.store_id, &text) {
+        crate::log::line("launch", &text);
+    }
     // Undone and not set again: the one-time step, with "Use the line again".
     let undone = ac::undone_file(data, &slot.game.store_id).exists() && ac::still_undone(data, &slot.game.store_id, set.as_deref(), false);
     if !ok || undone {
