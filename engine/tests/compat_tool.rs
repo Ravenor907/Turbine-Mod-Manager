@@ -222,6 +222,9 @@ fn the_three_files() {
     assert_eq!(m.str_at(&["manifest", "require_tool_appid"]), None);
     let s = tool::script_text(Path::new("/home/deck/.var/app/x/data/steam-launch"));
     assert!(s.starts_with("#!/bin/bash\n"));
+    // 0.63: the helper is read by /bin/bash itself, never by whichever "bash" comes first on the PATH a game
+    // was started with.
+    assert!(s.contains("\nexec /bin/bash \"$helper\"") && !s.contains("exec bash "));
     assert!(s.contains("launch='/home/deck/.var/app/x/data/steam-launch'\n"));
     assert!(!s.contains("@LAUNCH_DIR@"));
     for text in [v, tool::toolmanifest_vdf(), s] {

@@ -248,7 +248,7 @@ say "Turbine (mods): handing over to Turbine's launch helper (Steam's reaper abo
 export TURBINE_TOOL_REAPER="$reaper"
 # Read by bash, not started as a program of its own: a helper Turbine is rewriting at this very moment can't be
 # refused as "busy" that way.
-exec bash "$helper" "${chain[@]}"
+exec /bin/bash "$helper" "${chain[@]}"
 "##;
 
 /// What `install` did.

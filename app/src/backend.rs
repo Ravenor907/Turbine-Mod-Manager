@@ -2501,6 +2501,21 @@ impl qobject::Turbine {
     }
 
     pub fn finish(mut self: Pin<&mut Self>) {
+        // 0.63: closing with "This Seamless Co-op is older" still up: the answer is its default (keep the one
+        // installed), so the file is settled and Turbine's own download doesn't stay behind. Waited for briefly.
+        if self.rust().jobs.is_some() {
+            let (older_tx, older_rx) = mpsc::channel::<()>();
+            self.as_mut().send(
+                None,
+                "Older Seamless Co-op: closing",
+                false,
+                Box::new(move |w: &mut Worker| {
+                    crate::actions::settle_older(w, "Turbine is closing");
+                    let _ = older_tx.send(());
+                }),
+            );
+            let _ = older_rx.recv_timeout(Duration::from_secs(3));
+        }
         let (Some(game), n) = self.as_mut().take_pending() else { return };
         let (tx, rx) = mpsc::channel::<()>();
         let job = apply_job(game.clone(), n);

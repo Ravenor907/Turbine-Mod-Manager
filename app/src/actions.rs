@@ -146,6 +146,26 @@ fn hand_over<'a>(qt: &'a Qt, game: &Game) -> impl FnMut(Fetched) + 'a {
     }
 }
 
+/// A file Turbine downloaded itself sits in its own temp folder ("named-...") and goes when it is settled; a file
+/// in Downloads is the player's and stays.
+fn own_download(path: &Path) -> bool {
+    path.parent().and_then(|d| d.file_name()).is_some_and(|n| n.to_string_lossy().starts_with("named-"))
+}
+
+/// 0.63: an older Seamless Co-op file whose question was never answered (a second such file arrived, or Turbine is
+/// closing) is settled the way the question's default does: the one installed is kept, the Downloads watcher is told
+/// the file is settled, and a file Turbine downloaded itself is removed.
+pub(crate) fn settle_older(w: &mut Worker, why: &str) {
+    let Some((game_id, path, _, label)) = w.older_seamless.take() else { return };
+    crate::log::line("engine", &format!("{label}: {why}: the Seamless Co-op installed is kept; the older file wasn't added"));
+    if let Some(game) = w.slots.get(&game_id).map(|s| s.game.clone()) {
+        crate::catch::settled(w, &game, &path, "Kept the Seamless Co-op you have. The older file wasn't added.");
+    }
+    if own_download(&path) {
+        remove_download(&path);
+    }
+}
+
 fn remove_download(path: &Path) {
     let _ = std::fs::remove_file(path);
     if let Some(dir) = path.parent() {
@@ -237,6 +257,10 @@ pub(crate) fn add_archive_with(w: &mut Worker, game: &Game, path: &Path, source:
         Err(e) if turbine_engine::anticheat::older_seamless_in(&e).is_some() => {
             let (have, this) = turbine_engine::anticheat::older_seamless_in(&e).unwrap_or_default();
             crate::log::line("engine", &format!("{label}: Seamless Co-op {this} is older than the {have} installed: asking (Keep {have}, or Use {this})"));
+            // 0.63: one question at a time. A file that was still waiting for its answer is settled first (kept).
+            if w.older_seamless.as_ref().is_some_and(|(_, p, _, _)| p.as_path() != path) {
+                settle_older(w, "another older Seamless Co-op file arrived before the answer");
+            }
             w.older_seamless = Some((game.id(), path.to_path_buf(), asked_source, label.to_string()));
             w.say(format!("Seamless Co-op {this} is older than your {have}: which one?"), "work");
             let gid = game.id();
@@ -876,12 +900,14 @@ impl qobject::Turbine {
                     return;
                 };
                 let Some(game) = w.slots.get(&game_id).map(|s| s.game.clone()) else {
+                    // 0.63: the game went away meanwhile: nothing is added, and Turbine's own download goes.
                     crate::log::line("engine", &format!("{label}: the game it was for isn't open any more; nothing added"));
+                    if own_download(&path) {
+                        remove_download(&path);
+                    }
                     return;
                 };
-                // A file Turbine downloaded itself sits in its own temp folder and goes when it is settled; a file
-                // in Downloads is the player's and stays.
-                let own_download = path.parent().and_then(|d| d.file_name()).is_some_and(|n| n.to_string_lossy().starts_with("named-"));
+                let own_download = own_download(&path);
                 if use_it {
                     crate::log::line("engine", &format!("{label}: the player chose the older Seamless Co-op: adding it (the newer copy goes to Removed mods)"));
                     let out = add_archive_with(w, &game, &path, source, None, &label, true);
