@@ -164,6 +164,31 @@ pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record:
     Ok(out)
 }
 
+/// 0.62: one line that accounts for every piece. The older line counted only "written" and "your own kept", so a
+/// start where the art was already in place, was cleared in Steam, or was missing from Turbine itself all read
+/// "0 written, 0 of your own kept" and nobody could tell which. Zero counts are left out.
+pub fn summary(done: &[(PathBuf, ArtOutcome)]) -> String {
+    let count = |o: ArtOutcome| done.iter().filter(|(_, x)| *x == o).count();
+    let parts = [
+        (count(ArtOutcome::Written), "written"),
+        (count(ArtOutcome::Unchanged), "already in place"),
+        (count(ArtOutcome::PlayersOwn), "of your own kept"),
+        (count(ArtOutcome::Cleared), "cleared in Steam and left out (Settings, Steam library art, Add puts them back)"),
+        (count(ArtOutcome::NoSource), "missing from Turbine's own files"),
+    ];
+    let said: Vec<String> = parts.iter().filter(|(n, _)| *n > 0).map(|(n, w)| format!("{n} {w}")).collect();
+    if said.is_empty() {
+        "no pictures to place".to_string()
+    } else {
+        said.join(", ")
+    }
+}
+
+/// Did every piece come out badly (none written, in place or the player's own)? Then the player should hear why.
+pub fn nothing_shown(done: &[(PathBuf, ArtOutcome)]) -> bool {
+    !done.iter().any(|(_, o)| matches!(o, ArtOutcome::Written | ArtOutcome::Unchanged | ArtOutcome::PlayersOwn))
+}
+
 fn write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(d) = dest.parent() {
         fs::create_dir_all(d)?;

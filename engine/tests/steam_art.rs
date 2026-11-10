@@ -150,3 +150,32 @@ fn the_players_other_formats_and_cleared_art_are_respected() {
     assert!(other.join("9_logo.png").exists());
     let _ = fs::remove_dir_all(&d);
 }
+
+/// 0.62: the owner's log said "0 written, 0 of your own kept" at every start and nobody could tell whether the art
+/// was in place, cleared or missing. The line now accounts for every piece.
+#[test]
+fn the_summary_accounts_for_every_piece() {
+    let d = tmp("summary");
+    let grid = d.join("grid");
+    let record = d.join("data/steam-art.json");
+    fs::create_dir_all(&grid).unwrap();
+    let v1 = src(&d, "v1");
+    let first = steam_art::add_art(&v1, &grid, 5, steam_art::TURBINE_PARTS, &record).unwrap();
+    assert_eq!(steam_art::summary(&first), "4 written");
+    // The second start: the same art is there. This is the owner's case, and it no longer reads as nothing done.
+    let second = steam_art::add_art(&v1, &grid, 5, steam_art::TURBINE_PARTS, &record).unwrap();
+    assert_eq!(steam_art::summary(&second), "4 already in place");
+    assert!(!steam_art::nothing_shown(&second));
+    // One cleared in Steam, one the player's own.
+    fs::remove_file(grid.join("5.png")).unwrap();
+    fs::write(grid.join("5p.jpg"), "mine").unwrap();
+    let third = steam_art::add_art(&v1, &grid, 5, steam_art::TURBINE_PARTS, &record).unwrap();
+    let s = steam_art::summary(&third);
+    assert!(s.starts_with("2 already in place, 1 of your own kept, 1 cleared in Steam"), "{s}");
+    // Turbine's own pictures missing (a broken install): said, and counted as nothing shown.
+    let none = steam_art::add_art(&d.join("no-such-set"), &d.join("grid2"), 6, steam_art::TURBINE_PARTS, &d.join("data/r2.json")).unwrap();
+    assert_eq!(steam_art::summary(&none), "4 missing from Turbine's own files");
+    assert!(steam_art::nothing_shown(&none));
+    assert_eq!(steam_art::summary(&[]), "no pictures to place");
+    let _ = fs::remove_dir_all(&d);
+}

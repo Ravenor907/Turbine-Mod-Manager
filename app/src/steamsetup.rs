@@ -186,9 +186,11 @@ fn add_own_art(data: &Path, again: bool) -> Result<String, String> {
     let home = turbine_engine::home_dir();
     let (file, appid) = shortcuts::find_turbine_file(&home).ok_or("Turbine isn't in your Steam library yet. Add it to Steam first (Add a Non-Steam Game in Desktop Mode).")?;
     let done = steam_art::add_art_opts(&art_set("turbine"), &steam_art::grid_dir(&file), appid, steam_art::TURBINE_PARTS, &art_record(data), again).map_err(|e| e.to_string())?;
-    let written = done.iter().filter(|(_, o)| *o == steam_art::ArtOutcome::Written).count();
     let theirs = done.iter().filter(|(_, o)| *o == steam_art::ArtOutcome::PlayersOwn).count();
-    crate::log::line("steam-setup", &format!("Steam library art for Turbine ({appid}): {written} written, {theirs} of your own kept"));
+    crate::log::line("steam-setup", &format!("Steam library art for Turbine ({appid}) in {}: {}", steam_art::grid_dir(&file).display(), steam_art::summary(&done)));
+    if steam_art::nothing_shown(&done) {
+        return Err(format!("Turbine's art isn't in Steam: {}.", steam_art::summary(&done)));
+    }
     Ok(if theirs > 0 { format!("Turbine's art is in Steam ({theirs} of your own pictures kept). Steam shows it after it starts again.") } else { "Turbine's art is in Steam. Steam shows it after it starts again.".to_string() })
 }
 
