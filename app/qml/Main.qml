@@ -4337,6 +4337,9 @@ Window {
     function legendFor(o) {
         let h = []
         for (const k of ["a", "b", "x", "y"]) if (o[k] && o[k].label) h.push([k, o[k].label, o[k].pre || ""])
+        // 0.62: R3 is A on the focused thing, except while a toast shows a next step (Undo, Watch it): then R3 does
+        // that step, and the legend says so, right after A and B, for as long as the toast is up.
+        if (toastActionLive()) h.splice(Math.min(2, h.length), 0, ["r3", toast.actionLabel, ""])
         // The Nexus page: A already says Click, so the one more is Start Play after an add, otherwise how to move the
         // pointer (the right stick). X Options covers what LT opens too.
         if (page === "browser" && sheet === "" && !wheelOpen) {
@@ -5281,6 +5284,7 @@ Window {
                     m.wasOn = mods.filter(x => x.enabled).length
                     allOff()
                     m.ok(!!toastAction && toast.actionGlyph === glyph("r3"), "Toast check: Turn every mod off shows " + toast.actionGlyph + " " + toast.actionLabel)
+                    m.ok(legendHints.length > 2 && legendHints[2][0] === "r3" && legendHints[2][1] === "Undo", "Toast check: the legend while it shows: " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     pad("y") },
             () => { m.ok(sheet === "findpop" && !!toastAction, "Toast check: Y with Undo showing: " + (sheet === "findpop" ? "Find opened" : "sheet \"" + sheet + "\"") + (toastAction ? ", Undo kept" : ", Undo gone"))
                     pad("b") },
@@ -5288,6 +5292,7 @@ Window {
                     pad("r3")
                     const on = mods.filter(x => x.enabled).length
                     m.ok(on === m.wasOn && sheet === "", "Toast check: R3 with Undo showing: " + plural(on, "mod", "mods") + " back on of " + m.wasOn)
+                    m.ok(!legendHints.some(h => h[0] === "r3"), "Toast check: the legend after it: " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                     check("Input check: " + m.bad + " problems") }
         ]
         else if (name === "nexusguard" || name === "inlinebrowser") script = [
@@ -7435,7 +7440,7 @@ Window {
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
-          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks." },
+          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks. R3: the same as A; while a message offers a step (Undo), R3 does that step." },
         { kind: "info", key: "keys", title: "Keyboard and mouse",
           how: "Arrows move. Enter: do it. Esc or Backspace: back. Tab and Shift+Tab: the next and the last page. Ctrl+F: find. Menu key or right-click: options. F1: Help. Ctrl+= and Ctrl+-: size. Ctrl+Enter: Play. V: quick wheel. The mouse's Back button goes back." },
         { kind: "info", key: "touch", title: "Touch",
@@ -8170,11 +8175,11 @@ Window {
         property string k2: ""            // a second key and its words in one hint ("RT Click, LT Menu")
         property string label2: ""
         // In the legend, a hint for one button is also a button: a tap or click does what the button does.
-        readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y"].indexOf(k) >= 0
+        readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y", "r3"].indexOf(k) >= 0
         // A finger-sized target in the bar (0.59: the key caps alone are 24 px).
         height: clickable ? Math.max(app.tpx(44), implicitHeight) : implicitHeight
         spacing: app.px(6)
-        TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); app.act(hint.k) } }
+        TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); if (hint.k === "r3") app.r3Click(); else app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
         Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Repeater {

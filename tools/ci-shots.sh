@@ -353,6 +353,8 @@ need $i "Show hidden games" "Hidden check: every game hidden, the rail shows Sho
 need $i "Press twice: no repeat toast" "Press twice check: first A on Delete for good: the button says it, no toast"
 need $i "Add from Downloads: Y is Find" "Find check: Add from Downloads Y Find \(This game's files, All files\), All files showing"
 need $i "Toast action on R3" "Toast check: Turn every mod off shows (R3|F) Undo"
+need $i "R3's step is in the legend while the toast shows" "Toast check: the legend while it shows: A [^·]* · B [^·]* · R3 Undo"
+need $i "R3 leaves the legend with the toast" "Toast check: the legend after it: A [^·]* · B [^·]*( · [XY] [^·]*)*$"
 need $i "Y is Find under a toast" "Toast check: Y with Undo showing: Find opened, Undo kept"
 need $i "R3 undoes" "Toast check: R3 with Undo showing: [1-9][0-9]* mods? back on of [1-9]"
 need $i "Input checks" "Input check: 0 problems"

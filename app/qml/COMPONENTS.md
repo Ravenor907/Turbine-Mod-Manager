@@ -15,7 +15,8 @@ signals below, so touch works too.
 | Y | Find: the pop-up with Search, Sort and Category (Get mods) or Find, Show, Sort and Select several (My mods); Find plugin (Load order) |
 | LB / RB | Previous / next tab of this view: game tabs, Settings sections, installer steps; on a mod page the previous / next result. Never another game |
 | LT / RT | Pointer hidden: a page up / down (move mode: top / bottom). Pointer showing: LT right click, RT left click |
-| R3 | Left mouse button. Pointer showing: press and release at the pointer, held it drags. Pointer hidden: the pointer shows on the focused item and A runs |
+| R3 (0.62) | The same as A on the focused thing. While a toast offers a next step (Undo, Watch it) R3 does that step, and the legend shows "R3 Undo" after A and B for as long as the toast is up |
+| R3, pointer showing | Left mouse button. Pointer showing: press and release at the pointer, held it drags. Pointer hidden: the pointer shows on the focused item and A runs |
 | Start | A tap: Settings (again, or B, goes back). Held 3 s: Play (the Play choice, or the last choice: Look, "Hold Start does"); a ring fills on Play, letting go early does nothing. Never plays on a tap. A few sheets keep it for their own step (Save, Next, Done). Keyboard: Ctrl+Enter is the hold |
 | View | The quick wheel |
 | D-pad, left stick pushed | Move the focus (repeat 380 ms, then 85 ms, 5 rows at a time after 1.5 s) |
