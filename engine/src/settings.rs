@@ -1125,6 +1125,12 @@ pub fn in_place_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     with_ext(&edited_path(store_root, mod_id, rel), ".in-place")
 }
 
+/// 0.62: Turbine's copy as it was right after in-place changes were taken into it: the baseline for the player's
+/// changes in Turbine until the next apply.
+pub fn synced_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
+    with_ext(&edited_path(store_root, mod_id, rel), ".synced")
+}
+
 /// 0.62: a settings file that was changed where it is deployed (by the game, the mod or by hand) merged with
 /// Turbine's own copy. `placed` is the file as Turbine last put it there. A setting the player changed in Turbine
 /// since then keeps Turbine's value (also when it was changed in place too); every other change made in place is

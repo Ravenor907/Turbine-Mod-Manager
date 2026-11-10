@@ -1054,3 +1054,47 @@ fn an_older_file_from_the_same_page_is_asked_about_and_the_word_is_for_one_file(
     assert!(!store.seamless_mods().iter().find(|m| m.id == p.id).unwrap().package);
     let _ = fs::remove_dir_all(&w.root);
 }
+
+/// The 0.62 re-check, N1: Edit settings takes the game's change in before it shows the page. A setting the player
+/// then puts back to what it was is the player's change, not "unchanged since it was placed".
+#[test]
+fn a_setting_put_back_in_edit_settings_holds() {
+    use turbine_engine::settings;
+    let w = world("put-back");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&zip, &[("SeamlessCoop/ersc.dll", "dll"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    let m = added(store.import_archive(&zip, nexus("2.0.2")));
+    store.apply().unwrap();
+    let deployed = anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc_settings.ini");
+    let staged = turbine_engine::store::staged_dir(store.root(), &m.id);
+    let rel = settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")).unwrap();
+    let mine = |store: &Store| fs::read_to_string(settings::effective(store.root(), &m.id, &rel, &staged.join(&rel))).unwrap();
+    // Placed with allow_invaders = 1; the game's file changes to 0 (and one more setting).
+    fs::write(&deployed, INI_202.replace("allow_invaders = 1", "allow_invaders = 0").replace("new_in_202 = 5", "new_in_202 = 6")).unwrap();
+    touch_later(&deployed, 10);
+    // Edit settings opens: the page shows 0. Opening it again before an apply takes nothing in anew.
+    assert!(turbine_engine::store::sync_in_place(&w.game, store.root(), &m.id, &rel));
+    assert!(mine(&store).contains("allow_invaders = 0"));
+    assert!(!turbine_engine::store::sync_in_place(&w.game, store.root(), &m.id, &rel), "nothing new the second time");
+    // The player sets it back to 1 and sets a password, saves.
+    let edited = anticheat::coop_password_put(&mine(&store).replace("allow_invaders = 0", "allow_invaders = 1"), "dragon").unwrap();
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &edited).unwrap();
+    assert!(!turbine_engine::store::sync_in_place(&w.game, store.root(), &m.id, &rel), "the save is not undone by the page opening again");
+    assert_eq!(mine(&store), edited);
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("allow_invaders = 1"), "put back, and it holds: {got}");
+    assert!(got.contains("cooppassword = dragon") && got.contains("new_in_202 = 6"), "{got}");
+    assert_eq!(mine(&store), got);
+    // After the apply the baseline is what was placed again: a new in-place change is taken in as before.
+    fs::write(&deployed, got.replace("new_in_202 = 6", "new_in_202 = 7")).unwrap();
+    touch_later(&deployed, 20);
+    assert!(turbine_engine::store::sync_in_place(&w.game, store.root(), &m.id, &rel));
+    assert!(mine(&store).contains("new_in_202 = 7") && mine(&store).contains("allow_invaders = 1"));
+    let r = store.apply().unwrap();
+    assert!(fs::read_to_string(&deployed).unwrap().contains("new_in_202 = 7"));
+    let idle = store.apply().unwrap();
+    assert_eq!((idle.added, idle.removed), (0, 0), "{r:?} then {idle:?}");
+    let _ = fs::remove_dir_all(&w.root);
+}
