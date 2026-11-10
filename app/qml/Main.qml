@@ -133,7 +133,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck", "oldercheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck", "oldercheck", "protoncheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -1091,6 +1091,41 @@ Window {
                                                       lastProton: "", nothingStarted: "", using: [], toolName: "Turbine (mods)", tile: "", tileWords: "" })
     }
     property int toolChecks: 0
+    // ---- 0.62: "Proton for modded play": the Proton Turbine's Steam tool runs the game with (Turbine.protonJson:
+    // {name, dir, how, words, auto, list: [{name, dir, kind, usable, current}]}). A row in the game menu (This
+    // game) and on the tool steps sheet; it opens the list: Automatic first, then every Proton installed, the ones
+    // the tool can't start dimmed with the reason. A pick is kept (Turbine.protonSet; "" is Automatic).
+    readonly property var protonNow: {
+        steamTick
+        if (!game || acMode !== "me3" || game.id.indexOf("steam:") !== 0) return null
+        const p = parse(Turbine.protonJson(game.id), null)
+        return p && (p.list || []).length > 0 ? p : null
+    }
+    function protonTitle(p) { return "Proton for modded play: " + (!p ? "" : p.how === "you" ? p.name : "Automatic" + (p.name ? " (" + p.name + ")" : "")) }
+    readonly property var protonKinds: ({ stable: "", beta: "Beta", experimental: "Experimental", hotfix: "Hotfix", other: "Another tool's" })
+    property int protonPicks: 0
+    function openProtonPick(back) {
+        const p = game ? parse(Turbine.protonJson(game.id), null) : null
+        if (!p) return
+        const gid = game.id
+        const pick = (dir, name) => {
+            const r = parse(Turbine.protonSet(gid, dir), { ok: false, words: "Turbine couldn't keep that choice." })
+            note("action", "Proton for modded play: " + (name || "Automatic") + (r.ok ? "" : " refused: " + r.words))
+            protonPicks++; steamTick++
+            if (r.ok) toast.done(r.words); else toast.problem(r.words)
+            // Opened from the tool's steps: back to them, with the new name.
+            if (back === "msg" && msgData) { msgData = Object.assign({}, msgData, { footnote: protonNow ? protonTitle(protonNow) + " (" + protonNow.words + ")." : "", buttons: msgData.buttons.map(b => b.proton ? Object.assign({}, b, { label: protonNow ? protonTitle(protonNow).replace(" for modded play", "") : b.label }) : b) }); infoIndex = 0; sheet = "msg" }
+        }
+        note("action", "Proton for modded play: " + (p.name || "none") + " (" + p.how + "), " + p.list.length + " installed")
+        openPick("Proton for modded play", gameTitle + ": " + (p.how === "you" ? p.name + ", your pick" : (p.name || "none yet") + ", " + p.words), [
+            { icon: "restore", title: "Automatic", detail: p.auto ? "Turbine chooses: " + p.auto + " now" : "Turbine chooses", aLabel: "Pick", run: () => pick("", "") }
+        ].concat(p.list.map(x => ({
+            icon: "play", title: x.name,
+            detail: !x.usable ? "Can't be used: the Steam Linux Runtime it needs isn't installed" : [protonKinds[x.kind] || "", x.current ? "In use now" : ""].filter(s => s !== "").join(" · "),
+            dim: !x.usable, info: !x.usable, aLabel: "Pick", run: () => pick(x.dir, x.name) }))), back || "")
+        pickNoStart = true
+        menuIndex = p.how === "you" ? Math.max(0, 1 + p.list.findIndex(x => x.current)) : 0
+    }
     // 0.62, for the launch check and Why won't it start?: what Turbine's Steam tool did at the last launch, when it
     // said: that it started nothing (and why), and which Proton it ran the game with (and why that one).
     function toolRows(gameId) {
@@ -1108,6 +1143,7 @@ Window {
                         + (tool.restartFirst ? "\n\nSteam shows \"" + name + "\" in its list after Steam's next start." : "")
                         + (o.set ? "\n\nYour Launch Options (" + o.set + ") stay as they are." : ""),
                   steps: tool.steps,
+                  footnote: protonNow ? protonTitle(protonNow) + " (" + protonNow.words + ")." : "",
                   buttons: [
             // Check again keeps the steps up until Steam has it; then the Play that asked goes on.
             { key: "a", label: "Check again", keep: true, run: () => {
@@ -1124,7 +1160,10 @@ Window {
                     text: msgData.text.split("\n\n")[0] + (now.restartFirst ? "\n\nSteam shows \"" + name + "\" in its list after Steam's next start." : "") })
                 toast.info(now.restartFirst ? "Not yet: Steam has to start again before it lists " + name + "." : "Not picked yet. The steps are still here.") } },
             { key: "x", label: "Set it up myself", run: () => openLaunchPaste(o) }
-            ].concat(Turbine.gamemode ? [] : [
+            ].concat(protonNow ? [
+            // The Proton the tool runs the game with: its button opens the list (B there comes back here).
+            { key: "y", label: protonTitle(protonNow).replace(" for modded play", ""), keep: true, proton: true, run: () => openProtonPick("msg") }
+            ] : Turbine.gamemode ? [] : [
             // Desktop Mode only: Turbine sets the Launch Options line itself with one Steam restart.
             { key: "y", label: "Restart Steam and set it up", run: () => runSteamRestart({ game: o.game, kind: "options", resume: o.coop === true ? "coop" : "play", name: o.name, manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) }) }
             ]).concat([{ key: "b", label: "Not now", run: () => note("action", "Steam tool steps: not now") }]) })
@@ -2907,6 +2946,7 @@ Window {
         allOffWas.length > 0 && !mods.some(m => m.enabled)
             ? { icon: "power", title: "Turn them back on", detail: plural(allOffWas.length, "mod", "mods") + " you turned off together", ok: true, act: "allon" }
             : { icon: "power", title: "Turn every mod off", detail: "Turn them back on from here later", ok: mods.some(m => m.enabled), act: "alloff" },
+        protonNow ? { icon: "play", title: protonTitle(protonNow), detail: "The Proton Turbine's Steam tool runs it with: " + protonNow.words, ok: true, act: "proton" } : null,
         { icon: "info", title: "Game details", detail: "What Turbine found for this game", ok: true, act: "details" },
         { icon: "info", title: "Activity log", detail: "What Turbine did, to read, copy or save", ok: true, act: "activity" },
         { icon: "info", title: "Help", detail: "The buttons, and the beginner tutorial again", ok: true, act: "help" }
@@ -2917,7 +2957,7 @@ Window {
     readonly property var gameMenuOrder: ["unhold", "coopsettings", "cooptile", "original", "restore", "acguide", "acask", "acon",
         "add", "updateall", "checkupdates", "alloff", "allon", "profiles", "overlaps", "outdated", "nexusdl", "nexuslist",
         "why", "verify", "saves", "ersaves", "loader", "me3", "seamless", "acleftover", "kcdrestore", "launchundo", "reset",
-        "gamesettings", "details", "activity", "help"]
+        "gamesettings", "proton", "details", "activity", "help"]
     function gameMenuGroup(a) {
         const i = gameMenuOrder.indexOf(a)
         return i < gameMenuOrder.indexOf("add") ? "Play" : i < gameMenuOrder.indexOf("why") ? "Mods" : i < gameMenuOrder.indexOf("gamesettings") ? "Fix a problem" : "This game"
@@ -3008,6 +3048,7 @@ Window {
         // A dimmed row says why it can't be used (R4, T5).
         if (!item.ok) { note("action", "Game menu: " + item.title + " is dimmed: " + item.detail); toast.info(item.detail); return }
         note("action", "Game menu: " + item.title)
+        if (item.act === "proton") { openProtonPick("gamemenu"); return }
         if (item.act === "original") { sheet = ""; Turbine.playOriginal() }
         else if (item.act === "restore") { if (setups.length > 1) openSetups(); else { sheet = ""; Turbine.restoreSetup("") } }
         else if (item.act === "nexuslist") { sheet = ""; openNexus("https://www.nexusmods.com/" + rules.domain + "/mods/") }
@@ -5978,6 +6019,35 @@ Window {
                 () => { if (Turbine.busy || ver() !== "1.9.0") return false
                         check("Older check: X uses the older file: Seamless Co-op " + ver() + ", " + mods.filter(x => x.seamless === true).length + " used, " + mods.length + " mods in the list, sheet \"" + sheet + "\"") },
                 () => { check("Older check done: asked " + olderAsks + " times") }
+            ]
+        }
+        // 0.62: "Proton for modded play": the row in the game menu (This game), its list (Automatic first, an
+        // unusable Proton dimmed with the reason), a pick kept and Automatic again, and the same from the tool's
+        // steps sheet (its button, and B comes back to the steps).
+        else if (name === "protoncheck") {
+            const rowsNow = () => pickItems.map(r => r.title + (r.dim ? " [dim: " + r.detail + "]" : r.detail ? " [" + r.detail + "]" : "")).join("; ")
+            const openList = () => { sheet = "gamemenu"; menuIndex = gameMenuItems.findIndex(x => x.act === "proton"); pad("a") }
+            script = [
+                () => { if (!game || !modsLoaded || !rules) return false; sheet = ""; page = "game"; zone = "main"; tab = 0
+                        const row = gameMenuItems.find(x => x.act === "proton")
+                        check("Proton check: game menu row: " + (row ? row.title + " | section " + row.group : "none") + " | " + (protonNow ? protonNow.list.length + " installed, how " + protonNow.how : "no Proton found"))
+                        openList() },
+                () => { if (sheet !== "pick") return false
+                        check("Proton check: the list: " + pickTitle + " | " + rowsNow() + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : ""))
+                        m.picks = protonPicks; menuIndex = pickItems.findIndex(r => r.dim === true); m.dimRow = pickItems[menuIndex] ? pickItems[menuIndex].title : "none"; pad("a") },
+                () => { check("Proton check: A on the dimmed one (" + m.dimRow + "): picked " + (protonPicks - m.picks) + " times, still " + protonTitle(protonNow))
+                        if (sheet !== "pick") openList() },
+                () => { if (sheet !== "pick") return false; menuIndex = pickItems.findIndex((r, i) => i > 0 && r.dim !== true); m.want = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; pad("a") },
+                () => { check("Proton check: picked " + m.want + ": " + protonTitle(protonNow) + ", how " + (protonNow ? protonNow.how : "?") + ", sheet \"" + sheet + "\", toast: " + lastToast)
+                        openList() },
+                () => { if (sheet !== "pick") return false; m.focus = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; menuIndex = 0; pad("a") },
+                () => { check("Proton check: the list opened on " + m.focus + "; Automatic again: " + protonTitle(protonNow) + ", how " + (protonNow ? protonNow.how : "?"))
+                        sheet = ""; openLaunchSetup({ game: game.id, name: gameTitle, option: "x %command%", set: "", listed: true, coop: false }) },
+                () => { if (sheet !== "msg") return false
+                        check("Proton check: the tool's steps sheet: " + (msgData ? msgData.buttons.map(b => b.label).join("; ") + " | " + msgData.footnote : ""))
+                        infoIndex = msgData ? msgData.buttons.findIndex(b => b.proton === true) : 0; pad("a") },
+                () => { m.s1 = sheet + " " + pickTitle; pad("b"); check("Proton check: its button on the steps: " + m.s1 + "; B: sheet " + sheet + (sheet === "msg" && msgData ? " (" + msgData.title + ")" : "")) },
+                () => { sheet = ""; check("Proton check done") }
             ]
         }
         else if (name === "presscount") script = [

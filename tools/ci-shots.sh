@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*|protoncheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -994,6 +994,24 @@ for size in $SIZES; do
   need $n "Co-op tile in Game Mode: later, words only ($size)" "Tile check: Game Mode true, how later, label \"\", words: The tile can be added in Desktop Mode"
   need $n "Co-op tile in Game Mode: not asked ($size)" "Tile check: asked once after the install: no \\(later\\)$"
   need $n "Co-op tile in Game Mode: the row opens the words with OK only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| OK$"
+  # 0.62: "Proton for modded play". Two made-up Protons in the Steam library: one the tool can start, and one whose
+  # Steam Linux Runtime isn't installed (dimmed, with the reason). The row, the list, a pick, Automatic again, and
+  # the same from the tool's steps sheet.
+  rm -rf "$PWD/fh/proton-$size"; python3 tools/fake-home.py "$PWD/fh/proton-$size" --anticheat > /dev/null; hq="$PWD/fh/proton-$size"
+  common="$hq/.local/share/Steam/steamapps/common"
+  mkdir -p "$common/Proton 9.0" "$common/Proton 8.0"
+  for pr in "Proton 9.0" "Proton 8.0"; do printf '#!/bin/sh\n' > "$common/$pr/proton"; chmod +x "$common/$pr/proton"; done
+  printf '"manifest"\n{\n\t"version"\t"2"\n\t"commandline"\t"/proton %%verb%%"\n}\n' > "$common/Proton 9.0/toolmanifest.vdf"
+  printf '"manifest"\n{\n\t"version"\t"2"\n\t"commandline"\t"/proton %%verb%%"\n\t"require_tool_appid"\t"1628350"\n}\n' > "$common/Proton 8.0/toolmanifest.vdf"
+  shoot "protoncheck-$size" "$size" protoncheck "$hq" --game=$er
+  n="protoncheck-$size"
+  need $n "Proton row in the game menu, This game ($size)" "Proton check: game menu row: Proton for modded play: Automatic( \\(Proton [0-9.]+\\))? \\| section This game \\| [2-9] installed, how (auto|steam|tool)"
+  need $n "Proton list: Automatic first, the unusable one dimmed with the reason ($size)" "Proton check: the list: Proton for modded play \\| Automatic \\[Turbine chooses.*Proton 8.0 \\[dim: Can't be used: the Steam Linux Runtime it needs isn't installed\\].* \\| focus Automatic$"
+  need $n "Proton list: the dimmed one can't be picked ($size)" "Proton check: A on the dimmed one \\(Proton 8.0\\): picked 0 times, still Proton for modded play: Automatic"
+  need $n "Proton list: a pick is kept and shown ($size)" "Proton check: picked Proton 9.0: Proton for modded play: Proton 9.0, how you, sheet \"\", toast: .* runs with Proton 9.0 when it starts with mods."
+  need $n "Proton list: Automatic again ($size)" "Proton check: the list opened on Proton 9.0; Automatic again: Proton for modded play: Automatic.*, how (auto|steam|tool)$"
+  need $n "Proton on the tool's steps sheet ($size)" "Proton check: the tool's steps sheet: Check again; Set it up myself; Proton: Automatic[^;]*; Not now \\| Proton for modded play: Automatic"
+  need $n "Proton from the steps: its button opens the list, B comes back ($size)" "Proton check: its button on the steps: pick Proton for modded play; B: sheet msg \\(One step before .* plays with mods\\)$"
   # 0.62: a Seamless Co-op file older than the one installed is asked about: A keeps the one installed (B too), X
   # uses the older file; it is never added by itself and never reported as a mod that failed.
   rm -rf "$PWD/fh/older-$size"; python3 tools/fake-home.py "$PWD/fh/older-$size" --anticheat > /dev/null; ho="$PWD/fh/older-$size"
