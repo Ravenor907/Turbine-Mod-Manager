@@ -6003,9 +6003,18 @@ Window {
             const file = shot.arg("older-file")
             const ver = () => seamlessMod ? versionOf(seamlessMod) : "none"
             const ask = () => sheet === "msg" && msgData ? msgData.title + " | " + msgData.text + " | " + msgData.buttons.map(b => b.label).join("; ") + " | highlighted " + (infoButtons[infoIndex] ? infoButtons[infoIndex].label : "") : "sheet \"" + sheet + "\""
+            const pwRow = () => settingsView.shown.find(r => r.f && /password/i.test(r.f.key || ""))
+            const pwState = () => seamlessMod ? ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1] : "no Seamless Co-op"
             script = [
-                () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length
-                        check("Older check: installed Seamless Co-op " + ver() + ", " + mods.length + " mods; Get Seamless Co-op would: " + seamlessGetPlan()); m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
+                () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length; m.newer = seamlessMod.id
+                        check("Older check: installed Seamless Co-op " + ver() + ", " + mods.length + " mods; Get Seamless Co-op would: " + seamlessGetPlan())
+                        openCoopSettings() },
+                // A session password on the copy installed, typed on its settings page and saved by itself.
+                () => { if (sheet !== "settingsedit" || !pwRow()) return false; coopTypePassword() },
+                () => { if (sheet !== "ask") return false; askView.open("Session password", "", "dragon", "", 2000, false, "Done"); askView.accept() },
+                () => { if (sheet !== "settingsedit" || settingsView.changes > 0 || Turbine.coopPasswordState(seamlessMod.id) !== 1) return false; pad("b") },
+                () => { if (sheet !== "") return false
+                        check("Older check: the password on " + ver() + " is " + pwState()); m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
                 () => { if (olderAsks === m.asks) return false
                         check("Older check: asked: " + ask() + " | error said: " + (msgLevel === "error" ? msgText : "none")); pad("a") },
                 () => { if (Turbine.busy) return false
@@ -6015,9 +6024,28 @@ Window {
                 () => { if (Turbine.busy) return false
                         check("Older check: B goes back and keeps it: sheet \"" + sheet + "\", Seamless Co-op " + ver() + ", " + mods.length + " mods")
                         m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
-                () => { if (olderAsks === m.asks) return false; pad("x") },
+                // Use is the second button: Right to it, then A (a message's buttons are picked with the D-pad).
+                () => { if (olderAsks === m.asks || sheet !== "msg") return false
+                        pad("right"); m.on = infoButtons[infoIndex] ? infoButtons[infoIndex].label : ""; pad("a") },
+                // The older file is a new mod in the list, on; the newer copy is in Removed mods.
                 () => { if (Turbine.busy || ver() !== "1.9.0") return false
-                        check("Older check: X uses the older file: Seamless Co-op " + ver() + ", " + mods.filter(x => x.seamless === true).length + " used, " + mods.length + " mods in the list, sheet \"" + sheet + "\"") },
+                        const used = mods.filter(x => x.seamless === true)
+                        check("Older check: Right then A on " + m.on + ": in the list " + used.map(x => "Seamless Co-op " + versionOf(x) + (x.enabled ? " on" : " off")).join(", ") + " (" + mods.length + " mods), Removed mods " + removedMods.map(x => x.id === m.newer ? "the 2.0.1 copy" : x.name).join("; ")
+                              + ", failed: " + (msgLevel === "error" ? msgText : "none") + ", sheet \"" + sheet + "\"")
+                        check("Older check: the password on " + ver() + " is " + pwState())
+                        if (sheet !== "") sheet = ""
+                        openCoopSettings() },
+                () => { if (sheet !== "settingsedit" || !pwRow()) return false
+                        check("Older check: the password carried over: " + (String(settingsView.valueOf(pwRow().f)) === "dragon" ? "yes" : "no, it reads \"" + settingsView.valueOf(pwRow().f) + "\"")); pad("b") },
+                () => { if (sheet !== "") return false; openRemoved() },
+                () => { if (sheet !== "removed") return false
+                        const r = removedMods[removedIndex], o = binds()
+                        m.back = r ? r.id : ""
+                        check("Older check: Removed mods offers: " + (r ? (r.id === m.newer ? "the 2.0.1 copy" : r.name) : "nothing") + ", A " + (o.a ? o.a.label : "") + ", used twice: " + (olderAsks === m.asks + 1 ? "no" : "asked again"))
+                        pad("a") },
+                // What Put back then does (two copies are the two copies check's own subject): said, not required.
+                () => { if (Turbine.busy) return false
+                        check("Older check: after Put back: in the list " + mods.filter(x => x.seamless === true || x.id === m.back).map(x => x.name + " " + versionOf(x) + (x.enabled ? " on" : " off")).join(", ") + "; Removed mods " + removedMods.length + ", sheet \"" + sheet + "\"") },
                 () => { check("Older check done: asked " + olderAsks + " times") }
             ]
         }

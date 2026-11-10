@@ -1023,7 +1023,11 @@ for size in $SIZES; do
   need $n "Older Seamless Co-op: the question, Keep first ($size)" "Older check: asked: This Seamless Co-op is older \\| You have Seamless Co-op 2.0.1. This file is 1.9.0, which is older. \\| Keep 2.0.1; Use 1.9.0; Back \\| highlighted Keep 2.0.1 \\| error said: none$"
   need $n "Older Seamless Co-op: A keeps the one installed, nothing failed ($size)" "Older check: A keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods, failed: none$"
   need $n "Older Seamless Co-op: B keeps it too ($size)" "Older check: B goes back and keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods$"
-  need $n "Older Seamless Co-op: X uses the older file ($size)" "Older check: X uses the older file: Seamless Co-op 1.9.0, 1 used, 1 mods in the list, sheet \"\"$"
+  need $n "Older Seamless Co-op: a password is set on the copy installed ($size)" "Older check: the password on 2.0.1 is set$"
+  need $n "Older Seamless Co-op: Use adds the older file, on, and the newer copy goes to Removed mods ($size)" "Older check: Right then A on Use 1.9.0: in the list Seamless Co-op 1.9.0 on \\(1 mods\\), Removed mods the 2.0.1 copy, failed: none,"
+  need $n "Older Seamless Co-op: the password is still set after Use ($size)" "Older check: the password on 1.9.0 is set$"
+  need $n "Older Seamless Co-op: the password carried over ($size)" "Older check: the password carried over: yes$"
+  need $n "Older Seamless Co-op: the newer copy can be put back ($size)" "Older check: Removed mods offers: the 2.0.1 copy, A Put back, used twice: no$"
   if ran "$n" && grep -q "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::error title=Older Seamless Co-op was reported as a failed mod ($size)::$(grep -h "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"; fail=1; fi
   # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
   # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
