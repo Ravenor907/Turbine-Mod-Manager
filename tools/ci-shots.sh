@@ -563,6 +563,12 @@ for size in $SIZES; do
   done
   # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text), and the launch check's sheet.
   shoot "launchsetup-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
+  # 0.62: one sheet with the Steam tool's steps, Check again on A, Set it up myself as the other way; the restart
+  # way only in Desktop Mode, never in Game Mode; and the plain words when Steam has to start again first.
+  need "launchsetup-$size" "Steam tool: one sheet with the steps, Check again first ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, first: .* \| says after Steam's next start: (true \(restart first true\)|false \(restart first false\)) \| buttons Check again; Set it up myself; Restart Steam and set it up; Not now \| Game Mode false"
+  need "launchsetup-$size" "Steam tool: Check again keeps the steps until it is picked ($size)" "Tool steps, Check again: sheet msg, checks 1, Play asked 0 times, route (none|options)"
+  SHOOT_ENV="--env=SteamGamepadUI=1" shoot "launchsetupgm-$size" "$size" launchsetup "$PWD/home" --game=$skyrim
+  need "launchsetupgm-$size" "Steam tool in Game Mode: no Steam restart offered ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, .* \| buttons Check again; Set it up myself; Not now \| Game Mode true"
   need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
   need "notstarted-$size" "Launch check: a late start takes the sheet away ($size)" "Launch check, the game showed up late: sheet \"\"$"

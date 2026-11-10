@@ -341,7 +341,7 @@ Window {
             }
             else if (shot.page === "why") app.openWhy()
             // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
-            else if (shot.page === "launchsetup") app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false })
+            else if (shot.page === "launchsetup") { launchSetupShot.start(); app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false }) }
             else if (shot.page === "notstarted") {
                 app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; "))
                 // 0.62: it shows up late: the sheet goes. It started and closed: "closed after N seconds", never "didn't start".
@@ -395,6 +395,18 @@ Window {
             for (let i = 0; i < app.checkChoices.length; i++) app.act("right")
             app.note("shot", "Check focus on: " + app.checkChoices[app.checkIndex])
             if (stepNo === 0) { app.act("a"); app.note("shot", "After A: sheet \"" + app.sheet + "\""); stepNo = 1; app.startPlay(); start() }
+        }
+    }
+    // 0.62: the Steam tool's steps: what the one sheet says, then A (Check again) with the tool not picked yet.
+    Timer {
+        id: launchSetupShot; interval: 700
+        onTriggered: {
+            const d = app.msgData, t = app.steamTool(app.game.id)
+            app.note("shot", "Tool steps sheet: " + app.sheet + " | " + (d ? d.title : "") + " | " + (d && d.steps ? d.steps.length : 0) + " steps, first: " + (d && d.steps && d.steps[0] ? d.steps[0] : "")
+                     + " | says after Steam's next start: " + (!!d && /after Steam's next start/.test(d.text)) + " (restart first " + t.restartFirst + ") | buttons " + app.infoButtons.map(b => b.label).join("; ") + " | Game Mode " + Turbine.gamemode)
+            const asks = app.playAsks
+            app.pad("a")
+            app.note("shot", "Tool steps, Check again: sheet " + app.sheet + ", checks " + app.toolChecks + ", Play asked " + (app.playAsks - asks) + " times, route " + t.route)
         }
     }
     Timer { id: playOptionsShot; interval: 900; onTriggered: { app.note("shot", "Play options open: " + (app.sheet === "pick" && app.pickTitle === "Play options")) } }
@@ -969,13 +981,55 @@ Window {
                                 { key: "b", label: "Not now", run: () => {} }] })
             return
         }
-        // 0.6 (I1): Turbine sets the line itself with one Steam restart; pasting it is the fallback.
+        // 0.62: Steam starts the game through Turbine's own Steam tool, "Turbine (mods)", picked once in the game's
+        // Properties. One sheet: the steps in plain words (the engine's, Turbine.steamToolJson), Check again (A),
+        // and Set it up myself (the Launch Options line to paste) as the other way. Turbine no longer restarts
+        // Steam to write Steam's settings in Game Mode (Steam wrote its own copy back); in Desktop Mode that way
+        // is still offered.
+        const tool = steamTool(o.game)
+        if (tool.steps.length > 0) { openToolSteps(o, tool); return }
+        if (Turbine.gamemode) { openLaunchPaste(o); return }
+        // No Steam tool to offer here (Steam's folder wasn't found): the Desktop Mode way, as before.
         askSteamRestart({ game: o.game, kind: "options", resume: o.coop === true ? "coop" : "play", name: o.name,
                           title: o.outdated === true ? "Update " + o.name + "'s launch setting" : "One step before " + o.name + " plays with mods",
                           intro: "In Game Mode a game shows only when Steam starts it, so Turbine starts " + o.name + " through Steam. Steam needs one setting for that, and Turbine can set it for you."
                                  // 0.6 (break L9): the player's own Launch Options step aside while mods are on; say which, and how they come back.
                                  + (o.set && o.outdated !== true ? " Your Launch Options now (" + o.set + ") step aside while mods are on; Settings, Help, Undo the launch options change brings them back." : ""),
                           aLabel: "Restart Steam and set it up", manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) })
+    }
+    function steamTool(gameId) {
+        return parse(Turbine.steamToolJson(gameId), { installed: false, listed: false, chosen: false, route: "none", steps: [], restartFirst: true, proton: "", protonName: "",
+                                                      lastProton: "", nothingStarted: "", using: [], toolName: "Turbine (mods)", tile: "", tileWords: "" })
+    }
+    property int toolChecks: 0
+    function openToolSteps(o, tool) {
+        const name = tool.toolName || "Turbine (mods)"
+        note("action", "Steam tool steps for " + o.name + ": " + tool.steps.length + " steps, " + (tool.restartFirst ? "Steam has to start again first" : "Steam lists the tool") + ", route " + tool.route)
+        openMsg({ title: "One step before " + o.name + " plays with mods",
+                  text: "Steam starts " + o.name + " with your mods through Turbine's own Steam tool, \"" + name + "\". Pick it once in Steam; Turbine sees it when it is set."
+                        + (tool.restartFirst ? "\n\nSteam shows \"" + name + "\" in its list after Steam's next start." : "")
+                        + (o.set ? "\n\nYour Launch Options (" + o.set + ") stay as they are." : ""),
+                  steps: tool.steps,
+                  buttons: [
+            // Check again keeps the steps up until Steam has it; then the Play that asked goes on.
+            { key: "a", label: "Check again", keep: true, run: () => {
+                const now = steamTool(o.game)
+                toolChecks++
+                note("action", "Steam tool: check again: " + (now.route === "tool" ? "picked" : now.chosen ? "picked, not usable yet" : "not picked yet") + (now.restartFirst ? ", Steam has to start again first" : ""))
+                if (now.route === "tool" || now.route === "options") {
+                    sheet = ""; steamTick++
+                    toast.done(now.route === "tool" ? "Steam uses " + name + " for " + o.name + "." : o.name + " is set up.")
+                    if (o.coop === true) startCoop(); else startPlay()
+                    return
+                }
+                msgData = Object.assign({}, msgData, { steps: now.steps,
+                    text: msgData.text.split("\n\n")[0] + (now.restartFirst ? "\n\nSteam shows \"" + name + "\" in its list after Steam's next start." : "") })
+                toast.info(now.restartFirst ? "Not yet: Steam has to start again before it lists " + name + "." : "Not picked yet. The steps are still here.") } },
+            { key: "x", label: "Set it up myself", run: () => openLaunchPaste(o) }
+            ].concat(Turbine.gamemode ? [] : [
+            // Desktop Mode only: Turbine sets the Launch Options line itself with one Steam restart.
+            { key: "y", label: "Restart Steam and set it up", run: () => runSteamRestart({ game: o.game, kind: "options", resume: o.coop === true ? "coop" : "play", name: o.name, manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) }) }
+            ]).concat([{ key: "b", label: "Not now", run: () => note("action", "Steam tool steps: not now") }]) })
     }
     // The paste steps (Set it up myself): the exact text to copy into Steam's Launch Options.
     function openLaunchPaste(o) {
@@ -1144,6 +1198,14 @@ Window {
     property int steamTick: 0                  // bumps when Steam's settings changed (the game menu reads them again)
     property real steamSetupSince: 0
     function askSteamRestart(o) {
+        // 0.62: never in Game Mode (Steam starts again at once there and writes its own copy back, so the change
+        // was lost): the do-it-myself steps instead, or plain words when there are none.
+        if (Turbine.gamemode) {
+            note("action", "No Steam restart in Game Mode for " + o.name + " (" + o.kind + ")" + (o.manual ? ": the steps to do it by hand" : ""))
+            if (o.manual) { o.manual(); return }
+            openMsg({ title: o.title, text: o.intro + "\n\nSteam's own settings can't be changed from Game Mode. Open Turbine in Desktop Mode for this.", buttons: [{ key: "b", label: "OK", run: () => {} }] })
+            return
+        }
         note("action", "Steam restart asked for " + o.name + " (" + o.kind + ")")
         openMsg({ title: o.title,
                   text: o.intro + "\n\nTurbine needs to restart Steam once to finish setting up " + o.name + ". Steam will close and open again; any game or download in progress will stop. Save your game first if one is running.",
