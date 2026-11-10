@@ -707,6 +707,32 @@ fn changes_path(paths: &Paths, source: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
+/// 0.62: forgets the kept copy of a settings file as it was changed in place (see `do_remove`), so the next time
+/// its mod's file goes in, the mod's file itself is placed. The store calls this once it has merged the in-place
+/// changes into Turbine's own copy: from then on that copy is the whole truth. Answers true when a copy went.
+pub fn drop_saved_changes(paths: &Paths, source: &Path) -> bool {
+    changes_path(paths, source).is_some_and(|p| is_file(&p) && fs::remove_file(&p).is_ok())
+}
+
+/// 0.62: where deploy keeps a copy of a settings file exactly as it placed it (next to the record), so a later
+/// change made in place can be told apart from a later change to the mod's or Turbine's own copy.
+pub fn placed_copy(paths: &Paths, source: &Path) -> PathBuf {
+    let mut out = paths.record.parent().unwrap_or(Path::new("/")).join("placed-settings");
+    for c in source.components() {
+        if let Component::Normal(n) = c {
+            out.push(n);
+        }
+    }
+    out
+}
+
+/// Is this placed file a settings copy (not a link, nothing of the game's replaced) that something changed in place
+/// since Turbine put it there?
+pub fn changed_in_place(paths: &Paths, p: &Placed) -> bool {
+    let target = paths.game.join(&p.rel);
+    p.copy && p.backup.is_none() && config_like(&p.rel) && is_file(&target) && !is_ours(p, &target)
+}
+
 // ------------------------------------------------------------------ planning and applying
 
 /// Hands out backup names: never one given out earlier in the same plan, never one already on disk.
@@ -872,6 +898,10 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
         // A game file is here, or will be once the removals before this step are done: it gets backed up.
         let replaces_game_file = match current.get(&lk) {
             Some(p) if is_ours(p, &target) => p.backup.as_ref().is_some_and(|b| exists(b)),
+            // 0.62: Turbine's own settings copy that was changed in place is not a file of the game's: its removal
+            // (planned before this add) moves it aside, so there is nothing here to back up. Counting it as the
+            // game's gave the new copy a backup name, and it stopped being treated as a settings file.
+            Some(p) if p.copy && p.backup.is_none() && config_like(&p.rel) && going.contains(&lk) && changes_path(paths, &p.source).is_some() => false,
             Some(p) => meta.is_some() || p.backup.as_ref().is_some_and(|b| exists(b)),
             None => meta.is_some(),
         };
@@ -985,6 +1015,14 @@ fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, rep
         }
         if saved.is_some() {
             report.player_changes_restored.push(rel.to_string());
+        }
+        // 0.62: a settings file's text as placed, kept for the merge of later in-place changes (small files only).
+        if config_like(rel) && fs::metadata(target).is_ok_and(|m| m.len() <= 4 << 20) {
+            let keep = placed_copy(paths, source);
+            if let Some(d) = keep.parent() {
+                let _ = fs::create_dir_all(d);
+            }
+            let _ = fs::copy(target, &keep);
         }
     }
     let m = fs::symlink_metadata(target)?;

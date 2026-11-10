@@ -709,3 +709,81 @@ fn seamless_coop_is_the_newest_release_never_a_fixed_one() {
     assert!(loaders::parse_seamless_release(r#"{"tag_name":"latest build!","assets":[]}"#).is_err());
     assert!(loaders::parse_seamless_release("{}").is_err());
 }
+
+fn touch_later(p: &Path, secs: u64) {
+    let f = fs::File::options().write(true).open(p).unwrap();
+    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(secs)).unwrap();
+}
+
+/// 0.62: a settings file changed where it is deployed (by the game, the mod, or by hand) used to be kept over
+/// Turbine's newer copy, so a password or any other setting changed in Turbine afterwards never reached the game.
+/// Now the in-place changes are merged into Turbine's copy: what the player changed in Turbine since the last apply
+/// wins for those settings, everything else changed in place is kept and shows in Edit settings, and nothing is
+/// lost without a trace.
+#[test]
+fn settings_changed_in_place_are_merged_and_turbines_edits_reach_the_game() {
+    use turbine_engine::settings;
+    let w = world("in-place");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&zip, &[("SeamlessCoop/ersc.dll", "dll"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    let m = added(store.import_archive(&zip, nexus("2.0.2")));
+    store.apply().unwrap();
+    let deployed = anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc_settings.ini");
+    let staged = turbine_engine::store::staged_dir(store.root(), &m.id);
+    let rel = settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")).unwrap();
+    let turbines = |store: &Store| fs::read_to_string(settings::effective(store.root(), &m.id, &rel, &staged.join(&rel))).unwrap();
+
+    // 1. Changed in place only (never edited in Turbine): kept in the game, and Turbine's copy now shows it too.
+    fs::write(&deployed, INI_202.replace("allow_invaders = 1", "allow_invaders = 0")).unwrap();
+    touch_later(&deployed, 10);
+    store.apply().unwrap();
+    assert!(fs::read_to_string(&deployed).unwrap().contains("allow_invaders = 0"));
+    assert!(turbines(&store).contains("allow_invaders = 0"), "Edit settings shows what the game has");
+    assert!(settings::in_place_path(store.root(), &m.id, &rel).is_file(), "the in-place file is kept beside Turbine's copy");
+
+    // 2. The owner's case: the file changes in place again, then the password is set in Turbine. Both reach the game.
+    let now = fs::read_to_string(&deployed).unwrap();
+    fs::write(&deployed, now.replace("new_in_202 = 5", "new_in_202 = 9")).unwrap();
+    touch_later(&deployed, 20);
+    let with_pw = anticheat::coop_password_put(&turbines(&store), "dragon").unwrap();
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &with_pw).unwrap();
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("cooppassword = dragon"), "the password set in Turbine is in the game: {got}");
+    assert!(got.contains("new_in_202 = 9") && got.contains("allow_invaders = 0"), "the in-place changes stay: {got}");
+    assert_eq!(turbines(&store), got, "Turbine's copy and the game's file are the same again");
+    assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set);
+
+    // 3. A second change in Turbine (the part that never reached the game before): it does now.
+    fs::write(&deployed, got.replace("new_in_202 = 9", "new_in_202 = 7")).unwrap();
+    touch_later(&deployed, 30);
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &anticheat::coop_password_put(&turbines(&store), "wyvern").unwrap()).unwrap();
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("cooppassword = wyvern") && got.contains("new_in_202 = 7"), "{got}");
+
+    // 4. Changed in place and in Turbine since the last apply: Turbine's value is the truth; the in-place file is
+    //    kept beside Turbine's copy, so the other value isn't lost without a trace.
+    fs::write(&deployed, got.replace("cooppassword = wyvern", "cooppassword = other")).unwrap();
+    touch_later(&deployed, 40);
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &anticheat::coop_password_put(&turbines(&store), "drake").unwrap()).unwrap();
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("cooppassword = drake"), "{got}");
+    assert!(fs::read_to_string(settings::in_place_path(store.root(), &m.id, &rel)).unwrap().contains("cooppassword = other"));
+    // Changed in place only, a setting once set in Turbine: taken over, and Edit settings shows it (never a
+    // silent difference between Turbine's copy and the game's file).
+    fs::write(&deployed, got.replace("cooppassword = drake", "cooppassword = typed in the file")).unwrap();
+    touch_later(&deployed, 50);
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("cooppassword = typed in the file"), "{got}");
+    assert_eq!(turbines(&store), got);
+
+    // 5. Nothing changed anywhere: an apply changes nothing.
+    let r = store.apply().unwrap();
+    assert_eq!((r.added, r.removed), (0, 0), "{r:?}");
+    assert_eq!(fs::read_to_string(&deployed).unwrap(), got);
+    let _ = fs::remove_dir_all(&w.root);
+}

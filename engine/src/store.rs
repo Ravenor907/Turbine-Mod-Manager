@@ -525,6 +525,9 @@ pub struct Store {
     /// Each staged folder's files (game-relative), by folder, with the folder's inode and time when read: a mod's
     /// folder is made anew when its files change, so the list is read again only then.
     files_cache: std::sync::Mutex<FilesCache>,
+    /// 0.62: settings files whose in-place changes were merged into Turbine's copy and that the next apply must
+    /// place afresh (their sources, old and new).
+    merged_in_place: std::sync::Mutex<Vec<PathBuf>>,
 }
 
 /// A staged folder's files by folder, with its inode and modification time when read.
@@ -961,6 +964,7 @@ impl Store {
             clock: None,
             tar: None,
             files_cache: std::sync::Mutex::new(HashMap::new()),
+            merged_in_place: std::sync::Mutex::new(Vec::new()),
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -2345,6 +2349,59 @@ impl Store {
         }
     }
 
+    /// 0.62 (the owner's device: a co-op password set in Turbine never reached the game). Deploy keeps a settings
+    /// file that was changed where it is deployed, and used to keep it even over a newer copy of Turbine's, so
+    /// later Edit settings changes could stay out of the game for good. Now such a file is merged into Turbine's
+    /// copy before the apply: settings the player changed in Turbine since the file was last placed keep Turbine's
+    /// value, every other change made in place is taken over (settings::merge_in_place) and shows in Edit settings
+    /// from then on, the in-place file is kept beside Turbine's copy
+    /// (settings::in_place_path), and the merged copy is what goes into the game. Answers the file to deploy.
+    fn take_in_place_changes(&self, record: &Record, mod_id: &str, rel: &str, default_src: &Path, source: PathBuf) -> PathBuf {
+        let Some(fmt) = crate::settings::format_of(rel) else { return source };
+        let paths = self.deploy_paths();
+        let Some(p) = record.files.iter().find(|p| p.source == source) else { return source };
+        if !deploy::changed_in_place(&paths, p) {
+            return source;
+        }
+        let mut merged = self.merged_in_place.lock().unwrap_or_else(|e| e.into_inner());
+        if merged.contains(&source) {
+            return source;
+        }
+        let read = |f: &Path| fs::read(f).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+        let (Some(in_place), Some(mine), Some(default)) = (read(&paths.game.join(&p.rel)), read(&source), read(default_src)) else { return source };
+        if in_place == mine {
+            return source;
+        }
+        // What Turbine last put there: deploy's own copy from that moment; without one (placed by an older
+        // Turbine), Turbine's copy itself when it hasn't changed since, else the mod's own file.
+        let unchanged_since = fs::metadata(&source).is_ok_and(|m| (p.src_ino, p.src_size, p.src_mtime) == (m.ino(), m.len(), m.mtime() * 1_000_000_000 + m.mtime_nsec()));
+        let placed = read(&deploy::placed_copy(&paths, &p.source)).unwrap_or_else(|| if unchanged_since { mine.clone() } else { default.clone() });
+        let text = crate::settings::merge_in_place(fmt, &in_place, &placed, &mine);
+        let _ = fs::create_dir_all(crate::settings::edited_path(&self.root, mod_id, rel).parent().unwrap_or(&self.root));
+        let _ = fs::write(crate::settings::in_place_path(&self.root, mod_id, rel), &in_place);
+        // Saved even when the text is Turbine's own again: a newly written copy is what makes the apply place it.
+        if crate::settings::save_edit(&self.root, mod_id, rel, default_src, &text).is_err() {
+            return source;
+        }
+        let now = crate::settings::effective(&self.root, mod_id, rel, default_src);
+        merged.push(source);
+        if !merged.contains(&now) {
+            merged.push(now.clone());
+        }
+        now
+    }
+
+    /// After an apply took the in-place files out: their kept copies go, so the merged copies are what is placed.
+    fn drop_merged_in_place(&self, paths: &Paths, done: bool) {
+        let mut merged = self.merged_in_place.lock().unwrap_or_else(|e| e.into_inner());
+        for src in merged.iter() {
+            deploy::drop_saved_changes(paths, src);
+        }
+        if done {
+            merged.clear();
+        }
+    }
+
     /// Every file the enabled mods put in the game, in order (later ones win).
     fn wanted(&self) -> Vec<Wanted> {
         self.wanted_except(&[])
@@ -2367,7 +2424,11 @@ impl Store {
             let place = self.placements.get(&m.id);
             for (rel, source) in walk_files(&self.mod_dir(&m.id)) {
                 // 0.58: the player's edited copy of a config file (Edit settings) goes in place of the mod's own.
-                let source = crate::settings::effective(&self.root, &m.id, &rel, &source);
+                let default_src = source;
+                let source = crate::settings::effective(&self.root, &m.id, &rel, &default_src);
+                // 0.62: a settings file changed where it is deployed is merged into Turbine's copy first, so
+                // neither side's change is lost and Turbine's later edits always reach the game.
+                let source = self.take_in_place_changes(&record, &m.id, &rel, &default_src, source);
                 // A guarded game's mod with no placement (laid out by a player file's rules) may not replace.
                 let unplaced = PlaceInfo { replace: self.replace_ok.contains(&m.id), ..PlaceInfo::default() };
                 let place = place.or(if guarded { Some(&unplaced) } else { None });
@@ -2480,7 +2541,9 @@ impl Store {
             let without: Vec<Wanted> = wanted.iter().filter(|w| !stale.contains(&w.rel.to_lowercase())).cloned().collect();
             first = deploy::apply_guarded(&paths, &without, stop_after)?;
         }
+        self.drop_merged_in_place(&paths, false);
         let mut report = deploy::apply_guarded(&paths, &wanted, stop_after)?;
+        self.drop_merged_in_place(&paths, stop_after.is_none());
         report.refused = self.refused_files().into_iter().map(|(r, _)| r).collect();
         report.added += first.added;
         report.removed += first.removed;

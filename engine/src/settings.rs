@@ -1092,6 +1092,35 @@ pub fn backup_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     with_ext(&edited_path(store_root, mod_id, rel), ".backup")
 }
 
+/// 0.62: the file as the game or the mod itself last changed it in the game's folder, kept when its changes were
+/// merged into Turbine's copy (so nothing is lost without a trace).
+pub fn in_place_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
+    with_ext(&edited_path(store_root, mod_id, rel), ".in-place")
+}
+
+/// 0.62: a settings file that was changed where it is deployed (by the game, the mod or by hand) merged with
+/// Turbine's own copy. `placed` is the file as Turbine last put it there. A setting the player changed in Turbine
+/// since then keeps Turbine's value (also when it was changed in place too); every other change made in place is
+/// taken over. Answers the text Turbine's copy should have now. When one of Turbine's changes has no place in the
+/// in-place file (its setting is gone there), Turbine's copy stays whole.
+pub fn merge_in_place(fmt: Format, in_place: &str, placed: &str, turbine_copy: &str) -> String {
+    let (was, mine, theirs) = (parse(placed, fmt), parse(turbine_copy, fmt), parse(in_place, fmt));
+    let same = |a: &Field, b: &Field| a.section == b.section && a.key == b.key && a.occ == b.occ;
+    let mut edits: Vec<(usize, String)> = Vec::new();
+    for m in &mine {
+        // Not changed in Turbine since it was placed: the in-place file's value stands.
+        if was.iter().find(|w| same(w, m)).is_some_and(|w| w.value == m.value) {
+            continue;
+        }
+        match theirs.iter().find(|t| same(t, m)) {
+            Some(t) if t.value == m.value => {}
+            Some(t) => edits.push((t.id, m.value.clone())),
+            None => return turbine_copy.to_string(),
+        }
+    }
+    set(in_place, fmt, &edits).unwrap_or_else(|_| turbine_copy.to_string())
+}
+
 /// A path inside a mod: plain parts only.
 pub fn safe_rel(rel: &str) -> bool {
     !rel.is_empty() && !rel.starts_with('/') && rel.split('/').all(|p| !p.is_empty() && p != "." && p != "..") && !rel.contains('\\') && !rel.contains('\0')
