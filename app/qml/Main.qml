@@ -4252,6 +4252,12 @@ Window {
     // 0.63: Tab and Space each do one thing on a tap and another when held (see Keys.onPressed below).
     property bool tabDown: false
     property double keyAt: 0
+    // The real mouse moved: the hints follow it. Qt's hover again right after a key (a wheel or sheet closing under
+    // a resting mouse) is not the mouse being used.
+    function mouseSeen() {
+        if (Turbine.pointerShown || Date.now() - keyAt < 400) return
+        if (lastInput !== "mouse") lastInput = "mouse"
+    }
     property int hoverSeen: 0              // the checks' count of the real mouse's hovers
     property double hoverSeenAfterKey: -1
     property bool tabWheel: false
@@ -4309,10 +4315,8 @@ Window {
         HoverHandler {
             id: realMouse
             onPointChanged: {
-                // Qt's hover again right after a key (a wheel or sheet closing under a resting mouse) is not the mouse.
                 app.hoverSeen++; app.hoverSeenAfterKey = Date.now() - app.keyAt
-                if (Date.now() - app.keyAt < 400) return
-                if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse"
+                app.mouseSeen()
             }
         }
         Keys.onPressed: (e) => {
@@ -11492,6 +11496,9 @@ Window {
     // rather than the row). With a sheet open, the page under it doesn't count.
     property var hoverList: []
     function hover(item, on) {
+        // A row or button the real mouse comes onto is the mouse being used too: the hover reaches that item's own
+        // handler and not keyRoot's (the check saw no hover there while the row was outlined).
+        if (on) mouseSeen()
         let list = hoverList.filter(x => !!x && x !== item)
         if (on) list.push(item)
         hoverList = list
