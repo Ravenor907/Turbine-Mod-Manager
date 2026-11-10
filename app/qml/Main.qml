@@ -133,7 +133,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -1333,9 +1333,10 @@ Window {
     readonly property bool coopTileThere: steamTick >= 0 && !!game && seamlessIn && parse(Turbine.coopTileJson(game.id), { there: false }).there === true
     // ---- 0.62: how the tile can be added here and now is the engine's call (Turbine.coopTileOfferJson(game id),
     // {"how": "restart" | "direct" | "later" | "none", "words": what to tell the player, "label": the button}):
-    // "restart" with one Steam restart (asked first, as before), "direct" at once (Turbine.coopTileSet(game id,
-    // add) answers {"ok", "words"}), "later" not from here (the words say where: Desktop Mode, the Steam menu
-    // plugin), "none" not at all (the rows go). Until the engine has that call, the restart way stands.
+    // "direct" in Desktop Mode with Steam closed (Turbine.coopTileSet(game id, add) does it at once and answers
+    // {"ok", "words"}), "restart" in Desktop Mode with Steam running (one restart, asked first), "later" in Game
+    // Mode (words only, with OK: the tile is added in Desktop Mode), "none" for a game with no such tile (the rows
+    // go).
     readonly property var coopTileOffer: {
         steamTick
         if (!game || !seamlessIn) return { how: "none", words: "", label: "" }
@@ -5879,6 +5880,23 @@ Window {
                         check("Key check done: " + m.bad + " problems") }
             ]
         }
+        // 0.62: the Co-op tile's rows follow the engine's answer for where Turbine runs: in Desktop Mode one press
+        // (at once with Steam closed, or one restart, asked first), in Game Mode words only with OK.
+        else if (name === "tilecheck") script = [
+            () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0
+                    const o = coopTileOffer
+                    check("Tile check: Game Mode " + Turbine.gamemode + ", how " + o.how + ", label \"" + o.label + "\", words: " + o.words)
+                    const row = gameMenuItems.find(x => x.act === "cooptile")
+                    check("Tile check: game menu row: " + (row ? row.title + " | " + row.detail : "none"))
+                    m.asked = maybeAskCoopTile()
+                    m.s1 = sheet === "msg" && msgData ? msgData.title + " | " + msgData.buttons.map(b => b.label).join("; ") : "sheet \"" + sheet + "\""
+                    if (sheet !== "") pad("b") },
+            () => { check("Tile check: asked once after the install: " + (m.asked ? "yes, " + m.s1 : "no (" + coopTileOffer.how + ")"))
+                    sheet = ""; openCoopTile() },
+            () => { check("Tile check: the row opens: " + (sheet === "msg" && msgData ? msgData.title + " | " + msgData.text.substring(0, 90) + " | " + msgData.buttons.map(b => b.label).join("; ") : "sheet \"" + sheet + "\""))
+                    pad("b") },
+            () => { check("Tile check done: sheet \"" + sheet + "\"") }
+        ]
         else if (name === "presscount") script = [
             // After the tutorial: the rail, the game with no mods focused. Count every press to a mod added and Play.
             () => { if (!game || !modsLoaded) return false; sheet = ""; zone = "rail"; railIndex = current; m.start = inputCount; m.log = [] },

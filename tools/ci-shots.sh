@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -972,13 +972,27 @@ for size in $SIZES; do
   need $n "I3: settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
   need $n "I3: settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
   need $n "I12: edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
-  need $n "Co-op tile: asked once after the install, one press, the restart said first ($size)" "Co-op tile question: asked by itself 0 times; after the install: asked, Add a Co-op tile to Steam \\| Restart Steam and add it; Not now; B: sheet \"\"; a second time: not asked$"
-  need $n "Co-op tile: its row on the Co-op settings page ($size)" "Co-op settings page: row Co-op tile in Steam \\[Add\\], A Add, A opens: Add a Co-op tile to Steam$"
+  need $n "Co-op tile: asked once after the install, one press, the restart said first ($size)" "Co-op tile question: asked by itself 0 times; after the install: asked, Add a Co-op tile to Steam\\?? \\| (Restart Steam and add it|Add it); Not now; B: sheet \"\"; a second time: not asked$"
+  need $n "Co-op tile: its row on the Co-op settings page ($size)" "Co-op settings page: row Co-op tile in Steam \\[Add\\], A Add, A opens: Add a Co-op tile to Steam\\??$"
   if ran "coopcheck-$size"; then
   ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"
   else echo "::error title=I3: the ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
   fi
+  # 0.62: the Co-op tile follows the engine's answer: Desktop Mode with Steam closed adds it at once, with Steam
+  # running after one restart (asked first); Game Mode only says where it can be added, with OK.
+  rm -rf "$PWD/fh/tile-$size"; python3 tools/fake-home.py "$PWD/fh/tile-$size" --anticheat > /dev/null; ht="$PWD/fh/tile-$size"
+  shoot "tilecheck-$size" "$size" tilecheck "$ht" --game=$er "--selftest-import=$ht/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  n="tilecheck-$size"
+  need $n "Co-op tile in Desktop Mode: direct with Steam closed, or one restart ($size)" "Tile check: Game Mode false, how (direct, label \"Add it\", words: Steam is closed|restart, label \"Restart Steam and add it\", words: Steam has to restart once)"
+  need $n "Co-op tile in Desktop Mode: the game menu row says how ($size)" "Tile check: game menu row: Add a Co-op tile to Steam \\| .*\\((no restart|one Steam restart)\\)$"
+  need $n "Co-op tile in Desktop Mode: asked once, one press ($size)" "Tile check: asked once after the install: yes, Add a Co-op tile to Steam\\?? \\| (Add it|Restart Steam and add it); Not now$"
+  rm -rf "$PWD/fh/tilegm-$size"; python3 tools/fake-home.py "$PWD/fh/tilegm-$size" --anticheat > /dev/null; ht="$PWD/fh/tilegm-$size"
+  SHOOT_ENV="--env=SteamGamepadUI=1" shoot "tilecheckgm-$size" "$size" tilecheck "$ht" --game=$er "--selftest-import=$ht/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  n="tilecheckgm-$size"
+  need $n "Co-op tile in Game Mode: later, words only ($size)" "Tile check: Game Mode true, how later, label \"\", words: The tile can be added in Desktop Mode"
+  need $n "Co-op tile in Game Mode: not asked ($size)" "Tile check: asked once after the install: no \\(later\\)$"
+  need $n "Co-op tile in Game Mode: the row opens the words with OK only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| OK$"
   # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
   # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
   rm -rf "$PWD/fh/cooppw-$size"; python3 tools/fake-home.py "$PWD/fh/cooppw-$size" --anticheat > /dev/null; hp="$PWD/fh/cooppw-$size"
