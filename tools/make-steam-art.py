@@ -3,7 +3,9 @@
 
 Sets: turbine/ (Turbine Mod Manager) and coop/ (the optional ELDEN RING Co-op tile, Turbine-styled, plain text).
 Each set: capsule (600x900, <appid>p.png), wide (920x430, <appid>.png), hero (1920x620, <appid>_hero.png),
-logo (1280x400 transparent, <appid>_logo.png), icon (256x256, <appid>_icon.png).
+logo (1280x400 transparent, <appid>_logo.png), icon (256x256, <appid>_icon.png). Turbine's own icon is the app icon
+(packaging/...-256.png: the brass mark on a clear background); the mark in the other pictures is that icon's shape
+(src-mark-mask.png) filled with brass.
 """
 import base64
 import subprocess
@@ -106,11 +108,8 @@ def turbine_logo():
 
 
 def turbine_icon():
-    w = h = 256
-    b = f"""<rect width="256" height="256" rx="40" fill="url(#ground)"/>
-<circle cx="128" cy="128" r="128" fill="url(#glow)"/>
-{mark("m", 18, 18, 220)}"""
-    return svg(w, h, b, bg=False)
+    """0.62: the app icon itself (the brass mark on a clear background), copied, never drawn again here."""
+    return None
 
 
 # ------------------------------------------------------------------------------------------------ Co-op
@@ -158,10 +157,9 @@ def coop_logo():
 
 def coop_icon():
     w = h = 256
-    b = f"""<rect width="256" height="256" rx="40" fill="url(#ground)"/>
-<circle cx="128" cy="128" r="128" fill="url(#glow)"/>
-{mark("m", 28, 28, 200, opacity=0.22)}
-{word("CO-OP", 128, 145, 46, spacing=0)}"""
+    # 0.62: a clear background, like the app icon: the mark, dimmed, with the word over it.
+    b = f"""{mark("m", 8, 8, 240, opacity=0.38)}
+{word("CO-OP", 128, 146, 50, spacing=0)}"""
     return svg(w, h, b, bg=False)
 
 
@@ -178,6 +176,12 @@ if __name__ == "__main__":
             # The source kept in the repository points at the mask file; the render inlines it (rsvg-convert reads
             # no files outside the SVG's own folder).
             text = fn()
+            if text is None:
+                import shutil
+                shutil.copyfile(OUT.parent / "io.github.ravenor907.TurbineModManager-256.png", d / f"{part}.png")
+                (d / f"{part}.svg").unlink(missing_ok=True)
+                print(d / f"{part}.png")
+                continue
             (d / f"{part}.svg").write_text(text.replace(MASK_URI, "../src-mark-mask.png"))
             src = d / f".{part}.render.svg"
             src.write_text(text)

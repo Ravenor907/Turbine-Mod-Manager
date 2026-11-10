@@ -15,11 +15,9 @@
   
 </defs>
 
-<rect width="256" height="256" rx="40" fill="url(#ground)"/>
-<circle cx="128" cy="128" r="128" fill="url(#glow)"/>
-<mask id="m" maskUnits="userSpaceOnUse" x="28" y="28" width="200" height="200">
-  <image href="../src-mark-mask.png" x="28" y="28" width="200" height="200" transform="rotate(0 128.0 128.0)"/>
+<mask id="m" maskUnits="userSpaceOnUse" x="8" y="8" width="240" height="240">
+  <image href="../src-mark-mask.png" x="8" y="8" width="240" height="240" transform="rotate(0 128.0 128.0)"/>
 </mask>
-<rect x="28" y="28" width="200" height="200" fill="url(#brass)" mask="url(#m)" opacity="0.22"/>
-<text x="128" y="145" font-family="Cinzel" font-weight="700" font-size="46" letter-spacing="0" text-anchor="middle" fill="url(#brass)" opacity="1">CO-OP</text>
+<rect x="8" y="8" width="240" height="240" fill="url(#brass)" mask="url(#m)" opacity="0.38"/>
+<text x="128" y="146" font-family="Cinzel" font-weight="700" font-size="50" letter-spacing="0" text-anchor="middle" fill="url(#brass)" opacity="1">CO-OP</text>
 </svg>

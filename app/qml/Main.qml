@@ -7963,6 +7963,8 @@ Window {
 
     // The app icon: the small, simpler one where the full one would be under 64 physical pixels.
     readonly property string iconFull: "file:///app/share/icons/hicolor/128x128/apps/io.github.ravenor907.TurbineModManager.png"
+    // 0.62: the brass mark on a clear background, at every size; the splash takes the large one.
+    readonly property string iconBig: "file:///app/share/icons/hicolor/512x512/apps/io.github.ravenor907.TurbineModManager.png"
     readonly property string iconSmall: "file:///app/share/turbine-mod-manager/icon-small.png"
 
     // ---------------------------------------------------------------- Look settings rows
@@ -10486,8 +10488,8 @@ Window {
             id: splashIcon
             anchors.centerIn: parent
             width: Math.min(parent.width, parent.height) * 0.28; height: width
-            source: app.iconFull
-            sourceSize.width: 256
+            source: app.iconBig
+            sourceSize.width: 512
             smooth: true; mipmap: true
             opacity: 0
             scale: app.reduceMotion ? 1 : 0.7
