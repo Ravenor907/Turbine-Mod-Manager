@@ -313,7 +313,7 @@ impl qobject::Turbine {
     /// be added here. Read only, except that the tool's folder is written when it is missing.
     pub fn steam_tool_json(&self, game_id: &QString) -> QString {
         use turbine_engine::compat_tool as tool;
-        let none = "{\"installed\":false,\"listed\":false,\"chosen\":false,\"route\":\"none\",\"steps\":[],\"restartFirst\":true,\"proton\":\"\",\"protonName\":\"\",\"lastProton\":\"\",\"nothingStarted\":\"\",\"using\":[],\"toolName\":\"Turbine (mods)\",\"tile\":\"no\",\"tileWords\":\"\"}";
+        let none = "{\"installed\":false,\"listed\":false,\"chosen\":false,\"route\":\"none\",\"steps\":[],\"restartFirst\":true,\"proton\":\"\",\"protonName\":\"\",\"lastProton\":\"\",\"nothingStarted\":\"\",\"using\":[],\"toolName\":\"Turbine (mods)\",\"tile\":\"none\",\"tileWords\":\"\"}";
         let Some(g) = self.find(&game_id.to_string()) else { return QString::from(none) };
         let Some(root) = crate::anticheat::steam_root() else { return QString::from(none) };
         let data = crate::backend::data_home();
@@ -332,6 +332,45 @@ impl qobject::Turbine {
             steam_running: running != Some(false),
         };
         QString::from(tool::state_json(&ask).as_str())
+    }
+
+    /// 0.62: how the Co-op tile can be added (or taken out) here and now: {"how","words","label"}. "direct":
+    /// Desktop Mode with Steam closed (coopTileSet does it at once); "restart": Desktop Mode with Steam running
+    /// (one restart, asked first); "later": Game Mode (the words say where); "none": no such tile for this game.
+    pub fn coop_tile_offer_json(&self, game_id: &QString) -> QString {
+        use turbine_engine::compat_tool as tool;
+        let Some(g) = self.find(&game_id.to_string()) else { return QString::from(tool::NO_TILE_JSON) };
+        if turbine_engine::rules::GameRules::for_game(&g).anti_cheat.as_ref().and_then(|a| a.me3_game()) != Some("eldenring") {
+            return QString::from(tool::NO_TILE_JSON);
+        }
+        let game_mode = *self.gamemode();
+        let plugin = game_mode && crate::system::decky_plugin_installed();
+        let way = tool::tile_way(game_mode, plugin, crate::system::steam_running() != Some(false));
+        QString::from(way.offer_json(!tile_there(&g)).as_str())
+    }
+
+    /// 0.62: adds or takes out the Co-op tile at once. Only with Steam closed (Desktop Mode); otherwise it answers
+    /// why not and changes nothing. {"ok","words"}.
+    pub fn coop_tile_set(&self, game_id: &QString, add: bool) -> QString {
+        let answer = |ok: bool, words: &str| QString::from(format!("{{\"ok\":{ok},\"words\":{}}}", quote(words)).as_str());
+        let Some(g) = self.find(&game_id.to_string()) else { return answer(false, "That game isn't found any more.") };
+        if crate::system::steam_running() != Some(false) {
+            crate::log::line("steam-setup", "Co-op tile: Steam is running, nothing changed");
+            return answer(false, turbine_engine::compat_tool::TILE_NEEDS_STEAM_CLOSED);
+        }
+        let data = crate::backend::data_home();
+        match job_for(&g, if add { "tile" } else { "untile" }, "").and_then(|job| sr::apply_job(&data, &job)) {
+            Ok(lines) => {
+                for l in &lines {
+                    crate::log::line("steam-setup", l);
+                }
+                answer(true, if add { "Co-op tile added. It shows in your Steam library when Steam starts." } else { "Co-op tile removed from your Steam library." })
+            }
+            Err(e) => {
+                crate::log::line("steam-setup", &format!("Co-op tile: {e}"));
+                answer(false, &e)
+            }
+        }
     }
 
     /// Settings, Steam library art: {"found": Turbine is in Steam's library, "on": its art is wanted}.

@@ -528,51 +528,83 @@ pub fn still_used_words(names: &[String]) -> String {
 }
 
 // ---- The Co-op tile (0.62 decision) ----
+//
+// Steam keeps its non-Steam games in a file it writes back from memory when it closes, and Game Mode starts Steam
+// again at once. So the tile is added only where the file can be written safely: Desktop Mode. With Steam closed
+// Turbine writes it at once; with Steam running it is one Steam restart (which works on the desktop: Steam stays
+// closed until the script starts it again). In Game Mode it isn't offered as a button; the row says where it can be
+// added. Play Seamless Co-op is always in Turbine's Play choice, and in the Steam menu with Turbine's plugin.
 
 /// Where the optional Seamless Co-op tile in Steam's library can come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TileWay {
-    /// Turbine's Decky plugin adds it with Steam's own call: no file is written, no restart.
-    Decky,
-    /// Desktop Mode with Steam closed: Turbine writes Steam's list of non-Steam games (with a backup).
+    /// Desktop Mode with Steam closed: Turbine writes Steam's list of non-Steam games now (with a backup).
     DesktopSteamClosed,
-    /// Desktop Mode with Steam running: offered, after the player closes Steam.
-    DesktopCloseSteamFirst,
-    /// Game Mode without the plugin: not offered. Play Seamless Co-op stays in Turbine and in the Steam menu.
-    NotOffered,
+    /// Desktop Mode with Steam running: one Steam restart, asked first.
+    DesktopRestart,
+    /// Game Mode with Turbine's Steam menu plugin: not from here; co-op is one press in the Steam menu already.
+    GameModePlugin,
+    /// Game Mode without the plugin: not from here.
+    GameMode,
 }
 
-/// The decision: Steam's list of non-Steam games can't be written safely in Game Mode (Steam starts again at once
-/// and writes its own copy back), so there the tile only comes through the Decky plugin.
+/// The decision for this moment.
 pub fn tile_way(game_mode: bool, decky_plugin: bool, steam_running: bool) -> TileWay {
-    match (decky_plugin, game_mode, steam_running) {
-        (true, _, true) => TileWay::Decky,
-        (_, true, _) => TileWay::NotOffered,
-        (_, false, false) => TileWay::DesktopSteamClosed,
-        (_, false, true) => TileWay::DesktopCloseSteamFirst,
+    match (game_mode, steam_running, decky_plugin) {
+        (false, false, _) => TileWay::DesktopSteamClosed,
+        (false, true, _) => TileWay::DesktopRestart,
+        // Game Mode with Steam closed doesn't happen for longer than a moment (the session starts it again).
+        (true, _, true) => TileWay::GameModePlugin,
+        (true, _, false) => TileWay::GameMode,
     }
 }
 
 impl TileWay {
-    pub fn word(self) -> &'static str {
+    /// For the app: "direct" (Turbine does it now), "restart" (one Steam restart, asked first), "later" (not from
+    /// here: the words say where).
+    pub fn how(self) -> &'static str {
         match self {
-            TileWay::Decky => "decky",
-            TileWay::DesktopSteamClosed => "desktop",
-            TileWay::DesktopCloseSteamFirst => "closesteam",
-            TileWay::NotOffered => "no",
+            TileWay::DesktopSteamClosed => "direct",
+            TileWay::DesktopRestart => "restart",
+            TileWay::GameModePlugin | TileWay::GameMode => "later",
         }
     }
 
-    /// The row's words on the Co-op settings page.
-    pub fn words(self) -> &'static str {
-        match self {
-            TileWay::Decky => "Add a Co-op tile to your Steam library. It starts Seamless Co-op in one press.",
-            TileWay::DesktopSteamClosed => "Add a Co-op tile to your Steam library. Steam is closed, so Turbine can add it now.",
-            TileWay::DesktopCloseSteamFirst => "A Co-op tile can be added while Steam is closed. Close Steam, then come back here.",
-            TileWay::NotOffered => "A Co-op tile can be added in Desktop Mode with Steam closed, or here with Turbine's Decky plugin. Play Seamless Co-op is always in Turbine's Play choice and in the Steam menu.",
+    /// The words for the row and the question. `add`: adding the tile (false: taking it out).
+    pub fn words(self, add: bool) -> &'static str {
+        match (self, add) {
+            (TileWay::DesktopSteamClosed, true) => "Steam is closed, so Turbine can add it now. It shows when Steam starts.",
+            (TileWay::DesktopSteamClosed, false) => "Steam is closed, so Turbine can take it out now.",
+            (TileWay::DesktopRestart, _) => "Steam has to restart once for this.",
+            (TileWay::GameModePlugin, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is already one press in the Steam menu (Turbine's plugin) and in Turbine's Play choice.",
+            (TileWay::GameMode, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is in Turbine's Play choice.",
+            (TileWay::GameModePlugin | TileWay::GameMode, false) => "The tile can be taken out in Desktop Mode (open Turbine there), or in Steam: the tile's options, Manage, Remove non-Steam game.",
         }
     }
+
+    /// The button's label ("" when there is nothing to press here).
+    pub fn label(self, add: bool) -> &'static str {
+        match (self, add) {
+            (TileWay::DesktopSteamClosed, true) => "Add it",
+            (TileWay::DesktopSteamClosed, false) => "Remove it",
+            (TileWay::DesktopRestart, true) => "Restart Steam and add it",
+            (TileWay::DesktopRestart, false) => "Restart Steam and remove it",
+            _ => "",
+        }
+    }
+
+    /// {"how","words","label"} for the app.
+    pub fn offer_json(self, add: bool) -> String {
+        use crate::json::quote;
+        format!("{{\"how\":{},\"words\":{},\"label\":{}}}", quote(self.how()), quote(self.words(add)), quote(self.label(add)))
+    }
 }
+
+/// The answer for a game that has no Co-op tile at all.
+pub const NO_TILE_JSON: &str = "{\"how\":\"none\",\"words\":\"\",\"label\":\"\"}";
+
+/// Why the tile can't be written right now.
+pub const TILE_NEEDS_STEAM_CLOSED: &str = "Steam is running, so Turbine can't change its list of non-Steam games now. Close Steam (Desktop Mode), then try again.";
 
 // ---- For the app ----
 
@@ -633,7 +665,7 @@ pub fn state_json(a: &Ask) -> String {
         quote(&nothing_started(&log).unwrap_or_default()),
         using.join(","),
         quote(DISPLAY_NAME),
-        quote(tile.word()),
-        quote(tile.words()),
+        quote(tile.how()),
+        quote(tile.words(true)),
     )
 }

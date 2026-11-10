@@ -643,15 +643,23 @@ fn the_route_the_steps_and_the_tile_decision() {
     assert!(steps[2].contains("\"Turbine (mods)\""));
 
     // The Co-op tile: never by writing Steam's files in Game Mode.
-    assert_eq!(tool::tile_way(true, false, true), TileWay::NotOffered);
-    assert_eq!(tool::tile_way(true, true, true), TileWay::Decky);
+    assert_eq!(tool::tile_way(true, false, true), TileWay::GameMode);
+    assert_eq!(tool::tile_way(true, true, true), TileWay::GameModePlugin);
     assert_eq!(tool::tile_way(false, false, false), TileWay::DesktopSteamClosed);
-    assert_eq!(tool::tile_way(false, false, true), TileWay::DesktopCloseSteamFirst);
-    assert_eq!(tool::tile_way(false, true, true), TileWay::Decky);
     assert_eq!(tool::tile_way(false, true, false), TileWay::DesktopSteamClosed);
-    for w in [TileWay::NotOffered, TileWay::Decky, TileWay::DesktopSteamClosed, TileWay::DesktopCloseSteamFirst] {
-        assert!(!w.words().is_empty() && !w.word().is_empty());
+    assert_eq!(tool::tile_way(false, false, true), TileWay::DesktopRestart);
+    assert_eq!((TileWay::GameMode.how(), TileWay::GameModePlugin.how()), ("later", "later"));
+    assert_eq!((TileWay::DesktopSteamClosed.how(), TileWay::DesktopRestart.how()), ("direct", "restart"));
+    // Nothing to press in Game Mode, and the words say where it can be done.
+    for w in [TileWay::GameMode, TileWay::GameModePlugin] {
+        assert_eq!((w.label(true), w.label(false)), ("", ""));
+        assert!(w.words(true).contains("Desktop Mode") && w.words(false).contains("Desktop Mode"));
     }
+    assert!(TileWay::GameModePlugin.words(true).contains("Steam menu"));
+    assert!(!TileWay::GameMode.words(true).contains("Steam menu"), "no plugin, no promise of it");
+    let j = turbine_engine::json::parse(&TileWay::DesktopSteamClosed.offer_json(true)).unwrap();
+    assert_eq!((j.str_at("how"), j.str_at("label")), (Some("direct"), Some("Add it")));
+    assert_eq!(turbine_engine::json::parse(tool::NO_TILE_JSON).unwrap().str_at("how"), Some("none"));
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -678,7 +686,7 @@ fn the_state_for_the_app_and_no_restart_in_game_mode() {
     let v = ask(None);
     assert!(!b(&v, "installed") && !b(&v, "listed") && b(&v, "restartFirst"));
     assert_eq!(v.str_at("route"), Some("none"));
-    assert_eq!(v.str_at("tile"), Some("no"));
+    assert_eq!(v.str_at("tile"), Some("later"));
     // Written, Steam not started since: the first step is the restart.
     tool::install(&root, &data).unwrap();
     let made = fs::metadata(tool::tool_dir(&root).join("compatibilitytool.vdf")).unwrap().modified().unwrap();

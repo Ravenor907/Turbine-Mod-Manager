@@ -935,6 +935,17 @@ pub mod qobject {
         #[cxx_name = "coopTileJson"]
         fn coop_tile_json(self: &Self, game_id: &QString) -> QString;
 
+        /// 0.62: how the Co-op tile can be added or taken out here and now: {"how","words","label"} with how
+        /// "direct", "restart", "later" or "none" (steamsetup.rs).
+        #[qinvokable]
+        #[cxx_name = "coopTileOfferJson"]
+        fn coop_tile_offer_json(self: &Self, game_id: &QString) -> QString;
+
+        /// 0.62: adds (or takes out) the Co-op tile at once, with Steam closed: {"ok","words"}.
+        #[qinvokable]
+        #[cxx_name = "coopTileSet"]
+        fn coop_tile_set(self: &Self, game_id: &QString, add: bool) -> QString;
+
         /// 0.6, Settings: Turbine's Steam library art: {"found","on"}.
         #[qinvokable]
         #[cxx_name = "steamArtJson"]
