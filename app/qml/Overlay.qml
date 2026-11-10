@@ -21,11 +21,9 @@ Item {
     // (Motion.qml). It is on screen and takes presses from the first frame: the animation never holds anything
     // back, and closing is instant. Each overlay's file hands the motion system in (motion: ui.motion).
     property Motion motion: Motion { level: "off" }
-    property int entered: 0
     onVisibleChanged: {
         if (!visible) { enterFade.stop(); enterGrow.stop(); opacity = 1; scale = 1; return }
         if (!motion.on) return
-        entered++
         enterFade.restart()
         if (motion.moves) enterGrow.restart()
     }
