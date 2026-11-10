@@ -173,14 +173,51 @@ pub(crate) fn ensure_helper(data: &Path) {
         Ok(false) => {}
         Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam launch helper: {e}")),
     }
+    // 0.62: Turbine's Steam tool ("Turbine (mods)") next to Steam's other tools. A new folder Steam only reads, so
+    // it can be written while Steam runs; Steam lists it after its next start.
+    if let Some(root) = steam_root() {
+        match turbine_engine::compat_tool::install(&root, data) {
+            Ok(i) if !i.written.is_empty() => crate::log::line(
+                "launch",
+                &format!(
+                    "Steam tool \"Turbine (mods)\" written to {} ({}){}",
+                    turbine_engine::compat_tool::tool_dir(&root).display(),
+                    i.written.join(", "),
+                    if i.new_folder { ": Steam lists it after its next start" } else { "" }
+                ),
+            ),
+            Ok(_) => {}
+            Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam tool: {e}")),
+        }
+    }
+}
+
+/// Steam's own folder (the first one Steam uses on this device).
+pub(crate) fn steam_root() -> Option<PathBuf> {
+    turbine_engine::steam::steam_roots(&turbine_engine::home_dir()).into_iter().next()
+}
+
+/// 0.62: does Steam start this game through Turbine's Steam tool (chosen in the game's Properties, Compatibility)?
+pub(crate) fn via_tool(slot: &Slot, data: &Path, options_ok: bool) -> bool {
+    use turbine_engine::compat_tool as tool;
+    steam_root().is_some_and(|r| tool::route(&r, data, &slot.game.store_id, options_ok) == tool::Route::Tool)
 }
 
 /// The game's Launch Options in Steam as they are now: (set, the text Turbine needs, whether they run the helper).
 pub(crate) fn launch_option_state(slot: &Slot, data: &Path) -> (Option<String>, String, bool) {
     let set = turbine_engine::steam::launch_options(&turbine_engine::home_dir(), &slot.game.store_id);
     let need = ac::launch_option(data);
-    let ok = set.as_deref().is_some_and(|s| ac::launch_option_ok(s, data));
-    (set, need, ok)
+    let options_ok = set.as_deref().is_some_and(|s| ac::launch_option_ok(s, data));
+    // 0.62: the Proton Steam itself last used for the game is kept for Turbine's Steam tool, and a game that uses
+    // the tool is set up whatever its Launch Options say. Choosing the tool after an Undo sets it up again.
+    let id = &slot.game.store_id;
+    let _ = turbine_engine::compat_tool::remember_proton(data, id);
+    let tool = via_tool(slot, data, options_ok);
+    if tool && ac::undone_file(data, id).exists() {
+        let _ = ac::still_undone(data, id, None, true);
+        crate::log::line("launch", &format!("{}: Steam starts it through Turbine's Steam tool, so the earlier Undo no longer holds", slot.game.name));
+    }
+    (set, need, options_ok || tool)
 }
 
 /// The last apply of this game's mods failed: until one works, Steam's Play never starts me3.
@@ -221,8 +258,11 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     let words = match &set {
         None => "not found (the game isn't in Steam's settings yet)".to_string(),
         Some(s) if s.is_empty() => "empty".to_string(),
-        Some(s) => format!("\"{s}\"{}", if ok { " (they run Turbine's helper)" } else { " (they don't run Turbine's helper)" }),
+        Some(s) => format!("\"{s}\"{}", if set.as_deref().is_some_and(|x| ac::launch_option_ok(x, data)) { " (they run Turbine's helper)" } else { " (they don't run Turbine's helper)" }),
     };
+    if via_tool(slot, data, false) {
+        crate::log::line("launch", &format!("{}: Steam starts it through Turbine's Steam tool (\"Turbine (mods)\")", slot.game.name));
+    }
     crate::log::line("launch", &format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name));
     // Undone and not set again: the one-time step, with "Use the line again".
     let undone = ac::undone_file(data, &slot.game.store_id).exists() && ac::still_undone(data, &slot.game.store_id, set.as_deref(), false);

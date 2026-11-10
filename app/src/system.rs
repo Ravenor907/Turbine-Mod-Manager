@@ -202,6 +202,12 @@ fn host_has_plugin(plugins: &std::path::Path) -> Option<bool> {
     }
 }
 
+/// 0.62: is Turbine's Steam menu plugin installed in Decky (for the Co-op tile, which the plugin adds with Steam's
+/// own call)? Read only.
+pub fn decky_plugin_installed() -> bool {
+    host_has_plugin(&turbine_engine::home_dir().join("homebrew/plugins")) == Some(true)
+}
+
 /// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
 /// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
 pub fn decky_json() -> String {

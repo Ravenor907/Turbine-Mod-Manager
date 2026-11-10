@@ -654,3 +654,52 @@ fn the_route_the_steps_and_the_tile_decision() {
     }
     let _ = fs::remove_dir_all(&d);
 }
+
+#[test]
+fn the_state_for_the_app_and_no_restart_in_game_mode() {
+    // Game Mode: never close Steam to write its files (the session starts it again at once).
+    assert_eq!(tool::restart_and_write_allowed(true, Some(true)), Err(tool::GAME_MODE_NO_WRITE));
+    assert_eq!(tool::restart_and_write_allowed(true, None), Err(tool::GAME_MODE_NO_WRITE));
+    assert!(tool::restart_and_write_allowed(false, Some(true)).is_ok(), "Desktop Mode keeps the one restart");
+    assert!(tool::restart_and_write_allowed(false, Some(false)).is_ok());
+    assert!(tool::restart_and_write_allowed(true, Some(false)).is_ok(), "Steam really closed: the file can be written");
+    assert!(tool::GAME_MODE_NO_WRITE.contains("\"Turbine (mods)\""));
+
+    let d = tmp("state");
+    let root = d.join("Steam");
+    let data = d.join("data");
+    fs::create_dir_all(&root).unwrap();
+    let ask = |started: Option<std::time::SystemTime>| {
+        let a = tool::Ask { steam_root: &root, data: &data, app_id: APP, game_name: "Elden Ring", launch_options_ok: false, steam_started: started, game_mode: true, decky_plugin: false, steam_running: true };
+        turbine_engine::json::parse(&tool::state_json(&a)).unwrap()
+    };
+    let b = |v: &turbine_engine::json::Json, k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap();
+    // Not written yet.
+    let v = ask(None);
+    assert!(!b(&v, "installed") && !b(&v, "listed") && b(&v, "restartFirst"));
+    assert_eq!(v.str_at("route"), Some("none"));
+    assert_eq!(v.str_at("tile"), Some("no"));
+    // Written, Steam not started since: the first step is the restart.
+    tool::install(&root, &data).unwrap();
+    let made = fs::metadata(tool::tool_dir(&root).join("compatibilitytool.vdf")).unwrap().modified().unwrap();
+    let v = ask(Some(made - std::time::Duration::from_secs(5)));
+    assert!(b(&v, "installed") && !b(&v, "listed"));
+    assert_eq!(v.get("steps").unwrap().as_array().len(), 4);
+    // Steam started since: three steps.
+    let v = ask(Some(made + std::time::Duration::from_secs(5)));
+    assert!(b(&v, "listed") && !b(&v, "restartFirst") && !b(&v, "chosen"));
+    assert_eq!(v.get("steps").unwrap().as_array().len(), 3);
+    assert_eq!(v.str_at("toolName"), Some("Turbine (mods)"));
+    assert_eq!(v.str_at("proton"), Some(""));
+    // The Proton on record and the last launch's own words.
+    let p = d.join("Proton 11.0");
+    write(&p.join("proton"), "x");
+    write(&p.join("toolmanifest.vdf"), "x");
+    tool::write_proton_choice(&data, APP, &p).unwrap();
+    write(&anticheat::helper_log(&data), &format!("2026-11-10 10:00:00 Turbine (mods): Steam started app {APP} (waitforexitandrun) in /g: /g/x.exe\n2026-11-10 10:00:00 Turbine (mods): Proton for this game: {} [why: the Proton Steam last used for this game, kept by Turbine]\n", p.display()));
+    let v = ask(Some(made + std::time::Duration::from_secs(5)));
+    assert_eq!(v.str_at("protonName"), Some("Proton 11.0"));
+    assert_eq!(v.str_at("route"), Some("tool"));
+    assert_eq!(v.str_at("lastProton"), Some("Started with Proton 11.0: the Proton Steam last used for this game, kept by Turbine."));
+    let _ = fs::remove_dir_all(&d);
+}

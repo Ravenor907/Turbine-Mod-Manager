@@ -908,6 +908,13 @@ pub mod qobject {
         #[cxx_name = "steamSetupStart"]
         fn steam_setup_start(self: &Self, game_id: &QString, kind: &QString, resume: &QString) -> QString;
 
+        /// 0.62: Turbine's Steam tool ("Turbine (mods)") for a game: {"installed","listed","chosen","route",
+        /// "steps","restartFirst","proton","protonName","lastProton","nothingStarted","using","toolName","tile",
+        /// "tileWords"} (steamsetup.rs, turbine_engine::compat_tool::state_json).
+        #[qinvokable]
+        #[cxx_name = "steamToolJson"]
+        fn steam_tool_json(self: &Self, game_id: &QString) -> QString;
+
         /// 0.6: the Steam restart's state: {"state","words","resume","what","age"}.
         #[qinvokable]
         #[cxx_name = "steamSetupState"]

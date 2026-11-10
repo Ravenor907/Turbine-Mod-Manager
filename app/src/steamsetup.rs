@@ -65,6 +65,12 @@ pub(crate) fn start(found: &[Game], game_mode: bool, job: Job) -> Result<&'stati
         crate::log::line("steam-setup", &format!("Not restarting Steam for {}: {why}", job.what));
         return Err(why);
     }
+    // 0.62: never in Game Mode while Steam runs. The session starts Steam again at once, so the file was written
+    // after Steam had read it, and Steam wrote its own copy back (the owner's device, 0.6 and 0.61).
+    if let Err(why) = turbine_engine::compat_tool::restart_and_write_allowed(game_mode, crate::system::steam_running()) {
+        crate::log::line("steam-setup", &format!("No Steam restart for {} in Game Mode: Steam's files can't be written safely there", job.what));
+        return Err(why.to_string());
+    }
     if crate::system::steam_running() == Some(false) {
         crate::log::line("steam-setup", &format!("Steam is closed: making the change for {} now", job.what));
         let lines = sr::apply_job(&data, &job)?;
@@ -300,6 +306,32 @@ impl qobject::Turbine {
     pub fn coop_tile_json(&self, game_id: &QString) -> QString {
         let there = self.find(&game_id.to_string()).is_some_and(|g| tile_there(&g));
         QString::from(format!("{{\"there\":{there}}}").as_str())
+    }
+
+    /// 0.62: Turbine's Steam tool for a game (turbine_engine::compat_tool::state_json): is it written, does Steam
+    /// list it yet, does the game use it, the steps for the player, the Proton it runs, and how the Co-op tile can
+    /// be added here. Read only, except that the tool's folder is written when it is missing.
+    pub fn steam_tool_json(&self, game_id: &QString) -> QString {
+        use turbine_engine::compat_tool as tool;
+        let none = "{\"installed\":false,\"listed\":false,\"chosen\":false,\"route\":\"none\",\"steps\":[],\"restartFirst\":true,\"proton\":\"\",\"protonName\":\"\",\"lastProton\":\"\",\"nothingStarted\":\"\",\"using\":[],\"toolName\":\"Turbine (mods)\",\"tile\":\"no\",\"tileWords\":\"\"}";
+        let Some(g) = self.find(&game_id.to_string()) else { return QString::from(none) };
+        let Some(root) = crate::anticheat::steam_root() else { return QString::from(none) };
+        let data = crate::backend::data_home();
+        crate::anticheat::ensure_helper(&data);
+        let set = steam::launch_options(&turbine_engine::home_dir(), &g.store_id);
+        let running = crate::system::steam_running();
+        let ask = tool::Ask {
+            steam_root: &root,
+            data: &data,
+            app_id: &g.store_id,
+            game_name: &g.name,
+            launch_options_ok: set.as_deref().is_some_and(|s| ac::launch_option_ok(s, &data)),
+            steam_started: steam_started(),
+            game_mode: *self.gamemode(),
+            decky_plugin: crate::system::decky_plugin_installed(),
+            steam_running: running != Some(false),
+        };
+        QString::from(tool::state_json(&ask).as_str())
     }
 
     /// Settings, Steam library art: {"found": Turbine is in Steam's library, "on": its art is wanted}.

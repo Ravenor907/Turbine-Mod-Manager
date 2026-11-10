@@ -573,3 +573,67 @@ impl TileWay {
         }
     }
 }
+
+// ---- For the app ----
+
+/// Why Turbine doesn't restart Steam to change Steam's own settings files in Game Mode (0.62: that way is gone).
+pub const GAME_MODE_NO_WRITE: &str = "Game Mode starts Steam again at once, so Turbine can't change Steam's own settings here. Pick \"Turbine (mods)\" for the game in Steam instead (Turbine shows the three steps), or do this in Desktop Mode.";
+
+/// May Turbine close Steam, write one of Steam's settings files and start it again? Never in Game Mode while Steam
+/// runs (the session starts Steam again before the file is written, and Steam writes its own copy back).
+pub fn restart_and_write_allowed(game_mode: bool, steam_running: Option<bool>) -> Result<(), &'static str> {
+    if game_mode && steam_running != Some(false) {
+        Err(GAME_MODE_NO_WRITE)
+    } else {
+        Ok(())
+    }
+}
+
+/// What the app needs to know about the tool for one game.
+pub struct Ask<'a> {
+    pub steam_root: &'a Path,
+    pub data: &'a Path,
+    pub app_id: &'a str,
+    pub game_name: &'a str,
+    /// The game's Launch Options run Turbine's helper (anticheat::launch_option_ok).
+    pub launch_options_ok: bool,
+    /// When the running Steam started (None: not running, or unknown).
+    pub steam_started: Option<SystemTime>,
+    pub game_mode: bool,
+    pub decky_plugin: bool,
+    pub steam_running: bool,
+}
+
+/// The tool's state for one game as JSON for the app:
+/// {"installed","listed","chosen","route","steps":[..],"restartFirst","proton","protonName","lastProton",
+///  "nothingStarted","using":[app ids],"toolName","tile","tileWords"}.
+/// `route` is "tool", "options" or "none"; `listed` false means Steam must start again before the tool shows in its
+/// list; `proton` is the folder on record for the game ("" when the tool will choose by itself), `lastProton` the
+/// sentence about the Proton the tool used at the last launch.
+pub fn state_json(a: &Ask) -> String {
+    use crate::json::quote;
+    let installed = is_installed(a.steam_root, a.data);
+    let listed = installed && seen_by_steam(a.steam_root, a.steam_started);
+    let r = route(a.steam_root, a.data, a.app_id, a.launch_options_ok);
+    let chosen = is_chosen(a.steam_root, a.app_id);
+    let proton = proton_choice(a.data, a.app_id).filter(|p| is_proton(p));
+    let name = proton.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let log: Vec<String> = fs::read_to_string(crate::anticheat::helper_log(a.data)).unwrap_or_default().lines().rev().take(60).map(str::to_string).collect::<Vec<_>>().into_iter().rev().collect();
+    let steps: Vec<String> = steps(a.game_name, listed).iter().map(|s| quote(s)).collect();
+    let using: Vec<String> = games_using(a.steam_root).iter().map(|s| quote(s)).collect();
+    let tile = tile_way(a.game_mode, a.decky_plugin, a.steam_running);
+    format!(
+        "{{\"installed\":{installed},\"listed\":{listed},\"chosen\":{chosen},\"route\":{},\"steps\":[{}],\"restartFirst\":{},\"proton\":{},\"protonName\":{},\"lastProton\":{},\"nothingStarted\":{},\"using\":[{}],\"toolName\":{},\"tile\":{},\"tileWords\":{}}}",
+        quote(r.word()),
+        steps.join(","),
+        !listed,
+        quote(&proton.map(|p| p.to_string_lossy().to_string()).unwrap_or_default()),
+        quote(&name),
+        quote(&proton_words(&log).unwrap_or_default()),
+        quote(&nothing_started(&log).unwrap_or_default()),
+        using.join(","),
+        quote(DISPLAY_NAME),
+        quote(tile.word()),
+        quote(tile.words()),
+    )
+}
