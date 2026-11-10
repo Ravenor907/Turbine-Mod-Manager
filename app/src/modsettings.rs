@@ -349,7 +349,8 @@ pub(crate) fn coop_password(game: &Game, root: &std::path::Path, mod_id: &str) -
 
 /// The id of the installed Seamless Co-op, if it is installed.
 pub(crate) fn seamless_id(store: &Store) -> Option<String> {
-    store.installed_sources().into_iter().find(|(_, s)| s.kind == "loader" && s.id == "seamless").map(|(id, _)| id)
+    // The copy the game loads, known by its files: one from Nexus counts like Turbine's own download.
+    store.seamless().map(|m| m.id)
 }
 
 pub(crate) const NEEDS_PASSWORD: &str = "Set the Seamless Co-op session password first. Turbine opens its settings.";
