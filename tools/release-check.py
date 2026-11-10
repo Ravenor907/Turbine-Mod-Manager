@@ -18,8 +18,11 @@ if "--no-frozen-lockfile" in wf:
 need('if [ "$greens" -lt 3 ]', "a release needs three green runs of its commit")
 need("Turbine-Decky.zip.sha256", "the Decky zip needs its checksum beside it")
 rel = wf[wf.index("  release:"):]
-if rel.count("run-id: ${{ needs.reuse.outputs.run }}") < 2:
+# Both files come from the reused green run: one download step by their exact artifact ids, and the reuse
+# step looks up an id for each of the two files.
+if "run-id: ${{ needs.reuse.outputs.run }}" not in rel or "artifact-ids: ${{ needs.reuse.outputs.ids }}" not in rel:
     problems.append("the release must take both the Flatpak and the Decky zip from the reused green run")
+need("for name in TurbineModManager.flatpak Turbine-Decky.zip; do", "the reuse step must find both the Flatpak and the Decky zip")
 if "No checksum beside" not in rel or "exit 1" not in rel.split("No checksum beside")[1][:80]:
     problems.append("a missing checksum must stop the release")
 if "::warning title=No checksum" in rel:
