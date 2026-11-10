@@ -6422,8 +6422,10 @@ Window {
                         reqStop() },
                 () => { say(!reqRunning && listItems[0] && listItems[0].kind === "needsq", "Stop: " + (reqRunning ? "still running" : "stopped") + "; My mods rows: " + rowKinds())
                         modIndex = 0; zone = "main" },
-                // A press of its own: one in the same moment as a sheet closing is held back on purpose.
-                () => { pad("a") },
+                // The loader question opened when Get them all turned on Lantern Glow SKSE (it needs SKSE): B closes it
+                // first, then A on the row.
+                () => { if (sheet !== "") pad("b") },
+                () => { modIndex = 0; zone = "main"; pad("a") },
                 () => { say(reqRunning && reqStripWords === "Getting 1 of 1: Test Library", "A on the row goes on: " + (reqStripWords || "nothing running"))
                         reqSkip() },
                 () => { if (reqRunning) return false },
