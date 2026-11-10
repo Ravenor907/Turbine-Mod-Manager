@@ -4230,6 +4230,10 @@ Window {
     // A key was pressed: the hints follow the keyboard from here.
     function keySeen(name) {
         if (lastInput !== "keys") lastInput = "keys"
+        // 0.63: where the mouse rests now. Qt hovers the items under a still mouse again when the screen changes
+        // (a wheel or sheet closing after a key): that is not the mouse being used, so it doesn't turn the hints
+        // to the mouse's (the toast after Esc on the wheel lost its "Ctrl+Z").
+        keyMouseAt = realMouse.point.scenePosition
         inputCount++; lastInputAt = Date.now(); lastInputName = name
     }
     // Ctrl+= and Ctrl+-, and Ctrl with the mouse wheel: the interface size, a step at a time.
@@ -4247,6 +4251,7 @@ Window {
     }
     // 0.63: Tab and Space each do one thing on a tap and another when held (see Keys.onPressed below).
     property bool tabDown: false
+    property var keyMouseAt: null
     property bool tabWheel: false
     property bool spaceDown: false
     readonly property int tabHoldMs: 220
@@ -4294,8 +4299,15 @@ Window {
         id: keyRoot
         anchors.fill: parent
         focus: true
-        // A real mouse (not the controller pointer, which Turbine draws itself).
-        HoverHandler { onPointChanged: if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse" }
+        // A real mouse (not the controller pointer, which Turbine draws itself) that moved since the last key.
+        HoverHandler {
+            id: realMouse
+            onPointChanged: {
+                const p = point.scenePosition, k = app.keyMouseAt
+                if (k && Math.abs(p.x - k.x) < 1 && Math.abs(p.y - k.y) < 1) return
+                if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse"
+            }
+        }
         Keys.onPressed: (e) => {
             app.pressFresh = false
             // 0.62: Ctrl+Enter is the keyboard's hold of Start (the Play choice, or Play).
@@ -6120,11 +6132,12 @@ Window {
                         say(mouseLegend && barLb.width === 0 && barRb.width === 0 && startHintKey.width === 0, "after the mouse: " + (barLb.width === 0 && barRb.width === 0 && startHintKey.width === 0 ? "no key caps" : "key caps") + ", the pages by name: " + tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / "))
                         m.tb = tab; mouse({ x: width / 2, y: height / 3 }, Qt.ForwardButton); m.t1 = tab; mouse({ x: width / 2, y: height / 3 }, Qt.BackButton)
                         say(m.t1 === m.tb + 1 && tab === m.tb, "the Forward button: tab " + m.t1 + "; Back: tab " + tab) },
+                // A mod whose click asks nothing (one that needs a missing loader asks for it on the first click).
                 () => { if (turnTo >= 0) return false
-                        const it = modList.itemAtIndex(1); if (!it) return false
-                        m.on = mods[1].enabled; m.name = mods[1].name; const p = at(it, 0.4); mouse(p, Qt.LeftButton); mouse(p, Qt.LeftButton) },
+                        m.di = mods.findIndex(x => !x.needsLoader); const it = m.di >= 0 ? modList.itemAtIndex(m.di) : null; if (!it) return false
+                        m.on = mods[m.di].enabled; m.name = mods[m.di].name; const p = at(it, 0.4); mouse(p, Qt.LeftButton); mouse(p, Qt.LeftButton) },
                 () => { m.s1 = sheet; m.ok = (sheet === "pick" && pickTitle === m.name) || sheet === "modmenu"
-                        say(m.ok && modIndex === 1 && mods[1].enabled === m.on, "a double-click on row 2: " + (m.ok ? "the mod opened" : "sheet \"" + sheet + "\"") + ", left " + (mods[1].enabled === m.on ? "as it was" : "changed"))
+                        say(m.ok && modIndex === m.di && mods[m.di].enabled === m.on, "a double-click on a mod: " + (m.ok ? "the mod opened" : "sheet \"" + sheet + "\"") + ", left " + (mods[m.di].enabled === m.on ? "as it was" : "changed"))
                         mouse({ x: width / 2, y: height / 3 }, Qt.BackButton) },
                 () => { if (sheet !== "") mouse({ x: width / 2, y: height / 3 }, Qt.BackButton) },
                 () => { say(sheet === "", "Back from the opened mod: sheet \"" + sheet + "\"") },

@@ -313,7 +313,7 @@ need $y "Keys: Space held for 3 seconds is the Play choice" "Key check: Space he
 need $y "Keys: Tab held is the quick wheel" "Key check: Tab held: the wheel open, D picks slot 2, Esc: closed, the page stayed$"
 need $y "Mouse: no key caps, the pages by name" "Key check: after the mouse: no key caps, the pages by name: My mods / Get mods( / [A-Za-z ]+)?$"
 need $y "Mouse: Forward is the next page" "Key check: the Forward button: tab 1; Back: tab 0$"
-need $y "Mouse: a double-click opens a mod" "Key check: a double-click on row 2: the mod opened, left as it was$"
+need $y "Mouse: a double-click opens a mod" "Key check: a double-click on a mod: the mod opened, left as it was$"
 need $y "Mouse: Back closes the opened mod" "Key check: Back from the opened mod: sheet \"\"$"
 need $y "The bar after the mouse: nothing overlaps" "Bar check \(keycheck mouse, .* 0 problems"
 need $y "The bar with the keyboard's names: nothing overlaps" "Bar check \(keycheck, .* 0 problems"
