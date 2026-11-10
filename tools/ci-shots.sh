@@ -658,6 +658,25 @@ if grep -q "^MimeType=.*x-scheme-handler/nxm" "$desk" && grep -q "^Exec=.*%u" "$
 else
   echo "::error title=nxm handler not exported::$desk"; (cat "$desk" 2>&1 || true); fail=1
 fi
+# 0.63: the taskbar finds Turbine's entry by the window's name, and every icon the Flatpak exports is the mark on a
+# clear background (a picture with see-through pixels), at the six sizes and nowhere else.
+if grep -q "^StartupWMClass=io.github.ravenor907.TurbineModManager$" "$desk"; then
+  echo "::notice title=Window class exported::$(grep -h '^StartupWMClass=' "$desk")"
+else
+  echo "::error title=The menu entry doesn't name Turbine's window::$desk"; fail=1
+fi
+icons=$(cd "$loc/export/share/icons" 2>/dev/null && find . \( -type f -o -type l \) -name '*TurbineModManager*' | LC_ALL=C sort | tr '\n' ' ')
+want=""
+for n in 128 256 32 48 512 64; do want="$want./hicolor/${n}x${n}/apps/io.github.ravenor907.TurbineModManager.png "; done
+solid=""
+for f in "$loc"/export/share/icons/hicolor/*/apps/*.png; do
+  [ "$(od -An -tu1 -j25 -N1 "$f" | tr -d ' ')" = 6 ] || solid="$solid $f"
+done
+if [ "$icons" = "$want" ] && [ -z "$solid" ]; then
+  echo "::notice title=Icons exported::six sizes, each with a clear background"
+else
+  echo "::error title=Exported icons aren't the six clear ones::found: $icons; without see-through pixels:$solid"; fail=1
+fi
 # The browser helper is in the Flatpak (without its tests).
 ext=$(flatpak run --command=sh io.github.ravenor907.TurbineModManager -c 'ls /app/share/turbine-mod-manager/extension' 2>&1 | tr '\n' ' ')
 echo "Browser helper in the Flatpak: $ext"

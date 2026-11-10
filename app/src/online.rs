@@ -1311,6 +1311,21 @@ impl Net {
             return Err(format!("The update couldn't be installed ({line}). The details are in the activity log."));
         }
         crate::log::line("update", &format!("Installed Turbine {}", release.version));
+        // 0.63: the desktop's menu kept showing the icon from before an update. Its list of programs is rebuilt
+        // (KDE's own tool, in Desktop Mode; nothing happens where it isn't there), so the entry and its icon are
+        // read again.
+        for tool in ["kbuildsycoca6", "kbuildsycoca5"] {
+            let ran = std::process::Command::new("flatpak-spawn")
+                .args(["--host", tool, "--noincremental"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if ran.is_ok_and(|s| s.success()) {
+                crate::log::line("update", "The desktop's menu was asked to read Turbine's entry and icon again");
+                break;
+            }
+        }
         Ok(())
     }
 }

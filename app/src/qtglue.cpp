@@ -3,9 +3,12 @@
 // the controller pointer's mouse and wheel events.
 
 #include <QtCore/QByteArray>
+#include <QtCore/QFile>
+#include <QtCore/QSize>
 #include <QtCore/QString>
 #include <QtCore/QtGlobal>
 #include <QtGui/QClipboard>
+#include <QtGui/QIcon>
 #include <cstdlib>
 #include <cstring>
 #include <QtGui/QGuiApplication>
@@ -43,6 +46,26 @@ extern "C" void turbine_install_qt_handler(Sink sink)
 {
     s_sink = sink;
     s_previous = qInstallMessageHandler(handler);
+}
+
+// 0.63: who the window belongs to. Desktop Mode's taskbar showed a generic "X" for Turbine's window, because the
+// window named itself after the program file and no menu entry carries that name. With the desktop file's name the
+// taskbar finds Turbine's entry (its name and icon); the window icon itself comes from the icons the bundle
+// installs, for every place that asks the window and not the entry.
+extern "C" void turbine_window_identity()
+{
+    const QString id = QStringLiteral("io.github.ravenor907.TurbineModManager");
+    QGuiApplication::setDesktopFileName(id);
+    QIcon icon;
+    for (const int n : {32, 48, 64, 128, 256, 512}) {
+        const QString file = QStringLiteral("/app/share/icons/hicolor/%1x%1/apps/%2.png").arg(n).arg(id);
+        if (QFile::exists(file))
+            icon.addFile(file, QSize(n, n));
+    }
+    if (icon.isNull())
+        icon = QIcon::fromTheme(id);
+    if (!icon.isNull())
+        QGuiApplication::setWindowIcon(icon);
 }
 
 extern "C" void turbine_copy_text(const char *text)

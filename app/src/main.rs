@@ -32,6 +32,7 @@ pub const VERSION: &str = match option_env!("TURBINE_VERSION") {
 extern "C" {
     // qtglue.cpp
     fn turbine_install_qt_handler(sink: extern "C" fn(i32, *const std::os::raw::c_char, *const std::os::raw::c_char));
+    fn turbine_window_identity();
     // webglue.cpp
     fn turbine_web_prepare(log: extern "C" fn(*const std::os::raw::c_char)) -> i32;
     fn turbine_web_profile(
@@ -253,6 +254,9 @@ fn main() {
         a.as_mut().set_organization_name(&QString::from("Turbine Mod Manager"));
         a.as_mut().set_application_name(&QString::from("Turbine Mod Manager"));
     }
+    // 0.63: the window carries the menu entry's name and Turbine's icon (Desktop Mode's taskbar showed a generic one).
+    // SAFETY: after QGuiApplication, on the main thread; takes and keeps nothing from this side.
+    unsafe { turbine_window_identity() };
     // The browser's profile: kept in Turbine's data folder (signed in stays signed in), its cache in the cache folder.
     let web_data = log::folder(&backend::data_home()).join("browser");
     let web_cache = online::temp_dir().parent().map(|p| p.join("browser")).unwrap_or_else(|| web_data.join("cache"));
