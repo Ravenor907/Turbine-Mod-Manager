@@ -23,7 +23,7 @@ The optional Decky plugin puts Mods on or off and Play in Steam's Quick Access m
 | LB / RB | Tabs (My mods, Get mods, and the game's other tabs) |
 | LT / RT | Page up and down |
 | View | The quick wheel |
-| Start | Play (hold for Play options) |
+| Start | Settings (hold 3 seconds: Play) |
 | Right stick | Pointer |
 
 Touch works for everything the buttons do: tap to do, long-press for options.

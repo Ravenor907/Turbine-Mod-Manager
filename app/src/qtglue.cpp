@@ -198,3 +198,40 @@ extern "C" int turbine_key_event(int key, int pressed, const char *text)
     QCoreApplication::sendEvent(win, &ev);
     return 1;
 }
+
+// The build's checks: a keyboard key with its modifiers (Ctrl+Enter, Shift+Tab), sent to the window like a real one.
+// key: Qt's key code. mods: Qt's keyboard modifiers. Returns 1 when sent.
+extern "C" int turbine_selftest_key(int key, int mods, int pressed)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    QKeyEvent ev(pressed ? QEvent::KeyPress : QEvent::KeyRelease, key, Qt::KeyboardModifiers::fromInt(mods));
+    QCoreApplication::sendEvent(win, &ev);
+    return 1;
+}
+
+// The build's checks: a real mouse's buttons (left, right, Back) and its wheel with modifiers (Ctrl+wheel), at a
+// place in the window. kind: 0 move, 1 press, 2 release, 3 wheel. button: Qt's mouse button. Returns 1 when sent.
+extern "C" int turbine_selftest_mouse(int kind, double x, double y, int button, int mods, int wheel)
+{
+    QWindow *win = mainWindow();
+    if (!win)
+        return -1;
+    const QPointF local(x, y);
+    const QPointF global = win->mapToGlobal(local);
+    const Qt::KeyboardModifiers held = Qt::KeyboardModifiers::fromInt(mods);
+    if (kind == 3) {
+        QWheelEvent ev(local, global, QPoint(), QPoint(0, -120 * wheel), Qt::NoButton, held, Qt::NoScrollPhase, false);
+        ev.setTimestamp(stamp());
+        QCoreApplication::sendEvent(win, &ev);
+        return 1;
+    }
+    const Qt::MouseButton b = kind == 0 ? Qt::NoButton : static_cast<Qt::MouseButton>(button);
+    const Qt::MouseButtons down = kind == 1 ? Qt::MouseButtons(b) : Qt::MouseButtons(Qt::NoButton);
+    const QEvent::Type type = kind == 1 ? QEvent::MouseButtonPress : kind == 2 ? QEvent::MouseButtonRelease : QEvent::MouseMove;
+    QMouseEvent ev(type, local, global, b, down, held);
+    ev.setTimestamp(stamp());
+    QCoreApplication::sendEvent(win, &ev);
+    return 1;
+}

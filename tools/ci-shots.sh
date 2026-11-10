@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -228,7 +228,7 @@ done
 if [ "$MODE" = 1280x800 ]; then
 # 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
 # A new home for each (not a copy of the shared one, whose mods earlier pictures turned on and off): both mods start on.
-for p in controls legendcheck sheetcheck inputcheck; do
+for p in controls legendcheck sheetcheck inputcheck startcheck; do
   rm -rf "$PWD/fh/$p"; python3 tools/fake-home.py "$PWD/fh/$p" > /dev/null; h="$PWD/fh/$p"
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 done
@@ -260,7 +260,24 @@ done
 need opening8s-1280x800 "No sheet when Nexus is slow" "Still in front 8 seconds after Open: Open in Steam's browser and Always use Steam's browser are under the button"
 need nexusguard-1280x800 "3: three A presses, one browser" "Nexus guard: 3 presses of A, 1 browser launch,"
 need legendcheck-1280x800 "4: the legend is binds()" "Legend check: [0-9]+ contexts, 0 problems"
-need sheetcheck-1280x800 "6: A highlighted, B cancel, Start main" "Sheet rule: [0-9]+ sheets, 0 problems"
+need sheetcheck-1280x800 "6: A highlighted, B cancel, Start nothing" "Sheet rule: [0-9]+ sheets, 0 problems"
+# 0.62: Start. A tap is Settings and back, a hold let go early is nothing, 3 seconds is the Play choice (or Play, by
+# the setting), A on Play plays, Ctrl+Enter is the hold, a menu's Start never plays, the bar's hint is a button.
+s=startcheck-1280x800
+need $s "Start: a tap opens Settings" "Start check: a tap opens Settings, legend .*START Close$"
+need $s "Start: a tap again goes back" "Start check: a tap again goes back to My mods$"
+need $s "Start: B goes back" "Start check: B from Settings goes back to My mods$"
+need $s "Start: let go early does nothing, the ring was filling" "Start check: let go at 1.5 s: the ring was showing at [3-8][0-9]%, then page game, sheet \"\", Play asked 0 times$"
+need $s "Start: held 3 seconds shows the Play choice" "Start check: held 3 seconds: nothing at 2.3 s \(sheet \"\"\), then Play options, focus Play with mods, Play asked 0 times$"
+need $s "Start: B closes the Play choice" "Start check: B closes the Play choice: sheet \"\"$"
+need $s "Start: the setting in Settings, Look" "Start check: Hold Start does: row there, A changed it to last, the bar says hold: Play choice then hold: Play$"
+need $s "Start: Play my last choice plays after 3 seconds" "Start check: Play my last choice: held 3 seconds, Play asked 1 times$"
+need $s "Start: A on Play still plays" "Start check: A on Play: Play asked 1 times$"
+need $s "Start: Ctrl+Enter is the hold" "Start check: Ctrl\+Enter: Play options, setting choice$"
+need $s "Start: never plays from a menu" "Start check: Start on the mod menu: sheet \"modmenu\", page game, Play asked 0 times, legend ([^S]|S[^T])*$"
+need $s "Start: the bar's hint is a 44 px button" "Start check: a click on the Start hint \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px tall\): Settings$"
+need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck, .* 0 problems \| .*start, wheel, Play"
+need $s "Start checks" "Start check done: 0 problems"
 # 0.54 fixes: holds need a real press, a click on a row is A, the removed row, RT and R3, the tutorial, hidden games.
 i=inputcheck-1280x800
 need $i "Holds: a click never deletes" "Hold check: a click on Hold A to delete: only the highlight moved"
@@ -354,7 +371,7 @@ for size in $SIZES; do
   fi
 done
 if [ "$MODE" = 1280x800 ]; then
-# Controls: hold Start (Play options), R3 Find on My mods, Select several.
+# Controls: Play options, R3 Find on My mods, Select several.
 for p in playoptions findmods selectmods; do
   fresh "$p-1280x800"; h="$PWD/fh/$p-1280x800"
   shoot "$p-1280x800" 1280x800 $p "$h" --game=$skyrim \
@@ -362,8 +379,8 @@ for p in playoptions findmods selectmods; do
 done
 if ran "playoptions-1280x800"; then
 log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
-if grep -q "Play options open: true" "$log"; then echo "::notice title=Hold Start::Play options opened"
-else echo "::error title=Holding Start didn't open Play options::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
+if grep -q "Play options open: true" "$log"; then echo "::notice title=Play options::Play options opened"
+else echo "::error title=Play options didn't open::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
 fi
 # 0.52: A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
 # offer the missing script extender; KCD II rows say a first-game mod may not work; Witcher's clash offers
@@ -920,7 +937,8 @@ for size in $SIZES; do
   shoot "golden-$size" "$size" golden "$h" --game=$skyrim
   need "golden-$size" "Journey: X on an empty game opens Add from Downloads ($size)" "Journey add: sheet add, [1-9][0-9]* files, A Add"
   need "golden-$size" "Journey: A adds the mod, on ($size)" "Journey added: [^,]+ on, sheet none"
-  need "golden-$size" "Journey: Start plays it ($size)" "Journey played: Play started .* with [1-9] mods on"
+  need "golden-$size" "Journey: Start held shows the Play choice ($size)" "Journey Start held: Play options, focus Play with mods"
+  need "golden-$size" "Journey: A plays it ($size)" "Journey played: Play started .* with [1-9] mods on"
   need "golden-$size" "Journey: A turns it off and on ($size)" "Journey A off and on: .* on again"
   need "golden-$size" "Journey: Uninstall leaves the row with Put back ($size)" "Journey uninstall: the row says .* removed, A Put back"
   need "golden-$size" "Journey: A puts it back ($size)" "Journey put back: .* is back in My mods"

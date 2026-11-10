@@ -2,7 +2,7 @@ import QtQuick
 
 // The beginner tutorial: four cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
 // X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus
-// right in Turbine, Added, START plays). 4: Press START to play, then "Pick a game to start". Main.qml moves between the cards (A or Right next,
+// right in Turbine, Added, A on Play). 4: START: a tap is Settings, a 3 second hold plays; then "Pick a game to start". Main.qml moves between the cards (A or Right next,
 // Left back, B skips, Start finishes) and remembers it was seen; Settings, Help shows it again.
 Overlay {
     id: tut
@@ -85,7 +85,7 @@ Overlay {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: ["The buttons", "The quick wheel", "Getting a mod", "Play"][tut.card] || ""
+            text: ["The buttons", "The quick wheel", "Getting a mod", "Start"][tut.card] || ""
             color: tut.ui.c.accentText
             font.family: tut.ui.titleFont; font.pixelSize: tut.ui.fpx(28); font.bold: true
         }
@@ -98,7 +98,7 @@ Overlay {
                    "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
                    tut.thunderstore ? "Open Get mods, A on a mod, then A on Install. Turbine adds it with what it needs."
                                     : "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
-                   tut.startGlyph + " plays the game with your mods on. That's all you need."][tut.card] || ""
+                   "Hold " + tut.startGlyph + " for 3 seconds to play with your mods on. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18)
         }
@@ -147,7 +147,7 @@ Overlay {
             Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it on Nexus" }
             Step { n: 3; tile: "Slow download"; words: "Sign in if it asks (free), press Slow download" }
             Step { n: 4; tile: "Added"; words: "Turbine adds it and closes the page" }
-            Step { n: 5; tile: tut.startGlyph; words: tut.startGlyph + " plays" }
+            Step { n: 5; tile: "A"; face: true; words: "The ring is on Play: A plays" }
         }
         // 4: Start.
         Column {
@@ -155,7 +155,8 @@ Overlay {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(12)
             Pill { k: tut.startGlyph; anchors.horizontalCenter: parent.horizontalCenter; width: tut.ui.px(150); height: tut.ui.px(64) }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Play"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Hold 3 seconds: Play"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Tap: Settings"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18) }
         }
     }
 

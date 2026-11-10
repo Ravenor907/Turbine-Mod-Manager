@@ -102,6 +102,15 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selftestPad"]
         fn selftest_pad(self: Pin<&mut Self>, button: &QString, pressed: bool);
+        /// 0.62, for the build's checks: a keyboard key with its modifiers (Qt's codes), delivered like a real one.
+        #[qinvokable]
+        #[cxx_name = "selftestKey"]
+        fn selftest_key(self: Pin<&mut Self>, key: i32, mods: i32, pressed: bool);
+        /// 0.62, for the build's checks: a real mouse's move (kind 0), press (1), release (2) or wheel (3) at (x, y),
+        /// with Qt's button and modifiers.
+        #[qinvokable]
+        #[cxx_name = "selftestMouse"]
+        fn selftest_mouse(self: Pin<&mut Self>, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32);
         /// 0.6: a check's press (down and up) made `age_ms` before it is handled.
         #[qinvokable]
         #[cxx_name = "selftestPadAged"]
@@ -1919,6 +1928,24 @@ impl qobject::Turbine {
         }
     }
 
+    /// 0.62: a check's keyboard key, through the window like a real keyboard's.
+    pub fn selftest_key(self: Pin<&mut Self>, key: i32, mods: i32, pressed: bool) {
+        // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to Turbine's own window.
+        let r = unsafe { turbine_selftest_key(key, mods, i32::from(pressed)) };
+        if r != 1 {
+            crate::log::line("key", "Key check not delivered: Turbine's window wasn't found");
+        }
+    }
+
+    /// 0.62: a check's mouse event (a real mouse, not the controller pointer), through the window.
+    pub fn selftest_mouse(self: Pin<&mut Self>, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) {
+        // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to Turbine's own window.
+        let r = unsafe { turbine_selftest_mouse(kind, x, y, button, mods, wheel) };
+        if r != 1 {
+            crate::log::line("key", "Mouse check not delivered: Turbine's window wasn't found");
+        }
+    }
+
     /// 0.6 (break M2): a check's press that was made `age_ms` before it is handled (a stalled window).
     pub fn selftest_pad_aged(mut self: Pin<&mut Self>, button: &QString, age_ms: i32) {
         let b = button.to_string();
@@ -2845,6 +2872,8 @@ extern "C" {
     fn turbine_copy_text(text: *const std::os::raw::c_char);
     fn turbine_clipboard_text() -> *mut std::os::raw::c_char;
     fn turbine_free_text(text: *mut std::os::raw::c_char);
+    fn turbine_selftest_key(key: i32, mods: i32, pressed: i32) -> i32;
+    fn turbine_selftest_mouse(kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) -> i32;
 }
 
 /// Applies a game's waiting changes; `n` of them go back on the count if it fails.

@@ -16,7 +16,7 @@ signals below, so touch works too.
 | LB / RB | Previous / next tab of this view: game tabs, Settings sections, installer steps; on a mod page the previous / next result. Never another game |
 | LT / RT | Pointer hidden: a page up / down (move mode: top / bottom). Pointer showing: LT right click, RT left click |
 | R3 | Left mouse button. Pointer showing: press and release at the pointer, held it drags. Pointer hidden: the pointer shows on the focused item and A runs |
-| Start | Play; on a sheet its main button. Hold 0.6 s: Play options |
+| Start | A tap: Settings (again, or B, goes back). Held 3 s: Play (the Play choice, or the last choice: Look, "Hold Start does"); a ring fills on Play, letting go early does nothing. Never plays on a tap. A few sheets keep it for their own step (Save, Next, Done). Keyboard: Ctrl+Enter is the hold |
 | View | The quick wheel |
 | D-pad, left stick pushed | Move the focus (repeat 380 ms, then 85 ms, 5 rows at a time after 1.5 s) |
 | Left stick swept round | Scroll wheel, clockwise down; every 30 degrees one notch (3 rows) |
@@ -34,15 +34,15 @@ legend, so the legend can't promise something a button doesn't do. The D-pad and
 are never in the legend. Sheets answer through `sheetBinds()`.
 
 Legend rules: at most 5; A, B, X, Y in that order, then one more (the pointer's "RT Click, LT Menu" while it shows,
-or Start when a sheet covers Play). LB/RB are caps before the tab names in the bottom bar (and on the mod page
-header), View is the cap on the Wheel button, Start is the cap on Play: never printed twice. Holds read
+or Start where a sheet has its own Start step). LB/RB are caps before the tab names in the bottom bar (and on the mod page
+header), View is the cap on the Wheel button, Start is the cap on its own hint beside Play ("Settings", "hold: Play choice"): never printed twice. Holds read
 "hold A Delete". After a touch the button hints hide until the next press.
 
 ### The bottom bar (0.57)
 
 No top bar on the game screen. The bottom bar, left to right: the game's name with the tab and status under it
 ("My mods · Basic support · 2 mods on"; a warning in its color, and a tap on it opens Why won't it start? or what
-the status is about), LB RB and the tab names, the legend, View Wheel, and Start Play on the right. Going down a
+the status is about), LB RB and the tab names, the legend, View Wheel, the Start hint and Play on the right. Going down a
 long list or grid hides it and the rail (truly full screen); going up, the top, View, a tab change, a sheet or the
 rail bring them back, sliding unless Reduce motion is on.
 
@@ -107,15 +107,15 @@ Properties: `slots` ([{label, ok}]), `focusIndex` (-1 the middle), `labs`, `view
 ## SheetButtons
 
 The row of buttons on every sheet with buttons (Before you play, the loader prompt, InfoSheet, AskText, Delete for
-good). `labels`, `focusIndex` (the highlight), `mainIndex` (Start's button, drawn a little stronger). Signal
+good). `labels`, `focusIndex` (the highlight), `mainIndex` (the main button, drawn a little stronger). Signal
 `activated(index)` (a tap). The rule lives in Main.qml's `buttonSheet()`: the D-pad moves the highlight, A presses
-it, B is the cancel button, Start the main one. No key caps on the buttons and no other keys.
+it, B is the cancel button. No key caps on the buttons and no other keys (0.62: Start does nothing here).
 
 ## Tutorial
 
 The beginner tutorial, four cards on first run with the real buttons drawn large: A picks and B goes back with X
 options and Y find; View and the wheel; getting a mod (Get mods, A on a mod, Slow download on Nexus, Turbine adds
-it); Start plays. `card`, `count`, `viewGlyph`, `startGlyph`; signals `next()` and `skip()`. A or Right: next, Left:
+it); Start (a tap is Settings, a 3 second hold plays). `card`, `count`, `viewGlyph`, `startGlyph`; signals `next()` and `skip()`. A or Right: next, Left:
 back, B or Start: skip. The last card's A says "Pick a game to start" and lands on the rail. Remembered once seen
 (`seen.tutorialDone`); Settings, Help shows it again.
 
@@ -305,7 +305,7 @@ GameMenu {
 | `title` | string | "Before you play" | shown in capitals |
 | `checks` | array | [] | `{ level: "ok" | "warn" | "stop", title, detail }`; warn and stop lines are tinted |
 | `buttons` | array | [] | up to 4 `{ label, main }` (SheetButtons): Fix it, Play anyway, Play without mods, Not now |
-| `focusIndex` | int | 0 | the highlighted button (A presses it; B is Not now, Start Play anyway when nothing stops play) |
+| `focusIndex` | int | 0 | the highlighted button (A presses it; B is Not now) |
 | `note` | string | "" | small line under the buttons |
 
 Signals: `activated(int index, string key)`, `closed()`.
@@ -506,9 +506,9 @@ and A click at it (A on a focused element after the pointer was still 3 s: Enter
 (Back, Forward, Reload, Zoom in, Zoom out, Copy page address, Sign in with my browser, Close); Y Steam's keyboard (it
 also opens by itself once each time a text field gets the focus); B back a page, on the first page close (focus back
 on the button that opened it; hold 1 s home); LB/RB Page and Downloads; D-pad and the left stick pushed arrow keys
-into the page (spatial navigation); the left stick swept the wheel at the pointer; Start Play after a mod was added;
+into the page (spatial navigation); the left stick swept the wheel at the pointer; Start held 3 s: Play after a mod was added;
 View the quick wheel (Search Nexus, Zoom in, Forward, Reload, Full menu, Settings, Downloads, Zoom out). Legend: A
-Click, B Back or Close, X Menu, Y Type (only with a field focused), then Start Play after an add, otherwise LT Menu.
+Click, B Back or Close, X Menu, Y Type (only with a field focused), then hold Start Play after an add, otherwise LT Menu.
 
 Downloads: `downloadRequested` on the profile asks `Turbine.browserPlan()` where it goes (Downloads/Game Mods/<Game>/,
 refused unless https, zip/7z/rar, under 64 GB, room for twice its size; " (2)" for a name already there), then

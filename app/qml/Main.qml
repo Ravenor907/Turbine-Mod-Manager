@@ -36,6 +36,7 @@ Window {
         property bool compactList: false    // 0.56: shorter rows in My mods
         property bool reduceMotion: false   // 0.56: no sliding or growing (the header, the wheel, sheets)
         property string confirmBy: "hold"   // 0.56: "hold" (A held 5 s) or "twice" (A, then A again) for Reset and delete
+        property string holdStartDoes: "choice" // 0.62: holding Start 3 s: "choice" (the Play choice) or "last" (plays the last choice)
     }
     // Labs mode (ten presses on the icon in Settings > About) and the owner's checklist answers.
     Settings {
@@ -129,7 +130,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -282,8 +283,8 @@ Window {
                 if (shot.page === "removed") removedShot.start()
             }
             else if (shot.page === "opening") { app.getArea = "fallback"; app.getAct("a") }
-            // Hold Start: Play options; R3 Find with "glow" typed; Select several with one mod ticked.
-            else if (shot.page === "playoptions") { app.press("start"); playOptionsShot.start() }
+            // Play options; R3 Find with "glow" typed; Select several with one mod ticked.
+            else if (shot.page === "playoptions") { app.openPlayOptions(); playOptionsShot.start() }
             else if (shot.page === "findmods") { app.tab = 0; app.zone = "main"; app.act("y"); app.act("y"); askView.open("Find a mod", "", "glow", "", 60, false, "Done"); askView.accept(); app.act("start") }
             else if (shot.page === "selectmods") { app.tab = 0; app.zone = "main"; app.modIndex = 0; app.startSelect(app.mods[0]); app.act("down") }
             // 0.54: a mod's file page opened on a free account: the status says to press Slow download.
@@ -380,7 +381,7 @@ Window {
             if (stepNo === 0) { app.act("a"); app.note("shot", "After A: sheet \"" + app.sheet + "\""); stepNo = 1; app.startPlay(); start() }
         }
     }
-    Timer { id: playOptionsShot; interval: 900; onTriggered: { app.note("shot", "Play options open: " + (app.sheet === "pick" && app.pickTitle === "Play options")); app.release("start") } }
+    Timer { id: playOptionsShot; interval: 900; onTriggered: { app.note("shot", "Play options open: " + (app.sheet === "pick" && app.pickTitle === "Play options")) } }
     // getmodsback: the 5th card of the "lantern" search, its page, then B.
     Timer {
         id: getBackShot
@@ -893,7 +894,7 @@ Window {
             if (coopPasswordOf(d) !== "") { note("action", "Co-op password set: playing"); startCoop(); return }
             note("action", "Co-op password not set: its settings open on it")
             coopAfterSettings = true
-            toast.info("Set the session password first. Every co-op player uses the same password and settings. Start plays once it's set.")
+            toast.info("Set the session password first. Every co-op player uses the same password and settings. Play goes on once it's set.")
         }
         settingsMod = w.mod; settingsRel = w.rel; settingsReturn = w.back
         settingsView.title = w.title
@@ -1481,7 +1482,7 @@ Window {
         sheet = ""
         it.run()
     }
-    // Hold Start: Play with mods, Play without mods, or with another profile.
+    // Play options: Play with mods, Play without mods, or with another profile.
     function openPlayOptions() {
         if (!game || sheet !== "") return
         note("action", "Play options")
@@ -2158,8 +2159,10 @@ Window {
     }
 
     // ---------------------------------------------------------------- Play
+    property int playAsks: 0              // times Play was asked for (the build's checks count them)
     function startPlay(coop) {
         if (!game) return
+        playAsks++
         playCoopNext = coop === true
         // 0.57: an anti-cheat game me3 starts: asked once before the first Play with mods.
         if (acAskNeeded()) { openAcAsk(() => startPlay(coop === true)); return }
@@ -2412,13 +2415,13 @@ Window {
     function stopHolds(why) {
         const was = resetHold.running || confirmHold.running || homeHold.running || startHold.running || repeater.running
         stopReset(); stopConfirm()
-        homeHold.stop(); startHold.stop()
+        homeHold.stop(); startHold.stop(); startHeld = 0
         repeater.stop(); repeatButton = ""
         aHeld = false; bHeld = false; clickHeld = false
         if (was) note("pad", "Holds stopped (" + why + ")")
     }
     // The danger holds stop whenever the sheet or the page changes.
-    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); clickHeld = false; disarm() }
+    function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); startHeld = 0; clickHeld = false; disarm() }
     // (onPageChanged and onTabChanged, near the top, call it too.)
     onModPageChanged: { stopDangerHolds(); pageSettings = false }
     readonly property var gameMenuItems: [
@@ -2637,7 +2640,7 @@ Window {
     function modArrived(gameId, id, name, on) {
         note("action", "New mod " + name + " in " + gameId)
         const i = games.findIndex(g => g.id === gameId)
-        const words = on ? name + ": added and on. Press " + glyph("start") + " to play." : name + ": added, turned off. A turns it on."
+        const words = on ? name + ": added and on. A on Play starts it, or hold " + glyph("start") + "." : name + ": added, turned off. A turns it on."
         // The build's pictures add their test mods this way: only the new-mod picture (and the press count) follow them.
         if (shot.on && shot.page !== "newmod" && shot.page !== "presscount" && shot.page.indexOf("browser") !== 0) return
         // Nexus is open in Turbine: the landing waits for it to close (by itself 2.5 seconds after a single file).
@@ -3478,8 +3481,66 @@ Window {
         if (browserOpen) { browserFrom = null; browserArrival = null; closeBrowser("home") }
         page = "game"; zone = "main"; tab = 0; modIndex = 0
     }
-    // Hold Start (0.6 s): Play options. A short press is Play, as always.
-    Timer { id: startHold; interval: 600; onTriggered: app.openPlayOptions() }
+    // 0.62 (the owner's rule): a tap of Start opens Settings (again, or B, goes back). Holding Start for 3 seconds
+    // plays: a brass ring fills on the bar's Play button meanwhile, and letting go early does nothing. What the hold
+    // does is a setting (Look, "Hold Start does"): show the Play choice, or play the last choice at once.
+    readonly property int startHoldMs: 3000
+    readonly property int startTapMs: 500
+    property real startSince: 0
+    property real startHeld: 0            // 0 to 1 while Start is held
+    property int startHoldsDone: 0
+    readonly property bool startHoldPlays: look.holdStartDoes === "last"
+    readonly property string startHoldWords: "hold: " + (startHoldPlays ? "Play" : "Play choice")
+    Timer {
+        id: startHold
+        interval: 50
+        repeat: true
+        onTriggered: {
+            const part = Math.min(1, (Date.now() - app.startSince) / app.startHoldMs)
+            // Something opened over the page meanwhile, or there is nothing to play here: no ring, and no Play.
+            if (!app.startHoldReady()) { app.startHeld = 0; if (part >= 1) stop(); return }
+            app.startHeld = part
+            if (part >= 1) { stop(); app.startHeld = 0; app.startHoldsDone++; app.startHoldDone() }
+        }
+    }
+    // Where a hold of Start counts: a game's screen or Settings with nothing over it, and the Nexus page after an add.
+    function startHoldReady() {
+        if (sheet !== "" || wheelOpen || moving || orderMoving) return false
+        if (page === "browser") return browserAddedGame !== ""
+        return (page === "game" || page === "settings") && !!game
+    }
+    function startHoldBegin() {
+        startSince = Date.now(); startHeld = 0
+        startHold.restart()
+    }
+    function startHoldDone() {
+        note("action", "Start held 3 seconds: " + (page === "browser" ? "Play after the add" : startHoldPlays ? "Play my last choice" : "the Play choice"))
+        if (page === "browser") { browserPlay(); return }
+        if (!game) return
+        if (page === "settings") settingsBack()
+        if (page !== "game") return
+        if (startHoldPlays) playLast(); else playChoice()
+    }
+    // A tap of Start: Settings, and back from it.
+    function startTap() {
+        if (page === "settings") { note("action", "Start: back from Settings"); settingsBack() }
+        else if (page === "game") { note("action", "Start: Settings"); openSettings() }
+    }
+    // The Play choice: with Seamless Co-op its own question (the last choice has the ring), otherwise Play options.
+    function playChoice() {
+        if (!game) return
+        if (seamlessIn && !acRefused) playPressed(); else openPlayOptions()
+    }
+    // The last choice, started at once.
+    function playLast() {
+        if (!game) return
+        if (!seamlessIn || acRefused) { startPlay(); return }
+        const k = lastPlayChoice
+        note("action", "Play my last choice: " + k)
+        if (k === "coop") startCoopChecked()
+        else if (k === "plain") Turbine.playOriginal()
+        else startPlay()
+    }
     // Every press counts as input: a sheet that opens with no press near it is a bug (logged, and checked by the build).
     property int inputCount: 0
     property real lastInputAt: 0
@@ -3505,7 +3566,7 @@ Window {
         if (b === "b") bHeld = true
         // R3 here means the pointer was hidden: the same as A on the focused item (never the start of a hold).
         if (b === "r3") { r3Click(); return }
-        if (b === "start" && sheet === "" && !wheelOpen && !moving && !orderMoving && page === "game" && game) { startHold.restart(); return }
+        if (b === "start" && sheet === "" && !wheelOpen && !moving && !orderMoving && (page === "game" || page === "settings" || page === "browser")) { startHoldBegin(); return }
         if (["up", "down", "left", "right"].indexOf(b) >= 0) {
             repeatButton = b
             repeatSince = Date.now()
@@ -3525,7 +3586,14 @@ Window {
         if (b === "lost") { stopHolds("a controller went away"); return }
         if (b === "a") aHeld = false
         if (b === "b") bHeld = false
-        if (b === "start" && startHold.running) { startHold.stop(); act("start"); return }
+        if (b === "start" && startHold.running) {
+            const ms = Date.now() - startSince
+            startHold.stop(); startHeld = 0
+            // A tap is Settings; a hold let go before the 3 seconds does nothing at all.
+            if (ms < startTapMs) act("start")
+            else note("pad", "Start let go after " + (ms / 1000).toFixed(1) + " s: nothing (a hold is 3 seconds)")
+            return
+        }
         if (b === repeatButton) { repeater.stop(); repeatButton = "" }
         if (b === "a" && resetHold.running) stopReset()
         if (b === "a" && confirmHold.running) stopConfirm()
@@ -3598,6 +3666,15 @@ Window {
         HoverHandler { onPointChanged: if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse" }
         Keys.onPressed: (e) => {
             app.pressFresh = false
+            // 0.62: Ctrl+Enter is the keyboard's hold of Start (the Play choice, or Play).
+            if ((e.modifiers & Qt.ControlModifier) && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+                e.accepted = true
+                if (e.isAutoRepeat) return
+                app.note("key", "Key Ctrl+Enter")
+                app.inputCount++; app.lastInputAt = Date.now(); app.lastInputName = "start"
+                if (app.startHoldReady()) { app.startHoldsDone++; app.startHoldDone() }
+                return
+            }
             const map = {}
             map[Qt.Key_Up] = "up"; map[Qt.Key_Down] = "down"; map[Qt.Key_Left] = "left"; map[Qt.Key_Right] = "right"
             map[Qt.Key_Return] = "a"; map[Qt.Key_Enter] = "a"; map[Qt.Key_Space] = "a"
@@ -3669,16 +3746,13 @@ Window {
             else if (!sheetDry && !confirmHold.running && !pressTwice) holdHint(holdNeeded + " seconds to " + confirmWords())
         }
         else if (b === "b") { if (bs.cancel >= 0) runIt(bs.cancel); else if (!sheetDry) sheet = "" }
-        else if (b === "start" && sheetStartPlays(bs)) runIt(bs.main)
+        // 0.62: Start does nothing on these (a tap of Start never plays; A on the highlighted button does).
     }
-    function sheetStartPlays(bs) { return bs.main >= 0 && /play/i.test(bs.labels[bs.main] || "") }
     function sheetBinds() {
         const bs = buttonSheet()
         if (bs) {
             const hl = sheet === "ask" && askIndex < 0 ? (Turbine.gamemode ? "Keyboard" : "") : sheet === "confirm" && confirmIndex === 0 ? "Delete" : bs.labels[bs.index] || ""
             let o = { a: bind(hl, () => sheetAct("a"), sheet === "confirm" && confirmIndex === 0 ? "hold" : ""), b: bind(bs.cancel >= 0 ? bs.labels[bs.cancel] : "Close", () => sheetAct("b")) }
-            // Start only ever means Play: in the legend (and on the button) only when the main button plays.
-            if (sheetStartPlays(bs)) o.start = bind(bs.labels[bs.main], () => sheetAct("start"))
             return o
         }
         const s = sheet
@@ -3689,13 +3763,12 @@ Window {
             // A says what the highlighted row does ("A Uninstall", "A Rename").
             const row = s === "modmenu" ? modMenuItems[menuIndex] : s === "cardmenu" ? cardMenuItems[menuIndex] : gameMenuItems[menuIndex]
             // The game menu's A names its row too (T37); a dimmed row says why instead.
-            return { a: bind(row && s === "gamemenu" && !row.ok ? "Why not" : row && row.title.length <= 24 ? row.title : "Open", k("a")), b: bind("Close", k("b")), start: bind("Play", k("start")) }
+            return { a: bind(row && s === "gamemenu" && !row.ok ? "Why not" : row && row.title.length <= 24 ? row.title : "Open", k("a")), b: bind("Close", k("b")) }
         }
         if (s === "pick") return Object.assign({ a: bind(!pickItems[menuIndex] || pickItems[menuIndex].info ? "" : pickItems[menuIndex].aLabel ? pickItems[menuIndex].aLabel : "Choose", k("a")),
                                                  b: bind(pickBLabel !== "" ? pickBLabel : pickBack !== "" ? "Back" : "Close", k("b")) },
-                                               pickY ? { y: bind(pickY.label, k("y")) } : {},
-                                               page === "game" && game && !pickNoStart ? { start: bind("Play", k("start")) } : {})
-        if (s === "removed") return { a: bind(removedIndex === removedMods.length ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === removedMods.length ? "" : "Delete now", k("x")), start: bind("Play", k("start")) }
+                                               pickY ? { y: bind(pickY.label, k("y")) } : {})
+        if (s === "removed") return { a: bind(removedIndex === removedMods.length ? "Delete all" : "Put back", k("a")), b: bind("Close", k("b")), x: bind(removedIndex === removedMods.length ? "" : "Delete now", k("x")) }
         if (s === "add") return { a: bind(addList[addIndex] ? "Add" : "", k("a")), b: bind("Close", k("b")), y: bind("Find", k("y")) }
         if (s === "shares") return { a: bind("Read", k("a")), b: bind("Back", k("b")) }
         if (s === "profiles") return { a: bind("Choose", k("a")), b: bind("Close", k("b")), x: bind(!importData && profIndex < profileList.length ? "Options" : "", k("x")) }
@@ -3730,9 +3803,6 @@ Window {
                 if (sheet === "notice") seen.notSteamOS = true
                 sheet = ""
             }
-        } else if ((["modmenu", "gamemenu", "cardmenu", "removed"].indexOf(sheet) >= 0 || (sheet === "pick" && page === "game" && game && !nxmAsking && !pickNoStart)) && b === "start") {
-            // Start plays from any menu (the legend shows it while a menu covers the Play button).
-            stopReset(); sheet = ""; startPlay()
         } else if (sheet === "pick" && nxmAskQuiet(actStamp)) {
             note("nxm", "Press " + b + " ignored: made " + Math.round(actStamp - nxmShownAt) + " ms after the question showed")
         } else if (sheet === "pick" && nxmAsking && b === "a" && nxmRingMoved && actStamp < nxmShownAt + nxmRingMove.interval) {
@@ -3851,8 +3921,6 @@ Window {
             else if (b === "rt") stepMove(100000)
             else if (b === "a") endMove()
             else if (b === "b") cancelMove()
-            // Start puts the mod down and plays (the Play button says Start; controls #22).
-            else if (b === "start") { endMove(); startPlay() }
             return
         }
         if (orderMoving) { orderAct(b); return }
@@ -3876,14 +3944,17 @@ Window {
         if (sheet !== "") return sheetBinds()
         if (moving || orderMoving) return { a: bind("Done", () => act("a")), b: bind("Cancel", () => act("b")), lt: bind("", () => act("lt")), rt: bind("", () => act("rt")) }
         o.view = bind("", wheelPress)
-        if (page === "game" && game) o.start = bind("", playPressed)
+        // 0.62: a tap of Start is Settings, and back from it (press() times the hold that plays).
+        if (page === "game") o.start = bind("", startTap)
+        else if (page === "settings") o.start = bind("Close", startTap)
         // Nexus inside Turbine: A clicks at the pointer (or works the Downloads row), B back a page or close.
         if (page === "browser") {
             // B: back a page (held: close), or close on the first page.
             o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back" : "Close", browserBack)
             o.lb = bind("", () => { browserTab = 0 })
             o.rb = bind("", () => { browserTab = 1 })
-            o.start = bind(browserAddedGame !== "" ? "Play" : "", browserPlay)
+            // After an add: holding Start plays that game (a tap never plays).
+            o.start = bind(browserAddedGame !== "" ? "Play" : "", () => { if (browserAddedGame !== "") toast.info("Hold " + glyph("start") + " for 3 seconds to play.") }, "hold")
             if (browserTab === 1) {
                 o.a = bind(browserRowLabel(browserDlIndex), () => browserRowAct(browserDlIndex))
                 // X only on a row (the menu has nothing to offer with no downloads).
@@ -4076,13 +4147,13 @@ Window {
         // The Nexus page: A already says Click, so the one more is Start Play after an add, otherwise how to move the
         // pointer (the right stick). X Options covers what LT opens too.
         if (page === "browser" && sheet === "" && !wheelOpen) {
-            if (o.start && o.start.label) h.push(["start", o.start.label, ""])
+            if (o.start && o.start.label) h.push(["start", o.start.label, o.start.pre || ""])
             else if (browserTab === 0 && !browserTyping && !keysLegend) h.push(["rs", "Pointer", ""])
             return h.slice(0, 5)
         }
         // LT is the right button (options) only where X has options: elsewhere the legend says RT Click alone.
         if (Turbine.pointerShown && !keyboardUp) h.push(o.x && o.x.label ? ["rt", "Click", "", "lt", "Menu"] : ["rt", "Click", ""])
-        else if (o.start && o.start.label) h.push(["start", o.start.label, ""])
+        else if (o.start && o.start.label) h.push(["start", o.start.label, o.start.pre || ""])
         return h.slice(0, 5)
     }
     // 0.59: the first press after a page opens never changes a setting (the owner's Left on the way into Settings, a
@@ -4399,7 +4470,7 @@ Window {
         if (["up", "down", "left", "right"].indexOf(b) >= 0) wheelMove(b)
         else if (b === "a") { if (wheelSlot >= 0) wheelFire(wheelSlot); else if (labsOn) { closeWheel(); quickReport() } }
         else if (b === "b" || b === "view") closeWheel()
-        else if (b === "start") { closeWheel(); act("start") }
+        else if (b === "start") closeWheel()
     }
     // The wheel's Games: every game, last played first.
     function openGamesPick() {
@@ -4520,7 +4591,7 @@ Window {
                     const keys = h.map(x => x[0])
                     if (keys.some((k, i) => keys.indexOf(k) !== i)) bad.push("a key twice")
                     if (keys.some(k => ["lb", "rb", "view"].indexOf(k) >= 0)) bad.push("a cap in the legend")
-                    if (keys.indexOf("start") >= 0 && sheet === "" && !wheelOpen && page !== "browser" && page !== "place") bad.push("Start in the legend with Play in view")
+                    if (keys.indexOf("start") >= 0 && sheet === "" && !wheelOpen && page !== "browser" && page !== "place" && page !== "settings") bad.push("Start in the legend with Play in view")
                     for (const k of ["a", "b", "x", "y"]) {
                         if (o[k] && o[k].label && keys.indexOf(k) < 0) bad.push(k.toUpperCase() + " missing")
                         if (keys.indexOf(k) >= 0 && !(o[k] && o[k].run)) bad.push(k.toUpperCase() + " does nothing")
@@ -4538,8 +4609,9 @@ Window {
         // 0.6 (I3): Seamless Co-op chosen at Play: the choice, the password step, the remembered choice, its settings
         // from all three places, and a toggle, a number and the password saved into Turbine's copy of the file.
         else if (name === "coopcheck") script = [
-            () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); pad("start") },
+            () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); Turbine.selftestPad("start", true) },
             () => { if (sheet !== "pick") return false
+                    Turbine.selftestPad("start", false)
                     check("Co-op choice: " + pickItems.map(x => x.title).join("; ") + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " | Y " + (pickY ? pickY.label : "none"))
                     pad("down"); m.focus = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; pad("a") },
             () => { if (sheet !== "settingsedit") return false
@@ -4547,7 +4619,7 @@ Window {
                     check("Co-op password step: picked " + m.focus + ", sheet " + sheet + ", focus " + (r && r.f ? r.f.key : "none") + ", waiting " + coopAfterSettings)
                     const pw = settingsView.fields.find(x => /password/i.test(x.key)); settingsView.setValue(pw, "dragon") },
             () => { if (sheet === "settingsedit") return false; check("Co-op after the password: sheet \"" + sheet + "\", waiting " + coopAfterSettings) },
-            () => { sheet = ""; page = "game"; zone = "main"; pad("start") },
+            () => { sheet = ""; page = "game"; zone = "play"; pad("a") },
             () => { if (sheet !== "pick") return false
                     check("Co-op choice remembered: focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + ", Play says " + (lastPlayChoice === "coop" ? "Co-op" : "Solo"))
                     pad("y") },
@@ -4661,7 +4733,7 @@ Window {
             script = steps
         }
         // 0.6: the golden path, by real presses only: an empty game, X Add from Downloads, A on the file, the mod is on
-        // in My mods, Start plays it (Before you play's Play anyway when it asks); then the mod off and on with A, X
+        // in My mods, Start held 3 seconds and A play it (Before you play's Play anyway when it asks); then the mod off and on with A, X
         // Uninstall and A Put back.
         else if (name === "golden") script = [
             () => { if (!modsLoaded || !game) return false; sheet = ""; page = "game"; tab = 0; zone = "main"; m.played = playAt
@@ -4669,7 +4741,10 @@ Window {
             () => { if (sheet !== "add" || addList.length === 0) return false
                     addIndex = Math.max(0, addList.findIndex(d => d.name.indexOf("Brighter Lanterns") === 0)); check("Journey add: sheet add, " + addList.length + " files, A " + (binds().a ? binds().a.label : "")); pad("a") },
             () => { if (mods.length < 1 || page === "place") return false
-                    check("Journey added: " + mods.map(x => x.name + (x.enabled ? " on" : " off")).join(", ") + ", sheet " + (sheet || "none")); pad("start") },
+                    check("Journey added: " + mods.map(x => x.name + (x.enabled ? " on" : " off")).join(", ") + ", sheet " + (sheet || "none")); sheet = ""; Turbine.selftestPad("start", true) },
+            () => { if (sheet !== "pick") return false
+                    Turbine.selftestPad("start", false)
+                    check("Journey Start held: " + pickTitle + ", focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "")); pad("a") },
             () => { if (sheet === "check") { const o = binds(); check("Journey Before you play: A " + (o.a ? o.a.label : "") + " | " + checks.map(c => c.level + " " + c.title).join("; ")); if (checks.some(c => c.level === "stop")) return; act("right"); pad("a"); return false }
                     if (playAt === m.played) return false
                     check("Journey played: Play started " + game.name + " with " + mods.filter(x => x.enabled).length + " mods on") },
@@ -4799,8 +4874,8 @@ Window {
                     if (!bs) { check("Sheet rule " + c[0] + ": not a button sheet"); problems++; continue }
                     act("right")
                     bs = buttonSheet()
-                    // Start runs the main button only when that button plays (Start only ever means Play).
-                    const want = { a: bs.labels[bs.index] || "", b: bs.cancel >= 0 ? bs.labels[bs.cancel] : "", start: sheetStartPlays(bs) ? bs.labels[bs.main] : "" }
+                    // 0.62: Start runs nothing on a sheet (a tap of Start never plays).
+                    const want = { a: bs.labels[bs.index] || "", b: bs.cancel >= 0 ? bs.labels[bs.cancel] : "", start: "" }
                     let got = {}
                     for (const k of ["a", "b", "start"]) { lastDry = ""; act(k); got[k] = lastDry }
                     const ok = got.a === want.a && got.b === want.b && got.start === want.start
@@ -4988,6 +5063,68 @@ Window {
                     openHelpNow() },
             () => { if (name === "inlinebrowser") check("Inline browser buttons: " + (pageHelpLabels.length > 0 ? pageHelpLabels.join("; ") : "none") + " (Nexus " + (page === "browser" ? "open in Turbine" : "not open") + "), sheet \"" + sheet + "\"") }
         ]
+        // 0.62: Start. A tap opens Settings and a tap or B goes back; a hold let go early does nothing; a 3 second
+        // hold shows the Play choice (or plays, by the setting); A on Play plays; Ctrl+Enter is the hold; Start on a
+        // menu never plays; a tap on the bar's Start hint is a tap of Start. All by real presses, keys and clicks.
+        else if (name === "startcheck") {
+            m.bad = 0
+            const say = (ok, text) => { if (!ok) m.bad++; check("Start check: " + text + (ok ? "" : "  PROBLEM")) }
+            const holdRow = () => lookRows.findIndex(r => r.key === "holdStartDoes")
+            script = [
+                () => { if (mods.length < 2 || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0; m.asks = playAsks },
+                () => { pad("start"); say(page === "settings" && playAsks === m.asks, "a tap opens " + (page === "settings" ? "Settings" : page) + ", legend " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · ")) },
+                () => { pad("start"); say(page === "game" && zone === "main", "a tap again goes back to " + (page === "game" ? "My mods" : page)) },
+                () => { pad("start"); m.was = page; pad("b"); say(m.was === "settings" && page === "game", "B from Settings goes back to " + (page === "game" ? "My mods" : page)) },
+                // A hold let go at 1.5 s: the ring was filling, and nothing happens.
+                () => { m.t = Date.now(); Turbine.selftestPad("start", true) },
+                () => { if (Date.now() - m.t < 1500) return false
+                        m.part = startHeld; m.ring = startRing.visible
+                        Turbine.selftestPad("start", false)
+                        say(m.ring && m.part > 0.3 && m.part < 0.9 && page === "game" && sheet === "" && playAsks === m.asks && startHeld === 0,
+                            "let go at 1.5 s: the ring was " + (m.ring ? "showing" : "hidden") + " at " + Math.round(m.part * 100) + "%, then page " + page + ", sheet \"" + sheet + "\", Play asked " + (playAsks - m.asks) + " times") },
+                // Held for the 3 seconds: the Play choice, not before.
+                () => { m.t = Date.now(); Turbine.selftestPad("start", true) },
+                () => { if (Date.now() - m.t < 2300) return false; m.early = sheet },
+                () => { if (sheet !== "pick" && Date.now() - m.t < 6000) return false
+                        const secs = (Date.now() - m.t) / 1000
+                        Turbine.selftestPad("start", false)
+                        say(m.early === "" && sheet === "pick" && pickTitle === "Play options" && playAsks === m.asks && secs >= 2.9,
+                            "held 3 seconds: nothing at 2.3 s (sheet \"" + m.early + "\"), then " + (sheet === "pick" ? pickTitle : "sheet \"" + sheet + "\"") + ", focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "none") + ", Play asked " + (playAsks - m.asks) + " times")
+                        pad("b") },
+                () => { say(sheet === "" && page === "game", "B closes the Play choice: sheet \"" + sheet + "\"") },
+                // The setting, changed with A on its row in Settings, Look.
+                () => { openSection("Look"); zone = "settings"; setRow = holdRow(); m.words = startHoldWords; pad("a") },
+                () => { say(holdRow() >= 0 && look.holdStartDoes === "last" && startHoldWords === "hold: Play", "Hold Start does: row " + (holdRow() >= 0 ? "there" : "missing") + ", A changed it to " + look.holdStartDoes + ", the bar says " + m.words + " then " + startHoldWords)
+                        pad("b") },
+                () => { if (page !== "game") return false; zone = "main"; m.asks = playAsks; m.t = Date.now(); Turbine.selftestPad("start", true) },
+                () => { if (playAsks === m.asks && Date.now() - m.t < 6000) return false
+                        const secs = (Date.now() - m.t) / 1000
+                        Turbine.selftestPad("start", false)
+                        say(playAsks === m.asks + 1 && secs >= 2.9, "Play my last choice: held 3 seconds, Play asked " + (playAsks - m.asks) + " times") },
+                // A on the bar's Play button still plays.
+                () => { if (Turbine.busy) return false; sheet = ""; page = "game"; zone = "play"; m.asks = playAsks; pad("a") },
+                () => { say(playAsks === m.asks + 1, "A on Play: Play asked " + (playAsks - m.asks) + " times") },
+                // Back to the Play choice, by A on the row again; Ctrl+Enter is the keyboard's hold.
+                () => { if (Turbine.busy) return false; sheet = ""; openSection("Look"); zone = "settings"; setRow = holdRow(); pad("a") },
+                () => { pad("b"); sheet = ""; zone = "main"; m.asks = playAsks
+                        Turbine.selftestKey(Qt.Key_Return, Qt.ControlModifier, true); Turbine.selftestKey(Qt.Key_Return, Qt.ControlModifier, false) },
+                () => { say(look.holdStartDoes === "choice" && sheet === "pick" && pickTitle === "Play options" && playAsks === m.asks, "Ctrl+Enter: " + (sheet === "pick" ? pickTitle : "sheet \"" + sheet + "\"") + ", setting " + look.holdStartDoes)
+                        Turbine.selftestKey(Qt.Key_Escape, 0, true); Turbine.selftestKey(Qt.Key_Escape, 0, false) },
+                // Start on a menu never plays, and never opens Settings under it.
+                () => { say(sheet === "", "Esc closes the Play choice: sheet \"" + sheet + "\""); sheet = ""; zone = "main"; tab = 0; modIndex = 0; pad("x") },
+                () => { m.sheet = sheet; m.asks = playAsks; pad("start")
+                        say(m.sheet === "modmenu" && sheet === "modmenu" && page === "game" && playAsks === m.asks, "Start on the mod menu: sheet \"" + sheet + "\", page " + page + ", Play asked " + (playAsks - m.asks) + " times, legend " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
+                        pad("b") },
+                // The bar: the Start hint is a button for a finger or a click, and nothing overlaps.
+                () => { if (sheet !== "") return false
+                        const p = startHint.mapToItem(null, startHint.width / 2, startHint.height / 2)
+                        m.hint = startHint.visible; m.h = Math.round(startHint.height)
+                        Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0); Turbine.selftestMouse(1, p.x, p.y, Qt.LeftButton, 0, 0); Turbine.selftestMouse(2, p.x, p.y, Qt.LeftButton, 0, 0) },
+                () => { say(m.hint && m.h >= 44 && page === "settings", "a click on the Start hint (" + m.h + " px tall): " + (page === "settings" ? "Settings" : page)); pad("start") },
+                () => { say(page === "game", "and Start goes back: " + page); zone = "main"; legend.check("startcheck")
+                        check("Start check done: " + m.bad + " problems") }
+            ]
+        }
         else if (name === "presscount") script = [
             // After the tutorial: the rail, the game with no mods focused. Count every press to a mod added and Play.
             () => { if (!game || !modsLoaded) return false; sheet = ""; zone = "rail"; railIndex = current; m.start = inputCount; m.log = [] },
@@ -5214,7 +5351,7 @@ Window {
         }
         else if (b === "left") tutCard = Math.max(0, tutCard - 1)
         else if (b === "b") tutorialDone("skipped")
-        // Start finishes it (card 4 says Start plays): straight to picking a game.
+        // Start finishes it: straight to picking a game.
         else if (b === "start") tutorialDone("finished with Start")
     }
     property string tutorialFrom: ""
@@ -5676,7 +5813,7 @@ Window {
     property var webDls: []                 // downloads: {obj, path, name, game, state, got, total, speed, words, at, lastGot, lastAt}
     property int webDlTick: 0
     property var browserNoteNow: null       // {text, level, at}: a refusal, the no-key message, a sign-in result
-    property string browserAddedGame: ""    // a mod was added while it was open: Start plays that game
+    property string browserAddedGame: ""    // a mod was added while it was open: holding Start plays that game
     property var browserArrival: null       // the landing waiting for the browser to close: {game, id, name, on}
     property bool browserLiveForced: false  // the build's checks: the page is made even without the stand-in
     property bool forceMyBrowser: false     // the build's slowhint picture: the Desktop "My browser" way
@@ -5763,7 +5900,7 @@ Window {
         if (a && why === "added") { landing = true; modArrived(a.game, a.id, a.name, a.on); landing = false }
         else {
             note("focus", "Back from Nexus: " + zone + (modPage ? ", the mod page's " + (pageIndex === 0 ? "main button" : "row " + pageIndex) : ""))
-            if (a && why !== "play" && why !== "home") toast.done("Added " + a.name + "." + (game && a.game === game.id ? " " + glyph("start") + " plays." : ""))
+            if (a && why !== "play" && why !== "home") toast.done("Added " + a.name + "." + (game && a.game === game.id ? " Hold " + glyph("start") + " to play." : ""))
         }
         // Still downloading: it goes on, and the player is told so and where to see it (and when it lands, the
         // screen doesn't jump to it).
@@ -6114,7 +6251,7 @@ Window {
         ], "")
     }
 
-    // Start after an add: Play that game (the page closes first).
+    // Start held after an add: Play that game (the page closes first).
     function browserPlay() {
         const g = browserAddedGame
         if (g === "") return
@@ -6896,12 +7033,12 @@ Window {
     readonly property var rowsNow: sec === "Getting mods" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : sec === "Help" ? helpRows : []
     // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
     readonly property var helpRows: [
-        { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Play", action: "Show it" },
+        { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Start", action: "Show it" },
         { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: puts Steam's Launch Options back as they were", action: "Show" },
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
-          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Play (hold: Play options). Right stick: pointer, RT clicks." },
+          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks." },
         { kind: "info", key: "touch", title: "Touch",
           how: "Tap does it. Hold for options (Move is there: then tap where the mod goes). Swipe sideways on the bottom bar to switch tabs." }
     ].concat(steamArt.found ? [
@@ -7536,6 +7673,8 @@ Window {
           step: (d) => { look.compactList = !look.compactList; note("action", "Look: compact list " + look.compactList) } },
         { label: "Confirm deletes by", options: ["hold", "twice"], names: ["Holding A", "Pressing A twice"], key: "confirmBy",
           step: (d) => cycle("confirmBy", ["hold", "twice"], d) },
+        { label: "Hold Start does", options: ["choice", "last"], names: ["Show the Play choice", "Play my last choice"], key: "holdStartDoes",
+          step: (d) => cycle("holdStartDoes", ["choice", "last"], d) },
         { label: "Reduce motion", options: [false, true], names: ["Off", "On"], key: "reduceMotion",
           step: (d) => { look.reduceMotion = !look.reduceMotion; note("action", "Look: reduce motion " + look.reduceMotion) } },
 
@@ -8051,7 +8190,6 @@ Window {
                             id: pagePlayRow
                             anchors.centerIn: parent
                             spacing: app.px(8)
-                            Key { k: "start"; anchors.verticalCenter: parent.verticalCenter }
                             // Play waits for changes being saved: it says so.
                             Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                         }
@@ -9611,12 +9749,37 @@ Window {
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                 TapHandler { onTapped: app.startCoop() }
             }
+            // 0.62: what Start does: a tap is Settings, a 3 second hold plays (or shows the Play choice). A tap on
+            // it is a tap of Start. The words go when the bar has no room for them; the cap stays.
+            Rectangle {
+                id: startHint
+                visible: app.barGame && app.sheet === "" && !app.wheelOpen
+                anchors.verticalCenter: parent.verticalCenter
+                width: startHintRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
+                color: c.raised
+                Row {
+                    id: startHintRow
+                    anchors.centerIn: parent
+                    spacing: app.px(6)
+                    Key { id: startHintKey; k: "start"; anchors.verticalCenter: parent.verticalCenter }
+                    Column {
+                        visible: legend.startWords
+                        anchors.verticalCenter: parent.verticalCenter
+                        Text { text: "Settings"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
+                        Text { text: app.startHoldWords; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(12) }
+                    }
+                }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Settings. Hold Start for 3 seconds: " + (app.startHoldPlays ? "Play" : "Play choice")
+                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+                TapHandler { onTapped: { if (!app.gate(3, "Start hint")) return; app.note("touch", "Start hint tapped"); app.startTap() } }
+            }
             Rectangle {
                 id: playBtn
-                // A sheet whose own Start button is in the legend ("START Play with mods, offline"): Play steps aside.
+                // A sheet whose own Start button is in the legend ("START Save"): Play steps aside.
                 visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
                 width: playRow.implicitWidth + app.px(28); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
-                // Dimmed while a sheet or the wheel is open (Start means the sheet's own button then).
+                // Dimmed while a sheet or the wheel is open.
                 opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
                 // The focus ring when Play has the focus (a mod just arrived).
                 border.color: c.text
@@ -9629,14 +9792,38 @@ Window {
                     id: playRow
                     anchors.centerIn: parent
                     spacing: app.px(8)
-                    Key { k: "start"; visible: app.sheet === "" && !app.wheelOpen; anchors.verticalCenter: parent.verticalCenter }
                     // Play waits for changes being saved: it says so.
                     Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                }
+                // 0.62: Start held: a brass ring fills here over 3 seconds (shown once the press is clearly a hold).
+                Rectangle {
+                    id: startRing
+                    readonly property bool shown: app.startHeld > 0.1
+                    visible: shown
+                    anchors.centerIn: parent
+                    width: parent.height - app.px(6); height: width; radius: width / 2
+                    color: c.ground
+                    Shape {
+                        anchors.fill: parent
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: c.accentHi
+                            strokeWidth: Math.max(2, app.px(4))
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            PathAngleArc {
+                                centerX: startRing.width / 2; centerY: startRing.height / 2
+                                radiusX: startRing.width / 2 - app.px(5); radiusY: radiusX
+                                startAngle: -90
+                                sweepAngle: 360 * app.startHeld
+                            }
+                        }
+                    }
                 }
                 Accessible.role: Accessible.Button
                 Accessible.name: "Play"
                 HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                // 0.6 (I22): a long press is Play options, as holding Start is (the wheel's Play options slot shows it too).
+                // 0.6 (I22): a long press is Play options (the wheel's Play options slot shows it too).
                 TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { if (!app.gate(3, "Play")) return; app.playPressed() }
                              onLongPressed: { if (!app.gate(3, "Play")) return; app.note("touch", "Play held: Play options"); app.openPlayOptions() } }
             }
@@ -9728,6 +9915,11 @@ Window {
         TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: "Wheel" }
         TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
         readonly property real capsW: app.px(70)
+        // 0.62: the Start hint's words ("Settings", "hold: Play choice") show when they fit beside the game, the
+        // caps, the wheel's cap, Play and two hints. Measured from the words, never from the hint's own size.
+        TextMetrics { id: startWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(13); text: app.startHoldWords + "  " }
+        readonly property bool startWords: width - edge * 2 - barGameCol.width - capsW - playBtn.width - startHintKey.implicitWidth - app.px(16 + 50) - gap * 6
+                                           - hintsWidth(Math.min(2, app.legendHints.length)) >= startWordsMetrics.advanceWidth + app.px(6)
         // Room for the tab words: the bar less the game, the caps, Play, the wheel's cap and two hints.
         readonly property real barFree: width - edge * 2 - barGameCol.width - capsW - playGroup.width - app.px(50) - gap * 5 - hintsWidth(Math.min(2, app.legendHints.length))
         readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
@@ -9746,7 +9938,7 @@ Window {
             const add = (name, it) => { if (it && it.visible && it.width > 0) { const p = it.mapToItem(legend, 0, 0); items.push({ name: name, x: p.x, y: p.y, w: it.width, h: it.height }) } }
             add("game", barGameCol); add("tabs", barTabs)
             for (let i = 0; i < legendRow.children.length; i++) { const h = legendRow.children[i]; if (h.k !== undefined && h.visible) add("hint " + h.k.toUpperCase(), h) }
-            add("wheel", wheelBtn); add("co-op", coopBtn); add("Play", playBtn)
+            add("start", startHint); add("wheel", wheelBtn); add("co-op", coopBtn); add("Play", playBtn)
             let bad = []
             for (const a of items) {
                 if (a.x < -0.5 || a.x + a.w > legend.width + 0.5) bad.push(a.name + " past the edge (" + Math.round(a.x) + " to " + Math.round(a.x + a.w) + " of " + Math.round(legend.width) + ")")
