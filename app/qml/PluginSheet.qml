@@ -6,6 +6,7 @@ Overlay {
     id: sheet
     onOutsideTapped: sheet.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property var plugin: null             // the engine's plugin entry

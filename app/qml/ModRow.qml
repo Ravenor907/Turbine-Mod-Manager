@@ -147,6 +147,8 @@ Rectangle {
             radius: root.ui.px(6)
             anchors.verticalCenter: parent.verticalCenter
             color: root.isOn ? root.wash(root.ui.c.accent, 0.28) : root.ui.c.ground
+            // 0.62: the pill's fill fades between ON and OFF.
+            Behavior on color { enabled: root.ui.motion.on; ColorAnimation { duration: root.ui.motion.fast; easing.type: root.ui.motion.enter } }
             border.width: root.isOn ? 0 : Math.max(1, root.ui.px(1.5))
             border.color: root.ui.c.line
             Text {

@@ -17,6 +17,21 @@ Item {
     property bool closeOnOutside: true
     signal outsideTapped()
 
+    // 0.62: everything that covers the window comes in the same way: a short fade, and at Full a small growth
+    // (Motion.qml). It is on screen and takes presses from the first frame: the animation never holds anything
+    // back, and closing is instant. Each overlay's file hands the motion system in (motion: ui.motion).
+    property Motion motion: Motion { level: "off" }
+    property int entered: 0
+    onVisibleChanged: {
+        if (!visible) { enterFade.stop(); enterGrow.stop(); opacity = 1; scale = 1; return }
+        if (!motion.on) return
+        entered++
+        enterFade.restart()
+        if (motion.moves) enterGrow.restart()
+    }
+    NumberAnimation { id: enterFade; target: ov; properties: "opacity"; from: 0; to: 1; duration: ov.motion.fast; easing.type: ov.motion.enter }
+    NumberAnimation { id: enterGrow; target: ov; properties: "scale"; from: ov.motion.fromScale; to: 1; duration: ov.motion.moveBase; easing.type: ov.motion.enter }
+
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons

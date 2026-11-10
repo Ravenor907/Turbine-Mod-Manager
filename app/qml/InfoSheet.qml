@@ -9,6 +9,7 @@ Overlay {
     id: sh
     onOutsideTapped: sh.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property string title: ""

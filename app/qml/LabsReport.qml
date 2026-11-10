@@ -14,6 +14,7 @@ Overlay {
     id: report
     onOutsideTapped: report.closeClicked()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
     visible: false
 

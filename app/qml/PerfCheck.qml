@@ -11,6 +11,7 @@ Overlay {
     id: perf
     onOutsideTapped: perf.closeClicked()
     required property var ui
+    motion: ui.motion
     required property var win
     anchors.fill: parent
     visible: false
@@ -241,7 +242,7 @@ Overlay {
                     anchors.centerIn: parent
                     width: perf.ui.px(40); height: width; radius: perf.ui.px(4)
                     color: perf.ui.c.accent
-                    RotationAnimation on rotation { running: perf.phase === "still"; from: 0; to: 360; duration: 1200; loops: Animation.Infinite }
+                    RotationAnimation on rotation { running: perf.phase === "still"; from: 0; to: 360; duration: perf.ui.motion.testSpin; loops: Animation.Infinite }
                 }
                 ListView {
                     id: scroller
@@ -257,7 +258,7 @@ Overlay {
                     }
                     NumberAnimation on contentY {
                         running: perf.phase === "scroll"
-                        from: 0; to: perf.ui.px(30) * 300; duration: 4600; loops: Animation.Infinite
+                        from: 0; to: perf.ui.px(30) * 300; duration: perf.ui.motion.testScroll; loops: Animation.Infinite
                     }
                 }
                 Text {

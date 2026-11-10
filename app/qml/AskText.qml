@@ -7,6 +7,7 @@ Overlay {
     id: ask
     onOutsideTapped: ask.cancel()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
     // Main.qml draws it only while app.sheet is "ask" (0.59).
     property bool shown: false

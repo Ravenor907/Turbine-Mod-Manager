@@ -10,6 +10,7 @@ Overlay {
     id: fs
     closeOnOutside: false
     required property var ui
+    motion: ui.motion
     property var info: null               // the engine's installer JSON: {game, waiting, data, images}
     property int page: 0                  // which group of the current step
     property int focusIndex: 0

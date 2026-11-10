@@ -7,6 +7,7 @@ Overlay {
     id: al
     onOutsideTapped: al.closeClicked()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property var lines: []

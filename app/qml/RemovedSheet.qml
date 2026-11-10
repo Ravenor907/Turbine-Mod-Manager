@@ -8,6 +8,7 @@ Overlay {
     id: rs
     onOutsideTapped: rs.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property var mods: []                 // [{id, name, removedAt}]

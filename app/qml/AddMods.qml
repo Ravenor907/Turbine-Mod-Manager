@@ -16,6 +16,7 @@ Overlay {
     onOutsideTapped: root.closed()
 
     required property var ui
+    motion: ui.motion
     // 0.56: a download's name as people say it: no .zip, no Nexus numbers, spaces for underscores (the file's own
     // name is the small line under it).
     function niceName(f) {

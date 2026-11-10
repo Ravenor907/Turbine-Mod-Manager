@@ -9,6 +9,7 @@ Overlay {
     id: se
     closeOnOutside: false
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property string title: ""
@@ -260,6 +261,7 @@ Overlay {
                         readonly property bool on: row.f !== null && row.val === row.f.on
                         width: se.ui.tpx(64); height: se.ui.tpx(34); radius: height / 2
                         color: on ? se.ui.c.accent : se.ui.c.raised
+                        Behavior on color { enabled: se.ui.motion.on; ColorAnimation { duration: se.ui.motion.fast; easing.type: se.ui.motion.enter } }
                         border.color: se.ui.c.line
                         Text { anchors.centerIn: parent; text: parent.on ? "On" : "Off"; color: parent.on ? se.ui.c.onAccent : se.ui.c.soft; font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true }
                         TapHandler { onTapped: { se.focusIndex = row.index; se.change(row.modelData, 1) } }
@@ -303,6 +305,7 @@ Overlay {
                             Rectangle {
                                 readonly property real part: row.f && row.f.max > row.f.min ? Math.max(0, Math.min(1, (parseFloat(row.val) - row.f.min) / (row.f.max - row.f.min))) : 0
                                 width: parent.width * part; height: parent.height; radius: 2; color: se.ui.c.accent
+                                Behavior on width { enabled: se.ui.motion.moves; NumberAnimation { duration: se.ui.motion.moveFast; easing.type: se.ui.motion.enter } }
                             }
                         }
                     }

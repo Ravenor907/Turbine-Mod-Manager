@@ -78,7 +78,9 @@ Rectangle {
     border.color: ui.c.accentLo
     opacity: shown ? 1 : 0
     visible: opacity > 0
-    Behavior on opacity { NumberAnimation { duration: 160 } }
+    // 0.62: it fades in and out, and at Full slides up a little as it comes and back down as it goes.
+    Behavior on opacity { NumberAnimation { duration: root.ui.motion.base; easing.type: root.shown ? root.ui.motion.enter : root.ui.motion.leave } }
+    transform: Translate { y: (1 - root.opacity) * root.ui.px(14) * root.ui.motion.slide }
 
     // A tap on the toast dismisses it and goes nowhere else (0.59).
     MouseArea {  // overlay-check: the toast's own box, not the window

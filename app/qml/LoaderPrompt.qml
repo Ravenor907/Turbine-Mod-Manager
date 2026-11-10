@@ -17,6 +17,7 @@ Overlay {
     onOutsideTapped: root.closed()
 
     required property var ui
+    motion: ui.motion
 
     property string title: "Mod loader needed"
     property string loaderName: ""        // short name, e.g. "SKSE"

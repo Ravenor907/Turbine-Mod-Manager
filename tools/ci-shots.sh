@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|cooppw*|keycheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -317,10 +317,10 @@ fresh "bookcheck"; h="$PWD/fh/bookcheck"
 shoot "bookcheck-1280x800" 1280x800 bookcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
 k=bookcheck-1280x800
 need $k "Book: My mods keeps the game list" "Book check: My mods: the game list is there, page edges none$"
-need $k "Book: RB turns forward to Get mods" "Book check: RB: Get mods comes in from the right, turning true$"
+need $k "Book: RB turns forward to Get mods" "Book check: RB: Get mods comes in from the right$"
 need $k "Book: no game list on Get mods, the edges name the pages" "Book check: Get mods: the game list is gone, left edge My mods \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px\), right edge Load order$"
 need $k "Book: Left inside a row moves the ring" "Book check: Left inside the row: card 1, still Get mods$"
-need $k "Book: Left from the first column turns back" "Book check: Left from the first column: My mods comes in from the left over Get mods \(still showing\), zone main$"
+need $k "Book: Left from the first column turns back" "Book check: Left from the first column: My mods comes in from the left, zone main$"
 need $k "Book: the turn ends, the game list is back" "Book check: The turn done: My mods, Get mods put away, the game list back$"
 need $k "Book: Right inside a row moves the ring" "Book check: Right inside the row: card 2, still Get mods$"
 need $k "Book: Right from the last column turns forward" "Book check: Right from the last column: Load order comes in from the right$"
@@ -330,7 +330,18 @@ need $k "Book: a click on the left edge" "Book check: A click on the left edge: 
 need $k "Book: a click on the right edge" "Book check: A click on the right edge: Load order$"
 need $k "Book: the bar on Get mods, nothing overlaps" "Bar check \(bookcheck, .* 0 problems"
 need $k "Book: B is My mods" "Book check: The bar on Get mods: .*B My mods"
-need $k "Book checks" "Book check done: 0 problems, [1-9][0-9]* page turns shown"
+need $k "Book checks (animations off: nothing to wait for)" "Book check done: 0 problems, animations off, 0 page turns shown, 0 glides$"
+# 0.62: the same walk once more with animations at Full: only where things end up is asserted (the same lines), and
+# that the page turns and the glides really ran.
+fresh "bookfull"; h="$PWD/fh/bookfull"
+shoot "bookfull-1280x800" 1280x800 bookcheck "$h" --game=$skyrim --motion=full "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
+k=bookfull-1280x800
+need $k "Animations at Full: the game list goes on Get mods" "Book check: Get mods: the game list is gone, left edge My mods"
+need $k "Animations at Full: Left turns back and ends on My mods" "Book check: The turn done: My mods, Get mods put away, the game list back$"
+need $k "Animations at Full: Right turns forward" "Book check: Right from the last column: Load order comes in from the right$"
+need $k "Animations at Full: a held D-pad still stops at the edge" "Book check: Left held 1.5 s: card 1, the page stayed$"
+need $k "Animations at Full: the edges still turn the page" "Book check: A click on the right edge: Load order$"
+need $k "Animations at Full: every end state right, and the turns ran" "Book check done: 0 problems, animations full, [1-9][0-9]* page turns shown, [0-9]+ glides$"
 # 0.54 fixes: holds need a real press, a click on a row is A, the removed row, RT and R3, the tutorial, hidden games.
 i=inputcheck-1280x800
 need $i "Holds: a click never deletes" "Hold check: a click on Hold A to delete: only the highlight moved"

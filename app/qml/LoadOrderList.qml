@@ -33,7 +33,7 @@ Item {
     signal scrolled(int first, int last)  // after a wheel scroll or a swipe: the rows in view
     function rowItem(i) { return list.itemAtIndex(i) }
 
-    onFocusIndexChanged: if (focusIndex >= 0) list.positionViewAtIndex(focusIndex, ListView.Contain)
+    onFocusIndexChanged: if (focusIndex >= 0) lo.ui.glide(list, () => list.positionViewAtIndex(lo.focusIndex, ListView.Contain))
 
     Column {
         anchors.fill: parent

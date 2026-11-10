@@ -7,6 +7,7 @@ Overlay {
     id: vs
     onOutsideTapped: vs.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property string modName: ""

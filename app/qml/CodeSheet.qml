@@ -6,6 +6,7 @@ Overlay {
     id: cs
     onOutsideTapped: cs.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property var info: null               // {state: "working" | "ready" | "error", profile, code, left, files, message}

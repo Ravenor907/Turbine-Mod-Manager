@@ -8,6 +8,7 @@ Overlay {
     id: tut
     closeOnOutside: false
     required property var ui
+    motion: ui.motion
     property int card: 0
     property int count: 4
     // The pad's names for View and Start ("VIEW", "MENU", "BACK", "START"), from Main.qml's glyphs.

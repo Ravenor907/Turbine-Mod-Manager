@@ -7,6 +7,7 @@ Overlay {
     id: pg
     onOutsideTapped: pg.closed()
     required property var ui
+    motion: ui.motion
     anchors.fill: parent
 
     property string title: ""

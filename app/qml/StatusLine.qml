@@ -144,7 +144,7 @@ Rectangle {
                 RotationAnimator on rotation {
                     from: 0
                     to: 360
-                    duration: 900
+                    duration: root.ui.motion.spin
                     loops: Animation.Infinite
                     running: spinner.visible
                 }

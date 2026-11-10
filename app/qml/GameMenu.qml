@@ -17,6 +17,7 @@ Overlay {
     onOutsideTapped: root.closed()
 
     required property var ui
+    motion: ui.motion
 
     property string gameName: ""
     property string subtitle: "Game menu"

@@ -53,6 +53,22 @@ the status is about), LB RB and the tab names, the legend, View Wheel, the Start
 long list or grid hides it and the rail (truly full screen); going up, the top, View, a tab change, a sheet or the
 rail bring them back, sliding unless Reduce motion is on.
 
+### Motion (0.62)
+
+`Motion.qml` is the one place for how Turbine moves: `fast` 120 ms, `base` 180, `slow` 260 for fades, `moveFast`,
+`moveBase`, `moveSlow` and `page` (320) for anything that travels or grows, `enter` (OutCubic) and `leave` (InCubic),
+`fromScale` 0.97. Its `level` is the player's (Settings, Look, Animations): `full`, `reduced` (fades only: the move
+durations are 0) or `off` (everything is 0: instant). Main.qml has the one instance (`mo`, handed to components as
+`ui.motion`); no other file writes a duration in milliseconds or names an easing curve (tools/qml-check.js fails on
+one). The build's checks run with it off; one pass (`--motion=full`) checks that the end states are the same.
+
+What moves: every Overlay fades in and grows a little; the Get mods page turn; toasts fade and slide; the quick
+wheel's wedge fill; the bar's hints fade over when they change or the input does; lists and the grid glide to
+the focused row (`ui.glide(view, jump)`); a ring travels from the last focused thing to the new one on the main
+screens; a moved row slides in and a row put back fades in; pictures fade in when loaded; toggles and sliders;
+the ring that fills while Start is held; the splash. An animation only ever follows a state that has already
+changed, so a press during one acts at once.
+
 ### Get mods is a page of a book (0.62)
 
 No game list on Get mods (`railAway`): My mods is the page to the left and Load order the page to the right, named

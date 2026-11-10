@@ -16,6 +16,7 @@ Overlay {
     onOutsideTapped: root.closed()
 
     required property var ui
+    motion: ui.motion
 
     property string title: ""             // the mod's name; shown in capitals
     property string subtitle: ""          // e.g. "0.4.19.16 · Nexus · On, 3rd in load order"

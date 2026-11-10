@@ -34,7 +34,8 @@ Window {
         property int fallAmount: 40         // 10 to 100
         property int fallSize: 100          // 50 to 200 percent
         property bool compactList: false    // 0.56: shorter rows in My mods
-        property bool reduceMotion: false   // 0.56: no sliding or growing (the header, the wheel, sheets)
+        property bool reduceMotion: false   // 0.56: no sliding or growing (0.62: read once, as Animations "reduced")
+        property string animations: ""      // 0.62: full, reduced (fades only) or off (instant); "" until chosen
         property string confirmBy: "hold"   // 0.56: "hold" (A held 5 s) or "twice" (A, then A again) for Reset and delete
         property string holdStartDoes: "choice" // 0.62: holding Start 3 s: "choice" (the Play choice) or "last" (plays the last choice)
     }
@@ -599,7 +600,42 @@ Window {
     // back. Reduce motion: no slide, they just go and come.
     property bool barsHidden: false
     readonly property bool gameScreen: page === "game" && !modPage
-    readonly property bool reduceMotion: look.reduceMotion
+    // ---- 0.62: one motion system (Motion.qml): every duration and curve comes from it. Settings, Look, Animations:
+    // Full, Reduced (fades only) or Off (instant). The build's checks run with it off, so no check races an
+    // animation (--motion=full for the pass that only looks at where things end up; the splash pictures play it).
+    readonly property string motionLevel: shot.on ? (shot.arg("motion") !== "" ? shot.arg("motion") : shot.page.indexOf("splash") === 0 ? "full" : "off")
+                                          : look.animations !== "" ? look.animations : look.reduceMotion ? "reduced" : "full"
+    Motion { id: mo; level: app.motionLevel }
+    readonly property Motion motion: mo
+    readonly property bool reduceMotion: !mo.moves
+    // A list or grid brought to its focused row: `jump` puts it there (positionViewAtIndex and the like); at Full
+    // the view then glides from where it was instead of snapping. One at a time, never an overshoot, and a new
+    // one takes over from wherever the last had got to.
+    NumberAnimation {
+        id: glideAnim
+        properties: "contentY"; duration: mo.moveBase; easing.type: mo.enter
+        // It ends exactly where a jump would have put it (rows of different heights can move the mark on the way).
+        onFinished: { const j = app.glideJump; app.glideJump = null; if (j) j() }
+    }
+    property var glideJump: null
+    property int glides: 0
+    function glide(view, jump) {
+        if (!mo.moves || !view || !view.visible) { jump(); return }
+        if (glideAnim.running) {
+            glideAnim.stop(); glideJump = null
+            // Another view's glide ends where it was going.
+            if (glideAnim.target && glideAnim.target !== view) glideAnim.target.contentY = glideAnim.to
+        }
+        const from = view.contentY
+        jump()
+        const to = view.contentY
+        if (Math.abs(to - from) < 1) return
+        view.contentY = from
+        glideAnim.target = view; glideAnim.from = from; glideAnim.to = to
+        glideJump = jump
+        glides++
+        glideAnim.start()
+    }
     onBarsHiddenChanged: { barsChangedAt = Date.now(); note("page", "Bars " + (barsHidden ? "hidden (full screen)" : "shown")) }
     // They only hide when there is more than a screen to see: the list is taller than its view and the focused row
     // is past the first screen. Game switches and a flick back to the top bring them back.
@@ -662,14 +698,16 @@ Window {
     property int turnDir: 0               // -1: the page comes in from the left (back), 1: from the right
     property real turnPart: 1
     property int turnsShown: 0
-    property bool turnForced: false       // the build's check runs the animation in its pictures too
     property int tabBefore: 0
     property real gameChangedAt: 0        // a tab that changes with the game is no page turn
-    readonly property real turnX: turnTo < 0 ? 0 : turnDir * (1 - turnPart) * content.width
+    // Full: the page slides in. Reduced: it fades in where it is (turnFade).
+    readonly property real turnX: turnTo < 0 || !mo.moves ? 0 : turnDir * (1 - turnPart) * content.width
+    readonly property real turnFade: turnTo >= 0 && !mo.moves ? 1 - turnPart : 0
+    property int lastTurnDir: 0
     NumberAnimation {
         id: turnAnim
         target: app; properties: "turnPart"
-        from: 0; to: 1; duration: 280; easing.type: Easing.OutCubic
+        from: 0; to: 1; duration: mo.page; easing.type: mo.enter
         onFinished: { app.turnFrom = -1; app.turnTo = -1 }
     }
     function turnStart(from, to) {
@@ -681,8 +719,9 @@ Window {
     }
     onTabChanged: {
         // One page to the next in the same game: the turn. (Not in the build's pictures, but for its own check.)
-        if (page === "game" && !!game && Date.now() - gameChangedAt > 150 && Math.abs(tab - tabBefore) === 1 && !reduceMotion && (!shot.on || turnForced)) turnStart(tabBefore, tab)
+        if (page === "game" && !!game && Date.now() - gameChangedAt > 150 && Math.abs(tab - tabBefore) === 1 && mo.on) turnStart(tabBefore, tab)
         else { turnAnim.stop(); turnFrom = -1; turnTo = -1 }
+        lastTurnDir = tab > tabBefore ? 1 : -1
         tabBefore = tab
         barsHidden = false
         note("page", "Tab " + (tabs[tab] || tab))
@@ -766,6 +805,9 @@ Window {
         function fpx(v) { return app.fpx(v) }
         function tpx(v) { return app.tpx(v) }
         function hover(item, on) { app.hover(item, on) }
+        // 0.62: the motion system, and the glide to a focused row.
+        readonly property Motion motion: mo
+        function glide(view, jump) { app.glide(view, jump) }
     }
 
     // ---------------------------------------------------------------- data
@@ -2247,6 +2289,7 @@ Window {
     }
     function putBack(id) {
         note("action", "Put back " + id)
+        nudgeRow(id, 0)
         if (ghost && ghost.id === id) { ghost = null; ghostTimer.stop() }
         Turbine.undoRemove(id)
         toast.hide()
@@ -2276,6 +2319,10 @@ Window {
         moveSaved = mods.slice()
     }
     // d rows (Up/Down 1, Left/Right 10); LT/RT pass a large number for top or bottom.
+    // 0.62: a row that just moved, came back or arrived slides or fades into its place (the list is rebuilt when
+    // it changes, so the row is told where it came from: {id, dir: -1 from above, 1 from below, 0 a fade, at}).
+    property var rowNudge: null
+    function nudgeRow(id, dir) { rowNudge = mo.on ? { id: id, dir: dir, at: Date.now() } : null }
     function stepMove(d) {
         const from = modIndex
         const to = Math.max(0, Math.min(mods.length - 1, from + d))
@@ -2283,6 +2330,7 @@ Window {
         let list = mods.slice()
         const m = list.splice(from, 1)[0]
         list.splice(to, 0, m)
+        nudgeRow(m.id, to > from ? -1 : 1)
         mods = list
         modIndex = to
     }
@@ -3718,7 +3766,15 @@ Window {
     function startHoldBegin() {
         startSince = Date.now(); startHeld = 0
         startHold.restart()
+        startGlide = 0
+        if (mo.on) startGlideAnim.restart()
     }
+    // 0.62: what the ring draws. The hold itself is timed by startHold alone; this only fills the ring evenly
+    // between its ticks (with animations off the ring steps with the ticks, as before).
+    property real startGlide: 0
+    NumberAnimation { id: startGlideAnim; target: app; properties: "startGlide"; from: 0; to: 1; duration: app.startHoldMs; easing.type: mo.even }
+    readonly property real startRingPart: mo.on && startGlideAnim.running ? Math.min(startGlide, startHeld + 0.05) : startHeld
+    onStartHeldChanged: if (startHeld === 0) { startGlideAnim.stop(); startGlide = 0 }
     function startHoldDone() {
         note("action", "Start held 3 seconds: " + (page === "browser" ? "Play after the add" : startHoldPlays ? "Play my last choice" : "the Play choice"))
         if (page === "browser") { browserPlay(); return }
@@ -3795,6 +3851,7 @@ Window {
         if (b === "start" && startHold.running) {
             const ms = Date.now() - startSince
             startHold.stop(); startHeld = 0
+            startGlideAnim.stop(); startGlide = 0
             // A tap is Settings; a hold let go before the 3 seconds does nothing at all.
             if (ms < startTapMs) act("start")
             else note("pad", "Start let go after " + (ms / 1000).toFixed(1) + " s: nothing (a hold is 3 seconds)")
@@ -3830,6 +3887,72 @@ Window {
     function stickWheel(d) {
         const p = focusCenter()
         Turbine.wheelAt(p.x, p.y, d)
+    }
+    // ---- 0.62: the focus ring glides. Each thing draws its own ring where the focus rests; when the focus moves,
+    // a ring travels from the last one to the new one (120 ms) and fades as it lands. Only at Full, only on the
+    // main screens (the game list, My mods, Get mods, Play), and never while a list is still gliding to its row.
+    property Item focusWas: null
+    property int focusGlides: 0
+    function focusItemNow() {
+        if (sheet !== "" || wheelOpen || page === "browser" || page === "place") return null
+        if (zone === "rail") return railIndex < games.length ? railList.itemAtIndex(railIndex) : railIndex < games.length + railExtra ? hiddenTile : gear
+        if (zone === "play") return playBtn.visible ? playBtn : null
+        if (page !== "game" || modPage || zone !== "main") return null
+        if (tab === 0) return modIndex >= 0 && modList.visible ? modList.itemAtIndex(modIndex) : null
+        if (tab === 1 && getArea === "grid" && getView.visible) return getView.gridItem(getIndex)
+        return null
+    }
+    function focusMoved() { if (mo.moves) Qt.callLater(focusTrail) }
+    function focusTrail() {
+        let now = null
+        try { now = focusItemNow() } catch (e) { now = null }
+        const was = focusWas
+        focusWas = now
+        if (!mo.moves || !now || !was || was === now || glideAnim.running || turnTo >= 0) return
+        try {
+            if (!was.visible || !now.visible) return
+            const a = was.mapToItem(null, 0, 0), b = now.mapToItem(null, 0, 0)
+            // Both on screen (a row scrolled out of view has nowhere to glide from).
+            if (a.y + was.height < 0 || a.y > height || b.y + now.height < 0 || b.y > height) return
+            focusRing.x = a.x; focusRing.y = a.y; focusRing.width = was.width; focusRing.height = was.height
+            ringX.to = b.x; ringY.to = b.y; ringW.to = now.width; ringH.to = now.height
+            focusGlides++
+            ringMove.restart()
+        } catch (e) {}
+    }
+    Connections {
+        target: app
+        function onModIndexChanged() { app.focusMoved() }
+        function onGetIndexChanged() { app.focusMoved() }
+        function onGetAreaChanged() { app.focusMoved() }
+        function onRailIndexChanged() { app.focusMoved() }
+        function onZoneChanged() { app.focusMoved() }
+        function onTabChanged() { app.focusWas = null }
+        function onPageChanged() { app.focusWas = null }
+        function onSheetChanged() { app.focusWas = null }
+        function onCurrentChanged() { app.focusWas = null }
+    }
+    Rectangle {
+        id: focusRing
+        z: 45
+        visible: opacity > 0
+        opacity: 0
+        color: "transparent"
+        radius: app.px(6)
+        border.color: c.accentHi
+        border.width: Math.max(2, app.px(2))
+        enabled: false
+        SequentialAnimation {
+            id: ringMove
+            PropertyAction { target: focusRing; properties: "opacity"; value: 0.9 }
+            ParallelAnimation {
+                NumberAnimation { id: ringX; target: focusRing; properties: "x"; duration: mo.moveFast; easing.type: mo.enter }
+                NumberAnimation { id: ringY; target: focusRing; properties: "y"; duration: mo.moveFast; easing.type: mo.enter }
+                NumberAnimation { id: ringW; target: focusRing; properties: "width"; duration: mo.moveFast; easing.type: mo.enter }
+                NumberAnimation { id: ringH; target: focusRing; properties: "height"; duration: mo.moveFast; easing.type: mo.enter }
+            }
+            NumberAnimation { target: focusRing; properties: "opacity"; to: 0; duration: mo.fast; easing.type: mo.leave }
+        }
     }
     // The middle of whatever has the focus ring, in window pixels.
     function focusCenter() {
@@ -5431,25 +5554,25 @@ Window {
             const click = it => { const p = it.mapToItem(null, it.width / 2, it.height / 2)
                                   Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0); Turbine.selftestMouse(1, p.x, p.y, Qt.LeftButton, 0, 0); Turbine.selftestMouse(2, p.x, p.y, Qt.LeftButton, 0, 0) }
             script = [
-                () => { if (!game || !modsLoaded || mods.length < 1) return false; turnForced = true; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0 },
+                () => { if (!game || !modsLoaded || mods.length < 1) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; modIndex = 0 },
                 () => { say(rail.width > 0 && !edgeBack.visible, "My mods: the game list is " + (rail.width > 0 ? "there" : "gone") + ", page edges " + (edgeBack.visible ? "shown" : "none")); m.turns = turnsShown; pad("rb")
-                        say(tab === 1 && turnTo === 1 && turnDir === 1 && turnLine.visible && turnsShown === m.turns + 1, "RB: " + tabName() + " comes in from the " + (turnDir > 0 ? "right" : "left") + ", turning " + (turnTo >= 0)) },
+                        say(tab === 1 && lastTurnDir === 1 && (mo.moves ? turnTo === 1 && turnLine.visible && turnsShown === m.turns + 1 : !turnLine.visible), "RB: " + tabName() + " comes in from the " + (lastTurnDir > 0 ? "right" : "left")) },
                 () => { if (getItems.length < gridColumns || turnTo >= 0 || rail.width > 0) return false
                         say(rail.width === 0 && edgeBack.visible && edgeBack.width >= 44 && edgeNext.visible === bookHasNext && bookHasNext,
                             "Get mods: the game list is " + (rail.width === 0 ? "gone" : "there") + ", left edge " + (edgeBack.visible ? edgeBack.label : "none") + " (" + Math.round(edgeBack.width) + " px), right edge " + (edgeNext.visible ? edgeNext.label : "none"))
                         zone = "main"; getArea = "grid"; getIndex = 1; pad("left")
                         say(tab === 1 && getIndex === 0, "Left inside the row: card " + (getIndex + 1) + ", still " + tabName())
                         pad("left")
-                        say(tab === 0 && zone === "main" && turnTo === 0 && turnDir === -1 && getView.visible && modList.visible && turnLine.visible,
-                            "Left from the first column: " + tabName() + " comes in from the " + (turnDir < 0 ? "left" : "right") + " over Get mods (" + (getView.visible ? "still showing" : "gone") + "), zone " + zone) },
+                        say(tab === 0 && zone === "main" && lastTurnDir === -1 && modList.visible && (mo.moves ? turnTo === 0 && getView.visible && turnLine.visible : !getView.visible),
+                            "Left from the first column: " + tabName() + " comes in from the " + (lastTurnDir < 0 ? "left" : "right") + ", zone " + zone) },
                 () => { if (turnTo >= 0 || rail.width < px(72)) return false
                         say(tab === 0 && !getView.visible && rail.width > 0, "The turn done: " + tabName() + ", Get mods " + (getView.visible ? "still showing" : "put away") + ", the game list back"); pad("rb") },
                 () => { if (turnTo >= 0 || tab !== 1) return false
                         getArea = "grid"; getIndex = 0; pad("right")
                         say(tab === 1 && getIndex === 1, "Right inside the row: card " + (getIndex + 1) + ", still " + tabName())
                         getIndex = gridColumns - 1; pad("right")
-                        say(tab === 2 && turnDir === 1, "Right from the last column: " + tabName() + " comes in from the " + (turnDir > 0 ? "right" : "left")) },
-                () => { if (turnTo >= 0) return false; pad("lb"); say(tab === 1 && turnDir === -1, "LB from Load order: " + tabName() + " comes in from the " + (turnDir < 0 ? "left" : "right")) },
+                        say(tab === 2 && lastTurnDir === 1, "Right from the last column: " + tabName() + " comes in from the " + (lastTurnDir > 0 ? "right" : "left")) },
+                () => { if (turnTo >= 0) return false; pad("lb"); say(tab === 1 && lastTurnDir === -1, "LB from Load order: " + tabName() + " comes in from the " + (lastTurnDir < 0 ? "left" : "right")) },
                 // A held D-pad runs to the first column and stops there: the page stays.
                 () => { if (turnTo >= 0) return false; getArea = "grid"; getIndex = gridColumns - 1; m.t = Date.now(); Turbine.selftestPad("left", true) },
                 () => { if (Date.now() - m.t < 1500) return false; Turbine.selftestPad("left", false)
@@ -5462,7 +5585,7 @@ Window {
                 () => { if (turnTo >= 0 || tab !== 1 || rail.width > 0) return false; getArea = "grid"; getIndex = 0; zone = "main"
                         legend.check("bookcheck")
                         say(legendHints.some(h => h[0] === "b" && h[1] === "My mods"), "The bar on Get mods: " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
-                        check("Book check done: " + m.bad + " problems, " + turnsShown + " page turns shown") }
+                        check("Book check done: " + m.bad + " problems, animations " + mo.level + ", " + turnsShown + " page turns shown, " + glides + " glides") }
             ]
         }
         // 0.62 (the owner's device): Seamless Co-op started with an empty session password and the mod stopped with
@@ -7712,7 +7835,7 @@ Window {
         const lines = [
             "Interface size: " + sizeNow + "%", "Layout: " + layoutNow, "Theme: " + look.theme, "Accent: " + look.accent,
             "Contrast: " + (look.highContrast ? "High" : "Standard"), "Color vision: " + look.vision, "Compact list: " + look.compactList,
-            "Reduce motion: " + look.reduceMotion, "Confirm by: " + look.confirmBy, "Seasonal: " + seasonPick,
+            "Animations: " + mo.level, "Confirm by: " + look.confirmBy, "Seasonal: " + seasonPick,
             "Open Nexus in: " + browserSet.openIn, "Status over other apps: " + browserSet.overlay,
             "Check for updates at start: " + updates.auto, "Pre-release: " + (labsOn && updates.prerelease), "Labs: " + labsOn,
             "Nexus account: " + (account.state || "unknown") + (account.hasKey ? ", a key is set" : ", no key") + (account.premium === true ? ", Premium" : ""),
@@ -8156,8 +8279,9 @@ Window {
           step: (d) => cycle("confirmBy", ["hold", "twice"], d) },
         { label: "Hold Start does", options: ["choice", "last"], names: ["Show the Play choice", "Play my last choice"], key: "holdStartDoes",
           step: (d) => cycle("holdStartDoes", ["choice", "last"], d) },
-        { label: "Reduce motion", options: [false, true], names: ["Off", "On"], key: "reduceMotion",
-          step: (d) => { look.reduceMotion = !look.reduceMotion; note("action", "Look: reduce motion " + look.reduceMotion) } },
+        // 0.62: Full, Reduced (fades only: nothing travels or grows) or Off (instant).
+        { label: "Animations", options: ["full", "reduced", "off"], names: ["Full", "Reduced", "Off"], key: "animations", now: mo.level,
+          step: (d) => { const l = ["full", "reduced", "off"]; look.animations = l[(l.indexOf(mo.level) + d + l.length) % l.length]; note("action", "Look: animations " + look.animations) } },
 
         { label: "Seasonal", options: ["off", "date", "autumn", "snow"], names: ["Off", "By date", "Autumn", "Snow"], key: "season",
           now: seasonPick, step: (d) => { look.season = seasonPick; cycle("season", ["off", "date", "autumn", "snow"], d) } }
@@ -8341,7 +8465,7 @@ Window {
         size: look.fallSize
         scale: app.s
         light: c.light
-        moving: (app.active || shot.on) && !app.reduceMotion
+        moving: (app.active || shot.on) && mo.moves
     }
     Row {
         id: mainRow
@@ -8355,7 +8479,7 @@ Window {
             // 0.57: full screen while scrolling down (the bottom bar goes too).
             // 0.62: and on Get mods (a page of the book: no game list).
             width: app.railAway ? 0 : app.px(72)
-            Behavior on width { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+            Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
             visible: width > 0
             clip: true
             height: parent.height
@@ -8395,7 +8519,7 @@ Window {
                 model: app.games.length
                 currentIndex: app.zone === "rail" ? Math.min(app.railIndex, app.games.length - 1) : app.current
                 highlightFollowsCurrentItem: false
-                onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                onCurrentIndexChanged: app.glide(railList, () => railList.positionViewAtIndex(railList.currentIndex, ListView.Contain))
                 delegate: Item {
                     id: tileItem
                     required property int index
@@ -8425,6 +8549,8 @@ Window {
                             anchors.fill: parent
                             anchors.margins: tile.border.width
                             visible: status === Image.Ready
+                            opacity: status === Image.Ready ? 1 : 0
+                            Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.base; easing.type: mo.enter } }
                             source: tileItem.g ? app.fileUrl(tileItem.g.cover || tileItem.g.header) : ""
                             fillMode: Image.PreserveAspectCrop
                             sourceSize.height: app.px(132)
@@ -8583,7 +8709,6 @@ Window {
                     // 0.6 (I11): no top bar anywhere: the bottom bar names the place, has the result caps and Play.
                     height: 0
                     visible: false
-                    Behavior on height { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                     color: c.panel
                     clip: true
                     Image {
@@ -8737,12 +8862,14 @@ Window {
 
                     // ---- 0.62: a page turning. The page being covered dims, the one coming in slides over it on its own
                     // ground, and a brass line marks its edge.
-                    Rectangle { anchors.fill: parent; z: 1; visible: app.turnTo >= 0; color: c.ground; opacity: 0.55 }
-                    Rectangle { id: turnGround; x: app.turnX; width: parent.width; height: parent.height; z: 2; visible: app.turnTo >= 0; color: c.ground }
+                    Rectangle { anchors.fill: parent; z: 1; visible: app.turnTo >= 0 && mo.moves; color: c.ground; opacity: 0.55 }
+                    Rectangle { id: turnGround; x: app.turnX; width: parent.width; height: parent.height; z: 2; visible: app.turnTo >= 0 && mo.moves; color: c.ground }
+                    // Reduced: the new page fades in from the ground.
+                    Rectangle { anchors.fill: parent; z: 6; visible: app.turnFade > 0; color: c.ground; opacity: app.turnFade }
                     Rectangle {
                         id: turnLine
                         z: 4
-                        visible: app.turnTo >= 0
+                        visible: app.turnTo >= 0 && mo.moves
                         x: app.turnDir < 0 ? app.turnX + parent.width - width : app.turnX
                         width: Math.max(2, app.px(3)); height: parent.height
                         color: c.accentHi
@@ -8817,6 +8944,8 @@ Window {
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     visible: status === Image.Ready
+                                    opacity: status === Image.Ready ? 1 : 0
+                                    Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.base; easing.type: mo.enter } }
                                 }
                                 Text {
                                     visible: !panelPic.visible
@@ -8897,7 +9026,7 @@ Window {
                         model: app.listItems
                         currentIndex: Math.max(0, app.modIndex)
                         highlightFollowsCurrentItem: false
-                        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                        onCurrentIndexChanged: app.glide(modList, () => modList.positionViewAtIndex(modList.currentIndex, ListView.Contain))
                         // After the left stick scrolls, focus the nearest row still in view.
                         onMovementEnded: {
                             const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
@@ -8913,6 +9042,16 @@ Window {
                             readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex === index
                             readonly property Item pill: row.pillItem
                             width: modList.width
+                            // 0.62: just moved (it slides in from where it was) or put back (it fades in).
+                            transform: Translate { id: entryShift; y: 0 }
+                            NumberAnimation { id: entrySlide; target: entryShift; properties: "y"; to: 0; duration: mo.moveFast; easing.type: mo.enter }
+                            NumberAnimation { id: entryFade; target: entry; properties: "opacity"; from: 0; to: 1; duration: mo.base; easing.type: mo.enter }
+                            Component.onCompleted: {
+                                const n = app.rowNudge
+                                if (!n || !entry.m || n.id !== entry.m.id || Date.now() - n.at > 400) return
+                                if (n.dir === 0) entryFade.start()
+                                else if (mo.moves) { entryShift.y = n.dir * (entry.height + modList.spacing); entrySlide.start() }
+                            }
                             height: kind === "mod" ? row.implicitHeight : kind === "held" ? Math.max(app.touchFloor + app.px(8), app.px(52)) : app.px(app.desktopLayout ? 38 : 46)
                             ModRow {
                                 id: row
@@ -9119,7 +9258,7 @@ Window {
                         // 0.62: between the page edges (My mods on the left; Load order on the right where the game has one).
                         anchors.leftMargin: app.tpx(34) + app.px(6)
                         anchors.rightMargin: app.bookHasNext ? app.tpx(34) + app.px(6) : 0
-                        visible: app.page === "game" && app.game !== null && (app.tab === 1 || app.turnFrom === 1) && app.sources.length > 0 && !app.modPage
+                        visible: app.page === "game" && app.game !== null && (app.tab === 1 || (app.turnFrom === 1 && mo.moves)) && app.sources.length > 0 && !app.modPage
                         z: app.turnTo === 1 ? 3 : 0
                         transform: Translate { x: app.turnTo === 1 ? app.turnX : 0 }
                         // Touch: a swipe to the right turns back to My mods, to the left forward to Load order.
@@ -9190,7 +9329,7 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.game !== null && (app.tab === 2 || app.turnFrom === 2) && !app.modPage
+                        visible: app.page === "game" && app.game !== null && (app.tab === 2 || (app.turnFrom === 2 && mo.moves)) && !app.modPage
                         z: app.turnTo === 2 ? 3 : 0
                         transform: Translate { x: app.turnTo === 2 ? app.turnX : 0 }
                         plugins: app.order
@@ -9247,7 +9386,7 @@ Window {
                             model: app.lookRows
                             currentIndex: app.sec === "Look" ? app.setRow : 0
                             highlightFollowsCurrentItem: false
-                            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+                            onCurrentIndexChanged: app.glide(lookList, () => lookList.positionViewAtIndex(lookList.currentIndex, ListView.Contain))
                             delegate: Rectangle {
                                 id: srow
                                 required property int index
@@ -9282,6 +9421,7 @@ Window {
                                                 width: (parent.width - app.px(4) * ((srow.modelData.names || []).length - 1)) / (srow.modelData.names || [1]).length
                                                 height: app.px(32); radius: app.px(5)
                                                 color: on ? c.raised : c.ground
+                                                Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.fast; easing.type: mo.enter } }
                                                 Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
                                                 Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
                                                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -9346,9 +9486,14 @@ Window {
                                             width: Math.max(app.px(40), parent.width - app.tpx(36) * 2 - app.px(90)); height: app.px(6); radius: height / 2
                                             anchors.verticalCenter: parent.verticalCenter
                                             color: c.line
-                                            Rectangle { width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent }
+                                            // 0.62: the slider's fill and knob glide to the new value.
+                                            Rectangle {
+                                                width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent
+                                                Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
+                                            }
                                             Rectangle {
                                                 x: parent.width * track.part - width / 2
+                                                Behavior on x { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                                             }
@@ -9550,7 +9695,7 @@ Window {
                         spacing: app.px(4)
                         model: 2000
                         currentIndex: app.perfIndex
-                        highlightMoveDuration: 80
+                        highlightMoveDuration: mo.moveFast
                         onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
                         delegate: Rectangle {
                             id: prow
@@ -10191,7 +10336,7 @@ Window {
         readonly property bool shown: visible && !(app.barsHidden && app.sheet === "" && !app.wheelOpen)
         anchors.bottom: parent.bottom
         anchors.bottomMargin: shown ? 0 : -height - app.px(2)
-        Behavior on anchors.bottomMargin { enabled: !app.reduceMotion; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        Behavior on anchors.bottomMargin { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.leftMargin: rail.width
@@ -10398,7 +10543,7 @@ Window {
                                 centerX: startRing.width / 2; centerY: startRing.height / 2
                                 radiusX: startRing.width / 2 - app.px(5); radiusY: radiusX
                                 startAngle: -90
-                                sweepAngle: 360 * app.startHeld
+                                sweepAngle: 360 * app.startRingPart
                             }
                         }
                     }
@@ -10442,6 +10587,10 @@ Window {
             Row {
                 id: legendRow
                 visible: true
+                // 0.62: the hints fade over when they change (another screen, another row, the pad, keys or the mouse).
+                readonly property string said: app.legendHints.slice(0, legend.hintsFit).map(h => app.glyph(h[0]) + " " + h[1] + (h[3] ? app.glyph(h[3]) + h[4] : "")).join("|")
+                onSaidChanged: if (mo.on && legend.visible) hintsFade.restart()
+                NumberAnimation { id: hintsFade; target: legendRow; properties: "opacity"; from: 0.25; to: 1; duration: mo.base; easing.type: mo.enter }
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: app.px(16)
                 Repeater {
@@ -10543,7 +10692,6 @@ Window {
         slots: app.wheelSlots
         focusIndex: app.wheelSlot
         hint: app.wheelHint
-        reduceMotion: app.reduceMotion
         onActivated: (i) => { app.wheelSlot = i; app.wheelFire(i) }
         // A mouse over a wedge picks it; over the middle (or off the pie) nothing is picked.
         onPointed: (i) => { app.wheelByStick = false; app.wheelSlot = i; app.wheelPicked = i >= 0 }
@@ -10644,7 +10792,7 @@ Window {
     }
     // ---------------------------------------------------------------- 0.59: the start-up splash
     // The only branding: Turbine's icon in the middle, zooming in as it fades in, then out as it fades out, about
-    // 1.2 s in all (a plain short fade with Reduce motion). Once per launch, never when coming back from a game or the
+    // 1.2 s in all (0.62: it follows Animations: a plain short fade at Reduced, nothing at Off). Once per launch, never when coming back from a game or the
     // background; any press, tap or click skips it. Everything loads underneath while it plays.
     Item {
         id: splash
@@ -10653,16 +10801,17 @@ Window {
         z: 90000
         property bool shown: (!shot.on || shot.page.indexOf("splash") === 0) && !app.splashDone
         visible: shown
-        readonly property int inMs: app.reduceMotion ? 150 : 450
-        readonly property int holdMs: app.reduceMotion ? 300 : 250
-        readonly property int outMs: app.reduceMotion ? 150 : 500
+        readonly property int inMs: mo.splashIn
+        readonly property int holdMs: mo.splashHold
+        readonly property int outMs: mo.splashOut
         property real started: 0
         function finish(why) {
             if (!shown) return
             app.splashDone = true
             app.note("app", "Splash done (" + why + ") after " + Math.round(Date.now() - started) + " ms")
         }
-        Component.onCompleted: { started = Date.now(); if (shown) { splashAnim.start(); app.note("app", "Splash: start") } }
+        // Animations off: no splash at all.
+        Component.onCompleted: { started = Date.now(); if (shown && !mo.on) finish("animations off"); else if (shown) { splashAnim.start(); app.note("app", "Splash: start") } }
         Rectangle { anchors.fill: parent; color: c.ground; opacity: splashIcon.opacity }
         Image {
             id: splashIcon
@@ -10672,18 +10821,18 @@ Window {
             sourceSize.width: 512
             smooth: true; mipmap: true
             opacity: 0
-            scale: app.reduceMotion ? 1 : 0.7
+            scale: mo.splashFrom
         }
         SequentialAnimation {
             id: splashAnim
             ParallelAnimation {
-                NumberAnimation { target: splashIcon; properties: "opacity"; from: 0; to: 1; duration: splash.inMs; easing.type: Easing.OutCubic }
-                NumberAnimation { target: splashIcon; properties: "scale"; from: app.reduceMotion ? 1 : 0.7; to: 1; duration: splash.inMs; easing.type: Easing.OutCubic }
+                NumberAnimation { target: splashIcon; properties: "opacity"; from: 0; to: 1; duration: splash.inMs; easing.type: mo.enter }
+                NumberAnimation { target: splashIcon; properties: "scale"; from: mo.splashFrom; to: 1; duration: splash.inMs; easing.type: mo.enter }
             }
             PauseAnimation { duration: splash.holdMs }
             ParallelAnimation {
-                NumberAnimation { target: splashIcon; properties: "opacity"; to: 0; duration: splash.outMs; easing.type: Easing.InCubic }
-                NumberAnimation { target: splashIcon; properties: "scale"; to: app.reduceMotion ? 1 : 1.25; duration: splash.outMs; easing.type: Easing.InCubic }
+                NumberAnimation { target: splashIcon; properties: "opacity"; to: 0; duration: splash.outMs; easing.type: mo.leave }
+                NumberAnimation { target: splashIcon; properties: "scale"; to: mo.splashTo; duration: splash.outMs; easing.type: mo.leave }
             }
             ScriptAction { script: splash.finish("played") }
         }

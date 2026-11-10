@@ -46,7 +46,7 @@ Item {
         if (n >= 1000) return Math.round(n / 1000) + "K"
         return String(n)
     }
-    onFocusIndexChanged: if (focusArea === "grid") { grid.positionViewAtIndex(focusIndex, GridView.Contain); grid.snapRow() }
+    onFocusIndexChanged: if (focusArea === "grid") gm.ui.glide(grid, () => { grid.positionViewAtIndex(gm.focusIndex, GridView.Contain); grid.snapRow() })
     onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "recent") grid.positionViewAtBeginning()
     function gridItem(i) { return grid.itemAtIndex(i) }
     readonly property bool lookingOver: loading && items.length > 0 && !fallback
@@ -301,6 +301,9 @@ Item {
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             visible: status === Image.Ready
+            // 0.62: a picture fades in when it has loaded.
+            opacity: status === Image.Ready ? 1 : 0
+            Behavior on opacity { enabled: gm.ui.motion.on; NumberAnimation { duration: gm.ui.motion.base; easing.type: gm.ui.motion.enter } }
         }
         Text {
             visible: !img.visible

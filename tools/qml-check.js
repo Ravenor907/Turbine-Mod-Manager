@@ -340,9 +340,30 @@ function overlays(files) {
   return out;
 }
 
+// 0.62: one motion system. Every duration and curve comes from Motion.qml (ui.motion, or mo in Main.qml): a
+// duration written as a number, or an easing curve named, anywhere else is a problem. (Timers' intervals and the
+// time a hold takes are not animations and are not looked at.)
+function motionRule(files) {
+  const out = [];
+  let n = 0;
+  for (const f of files) {
+    if (/(^|\/)Motion\.qml$/.test(f)) continue;
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    for (let k = 0; k < lines.length; k++) {
+      const l = lines[k].replace(/\/\/.*$/, "");
+      if (/\b(duration|highlightMoveDuration|highlightResizeDuration|velocity)\s*:\s*-?\d/.test(l)) out.push(f + ":" + (k + 1) + ": a duration written as a number (take it from Motion.qml): " + l.trim().slice(0, 80));
+      if (/\bEasing\.[A-Z]\w+/.test(l)) out.push(f + ":" + (k + 1) + ": an easing curve named here (take it from Motion.qml): " + l.trim().slice(0, 80));
+      if (/\b(duration|easing\.type)\s*:/.test(l)) n++;
+    }
+  }
+  console.log("Motion check: " + n + " durations and curves, " + out.length + " outside Motion.qml");
+  return out;
+}
+
 const files = process.argv.slice(2);
 let all = [];
 for (const f of files) all = all.concat(checkFile(f)).concat(finalNames(f));
+all = all.concat(motionRule(files));
 for (const f of files) if (f.endsWith("Main.qml")) all = all.concat(settingsRows(f));
 all = all.concat(overlays(files));
 for (const e of all) console.log(e);

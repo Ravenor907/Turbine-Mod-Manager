@@ -11,12 +11,12 @@ Overlay {
     id: qw
     closeOnOutside: false
     required property var ui
+    motion: ui.motion
     property var slots: []
     property int focusIndex: -1
     property string hint: "Push the stick to choose"
     property int mousePick: -1            // the wedge a mouse over it picked
     onVisibleChanged: mousePick = -1
-    property bool reduceMotion: false
     signal activated(int index)
     signal pointed(int index)
     signal closed()
@@ -56,7 +56,7 @@ Overlay {
         width: outer * 2; height: outer * 2
         anchors.centerIn: parent
         scale: qw.visible ? 1 : 0.92
-        Behavior on scale { enabled: !qw.reduceMotion; NumberAnimation { duration: 120 } }
+        Behavior on scale { enabled: qw.ui.motion.moves; NumberAnimation { duration: qw.ui.motion.moveFast; easing.type: qw.ui.motion.enter } }
 
         // -1 the middle, -2 outside the pie, else the wedge (0 is Up, then clockwise).
         function wedgeAt(px, py) {
@@ -74,7 +74,11 @@ Overlay {
             anchors.fill: parent
             property int sel: qw.focusIndex
             property var okList: qw.slots.map(s => !!s.ok)
-            onSelChanged: requestPaint()
+            // 0.62: the picked wedge's fill fades in.
+            property real selPart: 1
+            onSelPartChanged: requestPaint()
+            NumberAnimation { id: selFade; target: canvas; properties: "selPart"; from: 0; to: 1; duration: qw.ui.motion.fast; easing.type: qw.ui.motion.enter }
+            onSelChanged: { if (qw.ui.motion.on && sel >= 0) selFade.restart(); else { selFade.stop(); selPart = 1 } requestPaint() }
             onOkListChanged: requestPaint()
             onWidthChanged: requestPaint()
             property color acc: qw.ui.c.accent
@@ -90,8 +94,9 @@ Overlay {
                     g.arc(cx, cy, R, a0, a1, false)
                     g.arc(cx, cy, r, a1, a0, true)
                     g.closePath()
-                    g.fillStyle = i === sel ? String(qw.ui.c.accent) : String(qw.ui.c.raised)
+                    g.fillStyle = String(qw.ui.c.raised)
                     g.fill()
+                    if (i === sel) { g.globalAlpha = selPart; g.fillStyle = String(qw.ui.c.accent); g.fill(); g.globalAlpha = 1 }
                     g.lineWidth = Math.max(2, qw.ui.px(4))
                     g.strokeStyle = String(qw.ui.c.ground)
                     g.stroke()

@@ -123,6 +123,8 @@ Item {
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                     visible: status === Image.Ready
+                    opacity: status === Image.Ready ? 1 : 0
+                    Behavior on opacity { enabled: md.ui.motion.on; NumberAnimation { duration: md.ui.motion.base; easing.type: md.ui.motion.enter } }
                 }
                 Text {
                     visible: !pic.visible

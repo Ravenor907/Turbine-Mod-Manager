@@ -22,6 +22,7 @@ Overlay {
     }
 
     required property var ui
+    motion: ui.motion
 
     property string title: "Before you play"
     // Each check: { level: "ok" | "warn" | "stop", title, detail }
