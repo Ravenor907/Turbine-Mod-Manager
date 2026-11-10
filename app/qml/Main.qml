@@ -334,10 +334,11 @@ Window {
             else if (shot.page === "placestart") { app.note("shot", "Place page open: " + (app.page === "place")); app.placeAct("start"); Turbine.applyNow() }
             else if (shot.page === "overwriteskip") { app.note("shot", "Overwrite sheet open: " + (app.sheet === "msg")); app.act("a"); Turbine.applyNow() }
             else if (shot.page === "nexuspick") {
-                // 0.62: it was asked by itself once (the game opened on Get mods); a second try doesn't ask again.
-                const again = app.maybeAskNexusGame("a second time")
-                app.note("shot", "Nexus game question: asked by itself " + app.nexusAsks + " times, sheet " + (app.sheet === "pick" ? app.pickTitle : "\"" + app.sheet + "\"") + ", " + app.pickItems.length + " rows; a second time: " + (again ? "asked again" : "not asked"))
-                app.sheet = ""; app.openNexusPick()
+                // 0.62: the game opened on Get mods with its anti-cheat card up: the question waits for the card,
+                // and comes by itself once B closes it (nexusPickShot looks).
+                app.note("shot", "Nexus game question, before: asked by itself " + app.nexusAsks + " times, sheet \"" + app.sheet + "\"" + (app.sheet === "msg" && app.msgData ? " (" + app.msgData.title + ")" : ""))
+                if (app.sheet !== "") app.pad("b")
+                nexusPickShot.start()
             }
             else if (shot.page === "why") app.openWhy()
             // 0.58: the one-time Launch Options step for a me3 game, and the launch check's sheet.
@@ -415,6 +416,17 @@ Window {
             const asks = app.playAsks
             app.pad("a")
             app.note("shot", "Tool steps, Check again: sheet " + app.sheet + ", checks " + app.toolChecks + ", Play asked " + (app.playAsks - asks) + " times, route " + t.route)
+        }
+    }
+    // 0.62: the Nexus game question came by itself once; a second try doesn't ask again.
+    Timer {
+        id: nexusPickShot; interval: 700
+        onTriggered: {
+            const rows = app.sheet === "pick" ? app.pickItems.length : 0, was = app.sheet === "pick" ? app.pickTitle : "\"" + app.sheet + "\""
+            if (app.sheet === "pick") app.pad("b")
+            const again = app.maybeAskNexusGame("a second time")
+            app.note("shot", "Nexus game question: asked by itself " + app.nexusAsks + " times, sheet " + was + ", " + rows + " rows; a second time: " + (again ? "asked again" : "not asked"))
+            app.sheet = ""; app.openNexusPick()
         }
     }
     Timer { id: playOptionsShot; interval: 900; onTriggered: { app.note("shot", "Play options open: " + (app.sheet === "pick" && app.pickTitle === "Play options")) } }
@@ -3845,6 +3857,8 @@ Window {
         else if (sheet === "" && pendingNotes && page !== "browser") { pendingNotes = false; infoIndex = 0; sheet = "notes" }
         else if (sheet === "" && pendingOldHelper) { pendingOldHelper = false; infoIndex = 0; sheet = "oldhelper" }
         else if (sheet === "") offerLoader()
+        // 0.62: "Which game on Nexus is this?" waited for the sheet that was up (the anti-cheat card comes first).
+        if (sheet === "" && tab === 1) Qt.callLater(() => app.maybeAskNexusGame("the sheet before it closed"))
     }
 
     Timer { interval: 16; repeat: true; running: app.active || shot.on; onTriggered: Turbine.poll() }
@@ -5177,7 +5191,7 @@ Window {
             () => { if (sheet !== "settingsedit") return false; check("Co-op settings from the Play choice (Y): " + settingsView.title); pad("b") },
             () => { sheet = ""; menuIndex = gameMenuItems.findIndex(x => x.act === "coopsettings"); m.gi = menuIndex; sheet = "gamemenu"; menuIndex = m.gi; check("Game menu first row: " + (gameMenuItems[0] ? gameMenuItems[0].title : "")); pad("a") },
             () => { if (sheet !== "settingsedit") return false; check("Co-op settings from the game menu: " + settingsView.title); pad("b") },
-            () => { sheet = ""; tab = 0; modIndex = Math.max(0, listItems.findIndex(x => x.kind === "mod" && isSeamless(x.m))); pad("x"); menuIndex = modMenuItems.findIndex(x => x.act === "settings"); check("Mod menu: " + modMenuTitles()); pad("a") },
+            () => { sheet = ""; tab = 0; zone = "main"; modIndex = Math.max(0, listItems.findIndex(x => x.kind === "mod" && isSeamless(x.m))); pad("x"); menuIndex = modMenuItems.findIndex(x => x.act === "settings"); check("Mod menu: " + modMenuTitles()); pad("a") },
             () => { if (sheet !== "settingsedit") return false
                     check("Co-op settings from the mod's X menu: " + settingsView.title)
                     const t = settingsView.fields.find(x => x.key === "allow_invaders"), n = settingsView.fields.find(x => x.key === "enemy_health_scaling")
@@ -5867,7 +5881,8 @@ Window {
                         Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, -1); m.z1 = sizeNow; Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, 1)
                         say(m.z0 === m.z && m.z1 === m.z + 10 && sizeNow === m.z, "the wheel alone: " + m.z0 + "%; Ctrl and the wheel up: " + m.z1 + "%, down: " + sizeNow + "%") },
                 // The hints follow the last input: a key, then the controller.
-                () => { K(Qt.Key_Down); m.h1 = hints(); legend.check("keycheck"); pad("up"); m.h2 = hints()
+                () => { K(Qt.Key_Down); m.h1 = hints() },
+                () => { legend.check("keycheck"); pad("up"); m.h2 = hints()
                         say(m.h1 === "Enter, Esc, X, Ctrl+F, PgUp, PgDn" && m.h2 === "A, B, X, Y, LB, RB", "hints after a key: " + m.h1 + "; after a controller press: " + m.h2)
                         keysTest = false
                         // 0.62: Desktop Mode with no controller: one line in the log, nothing on screen.
