@@ -211,7 +211,7 @@ fn main() {
     // A download Turbine's browser was writing when it last closed can't be resumed: its partial file goes (only in
     // the Turbine that holds the lock: another one may be writing them right now).
     if !screenshot {
-        for p in browse::remove_partials(&lock, &turbine_engine::home_dir().join("Downloads")) {
+        for p in browse::remove_partials(&lock, &turbine_engine::watch::downloads_folder(&turbine_engine::home_dir())) {
             log::line("web", &format!("Removed {}: a download that stopped when Turbine closed (Qt can't resume it)", p.display()));
         }
     }

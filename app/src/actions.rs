@@ -1512,7 +1512,7 @@ impl qobject::Turbine {
     }
 
     pub fn list_shares(mut self: Pin<&mut Self>) {
-        let dir = turbine_engine::home_dir().join("Downloads");
+        let dir = turbine_engine::watch::downloads_folder(&turbine_engine::home_dir());
         let mut found: Vec<(std::time::SystemTime, String, String)> = std::fs::read_dir(&dir)
             .map(|rd| {
                 rd.flatten()

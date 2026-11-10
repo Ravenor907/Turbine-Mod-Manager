@@ -617,3 +617,37 @@ fn edited_settings_reach_the_game_and_survive_updates() {
     s.apply().unwrap();
     assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 2\ncolor = warm\n"));
 }
+
+/// 0.62: Add from Downloads looks in the desktop's Downloads folder (the player moved it, or the desktop names it in
+/// another language) as well as ~/Downloads, and in each one's Game Mods folders.
+#[test]
+fn downloads_follow_the_desktops_downloads_folder() {
+    let d = std::env::temp_dir().join(format!("turbine-dl-moved-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let home = d.join("home");
+    let moved = d.join("sd card/Telechargements");
+    for (p, text) in [
+        (home.join("Downloads/Old 1.0.zip"), "PK"),
+        (moved.join("New 2.0.zip"), "PK"),
+        (moved.join("notes.txt"), "x"),
+        (moved.join("Game Mods/Elden Ring/Armor 1.0.7z"), "7z"),
+    ] {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+    // The desktop says where Downloads is (user-dirs.dirs, as the sandbox sees it).
+    fs::create_dir_all(home.join(".config")).unwrap();
+    fs::write(home.join(".config/user-dirs.dirs"), format!("XDG_DOWNLOAD_DIR=\"{}\"\n", moved.display())).unwrap();
+    let folder = turbine_engine::watch::downloads_folder_from(&home, None, &[home.join(".config")]);
+    assert_eq!(folder, moved);
+    let folders = vec![home.join("Downloads"), folder];
+    let mut all: Vec<(String, String)> = turbine_engine::store::downloads_all_in(&folders).into_iter().map(|(p, f)| (p.file_name().unwrap().to_string_lossy().into_owned(), f)).collect();
+    all.sort();
+    assert_eq!(all, vec![("Armor 1.0.7z".to_string(), "Elden Ring".to_string()), ("New 2.0.zip".to_string(), String::new()), ("Old 1.0.zip".to_string(), String::new())]);
+    let mut plain: Vec<String> = turbine_engine::store::downloads_in(&folders).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    plain.sort();
+    assert_eq!(plain, vec!["New 2.0.zip".to_string(), "Old 1.0.zip".to_string()]);
+    // One folder listed twice (the usual case: the desktop's folder is ~/Downloads) gives each file once.
+    assert_eq!(turbine_engine::watch::default_folders(&d.join("nobody")).len(), 1);
+    let _ = fs::remove_dir_all(&d);
+}

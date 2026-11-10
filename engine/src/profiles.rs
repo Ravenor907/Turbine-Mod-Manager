@@ -304,7 +304,8 @@ pub fn export(profiles: &Profiles, store: &Store, name: &str, home: &Path) -> Re
         profile: name.to_string(),
         mods: share_mods(store, &order),
     };
-    let dir = home.join("Downloads");
+    // 0.62: the desktop's Downloads folder (the one the player's file manager and browser show).
+    let dir = crate::watch::downloads_folder(home);
     fs::create_dir_all(&dir).map_err(|e| format!("The Downloads folder couldn't be made ({e})."))?;
     let base = folder_safe(&format!("Turbine profile - {} - {}", game.name, name));
     let mut path = dir.join(format!("{base}.json"));

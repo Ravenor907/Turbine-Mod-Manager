@@ -1255,7 +1255,7 @@ fn helper_source() -> PathBuf {
 
 /// The helper's folder in Downloads (Turbine puts it there for Load unpacked).
 fn helper_folder() -> PathBuf {
-    turbine_engine::home_dir().join("Downloads").join(HELPER_FOLDER)
+    turbine_engine::watch::downloads_folder(&turbine_engine::home_dir()).join(HELPER_FOLDER)
 }
 
 /// The "version" in a helper folder's manifest.json, when it is Turbine's helper.

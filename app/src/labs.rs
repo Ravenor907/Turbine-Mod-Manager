@@ -94,7 +94,8 @@ pub fn threads() -> usize {
 
 /// Downloads, where reports and screenshots go.
 pub fn downloads() -> PathBuf {
-    turbine_engine::home_dir().join("Downloads")
+    // 0.62: the desktop's Downloads folder (where the player looks for the report), not always ~/Downloads.
+    turbine_engine::watch::downloads_folder(&turbine_engine::home_dir())
 }
 
 /// Where the report screen's screenshot waits until Send (Turbine's cache folder).

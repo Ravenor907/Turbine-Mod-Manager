@@ -2741,14 +2741,25 @@ impl Store {
 /// Mod archives in Downloads and in each Downloads/Game Mods/<game> folder (where the browser helper saves Nexus
 /// downloads), newest first, each with its Game Mods folder name ("" for Downloads itself and Game Mods itself).
 /// Links are not followed.
+///
+/// 0.62: "Downloads" is the desktop's Downloads folder (watch::downloads_folder: where browsers really save when
+/// the player moved it), and ~/Downloads as well when that is another folder.
 pub fn downloads_all(home: &Path) -> Vec<(PathBuf, String)> {
-    let dl = home.join("Downloads");
-    let gm = dl.join(crate::watch::GAME_MODS);
-    let mut dirs: Vec<(PathBuf, String)> = vec![(dl.clone(), String::new()), (gm.clone(), String::new())];
-    if let Ok(rd) = fs::read_dir(&gm) {
-        for e in rd.flatten() {
-            if e.file_type().is_ok_and(|t| t.is_dir()) {
-                dirs.push((e.path(), e.file_name().to_string_lossy().into_owned()));
+    downloads_all_in(&crate::watch::default_folders(home))
+}
+
+/// `downloads_all` for the given Downloads folders.
+pub fn downloads_all_in(folders: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    let mut dirs: Vec<(PathBuf, String)> = Vec::new();
+    for dl in folders {
+        let gm = dl.join(crate::watch::GAME_MODS);
+        dirs.push((dl.clone(), String::new()));
+        dirs.push((gm.clone(), String::new()));
+        if let Ok(rd) = fs::read_dir(&gm) {
+            for e in rd.flatten() {
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    dirs.push((e.path(), e.file_name().to_string_lossy().into_owned()));
+                }
             }
         }
     }
@@ -2770,11 +2781,18 @@ pub fn downloads_all(home: &Path) -> Vec<(PathBuf, String)> {
     found.into_iter().map(|(_, p, f)| (p, f)).collect()
 }
 
-/// Mod archives (zip, 7z, rar) in the Downloads folder, newest first.
+/// Mod archives (zip, 7z, rar) in the Downloads folder, newest first (0.62: the desktop's Downloads folder, and
+/// ~/Downloads too when that is another folder).
 pub fn downloads(home: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = fs::read_dir(home.join("Downloads")) else { return Vec::new() };
-    let mut found: Vec<(SystemTime, PathBuf)> = rd
-        .flatten()
+    downloads_in(&crate::watch::default_folders(home))
+}
+
+/// `downloads` for the given Downloads folders.
+pub fn downloads_in(folders: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found: Vec<(SystemTime, PathBuf)> = folders
+        .iter()
+        .filter_map(|d| fs::read_dir(d).ok())
+        .flat_map(|rd| rd.flatten())
         .map(|e| e.path())
         .filter(|p| p.file_name().is_some_and(|n| archives::is_archive_name(&n.to_string_lossy())))
         .filter_map(|p| {
