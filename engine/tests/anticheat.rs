@@ -430,3 +430,35 @@ fn me3_games_ask_nothing_about_their_own_files() {
     assert!(conflicts.is_empty(), "{conflicts:?}");
     let _ = fs::remove_dir_all(&w.root);
 }
+
+/// 0.62: every me3 game's profile turns the game's code protection off (me3's top-level `disable_arxan`). Without
+/// it Elden Ring 1.17.2 started with mods and closed by itself after 20 to 28 seconds on the owner's device. The
+/// key has to sit above the first table, or TOML reads it as part of that table and me3 never sees it.
+#[test]
+fn every_me3_profile_turns_the_code_protection_off() {
+    let top_level = |text: &str| {
+        let head = text.split("\n[[").next().unwrap_or("");
+        head.lines().any(|l| l.trim() == "disable_arxan = true")
+    };
+    for game in gamedata::ME3_GAMES {
+        let d = std::env::temp_dir().join(format!("turbine-arxan-{}-{game}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let mods = anticheat::profile_mods(&d);
+        write(&mods.join("some.dll"), "x");
+        let (file, _) = anticheat::write_profile(&d, game).unwrap();
+        let t = fs::read_to_string(&file).unwrap();
+        assert!(top_level(&t), "{game}: {t}");
+        assert_eq!(t.matches("disable_arxan").count(), 1, "{game}: {t}");
+        assert!(t.contains(&format!("game = \"{game}\"")), "{game}: {t}");
+        let (file, _) = anticheat::write_profile_for(&d, game, anticheat::Coop::Solo).unwrap();
+        assert!(top_level(&fs::read_to_string(&file).unwrap()), "{game} solo");
+        let _ = fs::remove_dir_all(&d);
+    }
+    // The co-op profile (Elden Ring) carries it too.
+    let d = std::env::temp_dir().join(format!("turbine-arxan-{}-coop", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    write(&anticheat::profile_mods(&d).join("SeamlessCoop/ersc.dll"), "x");
+    let (file, _) = anticheat::write_profile_for(&d, "eldenring", anticheat::Coop::Seamless).unwrap();
+    assert!(top_level(&fs::read_to_string(&file).unwrap()));
+    let _ = fs::remove_dir_all(&d);
+}

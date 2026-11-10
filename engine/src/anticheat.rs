@@ -350,6 +350,11 @@ pub fn profile_text(game: &str, natives: &[String], savefile: Option<&str>) -> S
     if let Some(s) = savefile {
         t.push_str(&format!("savefile = {}\n", toml_str(s)));
     }
+    // 0.62: me3 leaves the games' code protection (Arxan) running unless the profile says otherwise, and its timed
+    // check then closes a modded game without a word after 20 to 30 seconds (the owner's Elden Ring 1.17.2). The
+    // key is a top-level one of me3's v1 profile, so it stays above the first table. me3 forces it for Dark Souls
+    // III anyway; writing it for every game keeps one profile shape.
+    t.push_str("disable_arxan = true\n");
     t.push_str(&format!("\n[[supports]]\ngame = \"{game}\"\n\n[[packages]]\nid = \"turbine-mods\"\npath = 'mods'\n"));
     for n in natives.iter().filter(|n| profile_safe(n)) {
         t.push_str(&format!("\n[[natives]]\npath = {}\n", toml_str(n)));
