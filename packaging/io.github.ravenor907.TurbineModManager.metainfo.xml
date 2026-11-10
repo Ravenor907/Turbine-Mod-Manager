@@ -15,6 +15,19 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.61" date="2026-11-10" type="development">
+      <description>
+        <p>Smaller fixes after 0.6:</p>
+        <ul>
+          <li>Y always opens Find; R3 runs Undo while a message shows</li>
+          <li>Edit settings: X opens Options (show as text or a list, reset to default)</li>
+          <li>Steam setup picks the account signed in last, and a restart is only offered when it is really needed</li>
+          <li>Updates install where Turbine was installed; downloads are caught from your real Downloads folder</li>
+          <li>Turbine looks for the controller again in Desktop Mode, and says what to do if it can't see one</li>
+          <li>Sign in keeps one waiting session; a busy Turbine answers the Steam menu plainly</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.6" date="2026-11-09" type="development">
       <description>
         <p>Easier, clearer and checked on every screen:</p>
