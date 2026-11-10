@@ -702,7 +702,7 @@ if command -v Xvfb > /dev/null; then
   sleep 2
   sky="The Elder Scrolls V Skyrim Special Edition"
   bshoot() {   # bshoot <name> <WxH> <page> <home> <data> [more arguments]
-    name=$1 size=$2 page=$3 home=$4 bdata=$5
+    name=$1 size=$2 page=$3 home=$4 bdata=$5 bcode=0
     shift 5
     RAN="$RAN$name "
     DISPLAY=:78 timeout 260 dbus-run-session -- flatpak run --socket=x11 --env=QT_QPA_PLATFORM=xcb --env=QT_QUICK_BACKEND=software \
@@ -710,8 +710,14 @@ if command -v Xvfb > /dev/null; then
       --env=TURBINE_HOME="$home" --env=TURBINE_DATA="$bdata" \
       --filesystem="$PWD/shots" --filesystem="$home" --filesystem="$PWD/data" --filesystem="$PWD/samples:ro" \
       io.github.ravenor907.TurbineModManager --screenshot="$PWD/shots/$name.png" --size="$size" --page="$page" --selftest-data="$PWD/samples" \
-      --browser-test=http://127.0.0.1:47800/ "$@" > "shots/$name.log" 2>&1 || echo "::warning title=$name stopped with code $?::"
-    if [ ! -s "$PWD/shots/$name.png" ]; then echo "::error title=No screenshot::$name"; tail -n 60 "shots/$name.log"; fail=1; fi
+      --browser-test=http://127.0.0.1:47800/ "$@" > "shots/$name.log" 2>&1 || bcode=$?
+    # How it stopped is said in words (a title alone doesn't show in the job's log): 0 is a quit, 124 the time limit,
+    # 134 or 139 a crash. With no picture, the last lines of its own log follow whole, not only the checks' lines.
+    if [ "${bcode:-0}" -ne 0 ]; then echo "::warning title=$name stopped with code $bcode::$name stopped with code $bcode (124: the time limit; 134 or 139: a crash)"; fi
+    if [ ! -s "$PWD/shots/$name.png" ]; then
+      echo "::error title=No screenshot::$name (it stopped with code ${bcode:-0})"; tail -n 60 "shots/$name.log"
+      echo "The last lines of its log:"; tail -n 40 "$bdata/turbine-mod-manager/activity.log" 2>/dev/null || true; fail=1
+    fi
     if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
   }
   # Chromium refuses its own sandbox when run as root, and the build container runs everything as root: there (only
