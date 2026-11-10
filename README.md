@@ -28,7 +28,7 @@ The optional Decky plugin puts Mods on or off and Play in Steam's Quick Access m
 
 Touch works for everything the buttons do: tap to do, long-press for options.
 
-Keyboard and mouse work too: arrows, Enter, Esc or Backspace to go back, Tab and Shift+Tab for the next and the last page, Ctrl+F to find, the Menu key or a right-click for options, F1 for Help, Ctrl+Enter to play, Ctrl+= and Ctrl+- for the size. The hints at the bottom follow whatever you used last.
+Keyboard and mouse work the way a PC player expects: W A S D or the arrows to move, Enter or Space to select, Esc to go back (on a game's first page it opens Settings), Q and E for the pages, F to find, R or a right-click for options, hold Tab for the quick wheel, hold Space for 3 seconds to play. With the mouse: click, double-click a mod to open it, the wheel to scroll, Ctrl and the wheel for the size, the side buttons for back and the next page. The hints at the bottom follow whatever you used last; after the mouse they are plain named buttons.
 
 ## Folders it uses
 

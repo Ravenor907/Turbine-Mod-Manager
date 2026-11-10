@@ -3984,7 +3984,7 @@ Window {
     property real startHeld: 0            // 0 to 1 while Start is held
     property int startHoldsDone: 0
     readonly property bool startHoldPlays: look.holdStartDoes === "last"
-    readonly property string startHoldWords: (keysLegend ? "Ctrl+Enter: " : "hold: ") + (startHoldPlays ? "Play" : "Play choice")
+    readonly property string startHoldWords: (keysLegend ? "hold Space: " : "hold: ") + (startHoldPlays ? "Play" : "Play choice")
     Timer {
         id: startHold
         interval: 50
@@ -4245,6 +4245,51 @@ Window {
         note("mouse", "Mouse Back: B")
         act("b")
     }
+    // 0.63: Tab and Space each do one thing on a tap and another when held (see Keys.onPressed below).
+    property bool tabDown: false
+    property bool tabWheel: false
+    property bool spaceDown: false
+    readonly property int tabHoldMs: 220
+    Timer {
+        id: tabHold
+        interval: app.tabHoldMs
+        onTriggered: {
+            if (!app.tabDown || app.sheet !== "" || app.wheelOpen || app.moving || app.orderMoving) return
+            app.tabWheel = true
+            app.lastInputName = "view"
+            app.note("key", "Tab held: the quick wheel")
+            app.wheelPress()
+        }
+    }
+    // Where Esc has nothing to go back from: a game's first page (My mods), on the list or the games.
+    readonly property bool escTop: page === "game" && sheet === "" && !wheelOpen && !moving && !orderMoving && !selecting && !modPage && tab === 0 && (zone === "main" || zone === "rail")
+    // The mouse's Forward button is the next page (RB), wherever the pointer is.
+    function mouseForward() {
+        if (lastInput !== "mouse") lastInput = "mouse"
+        inputCount++; lastInputAt = Date.now(); lastInputName = "rb"
+        note("mouse", "Mouse Forward: the next page")
+        act("rb")
+    }
+    // 0.63: a double-click on a mod opens it: its details (what it needs, what it wins or loses, where it goes), or
+    // its options when there is nothing more to tell. Each of the two clicks was A on the row, so the mod is first
+    // put back the way it was before the first one.
+    property var clickWas: null
+    function rowClickSeen(m) {
+        if (!m || !m.id) return
+        if (!clickWas || clickWas.id !== m.id || Date.now() - clickWas.at > 700) clickWas = { id: m.id, enabled: m.enabled === true, at: Date.now() }
+    }
+    function rowOpen(i, id) {
+        if (moving || orderMoving || selecting || wheelOpen || sheet !== "") return
+        const was = clickWas, now = mods.find(x => x.id === id)
+        clickWas = null
+        if (!now) return
+        if (was && was.id === id && (now.enabled === true) !== was.enabled) toggle(now, true)
+        if (sheet !== "") return
+        modIndex = i; zone = "main"
+        if (!menuMod || menuMod.id !== id) return
+        note("mouse", "Double-click on a mod: " + (modMenuHasFacts ? "its details" : "its options"))
+        if (modMenuHasFacts) openModDetails(menuMod); else sheet = "modmenu"
+    }
     Item {
         id: keyRoot
         anchors.fill: parent
@@ -4266,6 +4311,12 @@ Window {
             // is B, Tab and Shift+Tab (Page Down and Page Up too) flip pages, Ctrl+F or / finds, the Menu key or
             // Shift+F10 opens options, F1 is Help, Ctrl+= and Ctrl+- change the size, Ctrl+Z is a toast's step
             // (Undo), Home and End jump a screen. The letters stay: X, Y or F, Q and E, V the wheel, P Start.
+            // 0.63: the keys a PC player reaches for (many keyboards have no Page Up or Page Down): W A S D move
+            // like the arrows, Q and E turn the pages ([ and ] too), F finds, R opens options, Esc on a game's
+            // first page opens Settings (a tap of Start), Tab held opens the quick wheel (let go to choose; a
+            // tap of Tab is still the next page) and Space held for 3 seconds plays, with Start's ring (a tap
+            // of Space is still A). A text field that is being typed in has the keys itself: none of these
+            // reach here then.
             const ctrl = (e.modifiers & Qt.ControlModifier) !== 0, shift = (e.modifiers & Qt.ShiftModifier) !== 0
             if (ctrl && (e.key === Qt.Key_Equal || e.key === Qt.Key_Plus || e.key === Qt.Key_Minus)) {
                 e.accepted = true
@@ -4290,6 +4341,8 @@ Window {
             map[Qt.Key_X] = "x"; map[Qt.Key_Y] = "y"; map[Qt.Key_F] = "y"
             map[Qt.Key_Q] = "lb"; map[Qt.Key_E] = "rb"
             map[Qt.Key_P] = "start"; map[Qt.Key_V] = "view"
+            map[Qt.Key_W] = "up"; map[Qt.Key_S] = "down"; map[Qt.Key_A] = "left"; map[Qt.Key_D] = "right"
+            map[Qt.Key_R] = "x"; map[Qt.Key_BracketLeft] = "lb"; map[Qt.Key_BracketRight] = "rb"
             let b = undefined
             if (ctrl) b = e.key === Qt.Key_F ? "y" : e.key === Qt.Key_Z ? "r3" : undefined
             else if (shift && e.key === Qt.Key_F10) b = "x"
@@ -4297,6 +4350,36 @@ Window {
             else b = map[e.key]
             if (!b) return
             e.accepted = true
+            const plain = !ctrl && !shift && !(e.modifiers & Qt.AltModifier)
+            // 0.63: Esc on a game's first page (nothing to go back from) opens Settings, like a tap of Start.
+            if (e.key === Qt.Key_Escape && plain && app.escTop) {
+                if (e.isAutoRepeat) return
+                app.note("key", "Key Esc: Settings"); app.keySeen("start")
+                app.startTap()
+                return
+            }
+            // 0.63: Tab. A tap is the next page (on letting go); held, the quick wheel opens and letting go
+            // chooses what was picked. With a sheet up it is the next page at once, as before.
+            if (e.key === Qt.Key_Tab && plain) {
+                if (e.isAutoRepeat) return
+                app.note("key", "Key Tab"); app.keySeen("rb")
+                if (app.wheelOpen) { app.act("view"); return }
+                if (app.sheet !== "" || app.moving || app.orderMoving) { app.act("rb"); return }
+                app.tabDown = true; app.tabWheel = false
+                tabHold.restart()
+                return
+            }
+            // 0.63: Space. A tap is A (on letting go); held for 3 seconds where Start's hold counts, it plays,
+            // with the same ring on the Play button. With a sheet up it is A at once, as before.
+            if (e.key === Qt.Key_Space && plain) {
+                if (e.isAutoRepeat && app.spaceDown) return
+                if (!e.isAutoRepeat && app.startHoldReady()) {
+                    app.note("key", "Key Space"); app.keySeen("a")
+                    app.spaceDown = true
+                    app.startHoldBegin()
+                    return
+                }
+            }
             // Held down, only the arrows and the screen jumps repeat.
             if (e.isAutoRepeat && ["up", "down", "left", "right", "lt", "rt", "a"].indexOf(b) < 0) return
             if (!e.isAutoRepeat) app.note("key", "Key " + b)
@@ -4310,6 +4393,24 @@ Window {
             if (!(b === "a" && e.isAutoRepeat)) { app.padRepeat = e.isAutoRepeat; app.act(b); app.padRepeat = false }
         }
         Keys.onReleased: (e) => {
+            if (!e.isAutoRepeat && e.key === Qt.Key_Tab && app.tabDown) {
+                app.tabDown = false
+                if (tabHold.running) { tabHold.stop(); app.act("rb") }
+                else if (app.tabWheel) { app.tabWheel = false; app.wheelRelease() }
+                return
+            }
+            if (!e.isAutoRepeat && e.key === Qt.Key_Space && app.spaceDown) {
+                app.spaceDown = false
+                if (startHold.running) {
+                    const ms = Date.now() - app.startSince
+                    startHold.stop(); app.startHeld = 0
+                    startGlideAnim.stop(); app.startGlide = 0
+                    // A tap is A; a hold let go before the 3 seconds does nothing at all.
+                    if (ms < app.startTapMs) app.act("a")
+                    else app.note("key", "Space let go after " + (ms / 1000).toFixed(1) + " s: nothing (a hold is 3 seconds)")
+                }
+                return
+            }
             if (!e.isAutoRepeat && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space)) app.release("a")
             if (!e.isAutoRepeat && e.key === Qt.Key_V) app.release("view")
             if (!e.isAutoRepeat && e.key === Qt.Key_P) app.release("start")
@@ -5044,7 +5145,7 @@ Window {
     // the middle, or letting go of a held View with nothing picked all close it. A short tap of View keeps it open.
     property bool wheelByStick: false     // the wedge was picked by the stick's angle (it goes when the stick rests)
     property real wheelPressedAt: 0
-    readonly property string wheelHint: lastInput === "touch" ? "Tap one to choose" : lastInput === "mouse" ? "Click one to choose" : lastInput === "keys" ? "Arrow keys choose" : "Push the stick to choose"
+    readonly property string wheelHint: lastInput === "touch" ? "Tap one to choose" : lastInput === "mouse" ? "Click one to choose" : lastInput === "keys" ? "W A S D or the arrows choose" : "Push the stick to choose"
     function wheelPress() {
         if (wheelOpen) { closeWheel(); return }
         // View brings the bars back too.
@@ -5923,6 +6024,9 @@ Window {
                 () => { if (sheet === "settingsedit") pad("b"); check("Co-op password check done: " + m.bad + " problems") }
             ]
         }
+        // 0.63: and the keys a PC player expects: W A S D, Q and E, F, R, Esc for Settings on the first page, Tab
+        // held for the quick wheel, Space held for Play, letters left to a text field being typed in; the mouse's
+        // Forward button, a double-click on a mod, and no key caps after the mouse.
         // 0.62: the keyboard and the mouse drive every screen, by real key presses and clicks: arrows, Enter, Esc
         // and Backspace, Tab and Shift+Tab, Page Down and Page Up, Ctrl+F and /, the Menu key and Shift+F10, F1,
         // Ctrl+= and Ctrl+-, P, V, Ctrl+Enter, Ctrl+Z; hover, click, right-click, the Back button, Ctrl with the
@@ -5940,7 +6044,7 @@ Window {
                 // The keyboard.
                 () => { K(Qt.Key_Down); m.r1 = modIndex; K(Qt.Key_Up)
                         say(m.r1 === 1 && modIndex === 0 && lastInput === "keys", "Down and Up: row " + (m.r1 + 1) + " then row " + (modIndex + 1) + ", last input " + lastInput)
-                        say(hints() === "Enter, Esc, X, Ctrl+F, PgUp, PgDn", "the hints after a key: " + hints())
+                        say(hints() === "Enter, Esc, R, F, Q, E", "the hints after a key: " + hints())
                         m.on = mods[0].enabled; K(Qt.Key_Return) },
                 () => { say(mods[0].enabled !== m.on, "Enter is A: the mod turned " + (mods[0].enabled ? "on" : "off")); K(Qt.Key_Return) },
                 () => { K(Qt.Key_Menu); m.s1 = sheet; K(Qt.Key_Escape); m.s2 = sheet; K(Qt.Key_F10, Qt.ShiftModifier); m.s3 = sheet; K(Qt.Key_Backspace)
@@ -5960,6 +6064,32 @@ Window {
                 () => { K(Qt.Key_P); m.p = page; K(Qt.Key_P); m.p2 = page; K(Qt.Key_V); m.w = wheelOpen; K(Qt.Key_Right); m.ws = wheelSlot; K(Qt.Key_Escape)
                         say(m.p === "settings" && m.p2 === "game" && m.w && m.ws === 2 && !wheelOpen, "P: " + m.p + ", P again: " + m.p2 + "; V: the wheel " + (m.w ? "open" : "closed") + ", Right picks slot " + m.ws + ", Esc: " + (wheelOpen ? "still open" : "closed")) },
                 () => { K(Qt.Key_Return, Qt.ControlModifier); m.s1 = sheet + " " + pickTitle; K(Qt.Key_Escape); say(m.s1 === "pick Play options" && sheet === "", "Ctrl+Enter: " + m.s1 + ", Esc: sheet \"" + sheet + "\"") },
+                // 0.63: the keys a PC player expects.
+                () => { zone = "main"; tab = 0; modIndex = 0; K(Qt.Key_S); m.r1 = modIndex; K(Qt.Key_W); m.r2 = modIndex; K(Qt.Key_R); m.s1 = sheet; K(Qt.Key_Escape); K(Qt.Key_F); m.s2 = sheet; K(Qt.Key_Escape)
+                        say(m.r1 === 1 && m.r2 === 0 && m.s1 === "modmenu" && m.s2 === "findpop" && sheet === "", "W A S D, R and F: S to row " + (m.r1 + 1) + ", W to row " + (m.r2 + 1) + ", R: sheet \"" + m.s1 + "\", F: sheet \"" + m.s2 + "\"") },
+                () => { K(Qt.Key_E); m.t1 = tab; K(Qt.Key_BracketRight); m.t2 = tab; K(Qt.Key_BracketLeft); K(Qt.Key_Q)
+                        say(m.t1 === 1 && m.t2 === 2 && tab === 0, "Q and E turn the pages: E: tab " + m.t1 + ", ]: tab " + m.t2 + ", [ and Q: tab " + tab) },
+                () => { if (turnTo >= 0) return false; zone = "main"; K(Qt.Key_Escape); m.p = page; K(Qt.Key_Escape); m.p2 = page; K(Qt.Key_Backspace)
+                        say(m.p === "settings" && m.p2 === "game" && page === "game", "Esc on the first page: " + m.p + ", Esc again: " + m.p2 + "; Backspace stays B: " + page)
+                        zone = "main" },
+                // A field being typed in has the letters itself.
+                () => { K(Qt.Key_F); if (sheet !== "findpop") { say(false, "F didn't open Find"); return }
+                        findPopField(); m.t = tab
+                        K(Qt.Key_Q); K(Qt.Key_E); K(Qt.Key_R); K(Qt.Key_W); K(Qt.Key_F); K(Qt.Key_Space)
+                        say(sheet === "findpop" && tab === m.t && !wheelOpen && !spaceDown, "typing in Find: Q, E, R, W, F and Space are the field's: sheet \"" + sheet + "\", tab " + tab)
+                        findPopEndTyping(); K(Qt.Key_Escape) },
+                // Space: a tap is A, a 3 second hold is Start's hold (the Play choice).
+                () => { if (sheet !== "") { say(false, "Find stayed open: sheet \"" + sheet + "\""); sheet = "" } zone = "main"; tab = 0; modIndex = 0; m.on = mods[0].enabled; K(Qt.Key_Space) },
+                () => { say(mods[0].enabled !== m.on, "a tap of Space is A: the mod turned " + (mods[0].enabled ? "on" : "off")); K(Qt.Key_Space) },
+                () => { m.on = mods[0].enabled; m.t = Date.now(); Turbine.selftestKey(Qt.Key_Space, 0, true) },
+                () => { if (sheet !== "pick" && Date.now() - m.t < 6000) return false
+                        m.s1 = sheet + " " + pickTitle; m.ms = Date.now() - m.t; Turbine.selftestKey(Qt.Key_Space, 0, false); m.s2 = sheet; K(Qt.Key_Escape)
+                        say(m.s1 === "pick Play options" && m.ms >= 2900 && m.s2 === "pick" && mods[0].enabled === m.on && sheet === "", "Space held: " + m.s1 + " after " + (m.ms >= 2900 ? "3 seconds" : (m.ms / 1000).toFixed(1) + " s") + ", the mod left as it was, Esc: sheet \"" + sheet + "\"") },
+                // Tab held: the quick wheel; W A S D pick.
+                () => { m.t = Date.now(); m.tb = tab; Turbine.selftestKey(Qt.Key_Tab, 0, true) },
+                () => { if (!wheelOpen && Date.now() - m.t < 3000) return false
+                        m.w = wheelOpen; K(Qt.Key_D); m.ws = wheelSlot; K(Qt.Key_Escape); m.w2 = wheelOpen; Turbine.selftestKey(Qt.Key_Tab, 0, false)
+                        say(m.w && m.ws === 2 && !m.w2 && !wheelOpen && tab === m.tb, "Tab held: the wheel " + (m.w ? "open" : "closed") + ", D picks slot " + m.ws + ", Esc: " + (m.w2 || wheelOpen ? "still open" : "closed") + ", the page " + (tab === m.tb ? "stayed" : "turned")) },
                 // A toast's step (Undo) is Ctrl+Z.
                 () => { zone = "main"; tab = 0; m.wasOn = mods.filter(x => x.enabled).length; allOff(); m.g = toast.actionGlyph },
                 () => { K(Qt.Key_Z, Qt.ControlModifier); const on = mods.filter(x => x.enabled).length
@@ -5967,7 +6097,7 @@ Window {
                 // The mouse: hover, click, right-click, Back, Ctrl with the wheel.
                 () => { const it = modList.itemAtIndex(1); if (!it) return false
                         const p = at(it, 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
-                () => { say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, Ctrl+F, PgUp, PgDn", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
+                () => { say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, F, Q, E", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
                         m.on = mods[1].enabled; mouse(at(modList.itemAtIndex(1), 0.4), Qt.LeftButton) },
                 () => { say(mods[1].enabled !== m.on && modIndex === 1, "a click on a row is A: row " + (modIndex + 1) + " turned " + (mods[1].enabled ? "on" : "off"))
                         mouse(at(modList.itemAtIndex(0), 0.4), Qt.RightButton) },
@@ -5983,10 +6113,25 @@ Window {
                 () => { m.z = sizeNow; Turbine.selftestMouse(3, width / 2, height / 3, 0, 0, 1); m.z0 = sizeNow
                         Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, -1); m.z1 = sizeNow; Turbine.selftestMouse(3, width / 2, height / 3, 0, Qt.ControlModifier, 1)
                         say(m.z0 === m.z && m.z1 === m.z + 10 && sizeNow === m.z, "the wheel alone: " + m.z0 + "%; Ctrl and the wheel up: " + m.z1 + "%, down: " + sizeNow + "%") },
+                // 0.63: after the mouse no key caps; Forward is the next page; a double-click opens a mod.
+                () => { const it = modList.itemAtIndex(1); if (!it) return false
+                        const p = at(it, 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
+                () => { legend.check("keycheck mouse")
+                        say(mouseLegend && barLb.width === 0 && barRb.width === 0 && startHintKey.width === 0, "after the mouse: " + (barLb.width === 0 && barRb.width === 0 && startHintKey.width === 0 ? "no key caps" : "key caps") + ", the pages by name: " + tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / "))
+                        m.tb = tab; mouse({ x: width / 2, y: height / 3 }, Qt.ForwardButton); m.t1 = tab; mouse({ x: width / 2, y: height / 3 }, Qt.BackButton)
+                        say(m.t1 === m.tb + 1 && tab === m.tb, "the Forward button: tab " + m.t1 + "; Back: tab " + tab) },
+                () => { if (turnTo >= 0) return false
+                        const it = modList.itemAtIndex(1); if (!it) return false
+                        m.on = mods[1].enabled; m.name = mods[1].name; const p = at(it, 0.4); mouse(p, Qt.LeftButton); mouse(p, Qt.LeftButton) },
+                () => { m.s1 = sheet; m.ok = (sheet === "pick" && pickTitle === m.name) || sheet === "modmenu"
+                        say(m.ok && modIndex === 1 && mods[1].enabled === m.on, "a double-click on row 2: " + (m.ok ? "the mod opened" : "sheet \"" + sheet + "\"") + ", left " + (mods[1].enabled === m.on ? "as it was" : "changed"))
+                        mouse({ x: width / 2, y: height / 3 }, Qt.BackButton) },
+                () => { if (sheet !== "") mouse({ x: width / 2, y: height / 3 }, Qt.BackButton) },
+                () => { say(sheet === "", "Back from the opened mod: sheet \"" + sheet + "\"") },
                 // The hints follow the last input: a key, then the controller.
                 () => { K(Qt.Key_Down); m.h1 = hints() },
                 () => { legend.check("keycheck"); pad("up"); m.h2 = hints()
-                        say(m.h1 === "Enter, Esc, X, Ctrl+F, PgUp, PgDn" && m.h2 === "A, B, X, Y, LB, RB", "hints after a key: " + m.h1 + "; after a controller press: " + m.h2)
+                        say(m.h1 === "Enter, Esc, R, F, Q, E" && m.h2 === "A, B, X, Y, LB, RB", "hints after a key: " + m.h1 + "; after a controller press: " + m.h2)
                         keysTest = false
                         // 0.62: Desktop Mode with no controller: one line in the log, nothing on screen.
                         m.toastBefore = lastToastAt; m.noted = noPadNote(); m.again = noPadNote()
@@ -8044,7 +8189,7 @@ Window {
         { kind: "info", key: "buttons", title: "The buttons",
           how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks. R3: the same as A; while a message offers a step (Undo), R3 does that step." },
         { kind: "info", key: "keys", title: "Keyboard and mouse",
-          how: "Arrows move. Enter: do it. Esc or Backspace: back. Tab and Shift+Tab: the next and the last page. Ctrl+F: find. Menu key or right-click: options. F1: Help. Ctrl+= and Ctrl+-: size. Ctrl+Enter: Play. V: quick wheel. The mouse's Back button goes back." },
+          how: "Move: W A S D or the arrows. Enter or Space: do it. Esc or Backspace: back (Esc on a game's first page: Settings). Q and E: the last and the next page (Tab too). F: find. R or a right-click: options. Hold Tab: quick wheel (pick with the mouse or W A S D, let go to choose). Hold Space for 3 seconds: Play. A double-click opens a mod. The wheel scrolls; Ctrl and the wheel, or Ctrl+= and Ctrl+-, change the size. F1: Help. The mouse's Back button goes back and its Forward button turns the page." },
         { kind: "info", key: "touch", title: "Touch",
           how: "Tap does it. Hold for options (Move is there: then tap where the mod goes). Swipe sideways on the bottom bar to switch tabs." }
     ].concat(steamArt.found ? [
@@ -8728,8 +8873,13 @@ Window {
     component Key: Rectangle {
         property string k: ""
         property bool square: k.length > 1
-        implicitWidth: Math.max(app.px(24), keyText.implicitWidth + app.px(12))
-        implicitHeight: app.px(24)
+        // 0.63: no caps after the mouse (and `off`: this cap has nothing to say here). Without a size a row
+        // leaves it out, so the words beside it close up.
+        property bool off: false
+        readonly property bool gone: app.mouseLegend || off
+        implicitWidth: gone ? 0 : Math.max(app.px(24), keyText.implicitWidth + app.px(12))
+        implicitHeight: gone ? 0 : app.px(24)
+        clip: true
         radius: square ? app.px(5) : height / 2
         color: c.raised
         border.color: c.accentLo
@@ -8738,6 +8888,7 @@ Window {
             id: keyText
             anchors.centerIn: parent
             text: app.glyph(parent.k)
+            visible: !parent.gone
             color: c.text
             font.family: app.bodyFont
             font.pixelSize: app.fpx(14)
@@ -8760,8 +8911,11 @@ Window {
     // unless a check asks.)
     property bool keysTest: false
     readonly property bool keysLegend: !Turbine.gamemode && (!shot.on || keysTest) && (lastInput === "mouse" || lastInput === "keys")
-    readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "X", y: "Ctrl+F", lb: "PgUp", rb: "PgDn", lt: "Home", rt: "End", view: "V", start: "P", r3: "Ctrl+Z" })
+    // 0.63: the keys a PC player expects (Page Up and Page Down still work, and are never shown).
+    readonly property var keyNames: ({ a: "Enter", b: "Esc", x: "R", y: "F", lb: "Q", rb: "E", lt: "Home", rt: "End", view: "Tab", start: "Space", r3: "Ctrl+Z" })
     readonly property var mouseNames: ({ a: "Click", x: "Right-click" })
+    // 0.63: after the mouse, no key caps at all: the pages and the actions are buttons with their names.
+    readonly property bool mouseLegend: keysLegend && lastInput === "mouse"
     function glyph(k) {
         if (k === "rs") return "R stick"
         if (keysLegend && lastInput === "mouse" && mouseNames[k]) return mouseNames[k]
@@ -8779,18 +8933,27 @@ Window {
         property string k2: ""            // a second key and its words in one hint ("RT Click, LT Menu")
         property string label2: ""
         // In the legend, a hint for one button is also a button: a tap or click does what the button does.
-        readonly property bool clickable: parent === legendRow && ["a", "b", "x", "y", "r3"].indexOf(k) >= 0
+        readonly property bool clickable: (parent === legendRow || parent === hintMeasure) && ["a", "b", "x", "y", "r3"].indexOf(k) >= 0
+        // 0.63: after the mouse the hint is a button with its name on it and no key cap.
+        readonly property bool named: app.mouseLegend && clickable && label !== "" && k2 === ""
         // A finger-sized target in the bar (0.59: the key caps alone are 24 px).
         height: clickable ? Math.max(app.tpx(44), implicitHeight) : implicitHeight
         spacing: app.px(6)
         TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); if (hint.k === "r3") app.r3Click(); else app.act(hint.k) } }
         HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
-        Label { visible: hint.pre !== ""; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Label { visible: hint.pre !== "" && !hint.named; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Repeater {
             model: hint.k.split("+")
             Key { required property string modelData; k: modelData; visible: modelData !== ""; anchors.verticalCenter: parent.verticalCenter }
         }
-        Label { visible: hint.label !== ""; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+        Rectangle {
+            visible: hint.named
+            width: namedText.implicitWidth + app.px(22); height: Math.max(app.px(32), app.tpx(26)); radius: app.px(6)
+            anchors.verticalCenter: parent.verticalCenter
+            color: c.raised; border.color: c.accentLo; border.width: Math.max(1, app.px(1))
+            Text { id: namedText; anchors.centerIn: parent; text: (hint.pre !== "" ? hint.pre + " " : "") + hint.label; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(14) }
+        }
+        Label { visible: hint.label !== "" && !hint.named; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
         Key { visible: hint.k2 !== ""; k: hint.k2; anchors.verticalCenter: parent.verticalCenter }
         Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
     }
@@ -9485,7 +9648,8 @@ Window {
                                 // The legend says what A and X do: nothing printed twice.
                                 showHints: false
                                 // A click or tap anywhere on the row is A on it (turns it on or off; ticks it in Select several).
-                                onClicked: { if (!app.gate(0, "onClicked")) return; if (app.moving && entry.kind === "mod") { app.moveByTap(entry.index); return } app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
+                                onOpened: { if (entry.kind !== "mod" || app.sheet !== "" || app.wheelOpen || !app.gate(0, "onOpened")) return; app.rowOpen(entry.index, entry.m.id) }
+                                onClicked: { if (!app.gate(0, "onClicked")) return; if (app.moving && entry.kind === "mod") { app.moveByTap(entry.index); return } if (entry.kind === "mod" && !app.selecting) app.rowClickSeen(entry.m); app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
                                 // A right-click (LT with the pointer) opens the mod's menu, like X.
                                 onMenuClicked: { if (!app.gate(0, "onMenuClicked")) return; if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" } }
                             }
@@ -10826,27 +10990,38 @@ Window {
                 // On a mod page LB and RB step through the results (the line on the left says which).
                 visible: app.barGame && !app.modPage
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: app.px(6)
+                // 0.63: after the mouse the pages are buttons by name (My mods, Get mods, Load order), no caps.
+                spacing: app.mouseLegend ? app.px(22) : app.px(6)
+                leftPadding: app.mouseLegend ? app.px(10) : 0
+                rightPadding: leftPadding
                 // Dimmed where they do nothing (one tab, or a sheet open).
                 Key { id: barLb; k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
                 Key { id: barRb; k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
                 // No room for every name: only the tab LB or RB goes to (and nothing when even that doesn't fit).
                 Text {
-                    visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0
+                    visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0 && !app.mouseLegend
                     text: app.barTarget >= 0 ? (app.barTarget < app.tab ? "back to " : "") + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : ""
                     color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
                     anchors.verticalCenter: parent.verticalCenter
                     TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { app.note("touch", "Tab tapped: " + app.tabs[app.barTarget]); app.modPage = false; app.tab = app.barTarget } }
                 }
                 Repeater {
-                    model: legend.tabWordsFit ? app.tabs : []
+                    model: legend.tabWordsFit || app.mouseLegend ? app.tabs : []
                     Row {
                         required property int index
                         required property string modelData
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: app.px(6)
-                        Text { visible: parent.index > 0; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
+                        Text { visible: parent.index > 0 && !app.mouseLegend; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
                         Text {
+                            Rectangle {
+                                visible: app.mouseLegend
+                                z: -1
+                                anchors.centerIn: parent
+                                width: parent.width + app.px(20); height: Math.max(app.px(32), app.tpx(26)); radius: app.px(6)
+                                color: app.tab === parent.parent.index ? c.focusFill : c.raised
+                                border.color: app.tab === parent.parent.index ? c.accent : c.accentLo; border.width: Math.max(1, app.px(1))
+                            }
                             text: parent.modelData.replace(/ \(\d+\)$/, "")
                             color: app.tab === parent.index ? c.text : c.muted
                             font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: app.tab === parent.index
@@ -10894,12 +11069,13 @@ Window {
                     id: startHintRow
                     anchors.centerIn: parent
                     spacing: app.px(6)
-                    Key { id: startHintKey; k: "start"; anchors.verticalCenter: parent.verticalCenter }
+                    // 0.63: with the keyboard Settings is Esc, on a game's first page (elsewhere Esc goes back, so no cap).
+                    Key { id: startHintKey; k: app.keysLegend ? "b" : "start"; off: app.keysLegend && !app.escTop; anchors.verticalCenter: parent.verticalCenter }
                     Column {
-                        visible: legend.startWords
+                        visible: legend.startWords || startHintKey.gone
                         anchors.verticalCenter: parent.verticalCenter
                         Text { text: "Settings"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
-                        Text { text: app.startHoldWords; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(12) }
+                        Text { visible: !app.mouseLegend; text: app.startHoldWords; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(12) }
                     }
                 }
                 Accessible.role: Accessible.Button
@@ -10975,7 +11151,7 @@ Window {
                 anchors.centerIn: parent
                 spacing: app.px(6)
                 Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                Label { visible: legend.wheelWord || app.wheelOpen; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                Label { visible: legend.wheelWord || app.wheelOpen || app.mouseLegend; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
             }
             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
             TapHandler { onTapped: app.wheelPress() }
@@ -11110,6 +11286,7 @@ Window {
         count: app.tutCount
         viewGlyph: app.glyph("view")
         startGlyph: app.glyph("start")
+        keys: app.keysLegend
         thunderstore: app.sources.length > 0 && app.sources[0] === "thunderstore"
         onNext: app.tutorialAct("a")
         onSkip: app.tutorialAct("b")
@@ -11132,8 +11309,8 @@ Window {
         z: 9998
         MouseArea {
             anchors.fill: parent
-            acceptedButtons: Qt.BackButton
-            onClicked: app.mouseBack()
+            acceptedButtons: Qt.BackButton | Qt.ForwardButton
+            onClicked: (m) => { if (m.button === Qt.ForwardButton) app.mouseForward(); else app.mouseBack() }
         }
         WheelHandler {
             property real turned: 0
@@ -11181,7 +11358,7 @@ Window {
         // button does it while it shows.
         function act(kind, m, label, run) {
             put(kind, m)
-            actionLabel = label; actionGlyph = app.glyph("r3"); app.toastAction = run
+            actionLabel = label; actionGlyph = app.mouseLegend ? "" : app.glyph("r3"); app.toastAction = run
             timeout = 8000; show(m)
         }
         onActionClicked: { if (!app.gate(5, "toast action")) return; app.runToastAction() }

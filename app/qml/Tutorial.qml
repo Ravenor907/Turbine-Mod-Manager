@@ -14,6 +14,7 @@ Overlay {
     // The pad's names for View and Start ("VIEW", "MENU", "BACK", "START"), from Main.qml's glyphs.
     property string viewGlyph: "VIEW"
     property string startGlyph: "START"
+    property bool keys: false             // 0.63: the keyboard or the mouse was used last: the cards name the keys
     property bool thunderstore: false     // the game gets its mods from Thunderstore (Install, not Nexus)
     signal next()
     signal skip()
@@ -95,11 +96,14 @@ Overlay {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
             // 0.59 (T16): short, touch included, the game's own way to get mods, and the real Start glyph.
-            text: ["A picks, B goes back. X: options for the highlighted thing. Y: find and sort. LB and RB: tabs (on a mod page, the next result). Touch works too: tap, or hold for options.",
-                   "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
+            text: [tut.keys ? "Enter or Space picks, Esc goes back. Move with W A S D or the arrows. R: options for the highlighted thing. F: find and sort. Q and E: the pages. The mouse works too: click, double-click a mod to open it, right-click for options."
+                            : "A picks, B goes back. X: options for the highlighted thing. Y: find and sort. LB and RB: tabs (on a mod page, the next result). Touch works too: tap, or hold for options.",
+                   tut.keys ? "Hold Tab for the quick wheel from anywhere, pick with the mouse or W A S D, and let go: Find, Add from Downloads, Settings, your games and more."
+                            : "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
                    tut.thunderstore ? "Open Get mods, A on a mod, then A on Install. Turbine adds it with what it needs."
                                     : "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
-                   "Hold " + tut.startGlyph + " for 3 seconds to play with your mods on. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too."][tut.card] || ""
+                   tut.keys ? "Hold Space for 3 seconds to play with your mods on. Esc on a game's first page opens Settings. A click on the Play button plays too."
+                            : "Hold " + tut.startGlyph + " for 3 seconds to play with your mods on. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18)
         }
