@@ -96,9 +96,10 @@ Rectangle {
 
     HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
     // Touch: hold a moment for the mod's options (like X).
-    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
+    // A double-click opens the mod (0.63): counted by the same handler that sees every click (a second handler
+    // of its own never saw them).
+    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onDoubleTapped: root.opened(); onLongPressed: root.menuClicked() }
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
-    TapHandler { acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad; onDoubleTapped: root.opened() }
 
     Row {
         id: leftPart

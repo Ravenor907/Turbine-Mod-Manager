@@ -4233,7 +4233,9 @@ Window {
         // 0.63: where the mouse rests now. Qt hovers the items under a still mouse again when the screen changes
         // (a wheel or sheet closing after a key): that is not the mouse being used, so it doesn't turn the hints
         // to the mouse's (the toast after Esc on the wheel lost its "Ctrl+Z").
-        keyMouseAt = realMouse.point.scenePosition
+        // A copy: a point read from the handler would follow the mouse, and then every move looked like resting.
+        const at = realMouse.point.scenePosition
+        keyMouseAt = Qt.point(at.x, at.y)
         inputCount++; lastInputAt = Date.now(); lastInputName = name
     }
     // Ctrl+= and Ctrl+-, and Ctrl with the mouse wheel: the interface size, a step at a time.
