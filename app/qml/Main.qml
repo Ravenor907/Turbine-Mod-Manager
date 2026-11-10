@@ -4252,6 +4252,8 @@ Window {
     // 0.63: Tab and Space each do one thing on a tap and another when held (see Keys.onPressed below).
     property bool tabDown: false
     property double keyAt: 0
+    property int hoverSeen: 0              // the checks' count of the real mouse's hovers
+    property double hoverSeenAfterKey: -1
     property bool tabWheel: false
     property bool spaceDown: false
     readonly property int tabHoldMs: 220
@@ -4308,6 +4310,7 @@ Window {
             id: realMouse
             onPointChanged: {
                 // Qt's hover again right after a key (a wheel or sheet closing under a resting mouse) is not the mouse.
+                app.hoverSeen++; app.hoverSeenAfterKey = Date.now() - app.keyAt
                 if (Date.now() - app.keyAt < 400) return
                 if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse"
             }
@@ -6113,8 +6116,10 @@ Window {
                 // The mouse: hover, click, right-click, Back, Ctrl with the wheel.
                 // A real mouse comes to the row from somewhere else (it may already rest on that spot from an earlier check).
                 () => { const it = modList.itemAtIndex(1); if (!it) return false
-                        const p = at(it, 0.4); Turbine.selftestMouse(0, p.x + 40, p.y, 0, 0, 0); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
-                () => { say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, F, Q, E", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
+                        m.hv = hoverSeen; const p = at(it, 0.4); Turbine.selftestMouse(0, p.x + 40, p.y + 6, 0, 0, 0) },
+                () => { const p = at(modList.itemAtIndex(1), 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
+                () => { if (lastInput !== "mouse") note("check", "Key check note: hovers seen " + (hoverSeen - m.hv) + ", the last " + hoverSeenAfterKey + " ms after a key, pointer shown " + Turbine.pointerShown)
+                        say(lastInput === "mouse" && !!hoverItem && hints() === "Click, Esc, Right-click, F, Q, E", "the mouse over a row: last input " + lastInput + ", " + (hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
                         m.on = mods[1].enabled; mouse(at(modList.itemAtIndex(1), 0.4), Qt.LeftButton) },
                 () => { say(mods[1].enabled !== m.on && modIndex === 1, "a click on a row is A: row " + (modIndex + 1) + " turned " + (mods[1].enabled ? "on" : "off"))
                         mouse(at(modList.itemAtIndex(0), 0.4), Qt.RightButton) },
