@@ -4842,6 +4842,7 @@ Window {
         else if (name === "inputcheck") script = [
             () => { if (mods.length < 2) return false
                     page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""
+                    m.gid = game ? game.id : ""
                     m.bad = 0
                     m.ok = (good, text) => { if (!good) m.bad++; check(text + (good ? "" : "  PROBLEM")) } },
             // 1. Holds run only while a real press is held: never from a click, a tap, R3, or a lost release. Each step
@@ -4961,7 +4962,10 @@ Window {
                     m.ok(m.addY === "Find" && m.addRows === "This game's files, All files" && addAll, "Find check: Add from Downloads Y " + m.addY + " (" + m.addRows + "), All files " + (addAll ? "showing" : "not showing"))
                     pad("b") },
             // 12. 0.61 (M6): Y is Find even while a toast offers Undo; R3 runs the toast's Undo.
+            // The hidden-games check above can leave another game selected: go back to the one with the two mods.
             () => { if (!game) return false
+                    if (m.gid && game.id !== m.gid) { const gi = games.findIndex(x => x.id === m.gid); if (gi >= 0) railSelect(gi); return false }
+                    if (mods.length === 0) return false
                     page = "game"; zone = "main"; tab = 0; modIndex = 0; sheet = ""; Turbine.pointerHide()
                     if (!mods.some(x => x.enabled)) { Turbine.setEnabled(mods[0].id, true); mods = mods.map((x, i) => i === 0 ? Object.assign({}, x, { enabled: true }) : x) }
                     m.wasOn = mods.filter(x => x.enabled).length
