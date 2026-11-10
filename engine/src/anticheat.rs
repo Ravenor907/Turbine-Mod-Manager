@@ -601,6 +601,15 @@ fi
 case "$app" in
   ''|*[!0-9]*) say "No app id: Steam's own command"; exec "$@" ;;
 esac
+# 0.62: Steam's command runs Turbine's own Steam tool (the game uses "Turbine (mods)" and the Launch Options still
+# hold this helper): the tool decides, and comes back here with the line it built. Nothing is used up here.
+for a in "$@"; do
+  case "$a" in
+    */compatibilitytools.d/*/turbine-tool)
+      say "Steam's command runs Turbine's Steam tool: it goes on from here"
+      exec "$@" ;;
+  esac
+done
 # Proton's own log, into this folder (Report a problem picks it up): on when Turbine's setting is on, or when the
 # Launch Options turned it on themselves.
 if [ -f "$here/proton-log.on" ]; then export PROTON_LOG=1; fi
@@ -703,6 +712,12 @@ for a in "${keep[@]}"; do
     "AppId=$app") appid=yes ;;
   esac
 done
+# Started by Turbine's Steam tool: Steam's reaper is above the tool, not in this line (the tool looked for it).
+if [ "${TURBINE_TOOL_REAPER:-}" = yes ]; then
+  reaper=yes
+  appid=yes
+fi
+unset TURBINE_TOOL_REAPER
 if [ "$reaper" != yes ] || [ "$appid" != yes ]; then
   normal "Steam's reaper with AppId=$app isn't in front of the game (reaper: $reaper, AppId: $appid; Steam's command: ${args[*]})"
 fi

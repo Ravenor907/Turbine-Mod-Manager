@@ -8,6 +8,7 @@ pub mod anticheat;
 pub mod archives;
 pub mod basic;
 pub mod browser;
+pub mod compat_tool;
 pub mod cyberpunk;
 pub mod deploy;
 pub mod fomod;
