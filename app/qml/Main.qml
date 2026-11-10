@@ -130,7 +130,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -812,8 +812,14 @@ Window {
     readonly property bool seamlessIn: mods.some(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless")
     readonly property var seamlessMod: mods.find(m => m.sourceKind === "loader" && String(m.sourceId || "") === "seamless") || null
     // 0.58: Play Seamless Co-op (Elden Ring through Steam and me3, its own .co2 saves). Turns it on first if it's off.
+    // 0.62: every co-op start comes through here (the Play choice, Start held, Play options, the Co-op tile and
+    // Steam's menu, "Use it again"): with no session password the mod stops with an error, so its settings open
+    // on the password first, with the keyboard, and the start goes on once it is set.
+    property int coopStops: 0
+    function coopPasswordEmpty() { return !!seamlessMod && Turbine.coopPasswordState(seamlessMod.id) === 0 }
     function startCoop() {
         if (!game || !seamlessMod) return
+        if (coopPasswordEmpty()) { coopStops++; note("action", "Play Seamless Co-op: no session password, its settings open first"); openCoopPasswordFirst(); return }
         note("action", "Play Seamless Co-op")
         if (!seamlessMod.enabled) { Turbine.setEnabled(seamlessMod.id, true); mods = mods.map(x => x.id === seamlessMod.id ? Object.assign({}, x, { enabled: true }) : x) }
         startPlay(true)
@@ -854,15 +860,34 @@ Window {
     }
     // Co-op Play: the session password first. Empty: its settings open on the password, and Play goes on after Save.
     property bool coopAfterSettings: false
-    function startCoopChecked() {
+    function startCoopChecked() { startCoop() }
+    // Co-op settings on the password, with Steam's keyboard up; Play goes on after it is set (coopGoOn).
+    function openCoopPasswordFirst() {
         const f = coopSettingsFile()
-        if (!f) { startCoop(); return }
+        if (!f) { toast.problem("Seamless Co-op's settings file isn't there. Install Seamless Co-op again from the game menu."); return }
+        if (sheet !== "" && sheet !== "settingsedit") sheet = ""
         settingsWant = { mod: seamlessMod.id, rel: f.rel, title: "Seamless Co-op settings", pin: ["password"], back: "", coop: true }
         Turbine.settingsLoad(seamlessMod.id, f.rel)
     }
+    // A password as the mod reads it: no spaces round it, and a pair of quotes with nothing in it is empty.
+    function plainPassword(v) {
+        let t = String(v || "").trim()
+        if (t.length >= 2 && ((t[0] === '"' && t[t.length - 1] === '"') || (t[0] === "'" && t[t.length - 1] === "'"))) t = t.substring(1, t.length - 1).trim()
+        return t
+    }
     function coopPasswordOf(d) {
         const pw = (d.fields || []).find(x => /password/i.test(x.key || ""))
-        return pw ? String(pw.value || "").trim() : ""
+        return pw ? plainPassword(pw.value) : ""
+    }
+    // The password row gets the focus and Steam's keyboard opens on it.
+    function coopTypePassword() {
+        const i = settingsView.shown.findIndex(r => r.f && /password/i.test(r.f.key || ""))
+        if (i < 0) { note("action", "Co-op password: no password row on the page"); return }
+        settingsView.focusIndex = i
+        const row = settingsView.shown[i]
+        note("action", "Co-op password: the keyboard opens on " + row.f.key)
+        settingsTypeRow = row
+        openAsk("settingvalue", "Session password", "Every co-op player types the same one.", String(settingsView.valueOf(row.f) || ""), "Session password", 2000, false, "Done")
     }
     // Play after the check: with mods, or Seamless Co-op when that was asked.
     function playNow() {
@@ -938,7 +963,8 @@ Window {
             return
         }
         if (w.coop) {
-            if (coopPasswordOf(d) !== "") { note("action", "Co-op password set: playing"); startCoop(); return }
+            // Set meanwhile (the copy the game loads has one): on with the start.
+            if (!coopPasswordEmpty()) { note("action", "Co-op password set: playing"); startCoop(); return }
             note("action", "Co-op password not set: its settings open on it")
             coopAfterSettings = true
             toast.info("Set the session password first. Every co-op player uses the same password and settings. Play goes on once it's set.")
@@ -958,6 +984,7 @@ Window {
         }
         note("action", "Edit settings: " + w.title + " (" + w.rel + ", " + d.format + ", " + d.fields.length + " settings" + (d.edited ? ", edited" : "") + (d.big ? ", too big: plain text" : "") + ")")
         sheet = "settingsedit"
+        if (w.coop && coopAfterSettings) coopTypePassword()
     }
     function settingsFilesOf(modId) { return parse(Turbine.settingsFiles(modId), []) }
     // X on a mod, Edit settings: one file opens straight away; several are listed first.
@@ -1029,8 +1056,10 @@ Window {
     property bool settingsLeaving: false
     function coopGoOn() {
         const pw = settingsView.fields.find(x => /password/i.test(x.key || ""))
-        const v = pw ? String(settingsView.valueOf(pw)).trim() : ""
+        const v = pw ? plainPassword(settingsView.valueOf(pw)) : ""
         if (v === "") return
+        // Saved for real (the file Turbine keeps): otherwise the page stays, and says so.
+        if (coopPasswordEmpty()) { note("action", "Co-op password typed but not in the file yet"); toast.problem("The password didn't save. Try once more."); return }
         coopAfterSettings = false
         note("action", "Co-op password set: playing")
         sheet = ""
@@ -1652,6 +1681,10 @@ Window {
             // may open behind Turbine.
             if (url.indexOf("heroic://") === 0 && Turbine.gamemode) { app.note("action", "Play through Heroic in Game Mode"); toast.info("Heroic is starting it. If it doesn't show, press the Steam button and switch to it.") }
             if (!shot.on) Qt.openUrlExternally(url)
+        }
+        function onCoopPasswordNeeded(gameId) {
+            app.note("action", "Play Seamless Co-op stopped: no session password in the settings the game loads")
+            if (app.game && app.game.id === gameId && app.seamlessMod) { app.coopStops++; app.openCoopPasswordFirst() }
         }
         function onLaunchSetup(gameId, json) { const o = app.parse(json, null); if (o) app.openLaunchSetup(o) }
         function onNotStarted(gameId) { app.openNotStarted(gameId) }
@@ -4666,11 +4699,12 @@ Window {
                     Turbine.selftestPad("start", false)
                     check("Co-op choice: " + pickItems.map(x => x.title).join("; ") + " | focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + " | Y " + (pickY ? pickY.label : "none"))
                     pad("down"); m.focus = pickItems[menuIndex] ? pickItems[menuIndex].title : ""; pad("a") },
-            () => { if (sheet !== "settingsedit") return false
+            () => { if (sheet !== "ask") return false
                     const r = settingsView.shown[settingsView.focusIndex]
-                    check("Co-op password step: picked " + m.focus + ", sheet " + sheet + ", focus " + (r && r.f ? r.f.key : "none") + ", waiting " + coopAfterSettings)
-                    const pw = settingsView.fields.find(x => /password/i.test(x.key)); settingsView.setValue(pw, "dragon") },
-            () => { if (sheet === "settingsedit") return false; check("Co-op after the password: sheet \"" + sheet + "\", waiting " + coopAfterSettings) },
+                    m.asks = playAsks
+                    check("Co-op password step: picked " + m.focus + ", sheet " + askReturn + " with the keyboard (" + sheet + "), focus " + (r && r.f ? r.f.key : "none") + ", waiting " + coopAfterSettings + ", Play asked " + playAsks + " times")
+                    askView.open("Session password", "", "dragon", "", 2000, false, "Done"); askView.accept() },
+            () => { if (sheet === "settingsedit" || sheet === "ask") return false; check("Co-op after the password: sheet \"" + sheet + "\", waiting " + coopAfterSettings + ", Play asked " + (playAsks - m.asks) + " times, co-op " + (playCoopNext || playAsks > m.asks)) },
             () => { sheet = ""; page = "game"; zone = "play"; pad("a") },
             () => { if (sheet !== "pick") return false
                     check("Co-op choice remembered: focus " + (pickItems[menuIndex] ? pickItems[menuIndex].title : "") + ", Play says " + (lastPlayChoice === "coop" ? "Co-op" : "Solo"))
@@ -5219,6 +5253,52 @@ Window {
                         legend.check("bookcheck")
                         say(legendHints.some(h => h[0] === "b" && h[1] === "My mods"), "The bar on Get mods: " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · "))
                         check("Book check done: " + m.bad + " problems, " + turnsShown + " page turns shown") }
+            ]
+        }
+        // 0.62 (the owner's device): Seamless Co-op started with an empty session password and the mod stopped with
+        // an error. Every way a co-op start comes, with the password empty: nothing starts, Co-op settings open on
+        // the password with the keyboard, and the start waits for it.
+        else if (name === "cooppw") {
+            m.bad = 0
+            const say = (ok, text) => { if (!ok) m.bad++; check("Co-op password check: " + text + (ok ? "" : "  PROBLEM")) }
+            const stopped = () => sheet === "ask" && askReturn === "settingsedit" && coopAfterSettings && playAsks === m.asks
+            const focusKey = () => { const r = settingsView.shown[settingsView.focusIndex]; return r && r.f ? r.f.key : "none" }
+            const told = how => say(stopped() && focusKey() === "cooppassword", how + ": " + (playAsks === m.asks ? "nothing started" : "Play asked " + (playAsks - m.asks) + " times") + ", sheet " + askReturn + " with the keyboard (" + sheet + "), focus " + focusKey() + ", waiting " + coopAfterSettings)
+            const waitAsk = () => sheet === "ask" || Date.now() - m.t > 6500
+            // B on the keyboard sheet, then B on the settings: back on the game, nothing waiting, nothing started.
+            const close1 = () => { if (sheet === "ask") pad("b") }
+            const close2 = how => () => { if (sheet === "settingsedit") pad("b")
+                                          say(sheet === "" && !coopAfterSettings && playAsks === m.asks, how + ", then B and B: sheet \"" + sheet + "\", waiting " + coopAfterSettings + ", Play asked " + (playAsks - m.asks) + " times") }
+            script = [
+                () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; acAnswered = ({ "steam:1245620": true }); m.asks = playAsks
+                        say(Turbine.coopPasswordState(seamlessMod.id) === 0, "at the start the password is " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1]) },
+                // 1: the Play choice (A on Play, then Play Seamless Co-op).
+                () => { zone = "play"; pad("a") },
+                () => { if (sheet !== "pick") return false; menuIndex = pickItems.findIndex(x => x.key === "coop"); m.t = Date.now(); pad("a") },
+                () => { if (!waitAsk()) return false; told("The Play choice") },
+                close1, close2("The Play choice"),
+                // 2: Start held 3 seconds with "Play my last choice" (the last choice is co-op now).
+                () => { look.holdStartDoes = "last"; zone = "main"; m.t = Date.now(); Turbine.selftestPad("start", true) },
+                () => { if (sheet !== "ask" && Date.now() - m.t < 6500) return false; Turbine.selftestPad("start", false); told("Start held (last choice " + lastPlayChoice + ")"); look.holdStartDoes = "choice" },
+                close1, close2("Start held"),
+                // 3: Play options (the quick wheel), Play Seamless Co-op.
+                () => { zone = "main"; pad("view"); pad("down"); pad("right"); m.slot = wheelSlots[wheelSlot] ? wheelSlots[wheelSlot].label : ""; pad("a") },
+                () => { if (sheet !== "pick") return false; menuIndex = pickItems.findIndex(x => x.title === "Play Seamless Co-op"); m.t = Date.now(); pad("a") },
+                () => { if (!waitAsk()) return false; told("Play options (wheel slot " + m.slot + ")") },
+                close1, close2("Play options"),
+                // 4: the Co-op tile and Steam's menu, when Turbine is open: their request comes in as this line.
+                () => { m.t = Date.now(); linkArrived("turbine:quick play-coop " + encodeURIComponent(game.id)) },
+                () => { if (!waitAsk()) return false; told("The Co-op tile or Steam's menu") },
+                close1, close2("The tile"),
+                // 5: a start that got as far as the Play job itself: it stops there too, and says so.
+                () => { m.stops = coopStops; m.t = Date.now(); Turbine.playCoop() },
+                () => { if (!waitAsk()) return false; say(coopStops === m.stops + 1, "The Play job stopped it itself: " + (coopStops - m.stops) + " times"); told("The Play job") },
+                // 6: a pair of quotes with nothing in it is still empty: typed in, nothing starts.
+                () => { askView.open("Session password", "", "\"\"", "", 2000, false, "Done"); askView.accept(); m.t = Date.now() },
+                () => { if (Date.now() - m.t < 1800) return false
+                        say(playAsks === m.asks && Turbine.coopPasswordState(seamlessMod.id) === 0, "A password of two quotes: " + (playAsks === m.asks ? "nothing started" : "Play asked") + ", the password counts as " + ["unknown", "empty", "set"][Turbine.coopPasswordState(seamlessMod.id) + 1])
+                        if (sheet === "ask") pad("b") },
+                () => { if (sheet === "settingsedit") pad("b"); check("Co-op password check done: " + m.bad + " problems") }
             ]
         }
         else if (name === "presscount") script = [
@@ -6843,7 +6923,7 @@ Window {
         // A Play: once this game's mods are read (the seamless check and the check before Play need them).
         if (!modsLoaded && tries < 20) { quickWaiting = { link: link, tries: tries + 1 }; quickRetry.restart(); return }
         if (what === "play") startPlay()
-        else if (what === "play-coop") { if (seamlessMod) startCoop(); else Turbine.playCoop() }
+        else if (what === "play-coop") { if (seamlessMod) startCoop(); else toast.problem("Seamless Co-op isn't installed for " + games[i].name + ". Get it from the game menu.") }
         else if (what === "play-plain") Turbine.playOriginal()
     }
 

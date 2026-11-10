@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|cooppw*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -906,8 +906,8 @@ for size in $SIZES; do
   shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   n="coopcheck-$size"
   need $n "I3: Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
-  need $n "I3: no password: its settings open on it ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit, focus cooppassword, waiting true"
-  need $n "I3: with the password, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false"
+  need $n "I3: no password: its settings open on it with the keyboard, nothing started ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true, Play asked 0 times"
+  need $n "I3: with the password typed, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false, Play asked 1 times, co-op true"
   need $n "I3: the choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"
   need $n "I3: settings from the Play choice ($size)" "Co-op settings from the Play choice \\(Y\\): Seamless Co-op settings"
   need $n "I3: settings first in the game menu ($size)" "Game menu first row: Co-op settings"
@@ -918,6 +918,34 @@ for size in $SIZES; do
   ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"
   else echo "::error title=I3: the ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
+  fi
+  # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
+  # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
+  rm -rf "$PWD/fh/cooppw-$size"; python3 tools/fake-home.py "$PWD/fh/cooppw-$size" --anticheat > /dev/null; hp="$PWD/fh/cooppw-$size"
+  shoot "cooppw-$size" "$size" cooppw "$hp" --game=$er "--selftest-import=$hp/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
+  n="cooppw-$size"
+  stop="nothing started, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true$"
+  need $n "Co-op password: empty at the start ($size)" "Co-op password check: at the start the password is empty$"
+  need $n "Co-op password: the Play choice stops for it ($size)" "Co-op password check: The Play choice: $stop"
+  need $n "Co-op password: Start held stops for it ($size)" "Co-op password check: Start held \\(last choice coop\\): $stop"
+  need $n "Co-op password: Play options stops for it ($size)" "Co-op password check: Play options \\(wheel slot Play options\\): $stop"
+  need $n "Co-op password: the Co-op tile and Steam's menu stop for it ($size)" "Co-op password check: The Co-op tile or Steam's menu: $stop"
+  need $n "Co-op password: the Play job itself stops for it ($size)" "Co-op password check: The Play job stopped it itself: 1 times$"
+  need $n "Co-op password: the Play job opens its settings ($size)" "Co-op password check: The Play job: $stop"
+  need $n "Co-op password: the Play job says why ($size)" "Seamless Co-op not started: no session password"
+  need $n "Co-op password: B and B leave nothing waiting ($size)" "Co-op password check: The tile, then B and B: sheet \"\", waiting false, Play asked 0 times$"
+  need $n "Co-op password: two quotes are empty ($size)" "Co-op password check: A password of two quotes: nothing started, the password counts as empty$"
+  need $n "Co-op password checks ($size)" "Co-op password check done: 0 problems"
+  # The same from outside the window, as the Co-op tile and the Steam menu plugin ask: nothing is launched, the
+  # answer says the password is missing, and the tile leaves a request for Turbine to open on the game.
+  if ran "$n"; then
+    for how in "" "--from-tile"; do
+      out=$(timeout 60 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=TURBINE_HOME="$hp" --env=TURBINE_DATA="$PWD/data/$n" \
+        --filesystem="$hp" --filesystem="$PWD/data" io.github.ravenor907.TurbineModManager --play-coop "$er" --json $how 2>&1 || true)
+      if echo "$out" | grep -q '"password":false' && ! echo "$out" | grep -q '"launch"'; then echo "::notice title=Co-op password: --play-coop ${how:-from the Steam menu} starts nothing ($size)::$(echo "$out" | tail -n1 | cut -c1-200)"
+      else echo "::error title=Co-op password: --play-coop ${how:-from the Steam menu} didn't stop for the empty password ($size)::$(echo "$out" | tail -n3 | tr '\n' ' ' | cut -c1-300)"; fail=1; fi
+    done
+    need $n "Co-op password: the tile opens Turbine on the game first ($size)" "Co-op tile: Turbine opens on steam:1245620 first"
   fi
   shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
   need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"

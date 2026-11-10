@@ -131,6 +131,18 @@ impl qobject::Turbine {
         QString::from(format!("[{}]", items.join(",")).as_str())
     }
 
+    /// 0.62: is Seamless Co-op's session password set, for the game on screen? 1 set, 0 empty (a co-op start
+    /// must open Co-op settings first), -1 when its settings file isn't found.
+    pub fn coop_password_state(&self, mod_id: &QString) -> i32 {
+        let Some(game) = self.current_game() else { return -1 };
+        let root = Store::root_for(&game, &data_home());
+        match coop_password(&game, &root, &mod_id.to_string()) {
+            Some(p) if p.set() => 1,
+            Some(_) => 0,
+            None => -1,
+        }
+    }
+
     /// One settings file for the page, read and parsed on its own thread (a big file never stops the interface):
     /// the answer comes as `settingsLoaded` {"mod","rel","format","fields":[...],"lines":[...],"edited","big","error"}.
     pub fn settings_load(self: Pin<&mut Self>, mod_id: &QString, rel: &QString) {
@@ -282,6 +294,99 @@ impl qobject::Turbine {
                 }
             }),
         );
+    }
+}
+
+/// 0.62: Seamless Co-op's session password in both places it lives: Turbine's copy of ersc_settings.ini (the one
+/// Co-op settings shows) and the copy the mod itself loads (in the me3 profile's mods folder, placed by the last
+/// apply). The mod refuses to start with an empty one, so every co-op start checks the copy it will load.
+pub(crate) struct CoopPassword {
+    /// Turbine's copy: without the spaces or quotes round it ("" when not set).
+    pub mine: String,
+    /// The copy the mod loads, when it is in place.
+    pub loaded: Option<String>,
+    pub loaded_file: PathBuf,
+}
+
+impl CoopPassword {
+    /// Is there a password the mod will get (after `coop_password_ready` brought its copy up to date)?
+    pub(crate) fn set(&self) -> bool {
+        !self.mine.is_empty() || self.loaded.as_deref().is_some_and(|l| !l.is_empty())
+    }
+}
+
+/// A password value as the mod reads it: no spaces round it and no pair of quotes ("" and '' are empty).
+pub(crate) fn plain_password(v: &str) -> String {
+    let t = v.trim();
+    let quoted = t.len() >= 2 && ((t.starts_with('"') && t.ends_with('"')) || (t.starts_with('\'') && t.ends_with('\'')));
+    let t = if quoted { &t[1..t.len() - 1] } else { t };
+    t.trim().to_string()
+}
+
+/// The password setting in a settings file's text (cooppassword under [PASSWORD]).
+fn password_field(text: &str) -> Option<settings::Field> {
+    settings::parse(text, Format::Ini).into_iter().find(|f| f.key.to_ascii_lowercase().contains("password"))
+}
+
+/// None when Seamless Co-op's settings file (or its password setting) isn't found.
+pub(crate) fn coop_password(game: &Game, root: &std::path::Path, mod_id: &str) -> Option<CoopPassword> {
+    if !settings::safe_rel(mod_id) {
+        return None;
+    }
+    let staged = store::staged_dir(root, mod_id);
+    let rel = settings::config_files(&staged, 8, LIMIT).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini"))?;
+    let mine_file = settings::effective(root, mod_id, &rel, &staged.join(&rel));
+    let mine = plain_password(&password_field(&std::fs::read_to_string(mine_file).ok()?)?.value);
+    // Where the mod's files go: a game me3 starts has them in its profile's mods folder, never the game folder.
+    let loaded_file = if GameRules::for_game(game).anti_cheat.as_ref().and_then(|a| a.me3_game()).is_some() {
+        turbine_engine::anticheat::profile_mods(root).join(turbine_engine::anticheat::package_rel(&rel))
+    } else {
+        game.install_dir.join(&rel)
+    };
+    let loaded = std::fs::read_to_string(&loaded_file).ok().and_then(|t| password_field(&t)).map(|f| plain_password(&f.value));
+    Some(CoopPassword { mine, loaded, loaded_file })
+}
+
+/// The id of the installed Seamless Co-op, if it is installed.
+pub(crate) fn seamless_id(store: &Store) -> Option<String> {
+    store.installed_sources().into_iter().find(|(_, s)| s.kind == "loader" && s.id == "seamless").map(|(id, _)| id)
+}
+
+pub(crate) const NEEDS_PASSWORD: &str = "Set the Seamless Co-op session password first. Turbine opens its settings.";
+
+/// Just before a Seamless Co-op start, after the mods went in. The copy of the settings the mod loads can be older
+/// than Turbine's (a settings file changed in place is kept by an apply): when its password is empty or differs,
+/// Turbine's goes into it. Err with the words to say when there is no password at all: the start must not go on.
+pub(crate) fn coop_password_ready(game: &Game, root: &std::path::Path, mod_id: &str) -> Result<(), String> {
+    let Some(p) = coop_password(game, root, mod_id) else { return Ok(()) };
+    if p.mine.is_empty() {
+        return if p.set() { Ok(()) } else { Err(NEEDS_PASSWORD.to_string()) };
+    }
+    let Some(loaded) = &p.loaded else { return Ok(()) };
+    if *loaded == p.mine {
+        return Ok(());
+    }
+    let put = || -> Result<(), String> {
+        let text = std::fs::read_to_string(&p.loaded_file).map_err(|e| e.to_string())?;
+        let f = password_field(&text).ok_or("its password setting isn't there")?;
+        let edit = settings::Edit { section: f.section.clone(), key: f.key.clone(), occ: f.occ, was: f.value.clone(), value: p.mine.clone() };
+        let new = settings::set_by_key(&text, Format::Ini, &[edit])?;
+        let tmp = p.loaded_file.with_extension("ini.turbine-tmp");
+        std::fs::write(&tmp, new).and_then(|_| std::fs::rename(&tmp, &p.loaded_file)).map_err(|e| e.to_string())
+    };
+    match put() {
+        Ok(()) => {
+            crate::log::line("settings", &format!("Seamless Co-op: the settings the game loads had {} session password; Turbine's went into {}", if loaded.is_empty() { "no" } else { "another" }, p.loaded_file.display()));
+            Ok(())
+        }
+        Err(e) => {
+            crate::log::line("settings", &format!("Seamless Co-op: couldn't put the session password into {}: {e}", p.loaded_file.display()));
+            if loaded.is_empty() {
+                Err(format!("Couldn't put the session password into the co-op settings the game loads: {}", crate::log::plain(&e)))
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 

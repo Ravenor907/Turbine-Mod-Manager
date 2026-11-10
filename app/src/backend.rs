@@ -329,6 +329,11 @@ pub mod qobject {
         #[cxx_name = "settingsFiles"]
         fn settings_files(self: &Self, mod_id: &QString) -> QString;
 
+        /// 0.62: Seamless Co-op's session password for the game on screen: 1 set, 0 empty, -1 no settings file.
+        #[qinvokable]
+        #[cxx_name = "coopPasswordState"]
+        fn coop_password_state(self: &Self, mod_id: &QString) -> i32;
+
         /// Reads one settings file for the page on its own thread; the answer comes as `settingsLoaded`.
         #[qinvokable]
         #[cxx_name = "settingsLoad"]
@@ -865,6 +870,11 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "launchSetup"]
         fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
+
+        /// 0.62: a Seamless Co-op start stopped because the session password is empty: Co-op settings open on it.
+        #[qsignal]
+        #[cxx_name = "coopPasswordNeeded"]
+        fn coop_password_needed(self: Pin<&mut Self>, game: QString);
 
         /// 0.58: one settings file read for the Edit settings page (see settingsLoad).
         #[qsignal]
@@ -2894,6 +2904,23 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
             w.say(format!("{} is still running. Close it, then press Play again.", game.name), "error");
             return;
         }
+        // 0.62: Seamless Co-op never starts with an empty session password (the mod stops with an error). Checked
+        // here for every way a co-op start comes (Turbine's buttons, the Co-op tile, Steam's menu), before anything
+        // else is done, and again below for the copy of its settings the game loads, once the mods are in.
+        if coop == turbine_engine::anticheat::Coop::Seamless {
+            let empty = w.slot(&game).ok().and_then(|s| {
+                let id = crate::modsettings::seamless_id(&s.store)?;
+                crate::modsettings::coop_password(&s.game, s.store.root(), &id)
+            }).is_some_and(|p| !p.set());
+            if empty {
+                put_back(w);
+                crate::log::line("launch", &format!("{}: Seamless Co-op not started: no session password", game.name));
+                w.say(crate::modsettings::NEEDS_PASSWORD, "warn");
+                let id = game.id();
+                w.post(move |t| t.coop_password_needed(QString::from(id.as_str())));
+                return;
+            }
+        }
         // 0.57: a game me3 starts with mods: the player's answer first, and me3 itself (fetched, then Play
         // again).
         let me3_play = w.slot(&game).ok().and_then(|s| {
@@ -2919,6 +2946,21 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
         crate::actions::sync_order(w, &game);
         if result.is_ok() {
             witcher_sync(w, &game, true);
+        }
+        // 0.62: Seamless Co-op never starts with an empty session password (the mod stops with an error): the copy
+        // of its settings the game loads is checked here, after the mods went in, whichever way the start came.
+        if coop == turbine_engine::anticheat::Coop::Seamless && result.is_ok() {
+            let ready = w.slot(&game).ok().and_then(|s| {
+                let id = crate::modsettings::seamless_id(&s.store)?;
+                Some(crate::modsettings::coop_password_ready(&s.game, s.store.root(), &id))
+            });
+            if let Some(Err(why)) = ready {
+                crate::log::line("launch", &format!("{}: Seamless Co-op not started: no session password in the settings the game loads", game.name));
+                w.say(why, "warn");
+                let id = game.id();
+                w.post(move |t| t.coop_password_needed(QString::from(id.as_str())));
+                return;
+            }
         }
         // The loader may have just been put in place by apply, so this comes after it.
         let what = w.slot(&game).map(|s| overrides_for(s)).unwrap_or("mods");

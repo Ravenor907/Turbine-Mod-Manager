@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { ICON } from "./icon";
 import { BRASS, describeLaunch, gameFromPath, newestLaunch, statusLine, type Launch, type Status } from "./words";
 
-type Answer = { ok?: boolean; words?: string; launch?: string; how?: string; checks?: { level: string; title: string }[]; ask?: boolean; needsTurbine?: boolean; sent?: boolean; turbineUrl?: string; missing?: boolean };
+type Answer = { ok?: boolean; words?: string; launch?: string; how?: string; checks?: { level: string; title: string }[]; ask?: boolean; needsTurbine?: boolean; sent?: boolean; turbineUrl?: string; missing?: boolean; password?: boolean };
 
 const getStatus = callable<[game: string, name: string], Status>("status");
 const setMods = callable<[game: string, on: boolean], Answer>("mods");
@@ -183,6 +183,9 @@ function Content() {
       } else if (a.sent) {
         // Turbine is open and does it there: bring it to the front so its questions show.
         if (a.turbineUrl) runSteamUrl(a.turbineUrl);
+      } else if (a.password === false && a.turbineUrl) {
+        // Seamless Co-op has no session password: Turbine opens on its settings, and goes on once it is set.
+        if (!runSteamUrl(a.turbineUrl)) setWords("Set the Seamless Co-op session password in Turbine first. Start Turbine from your library.");
       }
     });
 
