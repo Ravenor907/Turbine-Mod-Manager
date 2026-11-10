@@ -1377,7 +1377,29 @@ Window {
     // restart is said first); Not now leaves it for the game menu and the Co-op settings page.
     property string seamlessWanted: ""    // the game Get Seamless Co-op was pressed for
     property int coopTileAsks: 0
-    function installSeamless() { if (!game) return; seamlessWanted = game.id; Turbine.installSeamless() }
+    // 0.62: Get Seamless Co-op goes to its Nexus page first (eldenring mod 510, the engine's
+    // anticheat::SEAMLESS_NEXUS: the newest version is there first), right in Turbine, where Slow download adds
+    // it. Turbine's own download from the mod's GitHub release is the other way: when Nexus can't be opened in
+    // Turbine or the player isn't signed in there. With a copy installed Turbine only looks whether a newer one
+    // is out: as new or newer installed, it says so and does nothing.
+    readonly property string seamlessNexusUrl: "https://www.nexusmods.com/eldenring/mods/510?tab=files"
+    function seamlessGetPlan() {
+        if (seamlessIn) return "check"
+        const outside = !Turbine.gamemode && browserSet.openIn === "mine"
+        return browserSignedIn && browserLive && !outside ? "nexus" : "github"
+    }
+    function installSeamless() {
+        if (!game) return
+        seamlessWanted = game.id
+        signinRefresh()
+        const plan = seamlessGetPlan()
+        note("action", "Get Seamless Co-op: " + (plan === "nexus" ? "its Nexus page in Turbine" : plan === "check" ? "installed: looking for a newer one" : "Turbine's own download (" + (browserSignedIn ? "Nexus doesn't open in Turbine here" : "not signed in on Nexus") + ")"))
+        if (plan === "nexus") {
+            toast.info("Seamless Co-op on Nexus: press Slow download on its newest file. Turbine adds it.")
+            if (openNexus(seamlessNexusUrl, "getit")) return
+        }
+        Turbine.installSeamless()
+    }
     onSeamlessInChanged: {
         if (seamlessIn && game && seamlessWanted === game.id) { seamlessWanted = ""; coopTileAskTimer.tries = 0; coopTileAskTimer.restart() }
         // 0.62: on opening a game with Seamless Co-op (and when it arrives): are there two copies?
@@ -5909,6 +5931,11 @@ Window {
                         signinRefresh()
                         say((accountRows[0].title === "Nexus Mods: Signed in") === Turbine.browserSignedIn() && browserSigninShown === (bridge.paired === true && !Turbine.browserSignedIn()),
                             "sign-in status: Settings says " + accountRows[0].title + ", Turbine's browser is " + (Turbine.browserSignedIn() ? "signed in" : "not signed in"))
+                        // 0.62: Get Seamless Co-op goes to Nexus first when Turbine's Nexus pages are signed in, and to
+                        // Turbine's own download otherwise (nothing is opened or downloaded here).
+                        m.p1 = seamlessGetPlan(); m.was = browserSignedIn; browserSignedIn = true; browserLiveForced = true; m.p2 = seamlessGetPlan()
+                        m.url = Turbine.browserPageMod(seamlessNexusUrl); browserSignedIn = m.was; browserLiveForced = false
+                        check("Seamless Co-op plan: not signed in on Nexus: " + m.p1 + "; signed in: " + m.p2 + " (mod " + m.url + " of " + seamlessNexusUrl.split("/")[3] + ")")
                         check("Key check done: " + m.bad + " problems") }
             ]
         }
@@ -5937,7 +5964,7 @@ Window {
             const ask = () => sheet === "msg" && msgData ? msgData.title + " | " + msgData.text + " | " + msgData.buttons.map(b => b.label).join("; ") + " | highlighted " + (infoButtons[infoIndex] ? infoButtons[infoIndex].label : "") : "sheet \"" + sheet + "\""
             script = [
                 () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length
-                        check("Older check: installed Seamless Co-op " + ver() + ", " + mods.length + " mods"); m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
+                        check("Older check: installed Seamless Co-op " + ver() + ", " + mods.length + " mods; Get Seamless Co-op would: " + seamlessGetPlan()); m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
                 () => { if (olderAsks === m.asks) return false
                         check("Older check: asked: " + ask() + " | error said: " + (msgLevel === "error" ? msgText : "none")); pad("a") },
                 () => { if (Turbine.busy) return false
@@ -10407,7 +10434,7 @@ Window {
             visible: app.sheet === "pick"
             title: app.pickTitle
             subtitle: app.pickSub
-            items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
+            items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true, enabled: m.dim !== true }))
             focusIndex: app.menuIndex
             onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return
                 if (app.nxmAsking) nxmRingMove.stop()   // a tap is the player's choice: the ring stays (break M1)

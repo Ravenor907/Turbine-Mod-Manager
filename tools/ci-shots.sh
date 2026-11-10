@@ -306,6 +306,7 @@ need $y "Mouse: Ctrl and the wheel change the size" "Key check: the wheel alone:
 need $y "The hints follow the last input" "Key check: hints after a key: Enter, Esc, X, Ctrl\+F, PgUp, PgDn; after a controller press: A, B, X, Y, LB, RB$"
 need $y "The bar with the keyboard's names: nothing overlaps" "Bar check \(keycheck, .* 0 problems"
 need $y "One sign-in status" "Key check: sign-in status: Settings says Nexus Mods: (Signed in, Turbine's browser is signed in|Not signed in, Turbine's browser is not signed in)$"
+need $y "Get Seamless Co-op: Nexus first when signed in, Turbine's own download otherwise" "Seamless Co-op plan: not signed in on Nexus: github; signed in: nexus \\(mod 510 of eldenring\\)"
 need $y "Key and mouse checks" "Key check done: 0 problems"
 # 0.62: Desktop Mode with no controller is normal: a line in the log, never a toast or a line in Settings.
 need $y "No controller in Desktop Mode: logged, nothing shown" "No controller in Desktop Mode: (logged once, no toast|a controller is seen, no toast)"
@@ -997,9 +998,10 @@ for size in $SIZES; do
   # uses the older file; it is never added by itself and never reported as a mod that failed.
   rm -rf "$PWD/fh/older-$size"; python3 tools/fake-home.py "$PWD/fh/older-$size" --anticheat > /dev/null; ho="$PWD/fh/older-$size"
   # (The copy installed came from Nexus as 2.0.1; the older file is another download, Turbine's own, that says 1.9.0.)
-  cp "$ho/Downloads/Seamless Co-op 2.0.1.zip" "$ho/Downloads/Seamless Co-op 1.9.0.zip"
+  cp -p "$ho/Downloads/Seamless Co-op 2.0.1.zip" "$ho/Downloads/Seamless Co-op 1.9.0.zip"
   shoot "oldercheck-$size" "$size" oldercheck "$ho" --game=$er "--selftest-import=$ho/Downloads/Seamless Co-op 2.0.1.zip|nexus|eldenring:510:1|2.0.1" "--older-file=$ho/Downloads/Seamless Co-op 1.9.0.zip"
   n="oldercheck-$size"
+  need $n "Get Seamless Co-op with a copy installed only looks for a newer one ($size)" "Older check: installed Seamless Co-op 2.0.1, 1 mods; Get Seamless Co-op would: check$"
   need $n "Older Seamless Co-op: the question, Keep first ($size)" "Older check: asked: This Seamless Co-op is older \\| You have Seamless Co-op 2.0.1. This file is 1.9.0, which is older. \\| Keep 2.0.1; Use 1.9.0; Back \\| highlighted Keep 2.0.1 \\| error said: none$"
   need $n "Older Seamless Co-op: A keeps the one installed, nothing failed ($size)" "Older check: A keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods, failed: none$"
   need $n "Older Seamless Co-op: B keeps it too ($size)" "Older check: B goes back and keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods$"
