@@ -871,6 +871,17 @@ pub mod qobject {
         #[cxx_name = "launchSetup"]
         fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
 
+        /// 0.62: a Seamless Co-op file older than the one installed was not added: the question for the player
+        /// ("You have <have>. This file is <this>, which is older.").
+        #[qsignal]
+        #[cxx_name = "olderSeamless"]
+        fn older_seamless(self: Pin<&mut Self>, game: QString, have: QString, this_one: QString);
+        /// 0.62: the answer to that question. true: use the older file (it is added again, allowed this once);
+        /// false: keep the one installed (the file is left alone).
+        #[qinvokable]
+        #[cxx_name = "olderSeamlessAnswer"]
+        fn older_seamless_answer(self: Pin<&mut Self>, use_it: bool);
+
         /// 0.62: looks at the Seamless Co-op copies in the list of the game on screen (on the worker); the answer
         /// comes as `coopChecked`.
         #[qinvokable]
@@ -1251,6 +1262,9 @@ pub(crate) struct Worker {
     pub(crate) loot: HashMap<String, (String, HashMap<String, Vec<crate::loot::Msg>>)>,
     /// Basic games' mods waiting for where their files go (game id, mod), oldest first.
     pub(crate) place_pending: std::collections::VecDeque<(String, store::PendingPlace)>,
+    /// 0.62: the older Seamless Co-op file waiting for the player's answer: (game id, file, where it came from, its
+    /// label).
+    pub(crate) older_seamless: Option<(String, PathBuf, turbine_engine::net::SourceInfo, String)>,
 }
 
 pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
@@ -1297,6 +1311,7 @@ impl Worker {
             share: None,
             loot: HashMap::new(),
             place_pending: std::collections::VecDeque::new(),
+            older_seamless: None,
         }
     }
 
@@ -2220,6 +2235,7 @@ impl qobject::Turbine {
                     share: None,
                     loot: HashMap::new(),
                     place_pending: std::collections::VecDeque::new(),
+                    older_seamless: None,
                 };
                 while let Ok(task) = rx.recv() {
                     let long = task.long;

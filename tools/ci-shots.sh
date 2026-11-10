@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -993,6 +993,18 @@ for size in $SIZES; do
   need $n "Co-op tile in Game Mode: later, words only ($size)" "Tile check: Game Mode true, how later, label \"\", words: The tile can be added in Desktop Mode"
   need $n "Co-op tile in Game Mode: not asked ($size)" "Tile check: asked once after the install: no \\(later\\)$"
   need $n "Co-op tile in Game Mode: the row opens the words with OK only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| OK$"
+  # 0.62: a Seamless Co-op file older than the one installed is asked about: A keeps the one installed (B too), X
+  # uses the older file; it is never added by itself and never reported as a mod that failed.
+  rm -rf "$PWD/fh/older-$size"; python3 tools/fake-home.py "$PWD/fh/older-$size" --anticheat > /dev/null; ho="$PWD/fh/older-$size"
+  # (The copy installed came from Nexus as 2.0.1; the older file is another download, Turbine's own, that says 1.9.0.)
+  cp "$ho/Downloads/Seamless Co-op 2.0.1.zip" "$ho/Downloads/Seamless Co-op 1.9.0.zip"
+  shoot "oldercheck-$size" "$size" oldercheck "$ho" --game=$er "--selftest-import=$ho/Downloads/Seamless Co-op 2.0.1.zip|nexus|eldenring:510:1|2.0.1" "--older-file=$ho/Downloads/Seamless Co-op 1.9.0.zip"
+  n="oldercheck-$size"
+  need $n "Older Seamless Co-op: the question, Keep first ($size)" "Older check: asked: This Seamless Co-op is older \\| You have Seamless Co-op 2.0.1. This file is 1.9.0, which is older. \\| Keep 2.0.1; Use 1.9.0; Back \\| highlighted Keep 2.0.1 \\| error said: none$"
+  need $n "Older Seamless Co-op: A keeps the one installed, nothing failed ($size)" "Older check: A keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods, failed: none$"
+  need $n "Older Seamless Co-op: B keeps it too ($size)" "Older check: B goes back and keeps it: sheet \"\", Seamless Co-op 2.0.1, 1 mods$"
+  need $n "Older Seamless Co-op: X uses the older file ($size)" "Older check: X uses the older file: Seamless Co-op 1.9.0, 1 used, 1 mods in the list, sheet \"\"$"
+  if ran "$n" && grep -q "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::error title=Older Seamless Co-op was reported as a failed mod ($size)::$(grep -h "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"; fail=1; fi
   # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
   # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
   rm -rf "$PWD/fh/cooppw-$size"; python3 tools/fake-home.py "$PWD/fh/cooppw-$size" --anticheat > /dev/null; hp="$PWD/fh/cooppw-$size"

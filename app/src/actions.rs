@@ -177,6 +177,8 @@ pub(crate) fn show_notes(w: &Worker, name: &str, notes: &[String]) {
 
 /// Adds (or, with `replaces`, updates) a mod from an archive. An installer with choices waits for the player.
 pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: SourceInfo, replaces: Option<String>, label: &str) -> Outcome {
+    // (Kept for the older Seamless Co-op question: "Use it" adds this same file again.)
+    let asked_source = source.clone();
     let result = w.slot(game).and_then(|s| match &replaces {
         Some(id) => s.store.replace_mod(id, path, source),
         None => s.store.import_archive(path, source),
@@ -220,6 +222,19 @@ pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: Sour
             let name = p.name.clone();
             w.say(if p.sure { format!("{} has files {} already has", p.name, game.name) } else { format!("Where do {}'s files go?", p.name) }, "work");
             crate::anygame::queue_place(w, game, *p);
+            Outcome::Choices { name }
+        }
+        // 0.62: an older Seamless Co-op than the one installed is not an error: the player is asked (Keep the one
+        // installed, the default, or Use this one). The file waits for the answer; nothing reports it as a mod that
+        // failed, and nothing tries it again by itself.
+        Err(e) if turbine_engine::anticheat::older_seamless_in(&e).is_some() => {
+            let (have, this) = turbine_engine::anticheat::older_seamless_in(&e).unwrap_or_default();
+            crate::log::line("engine", &format!("{label}: Seamless Co-op {this} is older than the {have} installed: asking (Keep {have}, or Use {this})"));
+            w.older_seamless = Some((game.id(), path.to_path_buf(), asked_source, label.to_string()));
+            w.say(format!("Seamless Co-op {this} is older than your {have}: which one?"), "work");
+            let gid = game.id();
+            let name = format!("Seamless Co-op {this}");
+            w.post(move |t| t.older_seamless(QString::from(gid.as_str()), QString::from(have.as_str()), QString::from(this.as_str())));
             Outcome::Choices { name }
         }
         Err(e) => {

@@ -133,7 +133,7 @@ Window {
                                       "wheel", "ghost", "railmenu", "browserframe", "browsertest", "browserpersist", "regress",
                                       "basicgame", "place", "placestart", "overwrite", "overwriteskip", "nexuspick", "basicmenu", "tucked", "why", "findpop", "fullscroll", "acask", "acdeploy", "acguide", "acrefuse", "modsempty", "notstarted", "launchsetup", "modsettings", "coopsettings", "gameupdate", "ersaves"].indexOf(page) >= 0 || scripted
         // 0.54: pages that run a list of presses (the controls' acceptance checks) and take their picture at the end.
-        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck"].indexOf(page) >= 0
+        readonly property bool scripted: ["controls", "legendcheck", "sheetcheck", "nexusguard", "inlinebrowser", "presscount", "inputcheck", "sizeinputs", "coopcheck", "editbutton", "menufit", "heldcheck", "abcheck", "passthrough", "golden", "mmdguard", "startcheck", "bookcheck", "cooppw", "keycheck", "tilecheck", "oldercheck"].indexOf(page) >= 0
         // Pages where every sheet must come from a press (the build checks the log for "opened with no press").
         readonly property bool strictSheets: ["controls", "presscount", "opening8s", "nexusguard"].indexOf(page) >= 0
         // Pages that show Labs mode (it isn't saved from a picture).
@@ -953,6 +953,22 @@ Window {
                   notes: ["Kept: " + (coopFound.name || "Seamless Co-op") + (coopFound.listVersion ? " " + coopFound.listVersion : "")].concat(others.map(o => "Moved to Removed mods: " + o)),
                   buttons: [{ key: "a", label: "Tidy up", run: () => { note("action", "Seamless Co-op: Tidy up"); coopAfterTidy = then; coopFound = Object.assign({}, coopFound, { others: [] }); Turbine.seamlessTidy() } },
                             { key: "b", label: "Not now", run: () => { note("action", "Seamless Co-op copies: not now"); coopFound = Object.assign({}, coopFound, { others: [], skipped: true }); if (then) then() } }] })
+    }
+    // ---- 0.62: a Seamless Co-op file older than the one installed (an old download, or GitHub behind Nexus) is
+    // never put over the newer one by itself. One question: Keep the one installed (A, the default; B goes back
+    // and keeps it too) or Use the older file (X). The file is not shown as a mod that failed.
+    property int olderAsks: 0
+    function askOlderSeamless(gameId, have, thisOne) {
+        const i = games.findIndex(g => g.id === gameId)
+        if (i >= 0 && i !== current) current = i
+        olderAsks++
+        note("action", "Older Seamless Co-op: have " + have + ", this file is " + thisOne)
+        const answer = use => { Turbine.olderSeamlessAnswer(use); Turbine.statusDone() }
+        openMsg({ title: "This Seamless Co-op is older", reason: "an older Seamless Co-op file",
+                  text: "You have Seamless Co-op " + have + ". This file is " + thisOne + ", which is older.",
+                  buttons: [{ key: "a", label: "Keep " + have, run: () => { note("action", "Older Seamless Co-op: keep " + have); answer(false) } },
+                            { key: "x", label: "Use " + thisOne, run: () => { note("action", "Older Seamless Co-op: use " + thisOne); answer(true) } },
+                            { key: "b", label: "Back", run: () => { note("action", "Older Seamless Co-op: back (keep " + have + ")"); answer(false) } }] })
     }
     property int coopStops: 0
     function coopPasswordEmpty() { return !!seamlessMod && Turbine.coopPasswordState(seamlessMod.id) === 0 }
@@ -1966,6 +1982,7 @@ Window {
             if (url.indexOf("heroic://") === 0 && Turbine.gamemode) { app.note("action", "Play through Heroic in Game Mode"); toast.info("Heroic is starting it. If it doesn't show, press the Steam button and switch to it.") }
             if (!shot.on) Qt.openUrlExternally(url)
         }
+        function onOlderSeamless(gameId, have, thisOne) { app.askOlderSeamless(gameId, have, thisOne) }
         function onCoopChecked(gameId, json) { app.coopLooked(gameId, app.parse(json, null)) }
         function onCoopPasswordNeeded(gameId) {
             app.note("action", "Play Seamless Co-op stopped: no session password in the settings the game loads")
@@ -5912,6 +5929,30 @@ Window {
                     pad("b") },
             () => { check("Tile check done: sheet \"" + sheet + "\"") }
         ]
+        // 0.62: an older Seamless Co-op file is asked about, never added by itself and never a failed mod: A keeps the
+        // one installed, B too, X uses the older file.
+        else if (name === "oldercheck") {
+            const file = shot.arg("older-file")
+            const ver = () => seamlessMod ? versionOf(seamlessMod) : "none"
+            const ask = () => sheet === "msg" && msgData ? msgData.title + " | " + msgData.text + " | " + msgData.buttons.map(b => b.label).join("; ") + " | highlighted " + (infoButtons[infoIndex] ? infoButtons[infoIndex].label : "") : "sheet \"" + sheet + "\""
+            script = [
+                () => { if (!seamlessIn || !modsLoaded) return false; sheet = ""; page = "game"; zone = "main"; tab = 0; m.n = mods.length
+                        check("Older check: installed Seamless Co-op " + ver() + ", " + mods.length + " mods"); m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
+                () => { if (olderAsks === m.asks) return false
+                        check("Older check: asked: " + ask() + " | error said: " + (msgLevel === "error" ? msgText : "none")); pad("a") },
+                () => { if (Turbine.busy) return false
+                        check("Older check: A keeps it: sheet \"" + sheet + "\", Seamless Co-op " + ver() + ", " + mods.length + " mods, failed: " + (msgLevel === "error" ? msgText : "none"))
+                        m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
+                () => { if (olderAsks === m.asks) return false; pad("b") },
+                () => { if (Turbine.busy) return false
+                        check("Older check: B goes back and keeps it: sheet \"" + sheet + "\", Seamless Co-op " + ver() + ", " + mods.length + " mods")
+                        m.asks = olderAsks; Turbine.selftestImport(file, "loader", "seamless", "1.9.0") },
+                () => { if (olderAsks === m.asks) return false; pad("x") },
+                () => { if (Turbine.busy || ver() !== "1.9.0") return false
+                        check("Older check: X uses the older file: Seamless Co-op " + ver() + ", " + mods.filter(x => x.seamless === true).length + " used, " + mods.length + " mods in the list, sheet \"" + sheet + "\"") },
+                () => { check("Older check done: asked " + olderAsks + " times") }
+            ]
+        }
         else if (name === "presscount") script = [
             // After the tutorial: the rail, the game with no mods focused. Count every press to a mod added and Play.
             () => { if (!game || !modsLoaded) return false; sheet = ""; zone = "rail"; railIndex = current; m.start = inputCount; m.log = [] },
