@@ -344,11 +344,19 @@ Window {
             else if (shot.page === "launchsetup") { launchSetupShot.start(); app.openLaunchSetup({ game: app.game.id, name: "Elden Ring", option: "if [ -x \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" ]; then \"/home/deck/.var/app/io.github.ravenor907.TurbineModManager/data/steam-launch/turbine-launch.sh\" %command%; else %command%; fi", set: "", listed: true, coop: false }) }
             else if (shot.page === "notstarted") {
                 app.openNotStarted(app.game.id); app.note("shot", "Launch check sheet: " + app.pickTitle + " | " + app.pickItems.map(r => r.title).join("; "))
+                // 0.62: what Turbine's Steam tool said about the last launch shows first, when it said anything.
+                app.toolTest = { lastProton: "Started with Proton 9.0 (Beta): Steam used it for this game last time.", nothingStarted: "no Proton was found, so nothing started" }
+                app.sheet = ""; app.openNotStarted(app.game.id)
+                app.note("shot", "Launch check with the tool's words: " + app.pickItems.map(r => r.title + (r.info ? " (" + r.detail + ")" : "")).join("; "))
+                app.sheet = ""; app.openWhy()
+                app.note("shot", "Why won't it start with the tool's words: " + app.pickItems.filter(r => /Proton|Steam tool/.test(r.title)).map(r => r.title + ": " + r.detail).join("; "))
+                app.sheet = ""; app.openNotStarted(app.game.id)
                 // 0.62: it shows up late: the sheet goes. It started and closed: "closed after N seconds", never "didn't start".
                 app.gameSeenLate(app.game.id, 31)
                 app.note("shot", "Launch check, the game showed up late: sheet \"" + app.sheet + "\"")
                 app.openNotStarted(app.game.id); app.quickExit(app.game.id, 24)
                 app.note("shot", "Launch check, it started then closed: sheet " + app.sheet + ", " + infoView.title + " | " + app.quickText + " | " + app.infoButtons.map(b => b.label).join("; "))
+                app.toolTest = null
                 app.quick = null; app.sheet = ""; app.openNotStarted(app.game.id)
             }
             // 0.56: a mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
@@ -997,11 +1005,23 @@ Window {
                                  + (o.set && o.outdated !== true ? " Your Launch Options now (" + o.set + ") step aside while mods are on; Settings, Help, Undo the launch options change brings them back." : ""),
                           aLabel: "Restart Steam and set it up", manualLabel: "Set it up myself", manual: () => openLaunchPaste(o) })
     }
+    // (toolTest: the build's pictures put a made-up answer here to see it shown.)
+    property var toolTest: null
     function steamTool(gameId) {
+        if (toolTest) return Object.assign({ installed: true, listed: true, chosen: true, route: "tool", steps: [], restartFirst: false, proton: "", protonName: "", lastProton: "", nothingStarted: "", using: [], toolName: "Turbine (mods)", tile: "", tileWords: "" }, toolTest)
         return parse(Turbine.steamToolJson(gameId), { installed: false, listed: false, chosen: false, route: "none", steps: [], restartFirst: true, proton: "", protonName: "",
                                                       lastProton: "", nothingStarted: "", using: [], toolName: "Turbine (mods)", tile: "", tileWords: "" })
     }
     property int toolChecks: 0
+    // 0.62, for the launch check and Why won't it start?: what Turbine's Steam tool did at the last launch, when it
+    // said: that it started nothing (and why), and which Proton it ran the game with (and why that one).
+    function toolRows(gameId) {
+        const t = steamTool(gameId)
+        let rows = []
+        if (t.nothingStarted) rows.push({ icon: "info", title: "Turbine's Steam tool started nothing", detail: t.nothingStarted, info: true, run: () => {} })
+        if (t.lastProton) rows.push({ icon: "info", title: "Proton at the last start", detail: t.lastProton, info: true, run: () => {} })
+        return rows
+    }
     function openToolSteps(o, tool) {
         const name = tool.toolName || "Turbine (mods)"
         note("action", "Steam tool steps for " + o.name + ": " + tool.steps.length + " steps, " + (tool.restartFirst ? "Steam has to start again first" : "Steam lists the tool") + ", route " + tool.route)
@@ -1450,7 +1470,7 @@ Window {
         if (sheet !== "" && sheet !== "pick") return
         notStartedFor = gameId
         const me3 = acMode === "me3" && game && game.id === gameId
-        let rows = []
+        let rows = toolRows(gameId)
         if (me3) {
             const h = healthNow(), lf = launchFinding(h)
             rows.push(lf ? lf : { icon: "power", title: "Steam's Launch Options: set", detail: "Steam has what " + name + " needs", info: true, run: () => {} })
@@ -2605,16 +2625,19 @@ Window {
         const worked = setups.filter(x => x.played === true && key(x.on || []) !== nowKey).sort((a, b) => b.savedAt - a.savedAt)[0] || null
         const added = worked ? onNow.filter(m => (worked.on || []).indexOf(m.id) < 0) : []
         if (!shot.on) Turbine.markNotWorking()
-        quick = { game: gameId, name: shortName, seconds: secs, added: added, worked: worked }
+        const tool = steamTool(gameId)
+        quick = { game: gameId, name: shortName, seconds: secs, added: added, worked: worked, proton: tool.lastProton || "", nothing: tool.nothingStarted || "" }
         page = "game"; zone = "main"; tab = 0; modPage = false
         // 0.62: it started and closed: a "didn't start" sheet still up for it gives way to "closed after N seconds".
         if (notStartedShowing(gameId)) { note("launch", "The didn't start sheet gives way: it started, then closed"); sheet = "" }
         notStartedFor = ""
         if (app.active && sheet === "") { infoIndex = 0; sheet = "quick" }
     }
-    readonly property string quickText: !quick ? "" : quick.added.length === 1 ? "Since it last worked, you added " + quick.added[0].name + "."
+    readonly property string quickText: !quick ? "" : (quick.added.length === 1 ? "Since it last worked, you added " + quick.added[0].name + "."
         : quick.added.length > 1 ? "Since it last worked (" + when(quick.worked.savedAt) + "), you added or turned on " + nameList(quick.added.map(m => m.name)) + "."
-        : "It started, then closed by itself. A mod is the likely cause: playing without mods shows whether the game itself is fine."
+        : "It started, then closed by itself. A mod is the likely cause: playing without mods shows whether the game itself is fine.")
+        // 0.62: which Proton Turbine's Steam tool ran it with, when the tool said.
+        + (quick.proton ? " " + quick.proton : "")
     // "Bright Torches, Faster Roach and 1 more"
     function nameList(names) {
         if (names.length <= 1) return names.join("")
@@ -2811,6 +2834,7 @@ Window {
         let rows = []
         if (loaderMissing) rows.push({ icon: "update", title: loaderShort + " isn't installed", detail: "Mods that need it stop the game at start. A gets it.", run: () => { sheet = ""; getLoader() } })
         const lf = launchFinding(h); if (lf) rows.push(lf)
+        if (game) rows = rows.concat(toolRows(game.id))
         if (h.verify && (h.verify.missing.length + h.verify.changed.length) > 0)
             rows.push({ icon: "info", title: plural(h.verify.missing.length + h.verify.changed.length, "mod file is", "mod files are") + " missing or changed", detail: "A puts them back", run: () => { sheet = ""; Turbine.applyNow(); toast.info("Putting the mod files back...") } })
         for (const c of (h.copies || [])) rows.push({ icon: "info", title: "Another copy of " + gameTitle, detail: c + ". Mods go only into the one shown here.", info: true, run: () => {} })

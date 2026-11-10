@@ -571,8 +571,10 @@ for size in $SIZES; do
   need "launchsetupgm-$size" "Steam tool in Game Mode: no Steam restart offered ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, .* \| buttons Check again; Set it up myself; Not now \| Game Mode true"
   need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
+  need "notstarted-$size" "Launch check: the Steam tool's words come first: nothing started, and which Proton ($size)" "Launch check with the tool's words: Turbine's Steam tool started nothing \(no Proton was found, so nothing started\); Proton at the last start \(Started with Proton 9.0 \(Beta\): Steam used it for this game last time.\); "
+  need "notstarted-$size" "Why won't it start: the same words ($size)" "Why won't it start with the tool's words: .*Turbine's Steam tool started nothing: no Proton was found.*Proton at the last start: Started with Proton 9.0"
   need "notstarted-$size" "Launch check: a late start takes the sheet away ($size)" "Launch check, the game showed up late: sheet \"\"$"
-  need "notstarted-$size" "Launch check: started then closed says closed after N seconds, the cause and its buttons ($size)" "Launch check, it started then closed: sheet quick, .* closed after 24 seconds \| (It started, then closed by itself|Since it last worked).* \| .*Play without mods; Keep my mods$"
+  need "notstarted-$size" "Launch check: started then closed says closed after N seconds, the cause and its buttons ($size)" "Launch check, it started then closed: sheet quick, .* closed after 24 seconds \| (It started, then closed by itself|Since it last worked).* Started with Proton 9.0 \(Beta\): Steam used it for this game last time. \| .*Play without mods; Keep my mods$"
   need "notstarted-$size" "Launch check: didn't start, with the fixes ($size)" "Launch check sheet: .* didn't start \| Play without mods; Activity log; Why won't it start\?"
   rm -rf "$PWD/fh/modsempty-$size"; python3 tools/fake-home.py "$PWD/fh/modsempty-$size" > /dev/null; h="$PWD/fh/modsempty-$size"
   shoot "modsempty-$size" "$size" modsempty "$h" --game=$skyrim
