@@ -4230,12 +4230,10 @@ Window {
     // A key was pressed: the hints follow the keyboard from here.
     function keySeen(name) {
         if (lastInput !== "keys") lastInput = "keys"
-        // 0.63: where the mouse rests now. Qt hovers the items under a still mouse again when the screen changes
+        // 0.63: when the key came. Qt hovers the items under a still mouse again when the screen changes
         // (a wheel or sheet closing after a key): that is not the mouse being used, so it doesn't turn the hints
         // to the mouse's (the toast after Esc on the wheel lost its "Ctrl+Z").
-        // A copy: a point read from the handler would follow the mouse, and then every move looked like resting.
-        const at = realMouse.point.scenePosition
-        keyMouseAt = Qt.point(at.x, at.y)
+        keyAt = Date.now()
         inputCount++; lastInputAt = Date.now(); lastInputName = name
     }
     // Ctrl+= and Ctrl+-, and Ctrl with the mouse wheel: the interface size, a step at a time.
@@ -4253,7 +4251,7 @@ Window {
     }
     // 0.63: Tab and Space each do one thing on a tap and another when held (see Keys.onPressed below).
     property bool tabDown: false
-    property var keyMouseAt: null
+    property double keyAt: 0
     property bool tabWheel: false
     property bool spaceDown: false
     readonly property int tabHoldMs: 220
@@ -4309,8 +4307,8 @@ Window {
         HoverHandler {
             id: realMouse
             onPointChanged: {
-                const p = point.scenePosition, k = app.keyMouseAt
-                if (k && Math.abs(p.x - k.x) < 1 && Math.abs(p.y - k.y) < 1) return
+                // Qt's hover again right after a key (a wheel or sheet closing under a resting mouse) is not the mouse.
+                if (Date.now() - app.keyAt < 400) return
                 if (!Turbine.pointerShown && app.lastInput !== "mouse") app.lastInput = "mouse"
             }
         }
