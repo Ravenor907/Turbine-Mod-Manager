@@ -24,7 +24,7 @@
           <li>The quick wheel's middle picks nothing and closes it</li>
           <li>Keyboard and mouse work everywhere, and the hints follow what you used last</li>
           <li>Smoother animations, with Full, Reduced or Off in Settings, Look</li>
-          <li>Elden Ring and other me3 games: a fix for the game closing by itself soon after it starts with mods</li>
+          <li>Elden Ring and other me3 games: the game's tamper protection is switched off for modded play, which should stop it closing by itself soon after it starts</li>
           <li>A Steam tool, Turbine (mods), picked once in the game's Properties, in place of restarting Steam in Game Mode</li>
           <li>Seamless Co-op: never starts without a session password, one copy per game, and its screens say it loads only with Play Seamless Co-op</li>
           <li>The Co-op tile is asked about once and added in Desktop Mode</li>
