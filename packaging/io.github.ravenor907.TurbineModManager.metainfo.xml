@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.64" date="2026-11-10" type="development">
+      <description>
+        <p>What a mod needs, lined up, and Cyberpunk's frameworks working under Proton:</p>
+        <ul>
+          <li>After an add, one sheet says what the mod needs; Get them all gets the whole chain in turn, with the next Nexus page opening by itself on its Slow download button, Skip and Stop, and a row in My mods to go on later</li>
+          <li>Before you play warns when a mod that is on misses what it needs, with Get what they need first</li>
+          <li>My mods keeps what other mods need under one collapsed Dependencies row; X options move a mod in or out, and the load order stays as it is</li>
+          <li>Cyberpunk 2077: when RED4ext or Cyber Engine Tweaks would stop with error 998, Before you play installs Microsoft's Visual C++ runtime into the game's Proton setup in one press</li>
+          <li>The first-run tutorial matches how Turbine works now, with a fifth card on what it sets up for you</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.63" date="2026-11-10" type="development">
       <description>
         <p>Updates that check without being refused, and keys and a mouse the way PC players expect:</p>
