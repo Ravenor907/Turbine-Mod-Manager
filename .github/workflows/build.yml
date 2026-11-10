@@ -59,6 +59,26 @@ jobs:
             # and its files must come from that attempt (made between its start and its end), never from an
             # earlier or later failed one (N2).
             repo="${{ github.repository }}"
+            # 0.64: a commit that changes only paths this workflow ignores on push (site/, *.md, pages.yml: the
+            # paths-ignore list at the top, mirrored in the case line below and checked by tools/release-check.py)
+            # has no build of its own. Its release reuses the green build of the newest commit before it that
+            # changed anything else; the release is still tagged on this commit.
+            built="$sha"
+            for step in $(seq 1 30); do
+              files=$(gh api "repos/$repo/commits/$built" --jq '.files[].filename')
+              parents=$(gh api "repos/$repo/commits/$built" --jq '.parents | length')
+              [ -n "$files" ] && [ "$parents" = 1 ] || break
+              only_ignored=1
+              while IFS= read -r f; do
+                case "$f" in site/*|*.md|.github/workflows/pages.yml) ;; *) only_ignored=0 ;; esac
+              done <<< "$files"
+              [ "$only_ignored" = 1 ] || break
+              built=$(gh api "repos/$repo/commits/$built" --jq '.parents[0].sha')
+            done
+            if [ "$built" != "$sha" ]; then
+              echo "::notice title=Only ignored paths changed::$sha changes only site/, *.md or pages.yml since $built: the release reuses $built's green build"
+              sha="$built"
+            fi
             greens=0
             for r in $(gh api "repos/$repo/actions/workflows/build.yml/runs?head_sha=$sha&per_page=50" \
                          --jq ".workflow_runs[] | select(.head_sha == \"$sha\" and (.event == \"push\" or .event == \"workflow_dispatch\") and .id != ${{ github.run_id }}) | .id"); do

@@ -3,6 +3,7 @@
 
 A release ships exactly what the green runs of its commit built and checked: the Flatpak and the Decky plugin from
 the reused run, each with its checksum, after the green full builds a release needs (REQUIRED_GREEN_BUILDS); the plugin's packages are pinned by its lockfile."""
+import re
 import sys
 
 wf = open(".github/workflows/build.yml").read()
@@ -36,6 +37,20 @@ if "No checksum beside" not in rel or "exit 1" not in rel.split("No checksum bes
     problems.append("a missing checksum must stop the release")
 if "::warning title=No checksum" in rel:
     problems.append("a missing checksum only warns")
+# 0.64: a commit that changes only the paths a push ignores reuses the green build of the commit before it. The walk
+# back must ignore exactly what the push trigger ignores (and nothing else), and must run before the green runs are
+# counted.
+top = wf[:wf.index("jobs:")]
+ignored = re.findall(r'^\s+- "([^"]+)"', top[top.index("paths-ignore:"):top.index("workflow_dispatch:")], re.M) if "paths-ignore:" in top else []
+if ignored != ["site/**", "README.md", "**/*.md", ".github/workflows/pages.yml"]:
+    problems.append(f"the push trigger's paths-ignore changed ({ignored}): change the release's walk back over ignored commits (its case line) to match, then this list")
+walk = 'case "$f" in site/*|*.md|.github/workflows/pages.yml) ;; *) only_ignored=0 ;; esac'
+if walk not in wf:
+    problems.append("the release must walk back over commits that change only ignored paths (site/, *.md, pages.yml) to the build they reuse")
+elif wf.index(walk) > wf.index("greens=0"):
+    problems.append("the walk back over ignored commits must come before the green builds are counted")
+if 'sha="$built"' not in wf:
+    problems.append("the release must look for green builds of the commit the walk back found")
 # 0.63: Turbine's own update check reads the checksum file beside the bundle (it no longer asks GitHub's API, whose
 # hourly limit refused it), so the release must publish both checksum files.
 for f in ("TurbineModManager.flatpak.sha256", "Turbine-Decky.zip.sha256"):
