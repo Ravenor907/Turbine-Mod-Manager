@@ -79,25 +79,101 @@ pub enum Match {
     Ask(Vec<NexusGame>),
 }
 
-/// Matches a store's game name against the list. Only one exact (normalized) name is sure.
+/// Words that carry no meaning of their own in a game's name (for scoring candidates).
+const SMALL_WORDS: &[&str] = &["a", "an", "the", "of", "and", "in", "on", "to", "for", "edition", "cut", "game", "year"];
+
+/// Words that name an edition of a game, not the game ("Remastered", "Definitive Edition", "Game of the Year").
+const EDITION_WORDS: &[&str] = &[
+    "edition", "cut", "remastered", "remaster", "definitive", "enhanced", "complete", "deluxe", "ultimate", "goty", "anniversary", "hd", "redux", "special", "legendary", "gold", "premium",
+    "directors", "extended", "final", "royal", "collection", "bundle", "game", "of", "the", "year",
+];
+
+/// A game's name without its edition (0.62): the part in front of a colon, a dash or a bracket when what follows
+/// names an edition ("The Outer Worlds: Spacer's Choice Edition", "Slay the Princess - The Pristine Cut",
+/// "The Witcher 3: Wild Hunt - Game of the Year Edition" keeps "the witcher 3 wild hunt"), and trailing edition
+/// words without a separator ("Dark Souls Remastered"). Normalized like `normalize`. A name that is all edition
+/// words stays whole.
+pub fn base_name(name: &str) -> String {
+    let is_edition = |part: &str| {
+        let n = normalize(part);
+        let words: Vec<&str> = n.split(' ').filter(|w| !w.is_empty()).collect();
+        // "... Edition" or "... Cut" names an edition whatever stands in front ("Spacer's Choice Edition", "The
+        // Pristine Cut"); otherwise every word must be an edition word.
+        !words.is_empty() && (matches!(words.last(), Some(&"edition") | Some(&"cut")) || words.iter().all(|w| EDITION_WORDS.contains(w)))
+    };
+    // Cut at separators from the right while the last part names an edition.
+    let seps: &[char] = &[':', '\u{2014}', '\u{2013}', '(', '[', '|'];
+    let spaced = name.replace(" - ", " \u{2014} ");
+    let mut parts: Vec<&str> = spaced.split(seps).map(|p| p.trim_matches(|c: char| c.is_whitespace() || c == ')' || c == ']')).filter(|p| !p.is_empty()).collect();
+    while parts.len() > 1 && is_edition(parts[parts.len() - 1]) {
+        parts.pop();
+    }
+    let joined = normalize(&parts.join(" "));
+    // Trailing edition words with no separator, as long as something else is left in front.
+    let mut words: Vec<&str> = joined.split(' ').filter(|w| !w.is_empty()).collect();
+    while words.len() > 1
+        && EDITION_WORDS.contains(&words[words.len() - 1])
+        && !["of", "the", "game", "year"].contains(&words[words.len() - 1])
+        && words[..words.len() - 1].iter().any(|w| !EDITION_WORDS.contains(w))
+    {
+        words.pop();
+    }
+    if words.len() > 3 && words[words.len() - 4..] == ["game", "of", "the", "year"] {
+        words.truncate(words.len() - 4);
+    }
+    if words.is_empty() {
+        normalize(name)
+    } else {
+        words.join(" ")
+    }
+}
+
+/// Matches a store's game name against the list. Sure: one game with exactly this name, or (0.62) no game with
+/// this name and exactly one game that is the same once both names lose their edition ("Slay the Princess - The
+/// Pristine Cut" is Nexus's "Slay the Princess"). Several games that differ only by edition or subtitle are asked
+/// about, those first (most mods first). Other candidates must share at least half of the name's telling words.
 pub fn match_name(name: &str, list: &[NexusGame]) -> Match {
     let want = normalize(name);
     let exact: Vec<&NexusGame> = list.iter().filter(|g| normalize(&g.name) == want).collect();
     if exact.len() == 1 {
         return Match::Sure(exact[0].clone());
     }
-    let words: Vec<&str> = want.split(' ').filter(|w| !w.is_empty()).collect();
-    let mut scored: Vec<(usize, &NexusGame)> = list
+    let base = base_name(name);
+    let mut same_base: Vec<&NexusGame> = if exact.is_empty() { list.iter().filter(|g| base_name(&g.name) == base).collect() } else { exact };
+    // Games of the same name with a subtitle ("Lantern Hollow: The Long Night" beside "Lantern Hollow Remastered")
+    // could be the one meant just as well: then it is a question. A number after the name is a sequel, not this game.
+    let sequel = |w: &str| w.bytes().all(|b| b.is_ascii_digit()) || (!w.is_empty() && w.bytes().all(|b| b"ivxlc".contains(&b)));
+    let prefix = format!("{base} ");
+    let siblings: Vec<&NexusGame> = list
         .iter()
-        .map(|g| {
-            let n = normalize(&g.name);
-            let theirs: Vec<&str> = n.split(' ').collect();
-            (words.iter().filter(|w| theirs.contains(w)).count(), g)
-        })
-        .filter(|(n, _)| *n > 0)
+        .filter(|g| !same_base.iter().any(|s| s.domain == g.domain))
+        .filter(|g| normalize(&g.name).strip_prefix(&prefix).and_then(|rest| rest.split(' ').next()).is_some_and(|w| !sequel(w)))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.mods.cmp(&a.1.mods)).then(a.1.name.cmp(&b.1.name)));
-    Match::Ask(scored.into_iter().take(4).map(|(_, g)| g.clone()).collect())
+    if same_base.len() == 1 && siblings.is_empty() {
+        return Match::Sure(same_base[0].clone());
+    }
+    same_base.extend(siblings);
+    let telling = |n: &str| -> Vec<String> { n.split(' ').filter(|w| !w.is_empty() && !SMALL_WORDS.contains(w)).map(str::to_string).collect() };
+    let words = telling(&base);
+    // With games of the same name found already, only ones that share every telling word are worth adding.
+    let need = if same_base.is_empty() { words.len().div_ceil(2).max(1) } else { words.len().max(1) };
+    // (shared words, words of theirs that aren't in the name, the game): most shared first, then the closest name
+    // ("Diablo" before "Diablo II: Resurrected" for "Diablo + Hellfire"), then most mods.
+    let mut scored: Vec<(usize, usize, &NexusGame)> = list
+        .iter()
+        .filter(|g| !same_base.iter().any(|s| s.domain == g.domain))
+        .map(|g| {
+            let theirs = telling(&base_name(&g.name));
+            (words.iter().filter(|w| theirs.contains(w)).count(), theirs.iter().filter(|w| !words.contains(w)).count(), g)
+        })
+        .filter(|(n, _, _)| *n >= need)
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(b.2.mods.cmp(&a.2.mods)).then(a.2.name.cmp(&b.2.name)));
+    let mut out: Vec<NexusGame> = same_base.into_iter().cloned().collect();
+    out.sort_by(|a, b| b.mods.cmp(&a.mods).then(a.name.cmp(&b.name)));
+    out.extend(scored.into_iter().map(|(_, _, g)| g.clone()));
+    out.truncate(4);
+    Match::Ask(out)
 }
 
 /// The key a game's answer is kept under: "steam:990080".
