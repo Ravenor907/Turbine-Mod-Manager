@@ -60,6 +60,11 @@ right or a click on the left edge turns back; Right from the last column, RB, a 
 turns forward (`turnPage(d)`; a held D-pad stops at the edge). The page coming in slides over the one it covers with
 a brass line at its edge (`turnStart`, 280 ms; none with Reduce motion). My mods and Load order keep the game list.
 
+### SettingsEditor's action rows (0.62)
+
+`extraRows` ([{key, title, detail, label}]) come after the settings, each with its button; A (or a tap) sends
+`actionClicked(key)`. Seamless Co-op's page has one: the Co-op tile in Steam.
+
 ## FindSheet (0.57)
 
 Y's pop-up. Get mods: a Search field, Sort buttons and Category buttons (six, then More..., which lists them all),

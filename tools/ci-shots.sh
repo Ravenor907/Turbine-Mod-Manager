@@ -943,6 +943,8 @@ for size in $SIZES; do
   need $n "I3: settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
   need $n "I3: settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
   need $n "I12: edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
+  need $n "Co-op tile: asked once after the install, one press, the restart said first ($size)" "Co-op tile question: asked by itself 0 times; after the install: asked, Add a Co-op tile to Steam \\| Restart Steam and add it; Not now; B: sheet \"\"; a second time: not asked$"
+  need $n "Co-op tile: its row on the Co-op settings page ($size)" "Co-op settings page: row Co-op tile in Steam \\[Add\\], A Add, A opens: Add a Co-op tile to Steam$"
   if ran "coopcheck-$size"; then
   ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
   if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"

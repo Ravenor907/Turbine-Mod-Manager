@@ -62,6 +62,7 @@ Window {
         property string updateWarned: "[]"  // 0.58: "<game>|<build>": the game update warning was shown
         property string modHold: "{}"       // 0.58: games played without mods until their mods update: {build, versions}
         property string playChoice: "{}"    // 0.6: per game, the last Play choice with Seamless Co-op: mods, coop or plain
+        property string coopTileAsked: "[]" // 0.62: games whose "Add a Co-op tile to Steam?" was asked once
     }
     // The rail: pinned games first, then the last played; hidden ones (tools like Lossless Scaling) left off.
     Settings {
@@ -1140,9 +1141,65 @@ Window {
     }
     // The co-op tile in Steam's library (with Seamless Co-op installed).
     readonly property bool coopTileThere: steamTick >= 0 && !!game && seamlessIn && parse(Turbine.coopTileJson(game.id), { there: false }).there === true
+    // ---- 0.62: how the tile can be added here and now is the engine's call (Turbine.coopTileOfferJson(game id),
+    // {"how": "restart" | "direct" | "later" | "none", "words": what to tell the player, "label": the button}):
+    // "restart" with one Steam restart (asked first, as before), "direct" at once (Turbine.coopTileSet(game id,
+    // add) answers {"ok", "words"}), "later" not from here (the words say where: Desktop Mode, the Steam menu
+    // plugin), "none" not at all (the rows go). Until the engine has that call, the restart way stands.
+    readonly property var coopTileOffer: {
+        steamTick
+        if (!game || !seamlessIn) return { how: "none", words: "", label: "" }
+        if (typeof Turbine.coopTileOfferJson !== "function") return { how: "restart", words: "", label: "" }
+        return parse(Turbine.coopTileOfferJson(game.id), { how: "restart", words: "", label: "" })
+    }
+    readonly property bool coopTileOffered: coopTileOffer.how !== "none" || coopTileThere
+    readonly property string coopTileHow: coopTileOffer.how === "restart" ? "one Steam restart" : coopTileOffer.how === "direct" ? "no restart" : ""
+    // Asked once, right after Seamless Co-op is installed: "Add a Co-op tile to Steam?" One press adds it (the
+    // restart is said first); Not now leaves it for the game menu and the Co-op settings page.
+    property string seamlessWanted: ""    // the game Get Seamless Co-op was pressed for
+    property int coopTileAsks: 0
+    function installSeamless() { if (!game) return; seamlessWanted = game.id; Turbine.installSeamless() }
+    onSeamlessInChanged: if (seamlessIn && game && seamlessWanted === game.id) { seamlessWanted = ""; coopTileAskTimer.tries = 0; coopTileAskTimer.restart() }
+    Timer {
+        id: coopTileAskTimer
+        property int tries: 0
+        interval: 1200
+        // Once nothing else is on screen (the install's own toast and any sheet come first).
+        onTriggered: { if (app.sheet !== "" || app.wheelOpen || app.page !== "game" || Turbine.busy) { if (++tries < 40) restart(); return } app.maybeAskCoopTile() }
+    }
+    function maybeAskCoopTile() {
+        if (!game || !seamlessIn || coopTileThere) return false
+        const asked = parse(seen.coopTileAsked, [])
+        if (asked.indexOf(game.id) >= 0) return false
+        const how = coopTileOffer.how
+        // Nothing to press here: no question (the rows say where it can be added).
+        if (how !== "restart" && how !== "direct") { note("action", "Co-op tile: not asked (" + how + ")"); return false }
+        asked.push(game.id); seen.coopTileAsked = JSON.stringify(asked)
+        coopTileAsks++
+        note("action", "Co-op tile: asked once for " + game.name + " (" + how + ")")
+        openCoopTile()
+        return true
+    }
     function openCoopTile() {
         if (!game) return
         const add = !coopTileThere
+        const offer = coopTileOffer
+        if (offer.how === "later" || offer.how === "none") {
+            openMsg({ title: add ? "Add a Co-op tile to Steam" : "Remove the Co-op tile from Steam", text: offer.words || "The Co-op tile can't be changed from here.", buttons: [{ key: "b", label: "OK", run: () => {} }] })
+            return
+        }
+        if (offer.how === "direct") {
+            const tileIntro = add ? "A tile in your Steam library that starts " + gameTitle + " with Seamless Co-op in one press: Turbine gets the mods ready and Steam starts the game as usual."
+                                  : "Takes the " + gameTitle + " Co-op tile and its pictures out of your Steam library."
+            openMsg({ title: add ? "Add a Co-op tile to Steam?" : "Remove the Co-op tile from Steam?", text: tileIntro + (offer.words ? "\n\n" + offer.words : ""),
+                      buttons: [{ key: "a", label: offer.label || (add ? "Add it" : "Remove it"), run: () => {
+                                      const r = parse(Turbine.coopTileSet(game.id, add), { ok: false, words: "Turbine couldn't change the Co-op tile." })
+                                      note("action", "Co-op tile " + (add ? "add" : "remove") + ": " + (r.ok ? "done" : "refused: " + r.words))
+                                      steamTick++
+                                      if (r.ok) toast.done(r.words || (add ? "Co-op tile added to your Steam library." : "Co-op tile removed.")); else toast.problem(r.words) } },
+                                { key: "b", label: "Not now", run: () => note("action", "Co-op tile: not now") }] })
+            return
+        }
         askSteamRestart({ game: game.id, kind: add ? "tile" : "untile", resume: "", name: gameTitle,
                           title: add ? "Add a Co-op tile to Steam" : "Remove the Co-op tile from Steam",
                           intro: add ? "A tile in your Steam library that starts " + gameTitle + " with Seamless Co-op in one press: Turbine gets the mods ready and Steam starts the game as usual."
@@ -2539,8 +2596,9 @@ Window {
     ] : []).concat(seamlessIn ? [
         { icon: "info", title: "Co-op settings", detail: "Seamless Co-op: the session password, then every other option", ok: true, act: "coopsettings" }
     ] : []).concat(seamlessIn && game && String(game.id).indexOf("steam:") === 0 ? [
-        coopTileThere ? { icon: "remove", title: "Remove the Co-op tile from Steam", detail: "Takes it out of your Steam library (one Steam restart)", ok: true, act: "cooptile" }
-                      : { icon: "play", title: "Add a Co-op tile to Steam", detail: "Seamless Co-op in one press from your Steam library (one Steam restart)", ok: true, act: "cooptile" }
+        !coopTileOffered ? null
+        : coopTileThere ? { icon: "remove", title: "Remove the Co-op tile from Steam", detail: "Takes it out of your Steam library" + (coopTileHow !== "" ? " (" + coopTileHow + ")" : ""), ok: true, act: "cooptile" }
+                      : { icon: "play", title: "Add a Co-op tile to Steam", detail: "Seamless Co-op in one press from your Steam library" + (coopTileHow !== "" ? " (" + coopTileHow + ")" : ""), ok: true, act: "cooptile" }
     ] : []).concat(acMode === "me3" && game && String(game.id).indexOf("steam:") === 0 ? [
         { icon: "restore", title: "Undo the launch options change", detail: "Shows what to paste back in Steam", ok: true, act: "launchundo" }
     ] : []).concat(acMode === "me3" && acInfo.seamless ? [
@@ -2692,7 +2750,7 @@ Window {
         else if (item.act === "acask") openAcAsk(null)
         else if (item.act === "acon") { sheet = ""; let a = Object.assign({}, acAnswered); delete a[game.id]; acAnswered = a; Turbine.antiCheatOff(false); toast.info("Anti-cheat stays on. Mods wait until you answer again.") }
         else if (item.act === "me3") { sheet = ""; Turbine.installMe3(false) }
-        else if (item.act === "seamless") { sheet = ""; Turbine.installSeamless() }
+        else if (item.act === "seamless") { sheet = ""; installSeamless() }
         else if (item.act === "acguide") openAcGuide()
         else if (item.act === "unhold") { sheet = ""; releaseHold("as you asked") }
         else if (item.act === "coopsettings") openCoopSettings()
@@ -4795,7 +4853,19 @@ Window {
                     if (t) settingsView.setValue(t, t.value === "1" ? "0" : "1")
                     if (n) settingsView.setValue(n, "50")
                     check("Co-op edits: allow_invaders to " + (t ? settingsView.valueOf(t) : "?") + ", enemy_health_scaling to 50") },
-            () => { if (settingsView.changes > 0) return false; check("Co-op edits saved by themselves: 0 waiting"); pad("b") }
+            () => { if (settingsView.changes > 0) return false; check("Co-op edits saved by themselves: 0 waiting"); pad("b") },
+            // 0.62: the Co-op tile is asked about once after Seamless Co-op is installed (never by itself otherwise),
+            // and has its row on the Co-op settings page.
+            () => { if (sheet !== "") return false; m.asks0 = coopTileAsks; m.r1 = maybeAskCoopTile()
+                    m.t = sheet === "msg" && msgData ? msgData.title + " | " + msgData.buttons.map(x => x.label).join("; ") : "sheet \"" + sheet + "\""; pad("b") },
+            () => { m.s = sheet; m.r2 = maybeAskCoopTile()
+                    check("Co-op tile question: asked by itself " + m.asks0 + " times; after the install: " + (m.r1 ? "asked" : "not asked") + ", " + m.t + "; B: sheet \"" + m.s + "\"; a second time: " + (m.r2 ? "asked again" : "not asked"))
+                    sheet = ""; openCoopSettings() },
+            () => { if (sheet !== "settingsedit") return false
+                    const i = settingsView.shown.findIndex(r => r.kind === "action"); m.row = i >= 0 ? settingsView.shown[i] : null
+                    if (i >= 0) settingsView.focusIndex = i
+                    m.a = binds().a.label; pad("a") },
+            () => { check("Co-op settings page: row " + (m.row ? m.row.title + " [" + m.row.label + "]" : "missing") + ", A " + m.a + ", A opens: " + (sheet === "msg" && msgData ? msgData.title : "sheet \"" + sheet + "\"")); pad("b") }
         ]
         // 0.6 (I8): Edit settings on the mod's panel: a tap and Right then A open that mod's settings; no button
         // for a mod without settings.
@@ -9938,6 +10008,22 @@ Window {
                 app.settingsLeaving = false
                 if (app.coopAfterSettings) { app.coopAfterSettings = false; toast.info("Co-op waits for a session password.") }
                 app.note("action", "Edit settings closed"); app.sheet = app.settingsReturn
+            }
+            // 0.62: the Co-op tile's row, on Seamless Co-op's own settings page.
+            extraRows: app.sheet === "settingsedit" && app.seamlessMod && app.settingsMod === app.seamlessMod.id && app.coopTileOffered ? [{
+                key: "cooptile", title: "Co-op tile in Steam",
+                detail: app.coopTileThere ? "In your Steam library: it starts " + app.gameTitle + " with Seamless Co-op in one press."
+                                          : "A tile in your Steam library that starts " + app.gameTitle + " with Seamless Co-op in one press" + (app.coopTileHow !== "" ? " (" + app.coopTileHow + ")." : "."),
+                label: app.coopTileThere ? "Remove" : "Add" }] : []
+            onActionClicked: (key) => { if (!app.gate(2, "sheet onActionClicked")) return
+                if (key !== "cooptile") return
+                // Anything still waiting to save goes in first, then the tile's own question.
+                app.settingsLeaving = true
+                if (changes > 0) app.settingsSaveNow(true)
+                app.settingsLeaving = false
+                app.coopAfterSettings = false
+                app.note("action", "Co-op settings: the Co-op tile row")
+                app.openCoopTile()
             }
             onTypeAsked: (row, value, label) => { if (!app.gate(2, "sheet onTypeAsked")) return
                 app.settingsTypeRow = row

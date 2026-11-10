@@ -22,6 +22,9 @@ Overlay {
     property bool textMode: false
     property int focusIndex: 0
     property bool leaveArmed: false
+    // 0.62: rows after the settings that do something (Seamless Co-op's page: the Co-op tile): [{key, title, detail, label}].
+    property var extraRows: []
+    signal actionClicked(string key)
 
     readonly property int changes: Object.keys(edits).length + Object.keys(lineEdits).length
     readonly property var fields: doc && doc.fields ? doc.fields : []
@@ -37,6 +40,7 @@ Overlay {
             if (f.section !== sec) { sec = f.section; if (sec !== "") out.push({ kind: "head", text: sec }) }
             out.push({ kind: "field", f: f })
         }
+        for (const x of extraRows) out.push({ kind: "action", key: x.key, title: x.title, detail: x.detail, label: x.label })
         return out
     }
     readonly property var lineRows: lines.map((t, i) => ({ kind: "line", n: i + 1, text: lineEdits[i + 1] !== undefined ? lineEdits[i + 1] : t }))
@@ -106,6 +110,7 @@ Overlay {
     function activate(r) {
         if (!r) return
         if (r.kind === "line") { typeAsked(r, r.text, "Line " + r.n); return }
+        if (r.kind === "action") { actionClicked(r.key); return }
         if (r.kind !== "field") return
         const f = r.f
         if (f.kind === "toggle" || f.kind === "list") change(r, 1)
@@ -116,6 +121,7 @@ Overlay {
         const r = shown[focusIndex]
         if (!r || r.kind === "head") return ""
         if (r.kind === "line") return "Edit line"
+        if (r.kind === "action") return r.label
         return r.f.kind === "toggle" ? "Switch" : r.f.kind === "list" ? "Next" : "Type"
     }
     function move(d) {
@@ -216,7 +222,7 @@ Overlay {
                     spacing: se.ui.px(2)
                     Text {
                         width: parent.width
-                        text: row.f ? se.nameOf(row.f.key) : row.modelData.kind === "line" ? "Line " + row.modelData.n : ""
+                        text: row.f ? se.nameOf(row.f.key) : row.modelData.kind === "line" ? "Line " + row.modelData.n : row.modelData.kind === "action" ? row.modelData.title : ""
                         elide: Text.ElideRight
                         color: se.ui.c.text
                         font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(15); font.bold: true
@@ -224,7 +230,7 @@ Overlay {
                     Text {
                         width: parent.width
                         visible: text !== ""
-                        text: row.f ? row.f.help : row.modelData.kind === "line" ? row.modelData.text : ""
+                        text: row.f ? row.f.help : row.modelData.kind === "line" ? row.modelData.text : row.modelData.kind === "action" ? row.modelData.detail : ""
                         wrapMode: Text.Wrap
                         maximumLineCount: row.foc ? 6 : 2
                         elide: Text.ElideRight
@@ -240,6 +246,14 @@ Overlay {
                     anchors.right: parent.right; anchors.rightMargin: se.ui.px(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: se.ui.px(8)
+                    // A row that does something: its button.
+                    Rectangle {
+                        visible: row.modelData.kind === "action"
+                        width: Math.max(se.ui.tpx(64), actionText.implicitWidth + se.ui.px(24)); height: se.ui.tpx(34); radius: se.ui.px(6)
+                        color: se.ui.c.raised; border.color: se.ui.c.accent
+                        Text { id: actionText; anchors.centerIn: parent; text: row.modelData.kind === "action" ? row.modelData.label : ""; color: se.ui.c.text; font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true }
+                        TapHandler { onTapped: { se.focusIndex = row.index; se.activate(row.modelData) } }
+                    }
                     // Toggle: one pill, On or Off.
                     Rectangle {
                         visible: row.f !== null && row.f.kind === "toggle"
