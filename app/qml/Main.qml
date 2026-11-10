@@ -1663,7 +1663,7 @@ Window {
         let l = shownMods.filter(m => deps.indexOf(m) < 0).map(m => ({ kind: "mod", m: m }))
         if (deps.length > 0) l = l.concat([{ kind: "deps", m: { id: "", name: "" } }]).concat(depsOpen ? deps.map(m => ({ kind: "mod", m: m, dep: true })) : [])
         // 0.64: requirements still to get (Later, Stop, or Turbine closed meanwhile): one row at the top goes on.
-        if (reqLeft && !reqRunning && !selecting) l.unshift({ kind: "needsq", m: { id: "", name: "" } })
+        if (reqLeft && !reqRunning && !selecting && !moving && !orderMoving) l.unshift({ kind: "needsq", m: { id: "", name: "" } })
         // 0.6: mods turned off from Steam's menu (Mods off) say so first, with the way back on that row.
         if (heldOff.length > 0 && !selecting) l.unshift({ kind: "held", m: { id: "", name: "" } })
         // Just uninstalled: the row stays, dimmed, for 8 seconds ("Removed", A puts it back), then the next row.
@@ -2578,10 +2578,11 @@ Window {
             findText = ""; listShow = "all"; listSort = "order"
             note("action", "Move: the full list in your order")
         }
-        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
-        if (i < 0 || !mods[i] || mods[i].id !== id) return
-        modIndex = i
+        // 0.64: moving shows the whole list in order (the Dependencies group opens out), so row n is mods[n].
         moving = true
+        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
+        if (i < 0 || !mods[i] || mods[i].id !== id) { moving = false; return }
+        modIndex = i
         moveFrom = modIndex
         moveSaved = mods.slice()
     }
@@ -2604,6 +2605,7 @@ Window {
     function endMove() {
         moving = false
         const m = mods[modIndex]
+        Qt.callLater(() => { if (m) { const r = listItems.findIndex(x => x.kind === "mod" && x.m.id === m.id); if (r >= 0) modIndex = r } })
         if (modIndex !== moveFrom && m) {
             note("action", "Reorder " + m.name + " from " + (moveFrom + 1) + " to " + (modIndex + 1))
             Turbine.moveTo(m.id, modIndex)
@@ -2616,6 +2618,8 @@ Window {
         moving = false
         mods = moveSaved
         modIndex = moveFrom
+        const back = mods[moveFrom]
+        Qt.callLater(() => { if (back) { const r = listItems.findIndex(x => x.kind === "mod" && x.m.id === back.id); if (r >= 0) modIndex = r } })
         note("action", "Move cancelled")
     }
     // The loader prompt shows once per game while a mod that needs the missing loader is on.
@@ -6753,7 +6757,7 @@ Window {
     // Four cards with the real buttons drawn large: A and B, X and Y; View and the quick wheel; getting a mod; Play.
     // A or Right: next card; Left: back one; B or Start: skip. It ends on the rail ("Pick a game to start"), runs
     // once (remembered) and Settings, Help shows it again.
-    readonly property int tutCount: 4
+    readonly property int tutCount: 5
     property int tutCard: 0
     function openTutorial(n) {
         tutCard = n || 0
@@ -8497,12 +8501,12 @@ Window {
     readonly property var rowsNow: sec === "Getting mods" ? accountRows : sec === "Updates" ? updateRows : sec === "Labs" ? labsRows : sec === "Help" ? helpRows : []
     // Help: the buttons in one place, the beginner tutorial again, and games hidden from the rail.
     readonly property var helpRows: [
-        { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Four cards: the buttons, the quick wheel, getting a mod, and Start", action: "Show it" },
+        { kind: "action", key: "tutorial", title: "Beginner tutorial", how: "Five cards: the buttons, the quick wheel, getting a mod, Start, and what Turbine sets up for you", action: "Show it" },
         { kind: "action", key: "launchundo", title: "Undo the launch options change", how: "For games Turbine starts through Steam with me3: puts Steam's Launch Options back as they were", action: "Show" },
         { kind: "action", key: "problem", title: "Report a problem", how: "Saves a report file in Downloads to send: what Turbine did lately, its settings and your games. No keys or passwords.", action: "Save report" },
         { kind: "action", key: "decky", title: "Steam menu plugin (Decky)", how: deckyWords, action: decky.plugin === true ? "How to use it" : "Show how" },
         { kind: "info", key: "buttons", title: "The buttons",
-          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play). Right stick: pointer, RT clicks. R3: the same as A; while a message offers a step (Undo), R3 does that step." },
+          how: "A: do it. B: back. X: options. Y: find and sort. LB RB: tabs. LT RT: page up or down. View: quick wheel. Start: Settings (hold 3 seconds: Play options, with Play Seamless Co-op where it is in). Right stick: pointer, RT clicks. R3: the same as A; while a message offers a step (Undo), R3 does that step." },
         { kind: "info", key: "keys", title: "Keyboard and mouse",
           how: "Move: W A S D or the arrows. Enter or Space: do it. Esc or Backspace: back (Esc on a game's first page: Settings). Q and E: the last and the next page (Tab too). F: find. R or a right-click: options. Hold Tab: quick wheel (pick with the mouse or W A S D, let go to choose). Hold Space for 3 seconds: Play. A double-click opens a mod. The wheel scrolls; Ctrl and the wheel, or Ctrl+= and Ctrl+-, change the size. F1: Help. The mouse's Back button goes back and its Forward button turns the page." },
         { kind: "info", key: "touch", title: "Touch",

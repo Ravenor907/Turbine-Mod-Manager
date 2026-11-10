@@ -1,16 +1,19 @@
 import QtQuick
 
-// The beginner tutorial: four cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
-// X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, Slow download on Nexus
-// right in Turbine, Added, A on Play). 4: START: a tap is Settings, a 3 second hold plays; then "Pick a game to start". Main.qml moves between the cards (A or Right next,
-// Left back, B skips, Start finishes) and remembers it was seen; Settings, Help shows it again.
+// The beginner tutorial: five cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
+// X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, sign in to Nexus right in
+// Turbine with a free account, Slow download, Added, what it needs lined up after it). 4: START: a tap is Settings, a
+// 3 second hold is Play options (Play Seamless Co-op there too). 5 (0.64): good to know: Steam's own Play through
+// Turbine (mods), games on an SD card or a second drive, Cyberpunk's Visual C++ runtime, updates. Then "Pick a game to
+// start". Main.qml moves between the cards (A or Right next, Left back, B skips, Start finishes) and remembers it was
+// seen; Settings, Help shows it again.
 Overlay {
     id: tut
     closeOnOutside: false
     required property var ui
     motion: ui.motion
     property int card: 0
-    property int count: 4
+    property int count: 5
     // The pad's names for View and Start ("VIEW", "MENU", "BACK", "START"), from Main.qml's glyphs.
     property string viewGlyph: "VIEW"
     property string startGlyph: "START"
@@ -87,7 +90,7 @@ Overlay {
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: ["The buttons", "The quick wheel", "Getting a mod", "Start"][tut.card] || ""
+            text: ["The buttons", "The quick wheel", "Getting a mod", "Start", "Good to know"][tut.card] || ""
             color: tut.ui.c.accentText
             font.family: tut.ui.titleFont; font.pixelSize: tut.ui.fpx(28); font.bold: true
         }
@@ -101,9 +104,10 @@ Overlay {
                    tut.keys ? "Hold Tab for the quick wheel from anywhere, pick with the mouse or W A S D, and let go: Find, Add from Downloads, Settings, your games and more."
                             : "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
                    tut.thunderstore ? "Open Get mods, A on a mod, then A on Install. Turbine adds it with what it needs."
-                                    : "Open Get mods, A on a mod, then A on Get it on Nexus. Sign in if it asks (free) and press Slow download. Turbine adds it and closes the page.",
-                   tut.keys ? "Hold Space for 3 seconds to play with your mods on. Esc on a game's first page opens Settings. A click on the Play button plays too."
-                            : "Hold " + tut.startGlyph + " for 3 seconds to play with your mods on. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too."][tut.card] || ""
+                                    : "Open Get mods, A on a mod, then A on Get it on Nexus. Nexus opens right here: sign in once (a free account is enough; with Premium it downloads with no press) and press Slow download. Turbine adds it, and lines up anything it needs.",
+                   tut.keys ? "Hold Space for 3 seconds for Play options: play with your mods, or Play Seamless Co-op where it is in. Esc on a game's first page opens Settings. A click on the Play button plays too."
+                            : "Hold " + tut.startGlyph + " for 3 seconds for Play options: play with your mods, or Play Seamless Co-op where it is in. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too.",
+                   "Turbine sets up what it can by itself and asks only when it must."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18)
         }
@@ -151,7 +155,7 @@ Overlay {
             Step { n: 1; tile: "Get mods"; words: "Open Get mods (RB)" }
             Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it on Nexus" }
             Step { n: 3; tile: "Slow download"; words: "Sign in if it asks (free), press Slow download" }
-            Step { n: 4; tile: "Added"; words: "Turbine adds it and closes the page" }
+            Step { n: 4; tile: "Added"; words: "Turbine adds it; what it needs comes next" }
             Step { n: 5; tile: "A"; face: true; words: "The ring is on Play: A plays" }
         }
         // 4: Start.
@@ -160,8 +164,40 @@ Overlay {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(12)
             Pill { k: tut.startGlyph; anchors.horizontalCenter: parent.horizontalCenter; width: tut.ui.px(150); height: tut.ui.px(64) }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Hold 3 seconds: Play"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Hold 3 seconds: Play options"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Tap: Settings"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18) }
+        }
+    }
+
+    // 5 (0.64): what happens once, by itself or with one press.
+    Column {
+        visible: tut.card === 4
+        anchors.top: body.bottom
+        anchors.topMargin: -tut.ui.px(4)
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: body.width
+        spacing: tut.ui.px(10)
+        Repeater {
+            model: [
+                ["Steam's Play button", "To play with mods from Steam, pick Turbine (mods) once in the game's Properties, Compatibility. Turbine shows the steps when it is needed."],
+                ["SD card or second drive", "Games there are found by themselves, like the rest."],
+                ["Cyberpunk 2077", "Its frameworks need Microsoft's Visual C++ runtime. Before you play offers it in one press."],
+                ["Updates", "Turbine looks for a new version when it starts and installs it only when you say yes."]
+            ]
+            Row {
+                required property var modelData
+                width: parent.width
+                spacing: tut.ui.px(12)
+                Rectangle { width: tut.ui.px(10); height: width; radius: width / 2; color: tut.ui.c.accent; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                    width: parent.width - tut.ui.px(22)
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    text: parent.modelData[0] + ": " + parent.modelData[1]
+                    color: tut.ui.c.text
+                    font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(17)
+                }
+            }
         }
     }
 

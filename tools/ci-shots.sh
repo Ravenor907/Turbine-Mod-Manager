@@ -215,9 +215,9 @@ for size in $SIZES; do
   shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
   shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
   shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
-  # 0.54 controls: the beginner tutorial's four cards, the quick wheel (Up then Right: Sort), a removed mod
+  # 0.54 controls: the beginner tutorial's cards (five from 0.64), the quick wheel (Up then Right: Sort), a removed mod
   # dimmed in its row, the rail's quick menu, and the browser buttons under a mod page's button.
-  for n in 1 2 3 4; do shoot "tutorial$n-$size" "$size" "tutorial$n" "$PWD/home"; done
+  for n in 1 2 3 4 5; do shoot "tutorial$n-$size" "$size" "tutorial$n" "$PWD/home"; done
   for p in wheel ghost; do
     fresh "$p-$size"; h="$PWD/fh/$p-$size"
     shoot "$p-$size" "$size" $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
