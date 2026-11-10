@@ -5420,6 +5420,8 @@ Window {
         else if (name === "mmdguard") {
             const ask = () => nxmAsk("nxm://skyrimspecialedition/mods/1/files/2", { name: game ? game.name : "", game: game ? game.id : "" })
             const since = () => nxmShownAt > 0 ? Turbine.monoMs() - nxmShownAt : -1
+            const ask2 = () => nxmAsk("nxm://skyrimspecialedition/mods/1/files/3", { name: game ? game.name : "", game: game ? game.id : "" })
+            const words = f => f ? "ring on " + (["Get it", "Not now"][f.ring] || "nothing") + ", A " + f.a + ", B " + f.b + ", input " + (f.quiet ? "off" : "ON") : "nothing read"
             script = [
                 () => { if (!game || !modsLoaded) return false; sheet = ""; page = "game"; tab = 0; zone = "main"; ask() },
                 () => { if (nxmShownAt === 0) return false; const f = nxmAskFirst || {}
@@ -5439,7 +5441,28 @@ Window {
                 () => { if (since() < 1400) return false
                         m.gets = nxmGets; m.ring = pickItems[menuIndex] ? pickItems[menuIndex].title : ""
                         Turbine.selftestPadAged("a", Math.round(since() - 1100))
-                        check("Guard stalled A: made at 1100 ms, ring on " + m.ring + ", handled at " + Math.round(since()) + " ms: " + (nxmAsking ? "still asking" : nxmGets === m.gets && sheet === "" ? "Not now, nothing downloaded" : "GOT IT")) }
+                        check("Guard stalled A: made at 1100 ms, ring on " + m.ring + ", handled at " + Math.round(since()) + " ms: " + (nxmAsking ? "still asking" : nxmGets === m.gets && sheet === "" ? "Not now, nothing downloaded" : "GOT IT")) },
+                // 0.62: asked twice in a row and with names Nexus hasn't said yet (a file never asked about), read in
+                // the very turn it opens and again at its first frame: on Not now, A and B Not now, input off, each
+                // time. A second link while it asks is dropped and changes nothing; the names coming late change the
+                // title only.
+                () => { if (sheet !== "") return false
+                        m.n = nxmAsks; ask2(); m.one = words(nxmAskFirst); m.title = pickTitle
+                        ask2(); check("Guard twice, the first: " + m.title + ": " + m.one + "; a second link at once: " + words(nxmAskState()) + ", " + (nxmAsks === m.n + 1 ? "dropped" : "ASKED AGAIN")) },
+                () => { if (nxmShownAt === 0) return false
+                        check("Guard twice, at its first frame: " + words(nxmAskFrame))
+                        m.ring = menuIndex; m.at = nxmShownAt
+                        nxmNameGot({ link: nxmAskLink, name: "SkyUI", file: "SkyUI 5.2SE" }, false)
+                        check("Guard names late: " + pickTitle + ", ring " + (menuIndex === m.ring ? "unchanged" : "MOVED") + ", the quiet second " + (nxmShownAt === m.at ? "unchanged" : "RESTARTED"))
+                        Turbine.selftestPadAged("a", Math.max(0, Math.round(since() - 300)))
+                        check("Guard names late, A made at 300 ms: " + (nxmAsking ? "ignored" : "TAKEN")) },
+                () => { if (since() < 1050) return false; pad("left"); pad("b") },
+                // Straight after it closed, the same link again (no wait between the two questions).
+                () => { if (sheet !== "") return false
+                        m.gets2 = nxmGets; m.n = nxmAsks; ask2(); check("Guard again at once: " + (nxmAsks === m.n + 1 ? "asked" : "NOT ASKED") + ": " + words(nxmAskFirst)); pad("a")
+                        check("Guard again at once, A: " + (nxmAsking && nxmGets === m.gets2 ? "ignored" : "TAKEN")) },
+                () => { if (nxmShownAt === 0) return false; check("Guard again, at its first frame: " + words(nxmAskFrame)) },
+                () => { if (since() < 1050) return false; pad("left"); pad("b") }
             ]
         }
         // 0.6: Mods off from Steam's menu shows in My mods with Turn them back on, by A and by a tap on the row.
@@ -7687,6 +7710,7 @@ Window {
         nxmShownAt = Turbine.monoMs()
         nxmRingMoved = false
         nxmRingMove.restart()
+        nxmAskFrame = nxmAskState()
         note("nxm", "The question is on screen (" + how + ")")
     }
 
@@ -7738,7 +7762,9 @@ Window {
     function nxmAsk(link, r) {
         if (nxmAsking) { note("nxm", "Another Mod Manager Download link while asking about one: dropped"); return }
         note("nxm", "Asking before it downloads: a Mod Manager Download link from Turbine's page")
-        nxmAskLink = link; nxmAskInfo = r; nxmAskMod = ""; nxmAskFile = ""
+        nxmAskLink = link; nxmAskInfo = r; nxmAskMod = ""; nxmAskFile = ""; nxmAskFirst = null; nxmAskFrame = null; nxmAsks++
+        // The same link asked again: its names are known already (the answer only tells when it changes).
+        nxmNameGot(parse(Turbine.nxmNameJson, {}), true)
         Turbine.nxmAskName(link)
         openPick(nxmAskTitle(), "Turbine asks before every Mod Manager Download from a page. Pick Get it (Right, or a tap), then press A.", [
             { icon: "play", title: "Get it", detail: "Downloads it and adds it to " + (r.name || "the game"), aLabel: "Get it", run: () => nxmAskGet() },
@@ -7751,10 +7777,22 @@ Window {
         nxmRingMove.stop(); nxmFrameFallback.restart()
         keyRoot.forceActiveFocus()
         // The build's checks read what the question offered the moment it opened (not after the quiet second, when
-        // the ring has moved to Get it): its A and B, and whether input was still off.
-        Qt.callLater(() => { const o = binds(); nxmAskFirst = { a: o.a ? o.a.label : "", b: o.b ? o.b.label : "", quiet: nxmAskQuiet(), ring: menuIndex } })
+        // the ring has moved to Get it): its A and B, and whether input was still off. Read here, in the same turn
+        // that opens it, never a moment later: a check that looks right after the question opened sees it.
+        nxmAskFirst = nxmAskState()
     }
     property var nxmAskFirst: null
+    // The same at the first frame that shows it (nxmShown), and how many questions opened.
+    property var nxmAskFrame: null
+    property int nxmAsks: 0
+    function nxmAskState() { const o = binds(); return { a: o.a ? o.a.label : "", b: o.b ? o.b.label : "", quiet: nxmAskQuiet(), ring: menuIndex } }
+    // The names of the link's mod and file, when Nexus has said them. They only change the title: the ring and the
+    // quiet second stay as they are.
+    function nxmNameGot(j, opening) {
+        if (!j || j.link !== nxmAskLink || nxmAskLink === "" || (!opening && !nxmAsking)) return
+        nxmAskMod = j.name || ""; nxmAskFile = j.file || ""
+        if (!opening) pickTitle = nxmAskTitle()
+    }
     function nxmAskWords() {
         const f = nxmAskFirst || {}, o = binds()
         return pickTitle + ", at first A " + f.a + ", B " + f.b + (f.quiet ? ", input off" : ", input ON") + "; after the quiet second A " + (o.a ? o.a.label : "") + ", B " + (o.b ? o.b.label : "")
@@ -7778,10 +7816,7 @@ Window {
     Connections {
         target: Turbine
         function onNxmNameJsonChanged() {
-            const j = app.parse(Turbine.nxmNameJson, {})
-            if (j.link !== app.nxmAskLink || !app.nxmAsking) return
-            app.nxmAskMod = j.name || ""; app.nxmAskFile = j.file || ""
-            app.pickTitle = app.nxmAskTitle()
+            app.nxmNameGot(app.parse(Turbine.nxmNameJson, {}), false)
         }
     }
 

@@ -1120,6 +1120,13 @@ for size in $SIZES; do
   need "mmdguard-$size" "M1: Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
   need "mmdguard-$size" "M1: then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
   need "mmdguard-$size" "N3: an A made before the ring moved, handled after, is Not now ($size)" "Guard stalled A: made at 1100 ms, ring on Get it, handled at [0-9]+ ms: Not now, nothing downloaded"
+  need "mmdguard-$size" "0.62: a question with no names yet opens on Not now, and a second link at once is dropped ($size)" "Guard twice, the first: Get mod 1 \\(file 3\\) for .*\\?: ring on Not now, A Not now, B Not now, input off; a second link at once: ring on Not now, A Not now, B Not now, input off, dropped$"
+  need "mmdguard-$size" "0.62: the same at its first frame ($size)" "Guard twice, at its first frame: ring on Not now, A Not now, B Not now, input off$"
+  need "mmdguard-$size" "0.62: the names coming late change the title only ($size)" "Guard names late: Get SkyUI \\(SkyUI 5.2SE\\) for .*\\?, ring unchanged, the quiet second unchanged$"
+  need "mmdguard-$size" "0.62: an A after the names came is still ignored ($size)" "Guard names late, A made at 300 ms: ignored$"
+  need "mmdguard-$size" "0.62: asked again at once, it opens on Not now ($size)" "Guard again at once: asked: ring on Not now, A Not now, B Not now, input off$"
+  need "mmdguard-$size" "0.62: an A in the turn it opens is ignored ($size)" "Guard again at once, A: ignored$"
+  need "mmdguard-$size" "0.62: asked again, the same at its first frame ($size)" "Guard again, at its first frame: ring on Not now, A Not now, B Not now, input off$"
   # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
   rm -rf "$PWD/fh/heldcheck-$size"; python3 tools/fake-home.py "$PWD/fh/heldcheck-$size" > /dev/null; h="$PWD/fh/heldcheck-$size"
   shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
