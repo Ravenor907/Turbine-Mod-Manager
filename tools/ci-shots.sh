@@ -250,6 +250,10 @@ need $c "8: tabs keep the row" "Tabs round trip: tab 1 and back to 0, row 2"
 need $c "8: a game round trip keeps tab and row" "Game round trip: back on .*, tab 0, .*: the same mod"
 need $c "Quick wheel: Up then Right" "Wheel: slot 1 Updates"
 need $c "Quick wheel held" 'Wheel held, Left, let go: sheet pick "Games"'
+need $c "Quick wheel: the middle is neutral, A closes" "Wheel neutral: a tap of View leaves it open with slot -1, A Close, B Close; A closes it: true"
+need $c "Quick wheel: the stick at rest picks nothing" "Wheel stick: pushed Right picks slot 2, at rest slot -1; D-pad Up picks slot 0 and it stays; B closes it: true"
+need $c "Quick wheel: View let go with nothing picked closes" 'Wheel held, nothing pushed, let go: it was open, now closed, sheet ""'
+need $c "Quick wheel: a click on the middle closes" "Wheel middle clicked: it was open, now closed"
 need $c "Uninstall keeps the row" "Uninstall: row 1 is ghost"
 need $c "Put back" "Put back: .* is back"
 # 5: no sheet opened without a press (in the scripted pages and when Nexus is slow to show).

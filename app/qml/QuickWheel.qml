@@ -3,8 +3,9 @@ import QtQuick
 // The quick wheel (View): a pie of eight wedges in fixed places, the same on every screen. The left stick (or a
 // pointer over it) picks a wedge by its angle; the D-pad still works (Up then Right is Up-right). The picked wedge
 // fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name, dimmed.
+// 0.62: the middle is neutral: with nothing picked (the stick at rest) it says Close and how to choose.
 // While it is open everything behind it is turned off (Main.qml's topLayer), and this backdrop takes every press,
-// scroll and hover; a tap outside the pie closes it, a tap in the middle is A with no wedge.
+// scroll and hover; a tap outside the pie or in the middle closes it.
 // Main.qml owns the slots ({label, ok, desc}) and the keys; a tap on a wedge does it.
 Overlay {
     id: qw
@@ -12,8 +13,9 @@ Overlay {
     required property var ui
     property var slots: []
     property int focusIndex: -1
-    property bool labs: false
-    property string viewGlyph: "VIEW"
+    property string hint: "Push the stick to choose"
+    property int mousePick: -1            // the wedge a mouse over it picked
+    onVisibleChanged: mousePick = -1
     property bool reduceMotion: false
     signal activated(int index)
     signal pointed(int index)
@@ -41,7 +43,9 @@ Overlay {
         }
         onPositionChanged: (m) => {
             const i = pie.wedgeAt(m.x - pie.x, m.y - pie.y)
-            if (i >= 0 && i !== qw.focusIndex) qw.pointed(i)
+            // Over a wedge: it is picked. Off it again (the middle, outside): a wedge the mouse picked lets go.
+            if (i >= 0) { if (i !== qw.focusIndex) { qw.mousePick = i; qw.pointed(i) } }
+            else if (qw.focusIndex >= 0 && qw.focusIndex === qw.mousePick) { qw.mousePick = -1; qw.pointed(-1) }
         }
     }
 
@@ -119,8 +123,9 @@ Overlay {
                 Accessible.name: (modelData.label || "") + (modelData.ok ? "" : ", not available here")
             }
         }
-        // The middle: the picked wedge's name and what it does (nothing picked: View's name, and Report in Labs).
+        // The middle: the picked wedge's name and what it does; nothing picked: Close, and how to choose.
         Rectangle {
+            id: middle
             anchors.centerIn: parent
             width: pie.inner * 2 - qw.ui.px(8); height: width; radius: width / 2
             color: qw.ui.c.panel
@@ -132,12 +137,12 @@ Overlay {
                 spacing: qw.ui.px(2)
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    text: parent.parent.s ? parent.parent.s.label : qw.viewGlyph
-                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(16); font.bold: true
+                    text: middle.s ? middle.s.label : "Close"
+                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(middle.s ? 16 : 19); font.bold: true
                 }
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
-                    text: parent.parent.s ? (parent.parent.s.ok ? (parent.parent.s.desc || "") : "Not available here") : (qw.labs ? "A: Report" : "Point at a wedge")
+                    text: middle.s ? (middle.s.ok ? (middle.s.desc || "") : "Not available here") : qw.hint
                     color: qw.ui.c.soft; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(12)
                 }
             }

@@ -4021,8 +4021,9 @@ Window {
         let o = {}
         if (sheet === "tutorial") return { a: bind(tutCard < tutCount - 1 ? "Next" : "Pick a game", () => tutorialAct("a")), b: bind("Skip", () => tutorialAct("b")), start: bind("", () => tutorialAct("start")) }
         if (wheelOpen) {
+            // 0.62: nothing picked (the stick at rest): A closes, like B and View.
             const s = wheelSlot >= 0 ? wheelSlots[wheelSlot] : null
-            return { a: bind(s ? (s.ok ? s.label : "") : (labsOn ? "Report" : ""), () => wheelAct("a")), b: bind("Close", () => wheelAct("b")), view: bind("", () => wheelAct("b")) }
+            return { a: bind(s ? (s.ok ? s.label : "") : "Close", () => wheelAct("a")), b: bind("Close", () => wheelAct("b")), view: bind("", () => wheelAct("b")) }
         }
         if (sheet !== "") return sheetBinds()
         if (moving || orderMoving) return { a: bind("Done", () => act("a")), b: bind("Cancel", () => act("b")), lt: bind("", () => act("lt")), rt: bind("", () => act("rt")) }
@@ -4448,7 +4449,7 @@ Window {
     // ---------------------------------------------------------------- the quick wheel (View)
     // Eight fixed slots, the same places on every screen; a slot with nothing to do here is dimmed, never moved.
     // Tap View: it stays open, the D-pad picks (Up then Right is Up-right), A does it, B closes. Or hold View, push a
-    // direction and let go of View. In Labs the middle takes the report shot.
+    // direction and let go of View. The middle is neutral: it closes.
     property bool wheelOpen: false
     // ---- 0.59: one input layer. In Qt 6 a MouseArea that takes a press stops the items under it but not their
     // pointer handlers, so an overlay's backdrop alone can't stop a tap reaching a card beneath. Everything under
@@ -4508,11 +4509,16 @@ Window {
         openPick("Recently viewed", gameTitle, recentViewed.map(r => ({ icon: "info", title: cleanName(r.name), detail: "", aLabel: "Open",
             run: () => { tab = 1; zone = "main"; openDetails(r) } })), "")
     }
+    // 0.62: the middle is neutral. The stick at rest picks nothing, and the middle says Close: A, B, View, a tap on
+    // the middle, or letting go of a held View with nothing picked all close it. A short tap of View keeps it open.
+    property bool wheelByStick: false     // the wedge was picked by the stick's angle (it goes when the stick rests)
+    property real wheelPressedAt: 0
+    readonly property string wheelHint: lastInput === "touch" ? "Tap one to choose" : lastInput === "mouse" ? "Click one to choose" : lastInput === "keys" ? "Arrow keys choose" : "Push the stick to choose"
     function wheelPress() {
         if (wheelOpen) { closeWheel(); return }
         // View brings the bars back too.
         barsHidden = false
-        wheelOpen = true; wheelSlot = -1; wheelHeld = true; wheelPicked = false
+        wheelOpen = true; wheelSlot = -1; wheelHeld = true; wheelPicked = false; wheelByStick = false; wheelPressedAt = Date.now()
         note("action", "Quick wheel open (" + wheelKind + "): " + wheelSlots.map(x => x.label + (x.ok ? "" : " (dim)")).join("; "))
     }
     function wheelRelease() {
@@ -4520,13 +4526,18 @@ Window {
         wheelHeld = false
         // Held, pushed, let go: that slot.
         if (wheelOpen && wheelPicked && wheelSlot >= 0) wheelFire(wheelSlot)
+        // Held and let go with nothing picked: it closes. (A short tap of View leaves it open.)
+        else if (wheelOpen && wheelSlot < 0 && Date.now() - wheelPressedAt >= 350) { note("action", "Quick wheel: View let go with nothing picked"); closeWheel() }
     }
     function closeWheel() { if (wheelOpen) { wheelOpen = false; wheelHeld = false; note("action", "Quick wheel closed") } }
     // The left stick picks a wedge by its angle while the wheel is open (0 is Up, clockwise; -1 centred).
     Connections {
         target: Turbine
         function onWheelAngleChanged() {
-            if (!app.wheelOpen || Turbine.wheelAngle < 0) return
+            if (!app.wheelOpen) return
+            // The stick came back to rest: the wedge it picked lets go (one picked with the D-pad stays).
+            if (Turbine.wheelAngle < 0) { if (app.wheelByStick) { app.wheelByStick = false; app.wheelSlot = -1; app.wheelPicked = false } return }
+            app.wheelByStick = true
             const a = Turbine.wheelAngle, cur = app.wheelSlot
             // A little give at the edges: the wedge picked stays until the stick is 6 degrees past its border, so a
             // stick resting on a border doesn't flicker between two.
@@ -4543,6 +4554,8 @@ Window {
         if (now < 0 || now % 2 === 1 || now === card || (now + 4) % 8 === card) wheelSlot = card
         else wheelSlot = (now === 0 && card === 6) || (now === 6 && card === 0) ? 7 : (now + card) / 2
         wheelPicked = true
+        // The stick sends D-pad presses too while the wheel is open: only a real D-pad press keeps its wedge.
+        wheelByStick = Turbine.wheelAngle >= 0
     }
     function wheelFire(i) {
         const s = wheelSlots[i]
@@ -4553,7 +4566,7 @@ Window {
     }
     function wheelAct(b) {
         if (["up", "down", "left", "right"].indexOf(b) >= 0) wheelMove(b)
-        else if (b === "a") { if (wheelSlot >= 0) wheelFire(wheelSlot); else if (labsOn) { closeWheel(); quickReport() } }
+        else if (b === "a") { if (wheelSlot >= 0) wheelFire(wheelSlot); else { note("action", "Quick wheel: A with nothing picked"); closeWheel() } }
         else if (b === "b" || b === "view") closeWheel()
         else if (b === "start") closeWheel()
     }
@@ -4630,6 +4643,20 @@ Window {
             // The quick wheel: tap View, Up then Right is Up-right (Sort); hold View, push Left, let go: Games.
             () => { pad("view"); pad("up"); pad("right"); check("Wheel: slot " + wheelSlot + " " + (wheelSlots[wheelSlot] ? wheelSlots[wheelSlot].label : "")); pad("b") },
             () => { Turbine.selftestPad("view", true); pad("left"); Turbine.selftestPad("view", false); check("Wheel held, Left, let go: sheet " + sheet + " \"" + pickTitle + "\""); pad("b") },
+            // 0.62: the neutral middle. A tap of View opens it with nothing picked, and A closes it.
+            () => { sheet = ""; pad("view"); m.open = wheelOpen; m.slot = wheelSlot; m.a = binds().a.label; m.b = binds().b.label; pad("a")
+                    check("Wheel neutral: a tap of View leaves it " + (m.open ? "open" : "closed") + " with slot " + m.slot + ", A " + m.a + ", B " + m.b + "; A closes it: " + !wheelOpen) },
+            // The stick pushed Right picks that wedge; back at rest nothing is picked. A D-pad pick stays. B closes.
+            () => { pad("view"); Turbine.wheelAngle = 90; m.s1 = wheelSlot; Turbine.wheelAngle = -1; m.s2 = wheelSlot; pad("up"); m.s3 = wheelSlot; pad("b")
+                    check("Wheel stick: pushed Right picks slot " + m.s1 + ", at rest slot " + m.s2 + "; D-pad Up picks slot " + m.s3 + " and it stays; B closes it: " + !wheelOpen) },
+            // View held with nothing pushed, then let go: it closes.
+            () => { m.t = Date.now(); Turbine.selftestPad("view", true); m.open = wheelOpen },
+            () => { if (Date.now() - m.t < 600) return false; Turbine.selftestPad("view", false)
+                    check("Wheel held, nothing pushed, let go: it was " + (m.open ? "open" : "closed") + ", now " + (wheelOpen ? "still open" : "closed") + ", sheet \"" + sheet + "\"") },
+            // A click (or a tap) on the middle closes it.
+            () => { pad("view"); m.open = wheelOpen
+                    Turbine.selftestMouse(0, width / 2, height / 2, 0, 0, 0); Turbine.selftestMouse(1, width / 2, height / 2, Qt.LeftButton, 0, 0); Turbine.selftestMouse(2, width / 2, height / 2, Qt.LeftButton, 0, 0) },
+            () => { check("Wheel middle clicked: it was " + (m.open ? "open" : "closed") + ", now " + (wheelOpen ? "still open" : "closed")) ; closeWheel() },
             // Uninstall: the same row stays (dimmed, A puts it back).
             () => { zone = "main"; tab = 0; modIndex = 0; m.name = mods[0].name; pad("x"); menuIndex = modMenuItems.findIndex(x => x.act === "remove"); pad("a") },
             () => { check("Uninstall: row " + (modIndex + 1) + " is " + (focusedItem ? focusedItem.kind : "nothing") + (focusedItem && focusedItem.kind === "ghost" ? " (" + focusedItem.m.name + ")" : "")); pad("a") },
@@ -7504,7 +7531,7 @@ Window {
           expect: "Heroic starts the game with the mods in place. In Game Mode, check it shows (Turbine says how to switch to it)." },
         { id: "seasonal", title: "Seasonal leaves and snow", how: "Settings > Look > Seasonal: Autumn, then Snow; try Amount and Size.",
           expect: "They fall smoothly behind the panels and stop while a game runs." },
-        { id: "quick-report", title: "Screenshot and report", how: "Labs on: tap View and press A on the middle of the wheel (or hold the icon at the top of the rail for 7 seconds).",
+        { id: "quick-report", title: "Screenshot and report", how: "Labs on: hold View for 7 seconds.",
           expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." },
         { id: "ts-install", title: "Thunderstore install", how: "Valheim, Lethal Company or Risk of Rain 2: Get mods, pick a mod, A Install.",
           expect: "It downloads with progress on the status line and the rail ring, and shows in My mods with what it needs." },
@@ -10215,13 +10242,13 @@ Window {
         visible: app.wheelOpen
         slots: app.wheelSlots
         focusIndex: app.wheelSlot
-        labs: app.labsOn
-        viewGlyph: app.glyph("view")
+        hint: app.wheelHint
         reduceMotion: app.reduceMotion
         onActivated: (i) => { app.wheelSlot = i; app.wheelFire(i) }
-        onPointed: (i) => { app.wheelSlot = i; app.wheelPicked = true }
+        // A mouse over a wedge picks it; over the middle (or off the pie) nothing is picked.
+        onPointed: (i) => { app.wheelByStick = false; app.wheelSlot = i; app.wheelPicked = i >= 0 }
         onClosed: app.closeWheel()
-        onMiddleTapped: { app.note("touch", "Quick wheel: middle tapped"); app.wheelSlot = -1; if (app.labsOn) app.wheelAct("a"); else app.closeWheel() }
+        onMiddleTapped: { app.note("touch", "Quick wheel: middle tapped"); app.wheelSlot = -1; app.closeWheel() }
     }
     Tutorial {
         ui: kit

@@ -94,7 +94,9 @@ outside a sheet closes it. A touch moves the ring, hides the pointer and the leg
 
 View's wheel: eight places around a circle, the same on every screen; a place with nothing to do here is dimmed,
 never moved. Tap View: it stays open, the D-pad picks (Up then Right is Up-right), A does it, B closes. Hold View,
-push, let go of View: that place. In Labs the middle is Report.
+push, let go of View: that place. 0.62: the middle is neutral. The stick at rest picks nothing and the middle says
+Close and how to choose (`hint`); A, B, View, a tap on the middle, or letting go of a held View with nothing picked
+close it.
 
 | Place | My mods | Get mods | Load order |
 | --- | --- | --- | --- |
