@@ -306,6 +306,10 @@ need $y "Mouse: Ctrl and the wheel change the size" "Key check: the wheel alone:
 need $y "The hints follow the last input" "Key check: hints after a key: Enter, Esc, X, Ctrl\+F, PgUp, PgDn; after a controller press: A, B, X, Y, LB, RB$"
 need $y "The bar with the keyboard's names: nothing overlaps" "Bar check \(keycheck, .* 0 problems"
 need $y "Key and mouse checks" "Key check done: 0 problems"
+# 0.62: Desktop Mode with no controller is normal: a line in the log, never a toast or a line in Settings.
+need $y "No controller in Desktop Mode: logged, nothing shown" "No controller in Desktop Mode: (logged once, no toast|a controller is seen, no toast)"
+hits=$(grep -n -E "No controller reaches Turbine|padHelp" app/qml/*.qml || true)
+if [ -n "$hits" ]; then echo "::error title=The no controller message is back::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
 # 0.62: Get mods as a page of a book: no game list, the page edges, Left and Right at the ends of a row, LB and RB,
 # a held D-pad, clicks on the edges, and the page-turn itself.
 fresh "bookcheck"; h="$PWD/fh/bookcheck"

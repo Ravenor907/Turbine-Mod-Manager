@@ -2009,14 +2009,17 @@ Window {
         Turbine.profiles()
         if (tab === 1) Qt.callLater(browseNow)
     }
-    // 0.61 (integration I9): Desktop Mode with no controller seen a few seconds after start: say so where the player
-    // looks, with what to do. (Steam keeps the controller for programs it didn't start and gives them only its desktop
-    // layout, a mouse and a few keys.) Once per run; never in pictures.
-    readonly property string padHelp: "No controller reaches Turbine here. For the controller, start Turbine from its entry in Steam: Steam then gives it the controller."
-    Timer {
-        interval: 4000; running: !shot.on && !Turbine.gamemode
-        onTriggered: if (!Turbine.pads) { app.note("pad", "Desktop Mode with no controller: told the player to start Turbine from Steam"); toast.info(app.padHelp) }
+    // 0.62 (the owner's setup): Desktop Mode with no controller seen is normal (Steam's desktop layout drives Turbine
+    // as a mouse and a keyboard, and both work everywhere): nothing is shown, in a toast or in Settings. The
+    // activity log has one line, once per run.
+    property bool noPadNoted: false
+    function noPadNote() {
+        if (Turbine.pads || Turbine.gamemode || noPadNoted) return false
+        noPadNoted = true
+        note("pad", "Desktop Mode with no controller seen: nothing shown (the mouse and the keyboard drive Turbine; started from its Steam entry, Steam gives it the controller)")
+        return true
     }
+    Timer { interval: 4000; running: !shot.on && !Turbine.gamemode; onTriggered: app.noPadNote() }
     Component.onCompleted: {
         introSeen = parse(seen.basicIntroDone, [])
         // Recorded samples instead of the internet (the build's screenshot checks); first, before anything asks.
@@ -5511,6 +5514,9 @@ Window {
                 () => { K(Qt.Key_Down); m.h1 = hints(); legend.check("keycheck"); pad("up"); m.h2 = hints()
                         say(m.h1 === "Enter, Esc, X, Ctrl+F, PgUp, PgDn" && m.h2 === "A, B, X, Y, LB, RB", "hints after a key: " + m.h1 + "; after a controller press: " + m.h2)
                         keysTest = false
+                        // 0.62: Desktop Mode with no controller: one line in the log, nothing on screen.
+                        m.toastBefore = lastToastAt; m.noted = noPadNote(); m.again = noPadNote()
+                        check("No controller in Desktop Mode: " + (Turbine.pads ? "a controller is seen" : Turbine.gamemode ? "Game Mode" : m.noted && !m.again ? "logged once" : "not logged") + ", " + (lastToastAt === m.toastBefore ? "no toast" : "a toast showed"))
                         check("Key check done: " + m.bad + " problems") }
             ]
         }
@@ -9326,7 +9332,8 @@ Window {
                                     Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.fpx(15); font.bold: true }
                                 }
                             }
-                            Label { visible: !Turbine.pads; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: Turbine.gamemode ? "Using Steam's controller settings (no controller seen directly)." : app.padHelp }
+                            // 0.62: only in Game Mode; in Desktop Mode no controller is normal and nothing is said.
+                            Label { visible: !Turbine.pads && Turbine.gamemode; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
                             Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
                             // 0.6 (I26): a test for the build's makers, so only with Labs on.
                             Rectangle {
