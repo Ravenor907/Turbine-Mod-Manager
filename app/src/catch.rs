@@ -1223,7 +1223,7 @@ impl qobject::Turbine {
 }
 
 /// What add_archive did with a caught download, for the status (and for its row in Turbine's browser, by its path).
-fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::Outcome) {
+pub(crate) fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::Outcome) {
     let g = game.name.clone();
     let p = path.to_path_buf();
     match out {
@@ -1240,6 +1240,16 @@ fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::Outcome) {
             t.set_status(&e, "stop", None, &g, "", true, "")
         }),
     }
+}
+
+/// 0.62: a caught download that needed the player and was answered without being added (an older Seamless Co-op the
+/// player chose not to use): its row and the status say it is done, so nothing waits on it or offers it again.
+pub(crate) fn settled(w: &Worker, game: &Game, path: &Path, words: &str) {
+    let (g, p, words) = (game.name.clone(), path.to_path_buf(), words.to_string());
+    w.post(move |mut t| {
+        t.as_mut().add_result(&p, true, false, "", &g, &words);
+        t.set_status(&words, "ok", None, &g, "", true, "")
+    });
 }
 
 /// The browser check's JSON plus the warning's words (title, text, steps), so the interface has one source.

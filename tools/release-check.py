@@ -35,6 +35,64 @@ decky = wf[wf.index("  decky:"):wf.index("  vendor:")]
 if "needs.reuse.outputs.run == ''" not in decky:
     problems.append("the Decky job must not build again for a release that reuses a green run")
 
+# 0.62: the app can't be built everywhere this script runs, and a function declared for the interface with no code
+# behind it only showed in the Flatpak build (olderSeamlessAnswer). Every #[qinvokable] declared in the bridge
+# (app/src/backend.rs) needs a function of the same name with a body somewhere in app/src, taking the same number of
+# arguments and the same kind of self.
+import glob
+import re
+
+def params(text):
+    """The parameter list of `fn name(...)` starting at text[0] == '(' (nesting counted), split at top level."""
+    depth, out, cur = 0, [], ""
+    for ch in text:
+        if ch in "(<[":
+            depth += 1
+            if depth == 1 and ch == "(":
+                continue
+        elif ch in ")>]":
+            depth -= 1
+            if depth == 0 and ch == ")":
+                break
+        if ch == "," and depth == 1:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+bridge = open("app/src/backend.rs").read()
+sources = {f: open(f).read() for f in sorted(glob.glob("app/src/*.rs"))}
+declared = re.findall(r"#\[qinvokable\]\s*(?:#\[[^\]]*\]\s*)*fn\s+([a-z0-9_]+)\s*(\([^;{]*?\))\s*(?:->[^;{]*)?;", bridge)
+if len(declared) < 50:
+    problems.append(f"the bridge check found only {len(declared)} invokables in app/src/backend.rs: its pattern no longer fits")
+pinned = lambda ps: bool(ps) and "Pin<&mut Self>" in ps[0]
+for name, sig in declared:
+    want = params(sig)
+    shapes = []
+    for f, text in sources.items():
+        for m in re.finditer(r"\bfn\s+" + name + r"\s*(\([^;{]*?\))\s*(?:->[^;{]*)?\{", text):
+            got = params(m.group(1))
+            # Other things in the app may carry the same name (a free function, another type's method): only a
+            # function that takes self counts.
+            if got and "self" in got[0]:
+                shapes.append((len(got), pinned(got), f))
+    if not shapes:
+        problems.append(f"{name} is declared for the interface in app/src/backend.rs but no function of that name exists in app/src")
+    elif not any(n == len(want) and pin == pinned(want) for n, pin, _ in shapes):
+        n, pin, f = shapes[0]
+        problems.append(f"{name}: the bridge declares {len(want) - 1} arguments on {'Pin<&mut Self>' if pinned(want) else '&Self'}, the function in {f} takes {n - 1} on {'Pin<&mut Self>' if pin else '&self'}")
+
+# And the other way round: every Turbine.<name>(...) the interface calls is declared in the bridge.
+bridge_names = set(re.findall(r'#\[cxx_name\s*=\s*"([A-Za-z0-9_]+)"\]', bridge)) | set(re.findall(r"\bfn\s+([a-z0-9_]+)\s*\(", bridge))
+camel = lambda n: re.sub(r"_([a-z0-9])", lambda m: m.group(1).upper(), n)
+bridge_names |= {camel(n) for n in bridge_names}
+for f in sorted(glob.glob("app/qml/*.qml")):
+    for name in sorted(set(re.findall(r"\bTurbine\.([A-Za-z0-9_]+)\s*\(", open(f).read())) - bridge_names):
+        problems.append(f"{f} calls Turbine.{name}(...), which the bridge in app/src/backend.rs doesn't declare")
+
 for p in problems:
     print(f"::error title=Release rules::{p}")
 print(f"Release rules: {len(problems)} problems")

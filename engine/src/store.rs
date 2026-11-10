@@ -611,8 +611,9 @@ pub struct Store {
     merged_in_place: std::sync::Mutex<Vec<PathBuf>>,
     /// 0.62: what the merge of in-place settings changes has to tell the player (for the next apply's report).
     settings_notes: std::sync::Mutex<Vec<String>>,
-    /// 0.62: the player allowed one older Seamless Co-op over a newer one (`allow_older_seamless`).
-    older_seamless_ok: bool,
+    /// 0.62: the one file the player allowed as an older Seamless Co-op over a newer one, while it is being added
+    /// (`import_archive_allowing_older`).
+    older_seamless_ok: Option<PathBuf>,
 }
 
 /// A staged folder's files by folder, with its inode and modification time when read.
@@ -1051,7 +1052,7 @@ impl Store {
             files_cache: std::sync::Mutex::new(HashMap::new()),
             merged_in_place: std::sync::Mutex::new(Vec::new()),
             settings_notes: std::sync::Mutex::new(Vec::new()),
-            older_seamless_ok: false,
+            older_seamless_ok: None,
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -1499,12 +1500,7 @@ impl Store {
         let done = self.begin(archive, target)?;
         // 0.62: one Seamless Co-op per game. A new copy of it (from anywhere) takes the place of the copies
         // installed, with their settings; they go to Removed mods, so the change can be put back.
-        if let Import::Added(d) = &done {
-            if self.rules.me3_game().is_some() {
-                let id = d.item.id.clone();
-                self.supersede_seamless(&id).map_err(|e| format!("Seamless Co-op was added, but the copy it replaces couldn't be moved to Removed mods ({e})."))?;
-            }
-        }
+        self.after_import(&done)?;
         Ok(done)
     }
 
@@ -1516,7 +1512,9 @@ impl Store {
         }
         self.index_of(id).map_err(|e| e.to_string())?;
         let target = self.target_for(archive, source, Some(id))?;
-        self.begin(archive, target)
+        let done = self.begin(archive, target)?;
+        self.after_import(&done)?;
+        Ok(done)
     }
 
     /// Where each installed mod came from, in order, for the update checker.
@@ -1897,7 +1895,7 @@ impl Store {
                 return Err(fail(format!("the {} file is empty", target.format_label)));
             }
             // 0.62: an older Seamless Co-op is never put over a newer installed copy without the player's word.
-            self.older_seamless_stop(&target, &files)?;
+            let target = self.older_seamless_gate(&target, &files, archive)?;
             let mut work = unpacked.clone();
             let mut notes = Vec::new();
 
@@ -2376,28 +2374,52 @@ impl Store {
     }
 
     /// 0.62: before a download that is Seamless Co-op's own package goes in: an older one is never put over a
-    /// newer installed copy without the player's word (`allow_older_seamless`, good for one add).
-    fn older_seamless_stop(&mut self, target: &Target, files: &[String]) -> Result<(), String> {
+    /// newer installed copy without the player's word. Every installed copy counts, the entry the download would
+    /// replace included (the re-check's N2: an older file from the same Nexus page went over the newer one with no
+    /// question). The word is good for one file only (`import_archive_allowing_older`, by the file's path). With
+    /// it, an older file that would have replaced its own newer entry in place becomes a new entry instead, so the
+    /// newer copy goes to Removed mods (`supersede_seamless`) and can be put back. Answers the target to use.
+    fn older_seamless_gate(&self, target: &Target, files: &[String], archive: &Path) -> Result<Target, String> {
+        let mut t = target.clone();
         if self.rules.me3_game().is_none() || !crate::anticheat::is_seamless_package(files) {
-            return Ok(());
+            return Ok(t);
         }
-        let allowed = std::mem::take(&mut self.older_seamless_ok);
-        let Some(this) = target.version.as_deref() else { return Ok(()) };
-        let newest = self
-            .seamless_mods()
-            .into_iter()
-            .filter(|m| m.package && m.id != target.id)
-            .filter_map(|m| m.version)
-            .max_by(|a, b| crate::updates::compare_versions(a, b));
-        match newest {
-            Some(have) if !allowed && crate::updates::compare_versions(this, &have) == std::cmp::Ordering::Less => Err(crate::anticheat::older_seamless_words(&have, this)),
-            _ => Ok(()),
+        let Some(this) = t.version.clone() else { return Ok(t) };
+        let older_than = |v: &str| crate::updates::compare_versions(&this, v) == std::cmp::Ordering::Less;
+        let newest = self.seamless_mods().into_iter().filter(|m| m.package).filter_map(|m| m.version).max_by(|a, b| crate::updates::compare_versions(a, b));
+        let Some(have) = newest.filter(|h| older_than(h)) else { return Ok(t) };
+        if self.older_seamless_ok.as_deref() != Some(archive) {
+            return Err(crate::anticheat::older_seamless_words(&have, &this));
         }
+        let own_is_newer = t.existing.and_then(|i| self.mods.get(i)).is_some_and(|m| m.version.as_deref().is_some_and(older_than));
+        if own_is_newer {
+            t.existing = None;
+            t.keep_name = false;
+            t.id = self.new_id(&t.name);
+        }
+        Ok(t)
     }
 
-    /// The player said "Use the older one": the next Seamless Co-op added may be older than the copy installed.
-    pub fn allow_older_seamless(&mut self) {
-        self.older_seamless_ok = true;
+    /// `import_archive` after the player said "Use the older one" for exactly this file: an older Seamless Co-op
+    /// may go over the newer copy this once (which goes to Removed mods). The word ends with this call, whatever
+    /// it comes to, and never covers another file.
+    pub fn import_archive_allowing_older(&mut self, archive: &Path, source: SourceInfo) -> Result<Import, String> {
+        self.older_seamless_ok = Some(archive.to_path_buf());
+        let r = self.import_archive(archive, source);
+        self.older_seamless_ok = None;
+        r
+    }
+
+    /// One Seamless Co-op per game: after a mod was added or updated (`id`), when it is Seamless Co-op's own
+    /// package, the other copies go to Removed mods with their settings carried over.
+    fn after_import(&mut self, done: &Import) -> Result<(), String> {
+        if let Import::Added(d) = done {
+            if self.rules.me3_game().is_some() {
+                let id = d.item.id.clone();
+                self.supersede_seamless(&id).map_err(|e| format!("Seamless Co-op was added, but the copy it replaces couldn't be moved to Removed mods ({e})."))?;
+            }
+        }
+        Ok(())
     }
 
     /// 0.62: a Seamless Co-op package just added (`new_id`) takes the place of the other copies of Seamless Co-op:

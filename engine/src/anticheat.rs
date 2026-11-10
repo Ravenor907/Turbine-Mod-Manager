@@ -1125,20 +1125,34 @@ pub fn is_seamless_file(rel: &str) -> bool {
     rel.replace('\\', "/").rsplit('/').next().is_some_and(|n| n.eq_ignore_ascii_case("ersc.dll"))
 }
 
-/// Is this list of files Seamless Co-op's own package: its ersc.dll in a SeamlessCoop folder with ersc_settings.ini
-/// beside it, at the top or one folder down ("Game/SeamlessCoop/...")? A bigger mod that merely carries an
-/// ersc.dll somewhere is not (0.62 break test M3: such a bundle took Seamless Co-op's place in the list).
+/// Is this list of files Seamless Co-op's own package, and nothing else: its ersc.dll in a SeamlessCoop folder with
+/// ersc_settings.ini beside it, at the top or one folder down ("Game/SeamlessCoop/..."), and beside that folder
+/// only a few loose files (its launcher, a readme)? A bigger mod that merely carries an ersc.dll somewhere is not
+/// (0.62 break test M3: such a bundle took Seamless Co-op's place in the list), and neither is a pack that holds a
+/// whole SeamlessCoop folder among other folders (the re-check's L-b): those are mods of their own.
 pub fn is_seamless_package(files: &[String]) -> bool {
     let lower: Vec<String> = files.iter().map(|f| f.replace('\\', "/").to_ascii_lowercase()).collect();
     lower.iter().any(|f| {
         let Some(prefix) = f.strip_suffix("seamlesscoop/ersc.dll") else { return false };
         let folders = prefix.split('/').filter(|p| !p.is_empty()).count();
-        (prefix.is_empty() || prefix.ends_with('/')) && folders <= 1 && lower.contains(&format!("{prefix}seamlesscoop/ersc_settings.ini"))
+        if !(prefix.is_empty() || prefix.ends_with('/')) || folders > 1 || !lower.contains(&format!("{prefix}seamlesscoop/ersc_settings.ini")) {
+            return false;
+        }
+        // Everything is in that one place: the SeamlessCoop folder, and loose files right beside it.
+        let mut loose = 0;
+        lower.iter().all(|x| match x.strip_prefix(prefix) {
+            Some(rest) if rest.starts_with("seamlesscoop/") => true,
+            Some(rest) if !rest.contains('/') => {
+                loose += 1;
+                loose <= 8
+            }
+            _ => false,
+        })
     })
 }
 
 /// The words when an older Seamless Co-op download is not put over a newer installed one. The app asks ("Keep
-/// <have>" by default, or "Use <this>", which is `Store::allow_older_seamless` and adding the file again).
+/// <have>" by default, or "Use <this>", which is `Store::import_archive_allowing_older` for that same file).
 pub fn older_seamless_words(have: &str, this: &str) -> String {
     format!("You have Seamless Co-op {have}. This file is {this}, which is older, so Turbine kept {have}.")
 }

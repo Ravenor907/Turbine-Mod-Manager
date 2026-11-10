@@ -177,10 +177,17 @@ pub(crate) fn show_notes(w: &Worker, name: &str, notes: &[String]) {
 
 /// Adds (or, with `replaces`, updates) a mod from an archive. An installer with choices waits for the player.
 pub(crate) fn add_archive(w: &mut Worker, game: &Game, path: &Path, source: SourceInfo, replaces: Option<String>, label: &str) -> Outcome {
+    add_archive_with(w, game, path, source, replaces, label, false)
+}
+
+/// `add_archive`; with `older_ok` the player has said "Use the older one" for exactly this file (an older Seamless
+/// Co-op than the one installed), so the engine lets this one file in (never another).
+pub(crate) fn add_archive_with(w: &mut Worker, game: &Game, path: &Path, source: SourceInfo, replaces: Option<String>, label: &str, older_ok: bool) -> Outcome {
     // (Kept for the older Seamless Co-op question: "Use it" adds this same file again.)
     let asked_source = source.clone();
     let result = w.slot(game).and_then(|s| match &replaces {
         Some(id) => s.store.replace_mod(id, path, source),
+        None if older_ok => s.store.import_archive_allowing_older(path, source),
         None => s.store.import_archive(path, source),
     });
     let out = match result {
@@ -853,6 +860,45 @@ impl qobject::Turbine {
     }
 
     /// A downloaded file arrived: the mod worker adds it.
+    /// 0.62: the answer to "This Seamless Co-op is older" (the `olderSeamless` signal). true: the same file is
+    /// added again, allowed this once for exactly that file, and the newer copy goes to Removed mods; false: the
+    /// one installed stays, the file is left alone and the Downloads watcher is told it is settled. Either way the
+    /// waiting file is taken from the worker here, so no answer can be used twice.
+    pub fn older_seamless_answer(mut self: Pin<&mut Self>, use_it: bool) {
+        self.as_mut().edited();
+        self.send(
+            None,
+            "Older Seamless Co-op: the answer",
+            true,
+            Box::new(move |w: &mut Worker| {
+                let Some((game_id, path, source, label)) = w.older_seamless.take() else {
+                    crate::log::line("engine", "Older Seamless Co-op: an answer came with no file waiting");
+                    return;
+                };
+                let Some(game) = w.slots.get(&game_id).map(|s| s.game.clone()) else {
+                    crate::log::line("engine", &format!("{label}: the game it was for isn't open any more; nothing added"));
+                    return;
+                };
+                // A file Turbine downloaded itself sits in its own temp folder and goes when it is settled; a file
+                // in Downloads is the player's and stays.
+                let own_download = path.parent().and_then(|d| d.file_name()).is_some_and(|n| n.to_string_lossy().starts_with("named-"));
+                if use_it {
+                    crate::log::line("engine", &format!("{label}: the player chose the older Seamless Co-op: adding it (the newer copy goes to Removed mods)"));
+                    let out = add_archive_with(w, &game, &path, source, None, &label, true);
+                    crate::catch::report(w, &game, &path, out);
+                } else {
+                    crate::log::line("engine", &format!("{label}: the player kept the Seamless Co-op installed; the older file is left alone"));
+                    w.say("Kept the Seamless Co-op you have.", "ok");
+                    crate::catch::settled(w, &game, &path, "Kept the Seamless Co-op you have. The older file wasn't added.");
+                    w.show(&game, true);
+                }
+                if own_download && w.older_seamless.as_ref().is_none_or(|(_, p, _, _)| *p != path) {
+                    remove_download(&path);
+                }
+            }),
+        );
+    }
+
     pub(crate) fn add_fetched(mut self: Pin<&mut Self>, game: Game, f: Fetched) {
         self.as_mut().edited();
         let name = format!("Add {}", f.label);
@@ -875,7 +921,11 @@ impl qobject::Turbine {
                     None => f.replaces,
                 };
                 add_archive(w, &game, &f.path, f.source, replaces, &f.label);
-                remove_download(&f.path);
+                // 0.62: an older Seamless Co-op waiting for the player's answer keeps its file until then
+                // (older_seamless_answer removes it).
+                if w.older_seamless.as_ref().is_none_or(|(_, p, _, _)| *p != f.path) {
+                    remove_download(&f.path);
+                }
             }),
         );
     }
