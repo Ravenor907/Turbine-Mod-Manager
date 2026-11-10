@@ -1735,6 +1735,10 @@ fn applied_words(report: &turbine_engine::deploy::Report, game: &Game) -> String
     if kept > 0 {
         add(format!("Kept your changes to {}", count(kept, "settings file", "settings files")));
     }
+    // 0.62: a settings file found damaged in the game's folder (Turbine's copy went back in).
+    for n in &report.settings_notes {
+        add(n.clone());
+    }
     if report.copied_not_linked > 0 {
         add(format!("{} copied, not linked (another drive), so they use full space", count(report.copied_not_linked, "file", "files")));
     }

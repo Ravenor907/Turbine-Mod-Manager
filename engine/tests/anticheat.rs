@@ -787,3 +787,89 @@ fn settings_changed_in_place_are_merged_and_turbines_edits_reach_the_game() {
     assert_eq!(fs::read_to_string(&deployed).unwrap(), got);
     let _ = fs::remove_dir_all(&w.root);
 }
+
+/// 0.62 break test M1: a setting changed in the game's folder, then the FIRST Edit settings save in Turbine. The
+/// deploy record still names the mod's own file while the file to deploy is Turbine's new copy; the merge was
+/// skipped and the in-place change was dropped without a trace.
+#[test]
+fn the_first_edit_in_turbine_keeps_changes_made_in_the_games_folder() {
+    use turbine_engine::settings;
+    let w = world("first-edit");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&zip, &[("SeamlessCoop/ersc.dll", "dll"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    let m = added(store.import_archive(&zip, nexus("2.0.2")));
+    store.apply().unwrap();
+    let deployed = anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc_settings.ini");
+    let staged = turbine_engine::store::staged_dir(store.root(), &m.id);
+    let rel = settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")).unwrap();
+    // The game (or the player, by hand) changes a setting in place.
+    fs::write(&deployed, INI_202.replace("allow_invaders = 1", "allow_invaders = 0")).unwrap();
+    touch_later(&deployed, 10);
+    // The first Edit settings save, made from the mod's defaults as the page showed them before 0.62 (no apply
+    // in between): only the password is set.
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &anticheat::coop_password_put(INI_202, "dragon").unwrap()).unwrap();
+    store.apply().unwrap();
+    let got = fs::read_to_string(&deployed).unwrap();
+    assert!(got.contains("cooppassword = dragon"), "{got}");
+    assert!(got.contains("allow_invaders = 0"), "the in-place change is kept: {got}");
+    let mine = fs::read_to_string(settings::effective(store.root(), &m.id, &rel, &staged.join(&rel))).unwrap();
+    assert_eq!(mine, got, "and Edit settings shows it");
+    assert!(fs::read_to_string(settings::in_place_path(store.root(), &m.id, &rel)).unwrap().contains("allow_invaders = 0"));
+    // Reset to default afterwards gives the mod's own file, not a stale copy of the in-place one.
+    settings::reset(store.root(), &m.id, &rel).unwrap();
+    store.apply().unwrap();
+    assert_eq!(fs::read_to_string(&deployed).unwrap(), INI_202);
+
+    // Edit settings itself merges before it shows the file (no store open): the page shows what the game has.
+    fs::write(&deployed, INI_202.replace("new_in_202 = 5", "new_in_202 = 8")).unwrap();
+    touch_later(&deployed, 20);
+    assert!(turbine_engine::store::sync_in_place(&w.game, store.root(), &m.id, &rel));
+    let shown = fs::read_to_string(settings::effective(store.root(), &m.id, &rel, &staged.join(&rel))).unwrap();
+    assert!(shown.contains("new_in_202 = 8"), "{shown}");
+    assert!(!turbine_engine::store::sync_in_place(&w.game, store.root(), "../x", &rel));
+    store.apply().unwrap();
+    assert!(fs::read_to_string(&deployed).unwrap().contains("new_in_202 = 8"));
+    let _ = fs::remove_dir_all(&w.root);
+}
+
+/// 0.62 break test M4: a settings file emptied or cut short in the game's folder (a crash while the game wrote it,
+/// a full disk) never empties Turbine's copy: Turbine's values stay and go back in, and the report says so.
+#[test]
+fn a_damaged_settings_file_never_empties_turbines_copy() {
+    use turbine_engine::settings::{self, Format};
+    // The unit case from the break test.
+    let placed = "[A]\nz = 0\npw = a\n";
+    assert_eq!(settings::merge_in_place(Format::Ini, "", placed, placed), placed);
+    assert_eq!(settings::merge_in_place(Format::Ini, "\n\n", placed, placed), placed);
+    assert_eq!(settings::merge_in_place(Format::Ini, "[A]\n", "[A]\nz = 0\npw = a\nq = 1\n", "[A]\nz = 0\npw = a\nq = 1\n"), "[A]\nz = 0\npw = a\nq = 1\n", "cut short: most settings gone");
+    assert!(settings::in_place_is_damaged(Format::Ini, "", placed));
+    assert!(!settings::in_place_is_damaged(Format::Ini, "[A]\nz = 1\npw = a\n", placed), "a changed value is not damage");
+    assert!(!settings::in_place_is_damaged(Format::Ini, "", ""), "an empty file that was placed empty");
+    // One setting removed on purpose is still a change, taken over.
+    assert_eq!(settings::merge_in_place(Format::Ini, "[A]\nz = 0\n", "[A]\nz = 0\npw = \n", "[A]\nz = 0\npw = \n"), "[A]\nz = 0\n");
+
+    let w = world("damaged");
+    let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(GameRules::for_game(&w.game))).unwrap();
+    let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
+    write_zip(&zip, &[("SeamlessCoop/ersc.dll", "dll"), ("SeamlessCoop/ersc_settings.ini", INI_202), ("ersc_launcher.exe", "exe")]);
+    let m = added(store.import_archive(&zip, nexus("2.0.2")));
+    let staged = turbine_engine::store::staged_dir(store.root(), &m.id);
+    let rel = settings::config_files(&staged, 8, 40).into_iter().find(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")).unwrap();
+    let with_pw = anticheat::coop_password_put(INI_202, "dragon").unwrap();
+    settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &with_pw).unwrap();
+    store.apply().unwrap();
+    let deployed = anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc_settings.ini");
+    assert_eq!(fs::read_to_string(&deployed).unwrap(), with_pw);
+    // The file is emptied where it is deployed.
+    fs::write(&deployed, "").unwrap();
+    touch_later(&deployed, 10);
+    let report = store.apply().unwrap();
+    assert_eq!(fs::read_to_string(&deployed).unwrap(), with_pw, "Turbine's copy is back in the game");
+    assert_eq!(fs::read_to_string(settings::effective(store.root(), &m.id, &rel, &staged.join(&rel))).unwrap(), with_pw, "and was never emptied");
+    assert_eq!(report.settings_notes.len(), 1, "{:?}", report.settings_notes);
+    assert!(report.settings_notes[0].contains("Turbine kept its own copy"), "{:?}", report.settings_notes);
+    assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set);
+    assert_eq!(fs::read_to_string(settings::in_place_path(store.root(), &m.id, &rel)).unwrap(), "", "the damaged file is kept beside it");
+    let _ = fs::remove_dir_all(&w.root);
+}

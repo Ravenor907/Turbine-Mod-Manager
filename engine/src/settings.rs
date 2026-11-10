@@ -1104,6 +1104,9 @@ pub fn in_place_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
 /// taken over. Answers the text Turbine's copy should have now. When one of Turbine's changes has no place in the
 /// in-place file (its setting is gone there), Turbine's copy stays whole.
 pub fn merge_in_place(fmt: Format, in_place: &str, placed: &str, turbine_copy: &str) -> String {
+    if in_place_is_damaged(fmt, in_place, placed) {
+        return turbine_copy.to_string();
+    }
     let (was, mine, theirs) = (parse(placed, fmt), parse(turbine_copy, fmt), parse(in_place, fmt));
     let same = |a: &Field, b: &Field| a.section == b.section && a.key == b.key && a.occ == b.occ;
     let mut edits: Vec<(usize, String)> = Vec::new();
@@ -1119,6 +1122,14 @@ pub fn merge_in_place(fmt: Format, in_place: &str, placed: &str, turbine_copy: &
         }
     }
     set(in_place, fmt, &edits).unwrap_or_else(|_| turbine_copy.to_string())
+}
+
+/// 0.62: is the file in the game's folder damaged rather than changed? Empty, or with no settings at all, or with
+/// fewer than half the settings Turbine placed (a crash while the game wrote it, a full disk). Such a file is
+/// never taken over: Turbine's copy stays and goes back in.
+pub fn in_place_is_damaged(fmt: Format, in_place: &str, placed: &str) -> bool {
+    let (theirs, was) = (parse(in_place, fmt).len(), parse(placed, fmt).len());
+    was > 0 && (in_place.trim().is_empty() || theirs == 0 || theirs * 2 < was)
 }
 
 /// A path inside a mod: plain parts only.

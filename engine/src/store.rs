@@ -49,6 +49,75 @@ pub struct Mod {
     pub added: u64,
 }
 
+/// What `merge_in_place_file` did.
+struct MergedInPlace {
+    /// The file to deploy now (Turbine's copy).
+    now: PathBuf,
+    /// The source the in-place file was placed from (its kept copy must go after the apply).
+    placed_from: PathBuf,
+    /// Words for the activity log when the in-place file couldn't be taken over.
+    note: Option<String>,
+}
+
+/// The deploy bookkeeping `Store::deploy_paths` uses, for code that has no store open.
+fn deploy_paths_for(game: &Game, store_root: &Path) -> Paths {
+    let d = store_root.join("deploy");
+    if rules::GameRules::for_game(game).anti_cheat.as_ref().and_then(|a| a.me3_game()).is_some() {
+        Paths { game: crate::anticheat::profile_mods(store_root), backups: d.join("me3-backups"), record: d.join("me3-record.json"), plan: d.join("me3-plan.json") }
+    } else {
+        Paths { game: game.install_dir.clone(), backups: d.join("backups"), record: d.join("record.json"), plan: d.join("plan.json") }
+    }
+}
+
+/// 0.62: merges a mod's settings file as it was changed where it is deployed into Turbine's copy (see
+/// `Store::take_in_place_changes`). The record entry is found by the file it was placed from: the file to deploy
+/// now (`source`) or the mod's own file (`default_src`). Before the first Edit settings save the record names the
+/// mod's own file while the file to deploy is already Turbine's copy, and matching on `source` alone skipped the
+/// merge and dropped the in-place change. None: nothing was changed in place (or it can't be read).
+fn merge_in_place_file(paths: &Paths, root: &Path, record: &Record, mod_id: &str, rel: &str, default_src: &Path, source: &Path) -> Option<MergedInPlace> {
+    let fmt = crate::settings::format_of(rel)?;
+    let p = record.files.iter().find(|p| p.source == source).or_else(|| record.files.iter().find(|p| p.source == default_src))?;
+    if !deploy::changed_in_place(paths, p) {
+        return None;
+    }
+    let read = |f: &Path| fs::read(f).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+    let (in_place, mine, default) = (read(&paths.game.join(&p.rel))?, read(source)?, read(default_src)?);
+    if in_place == mine {
+        // Nothing to merge, but the kept copy under the older source must still go after the apply.
+        return (p.source != source).then(|| MergedInPlace { now: source.to_path_buf(), placed_from: p.source.clone(), note: None });
+    }
+    // What Turbine last put there: deploy's own copy from that moment; without one (placed by an older Turbine),
+    // the file it was placed from when that hasn't changed since, else the mod's own file.
+    let unchanged_since = fs::metadata(&p.source).is_ok_and(|m| (p.src_ino, p.src_size, p.src_mtime) == (m.ino(), m.len(), m.mtime() * 1_000_000_000 + m.mtime_nsec()));
+    let placed = read(&deploy::placed_copy(paths, &p.source)).or_else(|| if unchanged_since { read(&p.source) } else { None }).unwrap_or_else(|| default.clone());
+    let lost = crate::settings::in_place_is_damaged(fmt, &in_place, &placed);
+    let text = if lost { mine.clone() } else { crate::settings::merge_in_place(fmt, &in_place, &placed, &mine) };
+    let _ = fs::create_dir_all(crate::settings::edited_path(root, mod_id, rel).parent().unwrap_or(root));
+    let _ = fs::write(crate::settings::in_place_path(root, mod_id, rel), &in_place);
+    // Saved even when the text is Turbine's own again: a newly written copy is what makes the apply place it.
+    crate::settings::save_edit(root, mod_id, rel, default_src, &text).ok()?;
+    let now = crate::settings::effective(root, mod_id, rel, default_src);
+    let note = lost.then(|| format!("{rel}: the file in the game's folder was empty or had lost most of its settings, so Turbine kept its own copy and put it back (the damaged file is kept beside Turbine's copy)"));
+    Some(MergedInPlace { now, placed_from: p.source.clone(), note })
+}
+
+/// 0.62: brings Turbine's copy of one mod's settings file up to date with changes made where it is deployed, with
+/// no store open (Edit settings calls it before it shows or saves the file, so the page shows what the game has and
+/// a first save can't drop an in-place change). The next apply places the merged copy. True when it merged.
+pub fn sync_in_place(game: &Game, store_root: &Path, mod_id: &str, rel: &str) -> bool {
+    if !crate::settings::safe_rel(mod_id) || !crate::settings::safe_rel(rel) {
+        return false;
+    }
+    let paths = deploy_paths_for(game, store_root);
+    let Ok(record) = Record::load(&paths.record) else { return false };
+    let default_src = staged_dir(store_root, mod_id).join(rel);
+    if !default_src.is_file() {
+        return false;
+    }
+    let source = crate::settings::effective(store_root, mod_id, rel, &default_src);
+    merge_in_place_file(&paths, store_root, &record, mod_id, rel, &default_src, &source).is_some()
+}
+
 /// An installed mod that is Seamless Co-op (0.62: known by its files, not by where it came from).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeamlessMod {
@@ -528,6 +597,8 @@ pub struct Store {
     /// 0.62: settings files whose in-place changes were merged into Turbine's copy and that the next apply must
     /// place afresh (their sources, old and new).
     merged_in_place: std::sync::Mutex<Vec<PathBuf>>,
+    /// 0.62: what the merge of in-place settings changes has to tell the player (for the next apply's report).
+    settings_notes: std::sync::Mutex<Vec<String>>,
 }
 
 /// A staged folder's files by folder, with its inode and modification time when read.
@@ -965,6 +1036,7 @@ impl Store {
             tar: None,
             files_cache: std::sync::Mutex::new(HashMap::new()),
             merged_in_place: std::sync::Mutex::new(Vec::new()),
+            settings_notes: std::sync::Mutex::new(Vec::new()),
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -2357,38 +2429,24 @@ impl Store {
     /// from then on, the in-place file is kept beside Turbine's copy
     /// (settings::in_place_path), and the merged copy is what goes into the game. Answers the file to deploy.
     fn take_in_place_changes(&self, record: &Record, mod_id: &str, rel: &str, default_src: &Path, source: PathBuf) -> PathBuf {
-        let Some(fmt) = crate::settings::format_of(rel) else { return source };
-        let paths = self.deploy_paths();
-        let Some(p) = record.files.iter().find(|p| p.source == source) else { return source };
-        if !deploy::changed_in_place(&paths, p) {
-            return source;
-        }
         let mut merged = self.merged_in_place.lock().unwrap_or_else(|e| e.into_inner());
         if merged.contains(&source) {
             return source;
         }
-        let read = |f: &Path| fs::read(f).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
-        let (Some(in_place), Some(mine), Some(default)) = (read(&paths.game.join(&p.rel)), read(&source), read(default_src)) else { return source };
-        if in_place == mine {
-            return source;
+        match merge_in_place_file(&self.deploy_paths(), &self.root, record, mod_id, rel, default_src, &source) {
+            Some(done) => {
+                for f in [done.placed_from, source, done.now.clone()] {
+                    if !merged.contains(&f) {
+                        merged.push(f);
+                    }
+                }
+                if let Some(n) = done.note {
+                    self.settings_notes.lock().unwrap_or_else(|e| e.into_inner()).push(n);
+                }
+                done.now
+            }
+            None => source,
         }
-        // What Turbine last put there: deploy's own copy from that moment; without one (placed by an older
-        // Turbine), Turbine's copy itself when it hasn't changed since, else the mod's own file.
-        let unchanged_since = fs::metadata(&source).is_ok_and(|m| (p.src_ino, p.src_size, p.src_mtime) == (m.ino(), m.len(), m.mtime() * 1_000_000_000 + m.mtime_nsec()));
-        let placed = read(&deploy::placed_copy(&paths, &p.source)).unwrap_or_else(|| if unchanged_since { mine.clone() } else { default.clone() });
-        let text = crate::settings::merge_in_place(fmt, &in_place, &placed, &mine);
-        let _ = fs::create_dir_all(crate::settings::edited_path(&self.root, mod_id, rel).parent().unwrap_or(&self.root));
-        let _ = fs::write(crate::settings::in_place_path(&self.root, mod_id, rel), &in_place);
-        // Saved even when the text is Turbine's own again: a newly written copy is what makes the apply place it.
-        if crate::settings::save_edit(&self.root, mod_id, rel, default_src, &text).is_err() {
-            return source;
-        }
-        let now = crate::settings::effective(&self.root, mod_id, rel, default_src);
-        merged.push(source);
-        if !merged.contains(&now) {
-            merged.push(now.clone());
-        }
-        now
     }
 
     /// After an apply took the in-place files out: their kept copies go, so the merged copies are what is placed.
@@ -2544,6 +2602,7 @@ impl Store {
         self.drop_merged_in_place(&paths, false);
         let mut report = deploy::apply_guarded(&paths, &wanted, stop_after)?;
         self.drop_merged_in_place(&paths, stop_after.is_none());
+        report.settings_notes = std::mem::take(&mut *self.settings_notes.lock().unwrap_or_else(|e| e.into_inner()));
         report.refused = self.refused_files().into_iter().map(|(r, _)| r).collect();
         report.added += first.added;
         report.removed += first.removed;

@@ -81,6 +81,9 @@ pub struct Report {
     pub put_back: Vec<String>,
     /// Settings files the player changed while the mod was in; kept to go back in next time.
     pub player_changes_saved: Vec<String>,
+    /// 0.62: what the store has to say about settings files changed in the game's folder (a damaged one that was
+    /// not taken over). Filled by the store, not by deploy itself.
+    pub settings_notes: Vec<String>,
     /// Settings files put back in with the player's own changes.
     pub player_changes_restored: Vec<String>,
     /// Entries in the record or plan that couldn't be read safely, found this time. They were set aside, not used.

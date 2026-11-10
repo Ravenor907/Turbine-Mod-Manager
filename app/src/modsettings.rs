@@ -62,6 +62,11 @@ fn target(game: &Game, mod_id: &str, rel: &str) -> Result<Target, String> {
     if !default.is_file() {
         return Err("The mod doesn't have that file any more.".into());
     }
+    // 0.62: changes made to the file in the game's folder come into Turbine's copy first, so the page shows what
+    // the game has and a save can't drop them.
+    if store::sync_in_place(game, &root, mod_id, rel) {
+        crate::log::line("settings", &format!("{rel}: changes made in the game's folder were taken into Turbine's copy"));
+    }
     let now = settings::effective(&root, mod_id, rel, &default);
     Ok(Target { now, default, root, game_dir: game.install_dir.clone(), mod_id: mod_id.to_string() })
 }
