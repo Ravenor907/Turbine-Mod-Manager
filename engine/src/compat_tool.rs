@@ -16,7 +16,8 @@
 //!   the game always starts.
 //!
 //! Which Proton: the one Turbine wrote down for the game (`<app id>.proton` in the helper's folder: the Proton Steam
-//! last used for it, from the helper's own log), else `default.proton`, else the newest numbered Proton installed,
+//! last used for it or the one it last ran with, or the player's pick), else `default.proton` (Steam's choice for
+//! all games, or the newest finished Proton), else the newest finished numbered Proton installed, then a Beta,
 //! else Proton Experimental, Hotfix, then other tools in compatibilitytools.d. The script says which one and why in
 //! steam-launch.log.
 //!
@@ -161,25 +162,48 @@ for f in "$launch/$app.proton" "$launch/default.proton"; do
   if [ -f "$f" ]; then
     d=$(head -n 1 "$f")
     d="${d%$'\r'}"
+    # The second line says where the record came from.
+    how=$(sed -n '2p' "$f")
+    how="${how%$'\r'}"
     case "$f" in
-      */default.proton) try "$d" "Turbine's choice for every game" ;;
-      *) try "$d" "the Proton Steam last used for this game, kept by Turbine" ;;
+      */default.proton)
+        case "$how" in
+          steam) try "$d" "Steam's own choice for all games, kept by Turbine" ;;
+          *) try "$d" "Turbine's choice for every game" ;;
+        esac ;;
+      *)
+        case "$how" in
+          you) try "$d" "your pick in Turbine for this game" ;;
+          tool) try "$d" "the Proton this game last ran with, kept by Turbine" ;;
+          *) try "$d" "the Proton Steam last used for this game, kept by Turbine" ;;
+        esac ;;
     esac
   fi
 done
 if [ -z "$proton" ]; then
-  # The newest numbered Proton ("Proton 11.0", "Proton 9.0 (Beta)"), then Experimental, Hotfix and other tools.
+  # The newest finished Proton ("Proton 11.0"), then numbered ones that are not finished ("Proton 12.0 (Beta)"),
+  # then Experimental, Hotfix and other tools.
   found=()
+  beta=()
   tab=$'\t'
   for l in "${libs[@]}"; do
     for d in "$l"/steamapps/common/Proton\ [0-9]*; do
-      [ -f "$d/proton" ] && found+=("$(basename "$d" | sed 's/^Proton \([0-9.]*\).*/\1/')$tab$d")
+      [ -f "$d/proton" ] || continue
+      name=$(basename "$d")
+      num=$(printf '%s' "$name" | sed 's/^Proton \([0-9.]*\).*/\1/')
+      if [ "$name" = "Proton $num" ]; then found+=("$num$tab$d"); else beta+=("$num$tab$d"); fi
     done
   done
+  count=$(( ${#found[@]} + ${#beta[@]} ))
   if [ "${#found[@]}" -gt 0 ]; then
     while IFS= read -r line; do
-      try "${line#*"$tab"}" "the newest Proton installed (Turbine has no record of the one Steam used for this game; ${#found[@]} numbered Proton found)"
+      try "${line#*"$tab"}" "the newest Proton installed (Turbine has no record of the one Steam used for this game; $count numbered Proton found)"
     done < <(printf '%s\n' "${found[@]}" | sort -t "$tab" -k1,1 -V -r)
+  fi
+  if [ "${#beta[@]}" -gt 0 ]; then
+    while IFS= read -r line; do
+      try "${line#*"$tab"}" "the newest Proton installed is a Beta (no finished Proton could be used; $count numbered Proton found)"
+    done < <(printf '%s\n' "${beta[@]}" | sort -t "$tab" -k1,1 -V -r)
   fi
   for l in "${libs[@]}"; do try "$l/steamapps/common/Proton - Experimental" "Proton Experimental (no numbered Proton could be used)"; done
   for l in "${libs[@]}"; do try "$l/steamapps/common/Proton Hotfix" "Proton Hotfix (no numbered Proton could be used)"; done
@@ -355,24 +379,94 @@ pub fn is_proton(dir: &Path) -> bool {
     dir.join("proton").is_file() && dir.join("toolmanifest.vdf").is_file()
 }
 
-/// Writes down the Proton folder for a game.
-pub fn write_proton_choice(data: &Path, app_id: &str, proton_dir: &Path) -> io::Result<()> {
-    if !app_id_ok(app_id) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id"));
+/// Where a game's Proton record came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtonHow {
+    /// Steam itself used it for the game (seen in the helper's log, or the game's entry in Steam's settings).
+    Steam,
+    /// The tool chose it by itself at a launch (no record then), and it is kept so the game keeps what works.
+    Tool,
+    /// The player picked it in Turbine.
+    You,
+}
+
+impl ProtonHow {
+    pub fn word(self) -> &'static str {
+        match self {
+            ProtonHow::Steam => "steam",
+            ProtonHow::Tool => "tool",
+            ProtonHow::You => "you",
+        }
     }
+
+    fn from_word(w: &str) -> ProtonHow {
+        match w.trim() {
+            "you" => ProtonHow::You,
+            "tool" => ProtonHow::Tool,
+            _ => ProtonHow::Steam,
+        }
+    }
+
+    /// In plain words, for the Settings row.
+    pub fn words(self) -> &'static str {
+        match self {
+            ProtonHow::Steam => "the one Steam last used for this game",
+            ProtonHow::Tool => "the one this game last ran with",
+            ProtonHow::You => "your pick",
+        }
+    }
+}
+
+fn write_record(file: &Path, proton_dir: &Path, how: &str) -> io::Result<()> {
     let text = proton_dir.to_string_lossy();
     if text.contains('\n') || !proton_dir.is_absolute() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a folder path"));
     }
-    fs::create_dir_all(crate::anticheat::launch_dir(data))?;
-    fs::write(proton_file(data, app_id), format!("{text}\n"))
+    if let Some(d) = file.parent() {
+        fs::create_dir_all(d)?;
+    }
+    fs::write(file, format!("{text}\n{how}\n"))
+}
+
+/// Writes down the Proton folder for a game, with where the record came from (the file's second line).
+pub fn write_proton_record(data: &Path, app_id: &str, proton_dir: &Path, how: ProtonHow) -> io::Result<()> {
+    if !app_id_ok(app_id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id"));
+    }
+    write_record(&proton_file(data, app_id), proton_dir, how.word())
+}
+
+/// Writes down the Proton Steam used for a game.
+pub fn write_proton_choice(data: &Path, app_id: &str, proton_dir: &Path) -> io::Result<()> {
+    write_proton_record(data, app_id, proton_dir, ProtonHow::Steam)
+}
+
+/// The player's pick for a game: a Proton folder, or None for "Automatic" (the record goes; the next launch
+/// chooses and keeps what it chose).
+pub fn set_proton_pick(data: &Path, app_id: &str, proton_dir: Option<&Path>) -> io::Result<()> {
+    match proton_dir {
+        Some(d) if is_proton(d) => write_proton_record(data, app_id, d, ProtonHow::You),
+        Some(_) => Err(io::Error::new(io::ErrorKind::NotFound, "that Proton isn't installed any more")),
+        None if !app_id_ok(app_id) => Err(io::Error::new(io::ErrorKind::InvalidInput, "not a Steam app id")),
+        None => match fs::remove_file(proton_file(data, app_id)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        },
+    }
 }
 
 /// The Proton folder written down for a game, if any.
 pub fn proton_choice(data: &Path, app_id: &str) -> Option<PathBuf> {
+    proton_record(data, app_id).map(|(d, _)| d)
+}
+
+/// The record for a game: the folder and where it came from.
+pub fn proton_record(data: &Path, app_id: &str) -> Option<(PathBuf, ProtonHow)> {
     let t = fs::read_to_string(proton_file(data, app_id)).ok()?;
-    let line = t.lines().next()?.trim_end_matches('\r');
-    (!line.is_empty()).then(|| PathBuf::from(line))
+    let mut lines = t.lines();
+    let line = lines.next()?.trim_end_matches('\r');
+    let how = ProtonHow::from_word(lines.next().unwrap_or(""));
+    (!line.is_empty()).then(|| (PathBuf::from(line), how))
 }
 
 /// The Proton Steam itself last used for a game, from the helper's log (steam-launch.log): the newest launch of the
@@ -397,17 +491,254 @@ pub fn last_steam_proton_in(log: &str, app_id: &str) -> Option<PathBuf> {
     None
 }
 
-/// Keeps the Proton Steam last used for the game, when the log has one and it is still there. Called before the
-/// player switches the game to Turbine's tool, and at every Play while the Launch Options way is in use. Answers
-/// the folder now on record.
+/// The Proton the game's newest launch in the helper's log ran with, and whose choice it was: Steam's own command
+/// (`last_steam_proton_in`'s kind of line), or the tool's own pick at a launch through the tool.
+pub fn last_proton_seen_in(log: &str, app_id: &str) -> Option<(PathBuf, ProtonHow)> {
+    let steam_mark = format!(" Steam started app {app_id} in ");
+    let tool_start = " Turbine (mods): Steam started app ";
+    let pick_mark = " Turbine (mods): Proton for this game: ";
+    let mut picked: Option<PathBuf> = None;
+    for line in log.lines().rev() {
+        if let Some(at) = line.find(pick_mark) {
+            let rest = &line[at + pick_mark.len()..];
+            picked = rest.split_once(" [why: ").map(|(d, _)| PathBuf::from(d));
+        } else if let Some(at) = line.find(tool_start) {
+            let ours = line[at + tool_start.len()..].starts_with(&format!("{app_id} ("));
+            match (ours, picked.take()) {
+                (true, Some(d)) => return Some((d, ProtonHow::Tool)),
+                // The tool started this game and chose nothing (no Proton found): look further back.
+                _ => continue,
+            }
+        } else if line.contains(&steam_mark) && line.contains(&format!("SteamLaunch AppId={app_id} ")) {
+            let one = format!("{line}\n");
+            if let Some(d) = last_steam_proton_in(&one, app_id) {
+                return Some((d, ProtonHow::Steam));
+            }
+        }
+    }
+    None
+}
+
+/// Keeps the Proton the game last ran with (0.62 break test M5: the record was written only from a Launch Options
+/// start and never moved once the game ran through the tool). Called at every Play. The player's own pick is never
+/// replaced. Otherwise the newest launch in the helper's log decides: Steam's own Proton, or what the tool chose
+/// by itself. Only a Proton that is still installed is written down. Answers the folder now on record.
 pub fn remember_proton(data: &Path, app_id: &str) -> Option<PathBuf> {
+    let now = proton_record(data, app_id);
+    if matches!(now, Some((ref d, ProtonHow::You)) if is_proton(d)) {
+        return now.map(|(d, _)| d);
+    }
     let log = fs::read_to_string(crate::anticheat::helper_log(data)).unwrap_or_default();
-    if let Some(dir) = last_steam_proton_in(&log, app_id) {
-        if is_proton(&dir) && proton_choice(data, app_id).as_deref() != Some(dir.as_path()) {
-            let _ = write_proton_choice(data, app_id, &dir);
+    if let Some((dir, how)) = last_proton_seen_in(&log, app_id) {
+        if is_proton(&dir) && now.as_ref().map(|(d, h)| (d.as_path(), *h)) != Some((dir.as_path(), how)) {
+            let _ = write_proton_record(data, app_id, &dir, how);
         }
     }
     proton_choice(data, app_id)
+}
+
+/// `remember_proton`, and with no record after it: the game's own entry in Steam's settings (the tool Steam was
+/// told to use for it before the player picks Turbine's), when that is a Proton installed here. Also keeps
+/// `default.proton` up to date (`write_default_proton`).
+pub fn remember_proton_with(steam_root: &Path, data: &Path, app_id: &str) -> Option<PathBuf> {
+    let _ = write_default_proton(steam_root, data);
+    if let Some(d) = remember_proton(data, app_id) {
+        if is_proton(&d) {
+            return Some(d);
+        }
+    }
+    let config = fs::read_to_string(config_file(steam_root)).unwrap_or_default();
+    let name = chosen_in(&config, app_id).filter(|n| n != TOOL_NAME)?;
+    let dir = installed_protons(steam_root).into_iter().find(|p| p.steam_name.as_deref() == Some(name.as_str()) || p.matches_steam_name(&name))?.dir;
+    write_proton_record(data, app_id, &dir, ProtonHow::Steam).ok()?;
+    Some(dir)
+}
+
+// ---- The Protons installed (0.62) ----
+
+/// What kind of Proton a folder is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProtonKind {
+    /// A finished, numbered Proton from Steam ("Proton 11.0").
+    Stable,
+    /// A numbered one that isn't finished ("Proton 12.0 (Beta)").
+    Beta,
+    Experimental,
+    Hotfix,
+    /// Another tool's Proton in compatibilitytools.d (GE-Proton and the like).
+    Other,
+}
+
+impl ProtonKind {
+    pub fn word(self) -> &'static str {
+        match self {
+            ProtonKind::Stable => "stable",
+            ProtonKind::Beta => "beta",
+            ProtonKind::Experimental => "experimental",
+            ProtonKind::Hotfix => "hotfix",
+            ProtonKind::Other => "other",
+        }
+    }
+}
+
+/// One Proton installed on this device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Proton {
+    pub dir: PathBuf,
+    /// Its folder's name ("Proton 11.0", "GE-Proton10-4").
+    pub name: String,
+    pub kind: ProtonKind,
+    /// Its number ("11.0"), for numbered ones.
+    pub number: String,
+    /// The Steam Linux Runtime it asks for is installed (or it asks for none): the tool can start it.
+    pub usable: bool,
+    /// Its name in Steam's settings when its folder says so (another tool's compatibilitytool.vdf).
+    pub steam_name: Option<String>,
+}
+
+impl Proton {
+    /// Is this the Proton Steam's settings call `name` ("proton_11", "proton_experimental", "GE-Proton10-4")?
+    pub fn matches_steam_name(&self, name: &str) -> bool {
+        match self.kind {
+            ProtonKind::Experimental => name == "proton_experimental",
+            ProtonKind::Hotfix => name == "proton_hotfix",
+            ProtonKind::Stable | ProtonKind::Beta => name.strip_prefix("proton_").is_some_and(|n| !n.is_empty() && n == self.number.split('.').next().unwrap_or("")),
+            ProtonKind::Other => self.name == name,
+        }
+    }
+}
+
+/// Steam's library folders (its own folder first), from steamapps/libraryfolders.vdf.
+pub fn library_folders(steam_root: &Path) -> Vec<PathBuf> {
+    let mut out = vec![steam_root.to_path_buf()];
+    if let Some(v) = fs::read_to_string(steam_root.join("steamapps/libraryfolders.vdf")).ok().and_then(|t| vdf::parse(&t).ok()) {
+        for (_, lib) in v.get("libraryfolders").map(|l| l.entries()).unwrap_or(&[]) {
+            if let Some(p) = lib.str_at(&["path"]).map(PathBuf::from) {
+                if p.is_absolute() && p.join("steamapps").is_dir() && !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every Proton installed: Steam's own in each library, then other tools' in compatibilitytools.d. Best first:
+/// finished ones by number (newest first), then Betas, Experimental, Hotfix, others; usable ones before the rest
+/// within each kind.
+pub fn installed_protons(steam_root: &Path) -> Vec<Proton> {
+    let libs = library_folders(steam_root);
+    let value = |file: &Path, key: &str| -> Option<String> {
+        let v = vdf::parse(&fs::read_to_string(file).ok()?).ok()?;
+        v.entries().first().and_then(|(_, body)| body.str_at(&[key])).map(str::to_string)
+    };
+    let usable = |dir: &Path| -> bool {
+        let Some(need) = value(&dir.join("toolmanifest.vdf"), "require_tool_appid") else { return true };
+        libs.iter().any(|l| value(&l.join(format!("steamapps/appmanifest_{need}.acf")), "installdir").is_some_and(|d| l.join("steamapps/common").join(d).join("toolmanifest.vdf").is_file()))
+    };
+    let mut out: Vec<Proton> = Vec::new();
+    for l in &libs {
+        let Ok(rd) = fs::read_dir(l.join("steamapps/common")) else { continue };
+        for e in rd.flatten() {
+            let dir = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with("Proton") || !is_proton(&dir) || out.iter().any(|p| p.name == name) {
+                continue;
+            }
+            let number: String = name.strip_prefix("Proton ").unwrap_or("").chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            let kind = if name == "Proton - Experimental" {
+                ProtonKind::Experimental
+            } else if name == "Proton Hotfix" {
+                ProtonKind::Hotfix
+            } else if !number.is_empty() && name == format!("Proton {number}") {
+                ProtonKind::Stable
+            } else if !number.is_empty() {
+                ProtonKind::Beta
+            } else {
+                ProtonKind::Other
+            };
+            out.push(Proton { usable: usable(&dir), dir, name, kind, number, steam_name: None });
+        }
+    }
+    if let Ok(rd) = fs::read_dir(tools_dir(steam_root)) {
+        for e in rd.flatten() {
+            let dir = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name == FOLDER || !is_proton(&dir) {
+                continue;
+            }
+            let steam_name = fs::read_to_string(dir.join("compatibilitytool.vdf"))
+                .ok()
+                .and_then(|t| vdf::parse(&t).ok())
+                .and_then(|v| v.path(&["compatibilitytools", "compat_tools"]).and_then(|c| c.entries().first().map(|(k, _)| k.clone())));
+            out.push(Proton { usable: usable(&dir), dir, name, kind: ProtonKind::Other, number: String::new(), steam_name });
+        }
+    }
+    out.sort_by(|a, b| {
+        a.kind.cmp(&b.kind).then(b.usable.cmp(&a.usable)).then_with(|| crate::updates::compare_versions(&b.number, &a.number)).then_with(|| crate::updates::compare_versions(&b.name, &a.name))
+    });
+    out
+}
+
+/// The Proton Turbine chooses by itself: the first usable one of `installed_protons` (a finished, numbered Proton
+/// before any Beta or Experimental).
+pub fn best_proton(steam_root: &Path) -> Option<Proton> {
+    installed_protons(steam_root).into_iter().find(|p| p.usable)
+}
+
+/// The file that names the Proton for games without a record of their own (read by the script).
+pub fn default_proton_file(data: &Path) -> PathBuf {
+    crate::anticheat::launch_dir(data).join("default.proton")
+}
+
+/// Keeps default.proton: Steam's own choice for all games (the "0" entry of its settings) when that Proton is
+/// installed and usable, else the newest finished Proton. Written only when it changes. Answers the folder.
+pub fn write_default_proton(steam_root: &Path, data: &Path) -> Option<PathBuf> {
+    let list = installed_protons(steam_root);
+    let config = fs::read_to_string(config_file(steam_root)).unwrap_or_default();
+    let steams = chosen_in(&config, "0")
+        .filter(|n| n != TOOL_NAME)
+        .and_then(|name| list.iter().find(|p| p.usable && (p.steam_name.as_deref() == Some(name.as_str()) || p.matches_steam_name(&name))));
+    let (pick, how) = match steams {
+        Some(p) => (p, "steam"),
+        None => (list.iter().find(|p| p.usable)?, "turbine"),
+    };
+    let file = default_proton_file(data);
+    let want = format!("{}\n{how}\n", pick.dir.to_string_lossy());
+    if fs::read_to_string(&file).is_ok_and(|t| t == want) || write_record(&file, &pick.dir, how).is_ok() {
+        Some(pick.dir.clone())
+    } else {
+        None
+    }
+}
+
+/// For the Settings row "Proton for modded play": {"name","dir","how","words","auto","list":[{"name","dir",
+/// "kind","usable","current"}]}. `how` is "you", "steam", "tool" or "auto" (no record: the tool takes `auto`, the
+/// default, at the next launch). The list is every Proton installed, best first.
+pub fn proton_json(steam_root: &Path, data: &Path, app_id: &str) -> String {
+    use crate::json::quote;
+    let list = installed_protons(steam_root);
+    let record = proton_record(data, app_id).filter(|(d, _)| is_proton(d));
+    let auto = write_default_proton(steam_root, data).or_else(|| list.iter().find(|p| p.usable).map(|p| p.dir.clone()));
+    let name_of = |d: &Path| d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let current = record.as_ref().map(|(d, _)| d.clone()).or_else(|| auto.clone());
+    let (how, words) = match &record {
+        Some((_, h)) => (h.word(), h.words().to_string()),
+        None => ("auto", "chosen by Turbine: Steam's own choice for all games, or the newest finished Proton".to_string()),
+    };
+    let items: Vec<String> = list
+        .iter()
+        .map(|p| format!("{{\"name\":{},\"dir\":{},\"kind\":{},\"usable\":{},\"current\":{}}}", quote(&p.name), quote(&p.dir.to_string_lossy()), quote(p.kind.word()), p.usable, current.as_deref() == Some(p.dir.as_path())))
+        .collect();
+    format!(
+        "{{\"name\":{},\"dir\":{},\"how\":{},\"words\":{},\"auto\":{},\"list\":[{}]}}",
+        quote(&current.as_deref().map(name_of).unwrap_or_default()),
+        quote(&current.as_deref().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()),
+        quote(how),
+        quote(&words),
+        quote(&auto.as_deref().map(name_of).unwrap_or_default()),
+        items.join(",")
+    )
 }
 
 // ---- What the tool said (for the launch check and reports) ----

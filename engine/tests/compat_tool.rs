@@ -603,7 +603,7 @@ fn the_proton_steam_last_used_is_kept_from_the_helpers_log() {
     write(&p.join("proton"), "x");
     write(&p.join("toolmanifest.vdf"), "x");
     assert_eq!(tool::remember_proton(&data, "1245620"), Some(p.clone()));
-    assert_eq!(fs::read_to_string(tool::proton_file(&data, "1245620")).unwrap(), format!("{}\n", p.display()));
+    assert_eq!(fs::read_to_string(tool::proton_file(&data, "1245620")).unwrap(), format!("{}\nsteam\n", p.display()));
     assert!(tool::write_proton_choice(&data, "12a", &p).is_err());
     assert!(tool::write_proton_choice(&data, "1", Path::new("relative/Proton")).is_err());
     let _ = fs::remove_dir_all(&d);
@@ -733,4 +733,113 @@ fn the_report_lines_hold_the_launch_logs_and_the_proton_pick() {
     write(&anticheat::helper_log(&data), "2026-11-10 10:00:00 Turbine (mods): no Proton that can run was found in /s: nothing started. In Steam, start any game with Proton once\n");
     assert!(anticheat::launch_report_lines(&data)[0].starts_with("Turbine's Steam tool: no Proton that can run was found"));
     let _ = fs::remove_dir_all(&d);
+}
+
+/// 0.62 break test M5: choosing by itself, the tool never takes a Beta or Experimental while a finished numbered
+/// Proton can run, unless that Beta is the one Steam last used for the game.
+#[test]
+fn a_beta_is_never_picked_over_a_finished_proton() {
+    if !has_bash() {
+        return;
+    }
+    let s = Steam::new("beta");
+    // A newer Beta and Experimental beside the finished Proton 11.
+    let beta = s.root.join("steamapps/common/Proton 12.0 (Beta)");
+    proton(&beta, &s.trace, "proton12beta", Some("4183110"));
+    proton(&s.root.join("steamapps/common/Proton - Experimental"), &s.trace, "protonexp", Some("4183110"));
+    let (code, t) = s.play();
+    assert_eq!(code, 0, "{}", s.log());
+    assert_eq!(names(&t), ["wrapper", "reaper", "slr4", "proton11", "game"], "{t:?}");
+    // The engine's own list agrees: finished ones first, then Betas, Experimental.
+    let list = tool::installed_protons(&s.root);
+    assert_eq!(list.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Proton 11.0", "Proton 12.0 (Beta)", "Proton 9.0 (Beta)", "Proton - Experimental"]);
+    assert_eq!(list.iter().map(|p| p.kind.word()).collect::<Vec<_>>(), ["stable", "beta", "beta", "experimental"]);
+    assert!(list.iter().all(|p| p.usable));
+    assert_eq!(tool::best_proton(&s.root).unwrap().name, "Proton 11.0");
+    // The Beta is used when Steam itself last used it for this game.
+    tool::write_proton_choice(&s.data, APP, &beta).unwrap();
+    let (_, t) = s.play();
+    assert_eq!(names(&t), ["wrapper", "reaper", "slr4", "proton12beta", "game"], "{t:?}");
+    // No record and no finished Proton left: the newest Beta, and the log says it is one.
+    fs::remove_file(tool::proton_file(&s.data, APP)).unwrap();
+    fs::remove_dir_all(&s.proton11).unwrap();
+    let (_, t) = s.play();
+    assert_eq!(names(&t), ["wrapper", "reaper", "slr4", "proton12beta", "game"], "{t:?}");
+    assert!(s.log().contains("[why: the newest Proton installed is a Beta (no finished Proton could be used; 2 numbered Proton found)]"), "{}", s.log());
+    // A Proton whose runtime is missing is listed as not usable and never the best.
+    fs::remove_dir_all(&s.slr4).unwrap();
+    let list = tool::installed_protons(&s.root);
+    assert_eq!(list.iter().find(|p| p.name == "Proton 12.0 (Beta)").map(|p| p.usable), Some(false));
+    assert_eq!(tool::best_proton(&s.root).unwrap().name, "Proton 9.0 (Beta)");
+    s.done();
+}
+
+/// 0.62 break test M5: the record moves with what the game really ran with, also through the tool; the player's
+/// own pick is kept; Automatic removes it; default.proton is written.
+#[test]
+fn the_proton_record_follows_launches_and_the_players_pick() {
+    if !has_bash() {
+        return;
+    }
+    let s = Steam::new("record");
+    // No record: the tool chooses (Proton 11), and Turbine keeps what the game ran with.
+    assert_eq!(tool::proton_record(&s.data, APP), None);
+    s.play();
+    assert_eq!(tool::last_proton_seen_in(&s.log(), APP), Some((s.proton11.clone(), tool::ProtonHow::Tool)));
+    assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton11.clone()));
+    assert_eq!(tool::proton_record(&s.data, APP), Some((s.proton11.clone(), tool::ProtonHow::Tool)));
+    s.play();
+    assert!(s.log().contains("[why: the Proton this game last ran with, kept by Turbine]"), "{}", s.log());
+    // The player picks another one in Turbine: used, said, and never replaced by what a launch shows.
+    tool::set_proton_pick(&s.data, APP, Some(&s.proton9)).unwrap();
+    let (_, t) = s.play();
+    assert_eq!(names(&t), ["wrapper", "reaper", "sniper", "proton9", "game"], "{t:?}");
+    assert!(s.log().contains("[why: your pick in Turbine for this game]"));
+    assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton9.clone()));
+    assert_eq!(tool::proton_record(&s.data, APP).unwrap().1, tool::ProtonHow::You);
+    // A pick that isn't a Proton is refused; Automatic takes the record away.
+    assert!(tool::set_proton_pick(&s.data, APP, Some(&s.d.join("nothing"))).is_err());
+    tool::set_proton_pick(&s.data, APP, None).unwrap();
+    assert_eq!(tool::proton_record(&s.data, APP), None);
+    tool::set_proton_pick(&s.data, APP, None).unwrap();
+    assert!(tool::set_proton_pick(&s.data, "12a", None).is_err());
+    // Steam's own launch afterwards (the game back on a plain Proton with the Launch Options line): its Proton
+    // becomes the record, over the tool's earlier one.
+    s.play();
+    tool::remember_proton(&s.data, APP);
+    assert_eq!(tool::proton_record(&s.data, APP).unwrap().1, tool::ProtonHow::Tool);
+    let own = format!("2026-11-10 12:00:00 Steam started app {APP} in /g: /s/steam-launch-wrapper -- /s/reaper SteamLaunch AppId={APP} -- {}/_v2-entry-point --verb=waitforexitandrun -- {}/proton waitforexitandrun /g/x.exe\n", s.sniper.display(), s.proton9.display());
+    fs::write(anticheat::helper_log(&s.data), format!("{}{own}", s.log())).unwrap();
+    assert_eq!(tool::remember_proton(&s.data, APP), Some(s.proton9.clone()));
+    assert_eq!(tool::proton_record(&s.data, APP), Some((s.proton9.clone(), tool::ProtonHow::Steam)));
+
+    // default.proton: the newest finished Proton, or Steam's own choice for all games when its settings name one.
+    assert_eq!(tool::write_default_proton(&s.root, &s.data), Some(s.proton11.clone()));
+    assert_eq!(fs::read_to_string(tool::default_proton_file(&s.data)).unwrap(), format!("{}\nturbine\n", s.proton11.display()));
+    let config = |zero: &str, game: &str| format!("\"InstallConfigStore\"\n{{\n\"Software\"\n{{\n\"Valve\"\n{{\n\"Steam\"\n{{\n\"CompatToolMapping\"\n{{\n\"0\"\n{{\n\"name\"\t\"{zero}\"\n}}\n\"814380\"\n{{\n\"name\"\t\"{game}\"\n}}\n}}\n}}\n}}\n}}\n}}\n");
+    let ge = tool::tools_dir(&s.root).join("GE-Proton10-4");
+    proton(&ge, &s.trace, "ge", Some("4183110"));
+    write(&ge.join("compatibilitytool.vdf"), "\"compatibilitytools\"\n{\n\"compat_tools\"\n{\n\"GE-Proton10-4\"\n{\n\"install_path\" \".\"\n\"display_name\" \"GE-Proton10-4\"\n}\n}\n}\n");
+    write(&tool::config_file(&s.root), &config("proton_9", "GE-Proton10-4"));
+    assert_eq!(tool::write_default_proton(&s.root, &s.data), Some(s.proton9.clone()), "Steam's own choice for all games");
+    assert_eq!(fs::read_to_string(tool::default_proton_file(&s.data)).unwrap(), format!("{}\nsteam\n", s.proton9.display()));
+    // A game with no record and no launch in the log: its own entry in Steam's settings (another tool's Proton).
+    assert_eq!(tool::remember_proton_with(&s.root, &s.data, "814380"), Some(ge.clone()));
+    assert_eq!(tool::proton_record(&s.data, "814380"), Some((ge.clone(), tool::ProtonHow::Steam)));
+    // A game with neither runs with default.proton, and the log says whose choice that is.
+    tool::set_proton_pick(&s.data, APP, None).unwrap();
+    let (_, t) = s.play();
+    assert_eq!(names(&t), ["wrapper", "reaper", "sniper", "proton9", "game"], "{t:?}");
+    assert!(s.log().contains("[why: Steam's own choice for all games, kept by Turbine]"));
+
+    // The Settings row: the Proton in use, why, and the list to pick from.
+    let j = turbine_engine::json::parse(&tool::proton_json(&s.root, &s.data, APP)).unwrap();
+    assert_eq!((j.str_at("name"), j.str_at("how"), j.str_at("auto")), (Some("Proton 9.0 (Beta)"), Some("auto"), Some("Proton 9.0 (Beta)")));
+    let list = j.get("list").unwrap().as_array();
+    assert_eq!(list.iter().map(|p| p.str_at("name").unwrap()).collect::<Vec<_>>(), ["Proton 11.0", "Proton 9.0 (Beta)", "GE-Proton10-4"]);
+    assert_eq!(list.iter().filter(|p| p.get("current").and_then(|c| c.as_bool()) == Some(true)).count(), 1);
+    tool::set_proton_pick(&s.data, APP, Some(&s.proton11)).unwrap();
+    let j = turbine_engine::json::parse(&tool::proton_json(&s.root, &s.data, APP)).unwrap();
+    assert_eq!((j.str_at("name"), j.str_at("how"), j.str_at("words")), (Some("Proton 11.0"), Some("you"), Some("your pick")));
+    s.done();
 }

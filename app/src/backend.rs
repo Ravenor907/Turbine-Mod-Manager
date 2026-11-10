@@ -951,6 +951,16 @@ pub mod qobject {
         #[cxx_name = "coopTileJson"]
         fn coop_tile_json(self: &Self, game_id: &QString) -> QString;
 
+        /// 0.62: the Proton Turbine's Steam tool runs a game with: {"name","dir","how","words","auto","list"}.
+        #[qinvokable]
+        #[cxx_name = "protonJson"]
+        fn proton_json(self: &Self, game_id: &QString) -> QString;
+
+        /// 0.62: the player's pick of that Proton (one of the list's "dir", or "" for Automatic): {"ok","words"}.
+        #[qinvokable]
+        #[cxx_name = "protonSet"]
+        fn proton_set(self: &Self, game_id: &QString, dir: &QString) -> QString;
+
         /// 0.62: how the Co-op tile can be added or taken out here and now: {"how","words","label"} with how
         /// "direct", "restart", "later" or "none" (steamsetup.rs).
         #[qinvokable]

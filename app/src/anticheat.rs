@@ -267,7 +267,11 @@ pub(crate) fn launch_option_state(slot: &Slot, data: &Path) -> (Option<String>, 
     // 0.62: the Proton Steam itself last used for the game is kept for Turbine's Steam tool, and a game that uses
     // the tool is set up whatever its Launch Options say. Choosing the tool after an Undo sets it up again.
     let id = &slot.game.store_id;
-    let _ = turbine_engine::compat_tool::remember_proton(data, id);
+    // (0.62 break test: at every Play, from launches through the tool too; default.proton is kept as well.)
+    let _ = match steam_root() {
+        Some(root) => turbine_engine::compat_tool::remember_proton_with(&root, data, id),
+        None => turbine_engine::compat_tool::remember_proton(data, id),
+    };
     let tool = via_tool(slot, data, options_ok);
     if tool && ac::undone_file(data, id).exists() {
         let _ = ac::still_undone(data, id, None, true);

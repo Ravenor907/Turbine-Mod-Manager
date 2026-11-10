@@ -334,6 +334,45 @@ impl qobject::Turbine {
         QString::from(tool::state_json(&ask).as_str())
     }
 
+    /// 0.62: the Proton Turbine's Steam tool runs a game with, for the row "Proton for modded play":
+    /// {"name","dir","how" ("you", "steam", "tool" or "auto"),"words","auto","list":[{"name","dir","kind",
+    /// "usable","current"}]} (turbine_engine::compat_tool::proton_json).
+    pub fn proton_json(&self, game_id: &QString) -> QString {
+        let none = "{\"name\":\"\",\"dir\":\"\",\"how\":\"auto\",\"words\":\"\",\"auto\":\"\",\"list\":[]}";
+        let (Some(g), Some(root)) = (self.find(&game_id.to_string()), crate::anticheat::steam_root()) else { return QString::from(none) };
+        let data = crate::backend::data_home();
+        let _ = turbine_engine::compat_tool::remember_proton_with(&root, &data, &g.store_id);
+        QString::from(turbine_engine::compat_tool::proton_json(&root, &data, &g.store_id).as_str())
+    }
+
+    /// 0.62: the player's pick of the Proton for a game's modded play: one of protonJson's `dir`s, or "" for
+    /// Automatic. Answers {"ok","words"}.
+    pub fn proton_set(&self, game_id: &QString, dir: &QString) -> QString {
+        let answer = |ok: bool, words: &str| QString::from(format!("{{\"ok\":{ok},\"words\":{}}}", quote(words)).as_str());
+        let Some(g) = self.find(&game_id.to_string()) else { return answer(false, "That game isn't found any more.") };
+        let data = crate::backend::data_home();
+        let dir = dir.to_string();
+        let pick = (!dir.is_empty()).then(|| PathBuf::from(&dir));
+        // Only a Proton from the list (installed now) can be picked.
+        if let Some(p) = &pick {
+            let listed = crate::anticheat::steam_root().is_some_and(|r| turbine_engine::compat_tool::installed_protons(&r).iter().any(|x| x.dir == *p));
+            if !listed {
+                return answer(false, "That Proton isn't installed any more.");
+            }
+        }
+        match turbine_engine::compat_tool::set_proton_pick(&data, &g.store_id, pick.as_deref()) {
+            Ok(()) => {
+                let name = pick.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+                crate::log::line("launch", &format!("{}: Proton for modded play: {}", g.name, name.as_deref().unwrap_or("Automatic")));
+                answer(true, &match name {
+                    Some(n) => format!("{} runs with {n} when it starts with mods.", g.name),
+                    None => format!("Turbine chooses the Proton for {} again.", g.name),
+                })
+            }
+            Err(e) => answer(false, &format!("Couldn't keep that choice: {e}")),
+        }
+    }
+
     /// 0.62: how the Co-op tile can be added (or taken out) here and now: {"how","words","label"}. "direct":
     /// Desktop Mode with Steam closed (coopTileSet does it at once); "restart": Desktop Mode with Steam running
     /// (one restart, asked first); "later": Game Mode (the words say where); "none": no such tile for this game.
