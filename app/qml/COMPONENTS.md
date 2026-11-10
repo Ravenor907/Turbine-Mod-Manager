@@ -29,6 +29,11 @@ and Page Down RB, Shift+Tab and Page Up LB, Ctrl+F or / Y, the Menu key or Shift
 Help, Ctrl+= and Ctrl+- the size, Ctrl+Enter the hold of Start, Ctrl+Z a toast's step, V View, P Start; a click is A, a
 right-click X, the mouse's Back button B, Ctrl with the wheel the size. The caps in the bar follow the last input
 (`glyph()`: `keyNames`, `mouseNames`), never in Game Mode.
+0.63, the keys a PC player expects: W A S D the D-pad too, Q and E (and [ and ]) LB and RB, F Y, R X, Esc on a game's
+first page a tap of Start (Settings; `escTop`), Tab held the quick wheel (let go to choose; a tap is RB), Space held
+for 3 seconds the hold of Start with its ring (a tap is A). A double-click opens a mod, the mouse's Forward button
+is RB. The bar shows Q, E, Enter, Esc, F, R, Tab and Space after a key; after the mouse (`mouseLegend`) no caps at
+all (a `Key` has no size then): the pages are buttons by name and each hint is a named button.
 
 The left stick (pointer.rs `left_stick`): pushed past 0.5 and kept within 25 degrees for 80 ms it is one D-pad
 press (released under 0.35); swept 40 degrees first it is the wheel until it comes back under 0.35.

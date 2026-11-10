@@ -15,6 +15,18 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.63" date="2026-11-10" type="development">
+      <description>
+        <p>Updates that check without being refused, and keys and a mouse the way PC players expect:</p>
+        <ul>
+          <li>Check for updates no longer runs into GitHub's hourly limit, looks at most once every 6 hours at a start, and says so plainly when GitHub asks it to wait</li>
+          <li>Turbine's own icon on its window in Desktop Mode's taskbar, and the menu's icon is read again after an update</li>
+          <li>Keyboard: W A S D or the arrows, Enter or Space, Esc (Settings on a game's first page), Q and E for the pages, F to find, R for options, hold Tab for the quick wheel, hold Space for 3 seconds to play</li>
+          <li>Mouse: a double-click opens a mod, the side buttons go back and to the next page, and the bar shows named buttons with no key caps</li>
+          <li>An older Seamless Co-op file left without an answer is settled when another arrives or Turbine closes</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.62" date="2026-11-10" type="development">
       <description>
         <p>Start, pages, keys and a safer way into Steam:</p>
