@@ -406,3 +406,60 @@ fn real_folders_with_the_catcher() {
     assert_eq!(a.path, dl.join("Real Mod 7z").with_file_name("Real Mod.7z"));
     assert!(a.catch_up, "arrived before this Turbine started");
 }
+
+/// 0.62: Game Mods folders an older Turbine named with a long dash get the plain name, with everything in them.
+#[test]
+fn folders_with_a_long_dash_get_their_plain_name() {
+    use turbine_engine::watch;
+    assert_eq!(watch::game_folder_name("The Witcher 3 Wild Hunt \u{2014} Remastered"), "The Witcher 3 Wild Hunt - Remastered");
+    assert_eq!(watch::game_folder_name("Slay the Princess \u{2013} The Pristine Cut"), "Slay the Princess - The Pristine Cut");
+    assert_eq!(watch::game_folder_name("Half-Life 2"), "Half-Life 2");
+    let d = std::env::temp_dir().join(format!("turbine-dash-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let dl = d.join("Downloads");
+    let gm = dl.join(watch::GAME_MODS);
+    let w = |rel: &str, text: &str| {
+        let p = gm.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, text).unwrap();
+        p
+    };
+    // 1. A plain rename: the contents come along, and the watcher's memory of the files follows.
+    let a = w("The Witcher 3 Wild Hunt \u{2014} Remastered/aqom.zip", "a");
+    w("The Witcher 3 Wild Hunt \u{2014} Remastered/sub/notes.txt", "n");
+    // 2. The plain folder is there already: files move over, never over one with the same name.
+    w("Slay the Princess \u{2014} The Pristine Cut/one.zip", "old one");
+    w("Slay the Princess \u{2014} The Pristine Cut/two.zip", "two");
+    w("Slay the Princess - The Pristine Cut/one.zip", "new one");
+    // 3. A download still being written: left for the next start.
+    w("Odd \u{2014} Game/half.zip.crdownload", "x");
+    // 4. No long dash: untouched.
+    w("Half-Life 2/hl.zip", "h");
+    let state = d.join("catch.json");
+    let mut st = watch::CatchState::default();
+    st.ignore(&watch::ignore_key(&a, 1));
+    st.save(&state).unwrap();
+
+    let lines = watch::rename_dash_folders(&[dl.clone(), d.join("nowhere")], Some(&state));
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    let new = gm.join("The Witcher 3 Wild Hunt - Remastered");
+    assert_eq!(fs::read_to_string(new.join("aqom.zip")).unwrap(), "a");
+    assert_eq!(fs::read_to_string(new.join("sub/notes.txt")).unwrap(), "n");
+    assert!(!gm.join("The Witcher 3 Wild Hunt \u{2014} Remastered").exists());
+    assert!(lines.iter().any(|l| l.contains("renamed to The Witcher 3 Wild Hunt - Remastered")), "{lines:?}");
+    let st = watch::CatchState::load(&state).unwrap();
+    assert_eq!(st.ignored, vec![watch::ignore_key(&new.join("aqom.zip"), 1)], "the remembered file follows the folder");
+    // The joined folder: the file with the same name stays where it was, the other moved.
+    let plain = gm.join("Slay the Princess - The Pristine Cut");
+    assert_eq!(fs::read_to_string(plain.join("one.zip")).unwrap(), "new one");
+    assert_eq!(fs::read_to_string(plain.join("two.zip")).unwrap(), "two");
+    assert_eq!(fs::read_to_string(gm.join("Slay the Princess \u{2014} The Pristine Cut/one.zip")).unwrap(), "old one", "nothing is lost or replaced");
+    assert!(gm.join("Odd \u{2014} Game/half.zip.crdownload").exists());
+    assert!(lines.iter().any(|l| l.contains("a download is still being written there")), "{lines:?}");
+    assert!(gm.join("Half-Life 2/hl.zip").exists());
+    // Again: only the two that couldn't finish are looked at; nothing else changes.
+    let again = watch::rename_dash_folders(&[dl], Some(&state));
+    assert_eq!(again.len(), 2, "{again:?}");
+    assert_eq!(fs::read_to_string(new.join("aqom.zip")).unwrap(), "a");
+    let _ = fs::remove_dir_all(&d);
+}

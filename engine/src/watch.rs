@@ -367,11 +367,96 @@ pub const OTHER_FOLDER: &str = "Other";
 /// The folder name for a game inside Game Mods: its name without characters browsers or file systems refuse
 /// (< > : " / \\ | ? * and control characters), spaces kept, at most 80 characters, never "." or "..".
 pub fn game_folder_name(name: &str) -> String {
-    let cleaned: String = name.chars().filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
+    // 0.62: a long dash in a game's name ("Slay the Princess \u{2014} The Pristine Cut") becomes a plain hyphen.
+    let cleaned: String = name.chars().map(plain_dash).filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
     let words = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let t: String = words.trim_matches('.').chars().take(80).collect();
     let t = t.trim().to_string();
     if t.is_empty() { OTHER_FOLDER.to_string() } else { t }
+}
+
+fn plain_dash(c: char) -> char {
+    if matches!(c, '\u{2014}' | '\u{2013}' | '\u{2012}' | '\u{2015}') { '-' } else { c }
+}
+
+/// 0.62: Game Mods folders made by an older Turbine with a long dash in their name ("The Witcher 3 Wild Hunt
+/// \u{2014} Remastered") get the name `game_folder_name` gives now (a plain hyphen), with everything in them. A
+/// folder is left for the next start while a download is still being written into it. When the new name is there
+/// already, the files move over one by one (a file with the same name there stays where it is, and so does the old
+/// folder). Links are never followed. The watcher's remembered files (`state_file`, CatchState) follow the move.
+/// Answers one line per folder for the activity log.
+pub fn rename_dash_folders(downloads: &[PathBuf], state_file: Option<&Path>) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for d in downloads {
+        let gm = d.join(GAME_MODS);
+        let Ok(rd) = fs::read_dir(&gm) else { continue };
+        let mut subs: Vec<PathBuf> = rd.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect();
+        subs.sort();
+        for old in subs {
+            let Some(name) = old.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+            if name.chars().all(|c| plain_dash(c) == c) {
+                continue;
+            }
+            let new_name = game_folder_name(&name);
+            let new = gm.join(&new_name);
+            let entries: Vec<PathBuf> = fs::read_dir(&old).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+            let writing = entries.iter().any(|p| p.file_name().is_some_and(|n| PARTIAL_SUFFIXES.iter().any(|s| n.to_string_lossy().to_lowercase().ends_with(s))));
+            if writing {
+                lines.push(format!("Game Mods folder {name}: a download is still being written there, renamed at the next start"));
+                continue;
+            }
+            if fs::symlink_metadata(&new).is_err() {
+                match fs::rename(&old, &new) {
+                    Ok(()) => {
+                        lines.push(format!("Game Mods folder {name} renamed to {new_name} ({} files kept)", entries.len()));
+                        moved.push((old, new));
+                    }
+                    Err(e) => lines.push(format!("Game Mods folder {name} couldn't be renamed ({e})")),
+                }
+                continue;
+            }
+            if !fs::symlink_metadata(&new).is_ok_and(|m| m.is_dir()) {
+                lines.push(format!("Game Mods folder {name} left as it is: {new_name} is there and isn't a folder"));
+                continue;
+            }
+            // The plain-named folder is there too: the files move over, never over a file of the same name.
+            let (mut over, mut stay) = (0, 0);
+            for p in &entries {
+                let Some(file) = p.file_name() else { continue };
+                let to = new.join(file);
+                if fs::symlink_metadata(&to).is_err() && fs::rename(p, &to).is_ok() {
+                    over += 1;
+                } else {
+                    stay += 1;
+                }
+            }
+            if stay == 0 && fs::remove_dir(&old).is_ok() {
+                lines.push(format!("Game Mods folder {name} joined with {new_name} ({over} files moved)"));
+            } else {
+                lines.push(format!("Game Mods folder {name}: {over} files moved to {new_name}, {stay} left there (the same names are in both)"));
+            }
+            moved.push((old, new));
+        }
+    }
+    if let (Some(file), false) = (state_file, moved.is_empty()) {
+        if let Some(mut st) = CatchState::load(file) {
+            let fix = |k: &String| {
+                moved.iter().fold(k.clone(), |k, (old, new)| {
+                    // Only a file that really is at the new place now follows; the rest keep their old path.
+                    let (o, n) = (format!("{}/", old.display()), format!("{}/", new.display()));
+                    match k.find(&o) {
+                        Some(i) if Path::new(&format!("{n}{}", &k[i + o.len()..])).exists() => format!("{}{n}{}", &k[..i], &k[i + o.len()..]),
+                        _ => k,
+                    }
+                })
+            };
+            st.ignored = st.ignored.iter().map(fix).collect();
+            st.pending = st.pending.iter().map(fix).collect();
+            let _ = st.save(file);
+        }
+    }
+    lines
 }
 
 /// The folders to watch for these Downloads folders: each one, its Game Mods folder, and every subfolder of that

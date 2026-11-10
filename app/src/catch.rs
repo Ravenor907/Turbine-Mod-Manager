@@ -382,6 +382,11 @@ impl qobject::Turbine {
     /// very first run, the last 24 hours count and Turbine asks before adding any of those.
     pub(crate) fn start_downloads_watch(mut self: Pin<&mut Self>) {
         let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
+        // 0.62: Game Mods folders named with a long dash by an older Turbine get their plain name, before the
+        // watcher looks at them.
+        for l in watch::rename_dash_folders(&watch::default_folders(&turbine_engine::home_dir()), Some(&path)) {
+            crate::log::line("catch", &l);
+        }
         let saved = CatchState::load(&path);
         let now = now_secs();
         let (since, first) = watch::catch_up_since(saved.as_ref(), now);
