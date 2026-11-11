@@ -7,3 +7,5 @@
 /repo
 *.flatpak
 /shots
+/build-dir
+/app/build-commit.txt
