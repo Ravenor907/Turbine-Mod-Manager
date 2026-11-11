@@ -97,7 +97,9 @@ shoot() {   # shoot <name> <WxH> <page> <home> [more arguments]
   if [ ! -s "$out" ]; then echo "::error title=No screenshot::$name"; cat "shots/$name.log"; tail -n 40 "$PWD/data/$name/turbine-mod-manager/activity.log" 2>/dev/null || true; fail=1; fi
   # Three pictures that never came: stop here rather than wait a minute for every other one.
   if [ "$hung" -ge 3 ]; then echo "::error title=Turbine hangs::three pictures timed out"; exit 1; fi
-  if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; fi
+  if grep -E "qrc:|\.qml:[0-9]+|TypeError|ReferenceError" "shots/$name.log"; then echo "::error title=QML problem::$name"; fail=1; qmlbad=$((qmlbad + 1)); fi
+  # The same script error in two pictures is in every picture: stop now, not after every other one.
+  if [ "${qmlbad:-0}" -ge 2 ]; then echo "::error title=QML problem in every picture::stopped early, see the lines above"; exit 1; fi
   # The engine answers "not ready" while parts of it are unfinished; say so without failing the build.
   if grep -q "not yet implemented" "shots/$name.log"; then echo "::warning title=Engine not finished::$name"; fi
   echo "SHOTTIME $name $(( SECONDS - t0 ))"

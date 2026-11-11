@@ -447,16 +447,24 @@ jobs:
       options: --privileged
     strategy:
       fail-fast: false
-      # 0.6: each size's pictures split over parallel shards (tools/ci-shots.sh plans them by run time).
+      # 0.6: each size's pictures split over parallel shards (tools/ci-shots.sh plans them by run time). 0.65: 8 and 6
+      # shards (the setup is about 2 minutes of each job, the pictures the rest).
       matrix:
         include:
-          - { part: 1280x800, shard: 0, shards: 4 }
-          - { part: 1280x800, shard: 1, shards: 4 }
-          - { part: 1280x800, shard: 2, shards: 4 }
-          - { part: 1280x800, shard: 3, shards: 4 }
-          - { part: 1920x1080, shard: 0, shards: 3 }
-          - { part: 1920x1080, shard: 1, shards: 3 }
-          - { part: 1920x1080, shard: 2, shards: 3 }
+          - { part: 1280x800, shard: 0, shards: 8 }
+          - { part: 1280x800, shard: 1, shards: 8 }
+          - { part: 1280x800, shard: 2, shards: 8 }
+          - { part: 1280x800, shard: 3, shards: 8 }
+          - { part: 1280x800, shard: 4, shards: 8 }
+          - { part: 1280x800, shard: 5, shards: 8 }
+          - { part: 1280x800, shard: 6, shards: 8 }
+          - { part: 1280x800, shard: 7, shards: 8 }
+          - { part: 1920x1080, shard: 0, shards: 6 }
+          - { part: 1920x1080, shard: 1, shards: 6 }
+          - { part: 1920x1080, shard: 2, shards: 6 }
+          - { part: 1920x1080, shard: 3, shards: 6 }
+          - { part: 1920x1080, shard: 4, shards: 6 }
+          - { part: 1920x1080, shard: 5, shards: 6 }
           - { part: x11, shard: 0, shards: 1 }
           - { part: nexus, shard: 0, shards: 1 }
     steps:
