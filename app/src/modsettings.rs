@@ -14,17 +14,8 @@ use turbine_engine::settings::{self, Format};
 use turbine_engine::store::{self, Store};
 use turbine_engine::{deploy, saves, Game};
 
-/// Config files bigger than this aren't offered.
+/// The most config files listed for a game or a mod.
 const LIMIT: usize = 40;
-
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-/// A setting whose value never goes into the log (pass, pwd, token, secret, key, auth, rcon, webhook in its name).
-fn secret(key: &str) -> bool {
-    turbine_engine::report::secret_word(key)
-}
 
 /// Where the game's own config files may be edited: not for a game me3 starts (its folder must stay as Steam
 /// installed it) and not for an online-only game.
@@ -160,9 +151,9 @@ impl qobject::Turbine {
         });
     }
 
-    /// Saves changes: {"fields":[{"id","value"}]} or {"lines":[{"line","text"}]}. Answers {"ok","error"}. A mod's
-    /// file goes into Turbine's own copy (the mod's file is never changed); the game's file in place, its original
-    /// and the copy before kept.
+    /// Saves changes: {"fields":[{"section","key","occ","was","value"}],"lines":[{"line","was","text"}]}. Answers
+    /// {"ok","error"}. A mod's file goes into Turbine's own copy (the mod's file is never changed); the game's file
+    /// in place, its original and the copy before kept.
     pub fn settings_save(&self, mod_id: &QString, rel: &QString, edits: &QString) -> QString {
         let answer = |ok: bool, e: &str| QString::from(format!("{{\"ok\":{ok},\"error\":{}}}", quote(e)).as_str());
         let Some(game) = self.current_game() else { return answer(false, "No game") };
@@ -183,7 +174,8 @@ impl qobject::Turbine {
             if was == val {
                 continue;
             }
-            said.push(if secret(key) { format!("{key} changed") } else { format!("{key} {was} to {val}") });
+            // A secret's value (pass, pwd, token, key... in its name) never goes into the log.
+            said.push(if turbine_engine::report::secret_word(key) { format!("{key} changed") } else { format!("{key} {was} to {val}") });
             edits.push(settings::Edit {
                 section: f.str_at("section").unwrap_or("").to_string(),
                 key: key.to_string(),
@@ -289,7 +281,7 @@ impl qobject::Turbine {
                 let Some(k) = saves::Kind::from_key(&kind) else { return };
                 let rules = GameRules::for_game(&game);
                 let folders = saves::locations(&game, &rules.saves, &turbine_engine::home_dir());
-                match saves::restore_kind_with(&id, k, &folders, &crate::health::backups_root(&game), now(), &coop_ext(&game)) {
+                match saves::restore_kind_with(&id, k, &folders, &crate::health::backups_root(&game), crate::now_secs(), &coop_ext(&game)) {
                     Ok(0) => w.say(format!("That backup has no {} saves.", k.label()), "warn"),
                     Ok(n) => {
                         crate::log::line("engine", &format!("Saves put back for {}: {} from {id} ({n} files; the saves before were kept)", game.name, k.label()));

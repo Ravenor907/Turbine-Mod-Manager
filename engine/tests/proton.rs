@@ -100,16 +100,6 @@ fn backup_is_made_once() {
 }
 
 #[test]
-fn removes_the_override() {
-    let p = prefix("remove", Some(SAMPLE));
-    proton::ensure_override(&p, "winhttp", "native,builtin").unwrap();
-    assert!(proton::remove_override(&p, "WINHTTP").unwrap());
-    assert_eq!(reg(&p), SAMPLE);
-    assert!(!proton::remove_override(&p, "winhttp").unwrap());
-    assert_eq!(reg(&p), SAMPLE);
-}
-
-#[test]
 fn makes_the_key_when_it_is_missing() {
     let text = SAMPLE.replace(
         "[Software\\\\Wine\\\\DllOverrides] 1730000001\n#time=1db2f8e7a6c1a01\n\"atl100\"=\"native,builtin\"\n\"d3dcompiler_47\"=\"native,builtin\"\n\"xinput1_3\"=\"native,builtin\"\n\n",
@@ -179,7 +169,6 @@ fn friendly_error_before_the_first_start() {
     let p = prefix("missing", None);
     assert_eq!(proton::read_override(&p, "winhttp").unwrap_err(), NOT_STARTED);
     assert_eq!(proton::ensure_override(&p, "winhttp", "native,builtin").unwrap_err(), NOT_STARTED);
-    assert_eq!(proton::remove_override(&p, "winhttp").unwrap_err(), NOT_STARTED);
     assert!(NOT_STARTED.contains("Start the game once from Steam, then try again"));
     assert!(!p.join("user.reg").exists());
     assert!(!p.join(BACKUP_NAME).exists());

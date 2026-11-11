@@ -2,8 +2,10 @@
 //! Heroic scans built on them. A small fixed-seed fuzzer (no outside crates) mutates valid inputs and checks that
 //! every call returns Ok or Err: no panic, no hang, no absurd allocation, no file outside the target folder.
 //!
-//! Tests marked `#[ignore = "DEFECT: ..."]` show a real problem; run them with `-- --ignored` once it is fixed.
-//! Some of them crash the whole test process (stack overflow, failed allocation), which is the point.
+//! A few of them would crash the whole test process (stack overflow, failed allocation) if the matching check went
+//! missing, which is the point.
+
+mod support;
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -11,9 +13,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
+use support::{data as data_file, scratch};
 use turbine_engine::inflate::{inflate, InflateError};
 use turbine_engine::json::{self, Json};
 use turbine_engine::vdf::{self, Vdf};
@@ -300,19 +302,6 @@ fn case<T>(what: &str, seed: u64, i: usize, input: &[u8], slow: Duration, f: imp
             v
         }
     }
-}
-
-static ITERATIONS: AtomicU64 = AtomicU64::new(0);
-
-fn counted(n: u64) {
-    ITERATIONS.fetch_add(n, Ordering::Relaxed);
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-break-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -635,10 +624,6 @@ fn zip_of(files: &[File], zip64: bool) -> Vec<u8> {
     assemble(body, &recs, zip64)
 }
 
-fn data_file(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
-}
-
 /// Raw deflate streams pulled out of the Python-made test archives (dynamic Huffman blocks from zlib).
 fn zlib_streams() -> Vec<(Vec<u8>, usize)> {
     let mut out = Vec::new();
@@ -746,8 +731,7 @@ fn check_extract(parent: &Path, dest: &Path, r: &Result<Vec<PathBuf>, ZipError>)
 
 #[test]
 fn fuzz_inflate() {
-    let n = guarded("fuzz_inflate", Duration::from_secs(40), || {
-        let mut runs = 0u64;
+    guarded("fuzz_inflate", Duration::from_secs(40), || {
         let slow = Duration::from_secs(2);
         // 1. Our own encoder: every valid stream must come back exactly, and stop at the size limit.
         let seed = 0x1F1A_7E01;
@@ -764,7 +748,6 @@ fn fuzz_inflate() {
                 assert_eq!(short, Err(InflateError::TooLarge), "limit not enforced, iteration {i}");
             }
             valid.push(enc);
-            runs += 2;
         }
         // 2. Damaged versions of those, plus zlib's own dynamic-Huffman streams.
         let mut seeds: Vec<(Vec<u8>, usize)> = valid.into_iter().map(|v| (v, 1 << 16)).collect();
@@ -779,7 +762,6 @@ fn fuzz_inflate() {
             if let Ok(out) = r {
                 assert!(out.len() <= limit, "output {} over limit {limit}, iteration {i}", out.len());
             }
-            runs += 1;
         }
         // 3. Random bytes, mostly forced to start a dynamic block so the table-building code gets hammered.
         let seed = 0x1F1A_7E03;
@@ -794,12 +776,8 @@ fn fuzz_inflate() {
             if let Ok(out) = r {
                 assert!(out.len() <= 1 << 20);
             }
-            runs += 1;
         }
-        runs
     });
-    counted(n);
-    eprintln!("fuzz_inflate: {n} runs clean");
 }
 
 #[test]
@@ -858,7 +836,7 @@ fn inflate_hand_made() {
 // ------------------------------------------------------------------------------------------------------------------
 // Fuzz: zip reading and unpacking.
 
-/// Fixed defect D1 (see `zip_huge_compressed_size_crashes`): open() must refuse any entry whose data runs past the
+/// As in `zip_huge_compressed_size_is_refused`: open() must refuse any entry whose data runs past the
 /// end of the file, so no read can be asked to allocate more than the file holds.
 fn assert_sizes_fit(z: &Zip, file_len: u64, i: usize) {
     for e in &z.entries {
@@ -868,7 +846,7 @@ fn assert_sizes_fit(z: &Zip, file_len: u64, i: usize) {
 
 #[test]
 fn fuzz_zip_open_and_read() {
-    let n = guarded("fuzz_zip_open_and_read", Duration::from_secs(45), || {
+    guarded("fuzz_zip_open_and_read", Duration::from_secs(45), || {
         let dir = scratch("zipread");
         let path = dir.join("in.zip");
         let seed = 0x21B0_0001;
@@ -876,15 +854,12 @@ fn fuzz_zip_open_and_read() {
         let seeds = zip_seeds(&mut rng);
         let limits = Limits { total: 32 << 20, ratio: 400 };
         let slow = Duration::from_secs(2);
-        let (mut runs, mut opened, mut read_ok) = (0u64, 0u64, 0u64);
         for i in 0..40_000 {
             let s = &seeds[rng.below(seeds.len())];
             let m = mutate(&mut rng, s, true);
             fs::write(&path, &m).unwrap();
             let opened_zip = case("zip-open", seed, i, &m, slow, || Zip::open(&path));
-            runs += 1;
             let Ok(mut z) = opened_zip else { continue };
-            opened += 1;
             for e in &z.entries {
                 assert!(
                     Path::new(&e.name).components().all(|c| matches!(c, Component::Normal(_))),
@@ -896,24 +871,18 @@ fn fuzz_zip_open_and_read() {
             let entries = z.entries.clone();
             for e in entries.iter().take(64) {
                 let r = case("zip-read", seed, i, &m, slow, || z.read(e, &limits));
-                runs += 1;
                 if let Ok(out) = r {
-                    read_ok += 1;
-                    assert_eq!(crc32(&out), crc32(&out)); // touch the data
                     assert_eq!(out.len() as u64, e.size, "read gave a size other than declared, iteration {i}");
                 }
             }
         }
         let _ = fs::remove_dir_all(&dir);
-        eprintln!("fuzz_zip_open_and_read: {runs} runs clean, {opened} opened, {read_ok} reads ok");
-        runs
     });
-    counted(n);
 }
 
 #[test]
 fn fuzz_zip_extract_all() {
-    let n = guarded("fuzz_zip_extract_all", Duration::from_secs(45), || {
+    guarded("fuzz_zip_extract_all", Duration::from_secs(45), || {
         let dir = scratch("zipextract");
         let input = dir.join("in.zip");
         let parent = dir.join("games");
@@ -924,7 +893,6 @@ fn fuzz_zip_extract_all() {
         let seeds: Vec<Vec<u8>> = zip_seeds(&mut rng).into_iter().filter(|s| s.len() < 8000).collect();
         let limits = Limits { total: 32 << 20, ratio: 400 };
         let slow = Duration::from_secs(5);
-        let (mut runs, mut ok) = (0u64, 0u64);
         for i in 0..15_000 {
             let s = &seeds[rng.below(seeds.len())];
             let m = if i < seeds.len() { s.clone() } else { mutate(&mut rng, s, true) };
@@ -934,14 +902,10 @@ fn fuzz_zip_extract_all() {
             let Ok(mut z) = Zip::open(&input) else { continue };
             assert_sizes_fit(&z, m.len() as u64, i);
             let r = case("zip-extract", seed, i, &m, slow, || z.extract_all(&dest, &limits));
-            runs += 1;
             if let Err(why) = check_extract(&parent, &dest, &r) {
                 let p = std::env::temp_dir().join(format!("turbine-break-extract-{seed:x}-{i}.zip"));
                 let _ = fs::write(&p, &m);
                 panic!("extract_all, seed {seed:#x} iteration {i}: {why} ({r:?}), input saved to {}", p.display());
-            }
-            if r.is_ok() {
-                ok += 1;
             }
         }
         // Nothing may ever appear next to the games folder either.
@@ -949,10 +913,7 @@ fn fuzz_zip_extract_all() {
         around.sort();
         assert_eq!(around, ["games", "in.zip"]);
         let _ = fs::remove_dir_all(&dir);
-        eprintln!("fuzz_zip_extract_all: {runs} runs clean, {ok} unpacked");
-        runs
     });
-    counted(n);
 }
 
 fn open_bytes(tag: &str, bytes: &[u8]) -> (PathBuf, Result<Zip, ZipError>) {
@@ -1019,7 +980,7 @@ fn zip64_lying_sizes_are_refused() {
 }
 
 #[test]
-fn zip_huge_compressed_size_crashes() {
+fn zip_huge_compressed_size_is_refused() {
     // A 150-byte archive whose ZIP64 field says the entry holds 2^50 compressed bytes. Zip::read used to do
     // vec![0; compressed] before reading, asking the allocator for 1 PiB so the process aborted. Refusing it in
     // open() (the data runs past the end of the file) or in read() are both fine.
@@ -1039,7 +1000,7 @@ fn zip_huge_compressed_size_crashes() {
 }
 
 #[test]
-fn zip_4gib_compressed_size_allocates_4gib() {
+fn zip_4gib_compressed_size_is_refused() {
     let (body, mut recs) = locals(&[f("a.txt", b"abc", Comp::Store)]);
     recs[0].csize = 0xFFFF_FFFE;
     let bytes = assemble(body, &recs, false);
@@ -1056,7 +1017,7 @@ fn zip_4gib_compressed_size_allocates_4gib() {
 }
 
 #[test]
-fn zip_stored_size_is_not_checked() {
+fn zip_stored_size_must_match() {
     // The directory says 1 byte, the stored data is 200 KB (with a matching CRC). The total limit is 1 KB.
     let big = vec![b'x'; 200_000];
     let (body, mut recs) = locals(&[f("a.bin", &big, Comp::Store)]);
@@ -1067,6 +1028,16 @@ fn zip_stored_size_is_not_checked() {
     let written = fs::metadata(parent.join("out/a.bin")).map(|m| m.len()).unwrap_or(0);
     let _ = fs::remove_dir_all(dir);
     assert!(r.is_err(), "a 1 KB limit let {written} bytes through");
+
+    // The directory says 3 bytes, the local header and the data say 10. Refused even with room to spare.
+    let mut z = zip_of(&[f("a.txt", b"0123456789", Comp::Store)], false);
+    let cd = z.windows(4).position(|w| w == [0x50, 0x4b, 1, 2]).unwrap();
+    put_le(&mut z, cd + 24, 3, 4);
+    let (dir, z) = open_bytes("storedsize2", &z);
+    let parent = dir.join("g");
+    let r = z.and_then(|mut z| z.extract_all(&parent.join("out"), &Limits::default()));
+    let _ = fs::remove_dir_all(dir);
+    assert!(r.is_err(), "a stored entry larger than its directory size accepted");
 }
 
 #[test]
@@ -1295,7 +1266,6 @@ fn zip_big_deflated_entry_streams() {
     let _ = fs::remove_dir_all(&dir);
     assert_eq!(len, BIG);
     assert_eq!(got.finish(), crc);
-    eprintln!("zip_big_deflated_entry_streams: peak memory {} KiB before unpacking, {} KiB after", before >> 10, after >> 10);
     assert!(after - before < 8 << 20, "unpacking 300 MiB raised peak memory by {} KiB", (after - before) >> 10);
 }
 
@@ -1573,11 +1543,10 @@ fn ser_json(rng: &mut Rng, v: &Json, out: &mut String) {
 
 #[test]
 fn fuzz_json() {
-    let n = guarded("fuzz_json", Duration::from_secs(40), || {
+    guarded("fuzz_json", Duration::from_secs(40), || {
         let seed = 0x750A_0001;
         let mut rng = Rng::new(seed);
         let slow = Duration::from_secs(1);
-        let mut runs = 0u64;
         let mut texts = Vec::new();
         for i in 0..6_000 {
             let v = gen_json(&mut rng, 0);
@@ -1593,7 +1562,6 @@ fn fuzz_json() {
                 assert_eq!(json::parse(&json::quote(s)).ok(), Some(Json::Str(s.clone())));
             }
             texts.push(t.into_bytes());
-            runs += 1;
         }
         let seed = 0x750A_0002;
         let mut rng = Rng::new(seed);
@@ -1602,12 +1570,8 @@ fn fuzz_json() {
             let m = mutate(&mut rng, &texts[pick], false);
             let t = String::from_utf8_lossy(&m);
             let _ = case("json-mutated", seed, i, &m, slow, || json::parse(&t));
-            runs += 1;
         }
-        runs
     });
-    counted(n);
-    eprintln!("fuzz_json: {n} runs clean");
 }
 
 #[test]
@@ -1715,11 +1679,10 @@ fn ser_vdf(rng: &mut Rng, items: &[(String, Vdf)], out: &mut String) {
 
 #[test]
 fn fuzz_vdf() {
-    let n = guarded("fuzz_vdf", Duration::from_secs(40), || {
+    guarded("fuzz_vdf", Duration::from_secs(40), || {
         let seed = 0x0DF0_0001;
         let mut rng = Rng::new(seed);
         let slow = Duration::from_secs(1);
-        let mut runs = 0u64;
         let mut texts = Vec::new();
         for i in 0..6_000 {
             let items = gen_vdf(&mut rng, 0);
@@ -1731,7 +1694,6 @@ fn fuzz_vdf() {
             let got = case("vdf-valid", seed, i, t.as_bytes(), slow, || vdf::parse(&t));
             assert_eq!(got.as_ref().ok(), Some(&Vdf::Obj(items)), "round trip failed, iteration {i}: {t:?}");
             texts.push(t.into_bytes());
-            runs += 1;
         }
         let seed = 0x0DF0_0002;
         let mut rng = Rng::new(seed);
@@ -1740,12 +1702,8 @@ fn fuzz_vdf() {
             let m = mutate(&mut rng, &texts[pick], false);
             let t = String::from_utf8_lossy(&m);
             let _ = case("vdf-mutated", seed, i, &m, slow, || vdf::parse(&t));
-            runs += 1;
         }
-        runs
     });
-    counted(n);
-    eprintln!("fuzz_vdf: {n} runs clean");
 }
 
 #[test]
@@ -1817,7 +1775,7 @@ fn put(path: &Path, bytes: &[u8]) {
 
 #[test]
 fn fuzz_scan_files() {
-    let n = guarded("fuzz_scan_files", Duration::from_secs(40), || {
+    guarded("fuzz_scan_files", Duration::from_secs(40), || {
         let home = Home(scratch("scanhome"));
         let h = &home.0;
         let steam = h.join(".local/share/Steam");
@@ -1848,7 +1806,6 @@ fn fuzz_scan_files() {
         assert_eq!(clean.games.len(), 4, "{:?} {:?}", clean.games, clean.problems);
         let seed = 0x5CA0_0001;
         let mut rng = Rng::new(seed);
-        let (mut runs, mut outside) = (0u64, 0u64);
         for i in 0..1_500 {
             for (p, b) in &files {
                 let m = if rng.chance(50) { mutate(&mut rng, b, false) } else { b.clone() };
@@ -1860,19 +1817,13 @@ fn fuzz_scan_files() {
                     let common = game.library.join("steamapps/common");
                     let inside = game.install_dir.starts_with(&common)
                         && game.install_dir.strip_prefix(&common).unwrap().components().all(|c| matches!(c, Component::Normal(_)));
-                    if !inside {
-                        outside += 1; // known defect D7
-                    }
+                    assert!(inside, "{:?} outside its library, seed {seed:#x} iteration {i}", game.install_dir);
                 }
                 let _ = turbine_engine::json::parse(&game.to_json()).expect("game JSON must stay valid");
             }
             let _ = turbine_engine::json::parse(&scan.games_json()).expect("games JSON must stay valid");
-            runs += 1;
         }
-        eprintln!("fuzz_scan_files: {runs} scans clean, {outside} Steam games outside their library (D7)");
-        runs
     });
-    counted(n);
 }
 
 #[test]

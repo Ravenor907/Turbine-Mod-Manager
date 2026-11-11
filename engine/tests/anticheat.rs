@@ -2,8 +2,11 @@
 //! (never the game folder), the game folder made original again for the normal launch, and online-only games
 //! refusing mods.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
+use support::write_zip_text as write_zip;
 use turbine_engine::anticheat::{self, AcState, Mode};
 use turbine_engine::games::{Game, Runtime, Store as Launcher};
 use turbine_engine::gamedata::{self, parse_game};
@@ -13,54 +16,6 @@ use turbine_engine::store::{ModRules, Store};
 fn write(p: &Path, text: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(p, text).unwrap();
-}
-
-/// A zip with stored entries (enough for the store's reader).
-fn write_zip(path: &Path, files: &[(&str, &str)]) {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    for (name, data) in files {
-        let offset = out.len() as u32;
-        let crc = turbine_engine::zip::crc32(data.as_bytes());
-        let len = data.len() as u32;
-        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
-        out.extend_from_slice(&20u16.to_le_bytes());
-        out.extend_from_slice(&0x0800u16.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(&[0; 4]);
-        out.extend_from_slice(&crc.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(data.as_bytes());
-        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&0x0800u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&[0; 4]);
-        central.extend_from_slice(&crc.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        central.extend_from_slice(&[0; 8]);
-        central.extend_from_slice(&0u32.to_le_bytes());
-        central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name.as_bytes());
-    }
-    let cd_offset = out.len() as u32;
-    out.extend_from_slice(&central);
-    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
-    out.extend_from_slice(&[0; 4]);
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-    out.extend_from_slice(&cd_offset.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, out).unwrap();
 }
 
 /// Rules like Elden Ring's: files go where the archive has them; me3 starts the game.
@@ -142,7 +97,7 @@ fn me3_mods_never_go_into_the_game_folder() {
     assert_eq!(fs::read_to_string(w.game.install_dir.join("Game/regulation.bin")).unwrap(), "the game's own regulation");
     let mods = anticheat::profile_mods(store.root());
     assert_eq!(files_under(&mods), vec!["SkipIntro.dll".to_string(), "regulation.bin".to_string()]);
-    let (profile, natives) = anticheat::write_profile(store.root(), "eldenring").unwrap();
+    let (profile, natives) = anticheat::write_profile_for(store.root(), "eldenring", anticheat::Coop::Solo).unwrap();
     assert_eq!(natives, vec!["mods/SkipIntro.dll".to_string()]);
     assert!(fs::read_to_string(profile).unwrap().contains("savefile = 'TurbineModded.sl2'"));
     // Play without mods leaves the profile alone and the game folder original.
@@ -207,10 +162,10 @@ fn elden_ring_rules_place_into_the_profile() {
     let got = files_under(&anticheat::profile_mods(store.root()));
     assert!(got.contains(&"parts/am_f_9000.partsbnd.dcx".to_string()), "{got:?}");
     assert!(got.contains(&"SeamlessCoop/ersc.dll".to_string()), "{got:?}");
-    let (profile, natives) = anticheat::write_profile(store.root(), "eldenring").unwrap();
-    assert_eq!(natives, vec!["mods/SeamlessCoop/ersc.dll".to_string()]);
-    // Seamless Co-op on: its own .co2 saves, no separate save of Turbine's.
-    assert!(!fs::read_to_string(profile).unwrap().contains("savefile"));
+    // The solo profile leaves Seamless Co-op out and uses Turbine's own save.
+    let (profile, natives) = anticheat::write_profile_for(store.root(), "eldenring", anticheat::Coop::Solo).unwrap();
+    assert!(natives.is_empty(), "{natives:?}");
+    assert!(fs::read_to_string(profile).unwrap().contains("savefile = 'TurbineModded.sl2'"));
     let _ = fs::remove_dir_all(&w.root);
 }
 
@@ -445,13 +400,11 @@ fn every_me3_profile_turns_the_code_protection_off() {
         let _ = fs::remove_dir_all(&d);
         let mods = anticheat::profile_mods(&d);
         write(&mods.join("some.dll"), "x");
-        let (file, _) = anticheat::write_profile(&d, game).unwrap();
+        let (file, _) = anticheat::write_profile_for(&d, game, anticheat::Coop::Solo).unwrap();
         let t = fs::read_to_string(&file).unwrap();
         assert!(top_level(&t), "{game}: {t}");
         assert_eq!(t.matches("disable_arxan").count(), 1, "{game}: {t}");
         assert!(t.contains(&format!("game = \"{game}\"")), "{game}: {t}");
-        let (file, _) = anticheat::write_profile_for(&d, game, anticheat::Coop::Solo).unwrap();
-        assert!(top_level(&fs::read_to_string(&file).unwrap()), "{game} solo");
         let _ = fs::remove_dir_all(&d);
     }
     // The co-op profile (Elden Ring) carries it too.
@@ -490,7 +443,6 @@ fn coop_needs_a_session_password_in_the_file_the_mod_loads() {
     let d = std::env::temp_dir().join(format!("turbine-cooppw-{}", std::process::id()));
     let _ = fs::remove_dir_all(&d);
     let store = d.join("store");
-    let data = d.join("data");
     let mods = anticheat::profile_mods(&store);
     // No Seamless Co-op in the profile.
     fs::create_dir_all(&mods).unwrap();
@@ -510,24 +462,14 @@ fn coop_needs_a_session_password_in_the_file_the_mod_loads() {
     let e = anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).unwrap_err();
     assert_eq!(e.to_string(), anticheat::COOP_NEEDS_PASSWORD);
     assert!(!anticheat::profile_file_for(&store, Coop::Seamless).exists(), "no co-op profile is written");
-    // The once file (what the helper and the Steam tool read for Play Seamless Co-op): not written, and one left
-    // from before goes.
-    let args = vec!["/x/me3.exe".to_string(), "launch".to_string()];
-    anticheat::arm_once(&data, "1245620", &args, "old").unwrap();
-    let e = anticheat::arm_coop_once(&data, &store, "1245620", &args).unwrap_err();
-    assert_eq!(e, anticheat::COOP_NEEDS_PASSWORD);
-    assert!(!anticheat::once_file(&data, "1245620").exists());
     // Solo Play is not held up by it.
     assert!(anticheat::write_profile_for(&store, "eldenring", Coop::Solo).is_ok());
-    // With a password: the profile and the once file are written.
+    // With a password: the profile is written.
     write(&ini, "[PASSWORD]\r\ncooppassword = dragon\r\n");
     assert_eq!(anticheat::coop_password(&store), CoopPassword::Set);
     assert!(anticheat::coop_password(&store).ready().is_ok());
     let (profile, natives) = anticheat::write_profile_for(&store, "eldenring", Coop::Seamless).unwrap();
     assert!(profile.exists() && natives.len() == 1);
-    anticheat::arm_coop_once(&data, &store, "1245620", &args).unwrap();
-    assert!(anticheat::once_file(&data, "1245620").exists());
-    assert!(anticheat::arm_coop_once(&data, &store, "12a", &args).is_err());
     let _ = fs::remove_dir_all(&d);
 }
 

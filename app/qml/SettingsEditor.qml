@@ -2,9 +2,9 @@ import QtQuick
 
 // 0.58, Edit settings: a mod's (or the game's) config file as a page of plain controls. Up and Down pick a setting;
 // Left and Right change it (a toggle flips, a number steps, a list moves to the next choice); A flips a toggle,
-// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself (0.6); X is Reset to
-// default; Y switches to the plain text of the file (A there edits the line); B goes back. Taps
-// and clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
+// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself (0.6); X opens the
+// options (the file as plain text, where A edits a line, or as a list; Reset to default); B goes back. Taps and
+// clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
 Overlay {
     id: se
     closeOnOutside: false
@@ -49,7 +49,6 @@ Overlay {
     readonly property bool plain: textMode || fields.length === 0
 
     signal saveClicked()
-    signal resetClicked()
     // 0.61 (I18): X opens the options (Show as text or as a list, Reset to default); Y is never used here.
     signal optionsClicked()
     function toggleView() { textMode = !textMode; focusIndex = firstField() }

@@ -71,7 +71,6 @@ fn webengine() -> WebEngine {
         .find(|d| d.join("QtWebEngineQuick").is_dir());
     match (lib, inc) {
         (Some(lib), Some(inc)) => {
-            println!("cargo:warning=Qt WebEngine from {} (headers in {})", lib.display(), inc.display());
             let includes = vec![inc.clone(), inc.join("QtWebEngineQuick"), inc.join("QtWebEngineCore")];
             WebEngine { lib, includes }
         }

@@ -49,7 +49,6 @@ pub const FIRST_2022: (u16, u16) = (14, 30);
 
 /// Said before Play when it is missing.
 pub const CHECK_TITLE: &str = "The Visual C++ runtime is missing";
-pub const OFFER: &str = "Install the Visual C++ runtime";
 
 /// What the prefix has.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,13 +85,18 @@ impl State {
     }
 }
 
-/// A PE file's version from its VS_FIXEDFILEINFO (signature 0xFEEF04BD): (major, minor, build, revision).
-pub fn dll_version(bytes: &[u8]) -> Option<(u16, u16, u16, u16)> {
+/// A PE file's VS_FIXEDFILEINFO (signature 0xFEEF04BD): its structure version and the file version's two words
+/// (most and least significant).
+pub(crate) fn fixed_file_info(bytes: &[u8]) -> Option<(u32, u32, u32)> {
     let sig = [0xBD, 0x04, 0xEF, 0xFE];
     let at = bytes.windows(4).position(|w| w == sig)?;
     let word = |o: usize| -> Option<u32> { bytes.get(at + o..at + o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) };
-    let ms = word(8)?;
-    let ls = word(12)?;
+    Some((word(4)?, word(8)?, word(12)?))
+}
+
+/// A PE file's version from its VS_FIXEDFILEINFO: (major, minor, build, revision).
+pub fn dll_version(bytes: &[u8]) -> Option<(u16, u16, u16, u16)> {
+    let (_, ms, ls) = fixed_file_info(bytes)?;
     Some(((ms >> 16) as u16, (ms & 0xFFFF) as u16, (ls >> 16) as u16, (ls & 0xFFFF) as u16))
 }
 

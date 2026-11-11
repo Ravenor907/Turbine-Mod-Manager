@@ -510,6 +510,26 @@ impl GameRules {
     }
 }
 
+/// A game-relative path for comparing: '/' separators, no leading '/', lowercase.
+pub(crate) fn lc(p: &str) -> String {
+    p.replace('\\', "/").trim_start_matches('/').to_lowercase()
+}
+
+/// The mod folders (in <game>/Mods, any case) these game-relative files belong to, in the order they first appear.
+pub fn mod_folders(files: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for f in files {
+        let clean = f.replace('\\', "/");
+        let mut parts = clean.trim_start_matches('/').split('/');
+        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) {
+            if top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
+                out.push(folder.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Finds a path under `base`, matching each part of `rel` ignoring case (games under Proton don't care about case,
 /// archives and players do). Returns the path with the casing on disk.
 pub fn find_ci(base: &Path, rel: &str) -> Option<PathBuf> {
@@ -560,11 +580,19 @@ impl Entry {
     }
 }
 
-/// Cleans up archive paths: '/' separators, no folder entries, no system junk, nothing that climbs out.
 fn normalize(files: &[String]) -> Result<Vec<Entry>, String> {
+    Ok(archive_paths(files, false)?.into_iter().map(|parts| Entry { src: parts.join("/"), parts }).collect())
+}
+
+/// Cleans up archive paths into their parts: '/' separators, no folder entries, no system junk, nothing that climbs
+/// out (with `refuse_absolute`, also no path from the root or a drive letter).
+pub(crate) fn archive_paths(files: &[String], refuse_absolute: bool) -> Result<Vec<Vec<String>>, String> {
     let mut out = Vec::new();
     for f in files {
         let clean = f.replace('\\', "/");
+        if refuse_absolute && (clean.starts_with('/') || clean.chars().nth(1) == Some(':')) {
+            return Err(format!("This archive has a file that points outside its folder: {f}"));
+        }
         if clean.ends_with('/') {
             continue; // a folder entry
         }
@@ -583,8 +611,7 @@ fn normalize(files: &[String]) -> Result<Vec<Entry>, String> {
         if lc.iter().any(|p| p == "__macosx") || matches!(lc.last().map(String::as_str), Some(".ds_store" | "thumbs.db" | "desktop.ini")) {
             continue;
         }
-        let src = parts.join("/");
-        out.push(Entry { src, parts });
+        out.push(parts);
     }
     Ok(out)
 }
@@ -1575,11 +1602,6 @@ pub fn fs_type_for(mounts: &str, path: &str) -> Option<String> {
         }
     }
     best.map(|(_, k)| k)
-}
-
-/// Is the folder on an exFAT drive, going by the text of /proc/mounts?
-pub fn is_exfat(mounts: &str, path: &str) -> bool {
-    fs_type_for(mounts, path).is_some_and(|t| is_exfat_type(&t))
 }
 
 // ---------------------------------------------------------------------------------------------------------------

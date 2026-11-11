@@ -1,17 +1,12 @@
 //! 0.59: the optional co-op tile in Steam's library. shortcuts.vdf is written back byte for byte apart from Turbine's
 //! own tile, with a backup first, only while Steam is closed, and never with a second copy of the tile.
 
+mod support;
+
 use std::fs;
-use std::path::PathBuf;
+use support::scratch as tmp;
 use turbine_engine::shortcuts::{self, TileChange};
 use turbine_engine::vdf;
-
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-cooptile-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
 
 fn s(out: &mut Vec<u8>, k: &str, v: &str) {
     out.push(1);

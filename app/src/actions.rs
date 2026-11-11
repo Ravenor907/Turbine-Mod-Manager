@@ -11,20 +11,18 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use turbine_engine::json::{self, quote, Json};
 use turbine_engine::net::SourceInfo;
 use turbine_engine::profiles::{self, Profiles, Share};
 use turbine_engine::rules::Kind;
-use turbine_engine::store::Import;
+use turbine_engine::store::{Import, Installed};
 use turbine_engine::{plugins, thunderstore, Game, Runtime, Store as Launcher};
 
 pub(crate) type Qt = CxxQtThread<qobject::Turbine>;
 pub(crate) type NetTask = Box<dyn FnOnce(&mut Net, &Qt) + Send>;
 
-const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
 /// Said when a Mod Manager Download link arrives and there is no Nexus key.
 pub const NO_KEY_NXM: &str = "Mod Manager Download needs your Nexus API key. Use Slow download (or Manual download) instead, Turbine picks it up from Downloads.";
 
@@ -36,6 +34,16 @@ pub(crate) fn community(game: &Game) -> Option<&'static str> {
     thunderstore::community_for_steam_app(&game.store_id)
 }
 
+/// A game's kind as the interface and the download lane name it.
+pub(crate) fn kind_word(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Bethesda => "bethesda",
+        Kind::BepInEx => "bepinex",
+        Kind::Smapi => "smapi",
+        Kind::Generic => "generic",
+    }
+}
+
 /// What the download lane needs to know about a game, from its store.
 pub(crate) fn game_info(slot: &Slot) -> GameInfo {
     let g = &slot.game;
@@ -45,13 +53,7 @@ pub(crate) fn game_info(slot: &Slot) -> GameInfo {
         name: g.name.clone(),
         community: community(g).map(str::to_string),
         domain: turbine_engine::nexus::domain_for(g.store, &g.store_id).map(str::to_string),
-        kind: match slot.rules.kind {
-            Kind::Bethesda => "bethesda",
-            Kind::BepInEx => "bepinex",
-            Kind::Smapi => "smapi",
-            Kind::Generic => "generic",
-        }
-        .into(),
+        kind: kind_word(slot.rules.kind).into(),
         loader_ok: slot.rules.loader_installed(g),
         native: g.runtime == Runtime::Native,
         steam: g.store == Launcher::Steam,
@@ -67,19 +69,10 @@ pub(crate) fn game_info(slot: &Slot) -> GameInfo {
     }
 }
 
-/// Turbine's cache folder (in the Flatpak, ~/.var/app/<id>/cache/turbine-mod-manager: the host can read it, which
-/// the self-update's installer needs).
-fn cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| turbine_engine::home_dir().join(".cache"))
-        .join("turbine-mod-manager")
-}
-
 // ---------------------------------------------------------------------------------------------------- posting back
 
-fn post<F>(qt: &Qt, f: F)
+/// Runs `f` on the interface thread (from the download lane or another thread).
+pub(crate) fn set<F>(qt: &Qt, f: F)
 where
     F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
 {
@@ -87,39 +80,18 @@ where
 }
 
 /// A sentence for the status line from the download lane.
-fn say(qt: &Qt, text: impl Into<String>, level: &'static str) {
+pub(crate) fn say(qt: &Qt, text: impl Into<String>, level: &'static str) {
     let text = text.into();
     crate::log::line("net", &format!("[{level}] {text}"));
-    post(qt, move |t| t.message(QString::from(text.as_str()), QString::from(level)));
-}
-
-fn set<F>(qt: &Qt, f: F)
-where
-    F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
-{
-    post(qt, f);
+    set(qt, move |t| t.message(QString::from(text.as_str()), QString::from(level)));
 }
 
 fn err_json(e: &str) -> String {
     format!("{{\"error\":{}}}", quote(e))
 }
 
-/// For anticheat.rs: the same helpers.
-pub(crate) fn progress_for(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
-    progress(qt)
-}
-pub(crate) fn say_for(qt: &Qt, text: impl Into<String>, level: &'static str) {
-    say(qt, text, level)
-}
-pub(crate) fn post_for<F>(qt: &Qt, f: F)
-where
-    F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
-{
-    post(qt, f)
-}
-
 /// Progress for the status line and the rail's Downloads ring, a few times a second at most.
-fn progress(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
+pub(crate) fn progress(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
     let mut last = Instant::now() - Duration::from_secs(1);
     move |label: &str, got: u64, total: Option<u64>| {
         let done = total.is_some_and(|t| got >= t);
@@ -133,7 +105,7 @@ fn progress(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
             got,
             total.map(|t| t.to_string()).unwrap_or_else(|| "0".into())
         );
-        post(qt, move |t| t.set_download_json(QString::from(j.as_str())));
+        set(qt, move |t| t.set_download_json(QString::from(j.as_str())));
     }
 }
 
@@ -142,7 +114,7 @@ fn hand_over<'a>(qt: &'a Qt, game: &Game) -> impl FnMut(Fetched) + 'a {
     let game = game.clone();
     move |f: Fetched| {
         let g = game.clone();
-        post(qt, move |t| t.add_fetched(g, f));
+        set(qt, move |t| t.add_fetched(g, f));
     }
 }
 
@@ -185,7 +157,7 @@ pub(crate) enum Outcome {
 }
 
 /// Install notes the player may want to act on (settings lines to add by hand, menus, REDmod): shown after adding.
-pub(crate) fn show_notes(w: &Worker, name: &str, notes: &[String]) {
+fn show_notes(w: &Worker, name: &str, notes: &[String]) {
     let notes: Vec<String> = notes.iter().filter(|n| !n.trim().is_empty()).cloned().collect();
     if notes.is_empty() {
         return;
@@ -193,6 +165,20 @@ pub(crate) fn show_notes(w: &Worker, name: &str, notes: &[String]) {
     let j = format!("[{}]", notes.iter().map(|n| quote(n)).collect::<Vec<_>>().join(","));
     let name = name.to_string();
     w.post(move |t| t.added(QString::from(name.as_str()), QString::from(j.as_str())));
+}
+
+/// A mod was added (or updated): its notes go to the activity log and the screen, `words` to the status line, and
+/// QML hears a new mod arrived (not for an update).
+pub(crate) fn mod_added(w: &Worker, game: &Game, done: &Installed, words: String, new: bool) {
+    for n in &done.notes {
+        crate::log::line("engine", &format!("{}: {n}", done.item.name));
+    }
+    w.say(words, "ok");
+    show_notes(w, &done.item.name, &done.notes);
+    if new {
+        let (gid, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
+        w.post(move |t| t.arrived(QString::from(gid.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
+    }
 }
 
 /// Adds (or, with `replaces`, updates) a mod from an archive. An installer with choices waits for the player.
@@ -212,25 +198,18 @@ pub(crate) fn add_archive_with(w: &mut Worker, game: &Game, path: &Path, source:
     });
     let out = match result {
         Ok(Import::Added(done)) => {
-            for n in &done.notes {
-                crate::log::line("engine", &format!("{}: {n}", done.item.name));
-            }
-            let verb = if replaces.is_some() { "Updated" } else { "Added" };
-            match &done.placed {
+            let words = match &done.placed {
                 // A Basic game's mod: where it went.
                 Some(p) => {
                     let words = crate::anygame::note_placed(&done.item.name, p);
-                    w.say(if replaces.is_some() { words.replacen("Added", "Updated", 1) } else { words }, "ok");
+                    if replaces.is_some() { words.replacen("Added", "Updated", 1) } else { words }
                 }
-                None => w.say(format!("{verb} {}", done.item.name), "ok"),
-            }
-            show_notes(w, &done.item.name, &done.notes);
+                None => format!("{} {}", if replaces.is_some() { "Updated" } else { "Added" }, done.item.name),
+            };
+            mod_added(w, game, &done, words, replaces.is_none());
             if let Some(id) = replaces {
                 let gid = game.id();
                 w.post(move |t| t.drop_update(&gid, &id));
-            } else {
-                let (gid, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
-                w.post(move |t| t.arrived(QString::from(gid.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
             }
             Outcome::Added { name: done.item.name.clone(), notes: done.notes.clone() }
         }
@@ -300,7 +279,7 @@ fn data_url(p: &turbine_engine::store::Pending, archive_path: &str) -> Option<St
         return None;
     };
     let bytes = std::fs::read(&f).ok()?;
-    Some(format!("data:image/{mime};base64,{}", crate::bridge::base64(&bytes)))
+    Some(format!("data:image/{mime};base64,{}", turbine_engine::thunderstore::base64_encode(&bytes)))
 }
 
 /// The installer's current step for the browser helper ("choices"); option ids are "g<group>o<option>".
@@ -434,15 +413,9 @@ fn installer_next(w: &mut Worker, game: &Game, mut p: turbine_engine::store::Pen
                 }
                 Ok(Import::NeedsChoices(_)) => w.say(format!("{name} couldn't be added: its installer stopped early."), "error"),
                 Ok(Import::Added(done)) => {
-                    for n in &done.notes {
-                        crate::log::line("engine", &format!("{name}: {n}"));
-                    }
-                    w.say(format!("Added {}", done.item.name), "ok");
-                    show_notes(w, &done.item.name, &done.notes);
+                    mod_added(w, game, &done, format!("Added {}", done.item.name), true);
                     let (g, m, notes) = (game.name.clone(), done.item.name.clone(), done.notes.clone());
                     w.post(move |t| t.caught_added(&g, &m, notes, true));
-                    let (gid, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
-                    w.post(move |t| t.arrived(QString::from(gid.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
                 }
                 Err(e) => {
                     let g = game.name.clone();
@@ -725,9 +698,14 @@ fn plan_share(w: &mut Worker, game: &Game, share: Share) {
             w.share = Some((game.id(), share));
             j
         }
-        Err(e) => format!("{{\"game\":{},\"profile\":\"\",\"plan\":null,\"error\":{}}}", quote(&game.id()), quote(&e)),
+        Err(e) => import_error(&game.id(), &e),
     };
     w.post(move |t| t.set_import_json(QString::from(json.as_str())));
+}
+
+/// The import screen's JSON when a share can't be read.
+fn import_error(game_id: &str, e: &str) -> String {
+    format!("{{\"game\":{},\"profile\":\"\",\"plan\":null,\"error\":{}}}", quote(game_id), quote(e))
 }
 
 /// After a share's mods are in: a profile with its order and on/off, switched to.
@@ -843,12 +821,12 @@ impl qobject::Turbine {
             let (tx, rx) = mpsc::channel::<NetTask>();
             let qt = self.qt_thread();
             let spawned = std::thread::Builder::new().name("turbine-net".into()).spawn(move || {
-                let mut net = Net::new(crate::VERSION, &cache_dir(), &crate::log::folder(&data_home()));
+                let mut net = Net::new(crate::VERSION, &crate::cache_dir(), &crate::log::folder(&data_home()));
                 while let Ok(task) = rx.recv() {
                     if catch_unwind(AssertUnwindSafe(|| task(&mut net, &qt))).is_err() {
                         say(&qt, "That download didn't finish. Press Get it again. If it fails twice: View, Game menu, Activity log says why.", "error");
                     }
-                    post(&qt, |mut t| {
+                    set(&qt, |mut t| {
                         let n = (*t.net_busy() - 1).max(0);
                         t.as_mut().set_net_busy(n);
                         if n == 0 {
@@ -883,7 +861,6 @@ impl qobject::Turbine {
         self.rust().game_info.clone()
     }
 
-    /// A downloaded file arrived: the mod worker adds it.
     /// 0.62: the answer to "This Seamless Co-op is older" (the `olderSeamless` signal). true: the same file is
     /// added again, allowed this once for exactly that file, and the newer copy goes to Removed mods; false: the
     /// one installed stays, the file is left alone and the Downloads watcher is told it is settled. Either way the
@@ -925,6 +902,7 @@ impl qobject::Turbine {
         );
     }
 
+    /// A downloaded file arrived: the mod worker adds it.
     pub(crate) fn add_fetched(mut self: Pin<&mut Self>, game: Game, f: Fetched) {
         self.as_mut().edited();
         let name = format!("Add {}", f.label);
@@ -1101,7 +1079,7 @@ impl qobject::Turbine {
                         net.install_nexus(&info, m, 0, None, &mut each, &mut prog)
                     })
                 } else {
-                    net.install_ts(&info, &[id.clone()], false, &mut each, &mut prog)
+                    net.install_ts(&info, std::slice::from_ref(&id), false, &mut each, &mut prog)
                 };
                 if let Err(e) = r {
                     say(qt, e, "error");
@@ -1125,17 +1103,12 @@ impl qobject::Turbine {
                         let page = turbine_engine::nexus::files_page_url(turbine_engine::loaders::SKSE_NEXUS_DOMAIN, turbine_engine::loaders::SKSE_NEXUS_MOD);
                         let j = format!("[{{\"name\":\"SKSE (Skyrim Script Extender)\",\"url\":{}}}]", quote(&page));
                         crate::log::line("net", &e);
-                        post(qt, move |t| t.pages(QString::from("SKSE is on Nexus Mods"), QString::from(j.as_str())));
+                        set(qt, move |t| t.pages(QString::from("SKSE is on Nexus Mods"), QString::from(j.as_str())));
                     }
                     Err(e) => say(qt, e, "error"),
                 }
             }),
         );
-    }
-
-    pub fn cancel_download(self: Pin<&mut Self>) {
-        online::CANCEL.store(true, Ordering::SeqCst);
-        crate::log::line("net", "Download cancelled by the player");
     }
 
     // ------------------------------------------------------------------------------------------------ FOMOD
@@ -1251,7 +1224,7 @@ impl qobject::Turbine {
                 if lists.is_none() {
                     return;
                 }
-                post(qt, move |t| {
+                set(qt, move |t| {
                     t.send(Some(gid), "LOOT's notes on the plugins", false, Box::new(move |w: &mut Worker| loot_messages(w, &game, lists)))
                 });
             }),
@@ -1279,7 +1252,7 @@ impl qobject::Turbine {
             "LOOT's masterlist for sorting",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let (lists, note) = net.loot_lists(false);
-                post(qt, move |t| {
+                set(qt, move |t| {
                     t.send(Some(game.id()), "Sort the load order", true, Box::new(move |w: &mut Worker| sort_order(w, &game, lists, note)))
                 });
             }),
@@ -1390,7 +1363,7 @@ impl qobject::Turbine {
         let Some(game) = self.current_game() else { return };
         let name = name.to_string();
         crate::log::line("action", &format!("Create a Thunderstore code for profile {name}"));
-        let working = format!("{{\"state\":\"working\",\"profile\":{},\"code\":\"\",\"left\":0,\"files\":0,\"message\":\"\"}}", quote(&name));
+        let working = code_json("working", &name, "", 0, 0, "");
         self.as_mut().set_code_json(QString::from(working.as_str()));
         self.send(
             Some(game.id()),
@@ -1480,6 +1453,15 @@ impl qobject::Turbine {
         QString::from(crate::single::take().unwrap_or_default().as_str())
     }
 
+    /// The installed game a Nexus link is for: the game on screen first when it matches (Stardew Valley can be both
+    /// Steam and GOG).
+    fn game_for_link(&self, l: &turbine_engine::nxm::NxmLink) -> Option<Game> {
+        let ids = l.store_ids();
+        self.current_game()
+            .filter(|g| ids.contains(&g.store_id.as_str()))
+            .or_else(|| self.rust().found.iter().find(|g| ids.contains(&g.store_id.as_str())).cloned())
+    }
+
     pub fn open_link(&self, link: &QString) -> QString {
         let out = |game: &str, name: &str, error: &str| {
             QString::from(format!("{{\"game\":{},\"name\":{},\"error\":{}}}", quote(game), quote(name), quote(error)).as_str())
@@ -1496,11 +1478,7 @@ impl qobject::Turbine {
             // Without a key Turbine can't ask Nexus for the file. Slow download works, and the page's mod is
             // remembered so that download goes into the right game by itself.
             crate::log::line("nxm", "No Nexus API key: pointing to Slow download instead");
-            let ids = l.store_ids();
-            let game = self
-                .current_game()
-                .filter(|g| ids.contains(&g.store_id.as_str()))
-                .or_else(|| self.rust().found.iter().find(|g| ids.contains(&g.store_id.as_str())).cloned());
+            let game = self.game_for_link(&l);
             return QString::from(
                 format!(
                     "{{\"game\":{},\"name\":{},\"error\":{},\"needsKey\":true,\"page\":{}}}",
@@ -1518,13 +1496,7 @@ impl qobject::Turbine {
         if l.expired_at(turbine_engine::nxm::now()) {
             return out("", name, turbine_engine::nxm::EXPIRED_MESSAGE);
         }
-        let ids = l.store_ids();
-        // The game on screen first when it matches (Stardew Valley can be both Steam and GOG).
-        let found = self
-            .current_game()
-            .filter(|g| ids.contains(&g.store_id.as_str()))
-            .or_else(|| self.rust().found.iter().find(|g| ids.contains(&g.store_id.as_str())).cloned());
-        match found {
+        match self.game_for_link(&l) {
             Some(g) => out(&g.id(), name, ""),
             None => out("", name, &format!("{name} isn't installed here, so Turbine has nowhere to put this mod.")),
         }
@@ -1551,7 +1523,7 @@ impl qobject::Turbine {
                     Ok(f) => match into {
                         Some(dir) => {
                             let g = game.clone();
-                            post(qt, move |t| t.web_place_fetched(g, f, dir));
+                            set(qt, move |t| t.web_place_fetched(g, f, dir));
                         }
                         None => hand_over(qt, &game)(f),
                     },
@@ -1616,7 +1588,7 @@ impl qobject::Turbine {
                     .collect()
             })
             .unwrap_or_default();
-        found.sort_by(|a, b| b.0.cmp(&a.0));
+        found.sort_by_key(|f| std::cmp::Reverse(f.0));
         let items: Vec<String> = found.iter().map(|(_, n, p)| format!("{{\"name\":{},\"path\":{}}}", quote(n), quote(p))).collect();
         self.as_mut().set_shares_json(QString::from(format!("[{}]", items.join(",")).as_str()));
     }
@@ -1626,7 +1598,7 @@ impl qobject::Turbine {
         self.profile_job("Read a share file", move |w, game| match profiles::read_share(&path) {
             Ok(share) => plan_share(w, game, share),
             Err(e) => {
-                let j = format!("{{\"game\":{},\"profile\":\"\",\"plan\":null,\"error\":{}}}", quote(&game.id()), quote(&e));
+                let j = import_error(&game.id(), &e);
                 w.post(move |t| t.set_import_json(QString::from(j.as_str())));
             }
         });
@@ -1640,11 +1612,11 @@ impl qobject::Turbine {
         self.net_send(
             "Read a Thunderstore profile code",
             Box::new(move |net: &mut Net, qt: &Qt| match net.read_code(&info, &code) {
-                Ok(share) => post(qt, move |t| {
+                Ok(share) => set(qt, move |t| {
                     t.send(Some(game.id()), "Plan a profile import", false, Box::new(move |w: &mut Worker| plan_share(w, &game, share)))
                 }),
                 Err(e) => {
-                    let j = format!("{{\"game\":{},\"profile\":\"\",\"plan\":null,\"error\":{}}}", quote(&info.id), quote(&e));
+                    let j = import_error(&info.id, &e);
                     set(qt, move |t| t.set_import_json(QString::from(j.as_str())));
                 }
             }),
@@ -1718,7 +1690,7 @@ impl qobject::Turbine {
                             }
                             // Queued after every download's import, so the profile sees all of them.
                             let g2 = g.clone();
-                            post(qt, move |t| {
+                            set(qt, move |t| {
                                 t.send(Some(g2.id()), "Make the shared profile", true, Box::new(move |w: &mut Worker| finish_share(w, &g2)))
                             });
                         }),
@@ -1928,7 +1900,7 @@ impl qobject::Turbine {
         let out = std::process::Command::new("flatpak-spawn")
             .args(["--host", "flatpak", "override", "--user"])
             .arg(format!("--filesystem={folder}"))
-            .arg(APP_ID)
+            .arg(crate::APP_ID)
             .stdin(std::process::Stdio::null())
             .output();
         match out {
@@ -1949,9 +1921,9 @@ impl qobject::Turbine {
 
     pub fn restart(self: Pin<&mut Self>) {
         crate::log::line("update", "Restarting into the new version");
-        let mut cmd = if Path::new("/.flatpak-info").exists() {
+        let mut cmd = if crate::system::in_flatpak() {
             let mut c = std::process::Command::new("flatpak-spawn");
-            c.args(["--host", "flatpak", "run", APP_ID]);
+            c.args(["--host", "flatpak", "run", crate::APP_ID]);
             c
         } else {
             std::process::Command::new(std::env::current_exe().unwrap_or_else(|_| "turbine-mod-manager".into()))

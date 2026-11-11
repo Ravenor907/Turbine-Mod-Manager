@@ -1,8 +1,11 @@
 //! Game rules: archive layouts for every kind of game, loader detection, the check before Play and launch links.
 
+mod support;
+
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use support::TempDir;
 use turbine_engine::rules::{self, pre_play_with, GameRules, Kind};
 use turbine_engine::{Game, Runtime, Store};
 
@@ -51,26 +54,6 @@ fn dests(rules: &GameRules, files: &[&str], name: &str) -> Vec<String> {
     let mut d: Vec<String> = map(rules, files, name).into_values().collect();
     d.sort();
     d
-}
-
-struct TempDir(PathBuf);
-impl TempDir {
-    fn new(tag: &str) -> TempDir {
-        let d = std::env::temp_dir().join(format!("turbine-rules-{tag}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        TempDir(d)
-    }
-    fn touch(&self, rel: &str) {
-        let p = self.0.join(rel);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, "x").unwrap();
-    }
-}
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
 }
 
 // ----- game table ----------------------------------------------------------------------------------------------
@@ -462,26 +445,26 @@ fn loader_detection_ignores_case() {
     let g = game(Store::Steam, "489830", "Skyrim Special Edition", &t.0);
     let r = GameRules::for_game(&g);
     assert!(!r.loader_installed(&g));
-    t.touch("SKSE64_Loader.EXE");
+    t.write("SKSE64_Loader.EXE", b"x");
     assert!(r.loader_installed(&g));
 
     let t = TempDir::new("bepinex");
     let g = game(Store::Steam, "892970", "Valheim", &t.0);
     let r = GameRules::for_game(&g);
-    t.touch("winhttp.dll");
+    t.write("winhttp.dll", b"x");
     assert!(!r.loader_installed(&g), "core folder missing");
-    t.touch("bepinex/Core/BepInEx.dll");
+    t.write("bepinex/Core/BepInEx.dll", b"x");
     assert!(r.loader_installed(&g));
 
     let t = TempDir::new("smapi");
     let g = game(Store::Gog, "1453375253", "Stardew Valley", &t.0);
     let r = GameRules::for_game(&g);
-    t.touch("Stardew Valley");
+    t.write("Stardew Valley", b"x");
     assert!(!r.loader_installed(&g));
-    t.touch("StardewModdingAPI");
+    t.write("StardewModdingAPI", b"x");
     assert!(r.loader_installed(&g));
     fs::remove_file(t.0.join("StardewModdingAPI")).unwrap();
-    t.touch("StardewModdingAPI.exe");
+    t.write("StardewModdingAPI.exe", b"x");
     assert!(r.loader_installed(&g));
 
     // No loader: nothing to install.
@@ -561,6 +544,9 @@ fn low_space_and_exfat_warn_in_order() {
     assert!(c[2].detail.contains("300 MB"));
     // Exactly 1 GB free is enough.
     assert_eq!(pre_play_with(&g, &skyrim(), Some("2"), false, Some(GB), None, true)[0].level, "ok");
+    // The FUSE exFAT driver's name counts too.
+    let fuse = pre_play_with(&g, &skyrim(), Some("2"), false, Some(GB), Some("fuse.exfat"), true);
+    assert!(fuse.iter().any(|c| c.title == "Game is on an exFAT drive"));
 }
 
 #[test]
@@ -584,14 +570,13 @@ proc /proc proc rw,nosuid 0 0
 fn exfat_from_proc_mounts() {
     let sd = "/run/media/deck/SD Card/steamapps/common/Skyrim Special Edition";
     assert_eq!(rules::fs_type_for(MOUNTS, sd).as_deref(), Some("exfat"));
-    assert!(rules::is_exfat(MOUNTS, sd));
-    assert!(!rules::is_exfat(MOUNTS, "/home/deck/.local/share/Steam/steamapps/common/Valheim"));
+    assert_eq!(rules::fs_type_for(MOUNTS, "/home/deck/.local/share/Steam/steamapps/common/Valheim").as_deref(), Some("ext4"));
     assert_eq!(rules::fs_type_for(MOUNTS, "/home/deck").as_deref(), Some("ext4"));
     // "/run/media/deck/SD" must not swallow "/run/media/deck/SDX".
     assert_eq!(rules::fs_type_for(MOUNTS, "/run/media/deck/SDX/x").as_deref(), Some("btrfs"));
     assert_eq!(rules::fs_type_for(MOUNTS, "/run/media/deck/SD/x").as_deref(), Some("fuseblk"));
-    assert!(rules::is_exfat(MOUNTS, "/mnt/games/exfat/Game"));
-    assert!(!rules::is_exfat(MOUNTS, "/mnt/games/exfatter"));
+    assert_eq!(rules::fs_type_for(MOUNTS, "/mnt/games/exfat/Game").as_deref(), Some("fuse.exfat"));
+    assert_eq!(rules::fs_type_for(MOUNTS, "/mnt/games/exfatter").as_deref(), Some("ext4"));
     assert_eq!(rules::fs_type_for("", "/x"), None);
 }
 

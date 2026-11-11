@@ -1,8 +1,8 @@
 import QtQuick
 
 // Pages to open on Nexus Mods, for what a free account can't download inside Turbine (a mod, what it needs, SKSE,
-// a shared profile's Nexus mods). A opens the focused page in the browser; pressing Mod Manager Download there
-// sends the file back to Turbine. B closes. Main.qml handles the keys.
+// a shared profile's Nexus mods). A opens the focused page in Turbine's browser; Slow download there, and Turbine
+// adds the file by itself. B closes. Main.qml handles the keys.
 Overlay {
     id: pg
     onOutsideTapped: pg.closed()
@@ -20,10 +20,8 @@ Overlay {
     function followFocus() {
         if (typeof rowRepeater === "undefined" || !rowRepeater || typeof scroller === "undefined" || !scroller) return
         const it = rowRepeater.itemAt(focusIndex)
-        if (it) scroller.follow(it)
+        if (it) pg.ui.follow(scroller, col, it)
     }
-    property bool gameMode: false
-    property bool handlerSet: true        // Turbine is the program for Nexus links
 
     signal activated(int index)
     signal closed()
@@ -46,12 +44,6 @@ Overlay {
             contentHeight: col.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            function follow(it) {
-                if (!it) return
-                const y = it.mapToItem(col, 0, 0).y
-                if (y < contentY) contentY = Math.max(0, y)
-                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
-            }
         Column {
             id: col
             width: scroller.width
@@ -69,14 +61,6 @@ Overlay {
                 text: "Press Slow download on each page. Turbine adds each file by itself."
                 color: pg.ui.c.text
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15)
-            }
-            Text {
-                visible: false   // 0.59 (T15): the page opens in Turbine, so no setting is needed
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: "Mod Manager Download also needs Turbine set for Nexus downloads in Settings, Getting mods. Slow download needs nothing."
-                color: pg.ui.c.soft
-                font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(14)
             }
             Repeater {
                 id: rowRepeater

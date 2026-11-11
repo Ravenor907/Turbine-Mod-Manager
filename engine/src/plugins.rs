@@ -15,15 +15,16 @@
 //!   The game's own files leave out the always-loaded plugins. Turbine also writes loadorder.txt (every plugin, in
 //!   order) for tools that read it.
 //!
-//! Sorting here only puts masters first and every plugin after its masters, keeping the order otherwise. The
-//! community masterlist (load order rules for known mods) is a later addition.
+//! Sorting here only puts masters first and every plugin after its masters, keeping the order otherwise. Sorting by
+//! LOOT's community masterlist is done by the app (app/src/loot.rs).
 
 use crate::games::{Game, Store};
 use crate::json::quote;
 use crate::xml::cp1252;
+use crate::write_atomic;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// The game's own masters, always loaded first in this order.
@@ -194,16 +195,6 @@ fn to_cp1252(s: &str) -> Vec<u8> {
             }
         })
         .collect()
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension("turbine-tmp");
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, path)
 }
 
 /// Keeps a copy of the player's own file the first time Turbine changes it.

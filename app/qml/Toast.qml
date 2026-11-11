@@ -4,12 +4,7 @@ import QtQuick
 // itself at the bottom center of its parent and hides itself after timeout milliseconds (0 keeps it up).
 // Call show(...) to put up a message; it stays hidden until then.
 //
-// ui (required): an object that gives
-//   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
-//                 onAccent, focusFill, ok, warn, light (bool); stop is optional (a fallback is used without it)
-//   ui.px(n)      design pixels to screen pixels
-//   ui.titleFont  font family for titles
-//   ui.bodyFont   font family for everything else
+// ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
 Rectangle {
     id: root
 
@@ -45,22 +40,6 @@ Rectangle {
     function hide() {
         hideTimer.stop()
         if (shown) { shown = false; hidden() }
-    }
-
-    // Contrast: the same hue, darkened on light grounds or lightened on dark ones until it reads at 4.5:1 or better.
-    function lum(col) {
-        const f = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
-        return 0.2126 * f(col.r) + 0.7152 * f(col.g) + 0.0722 * f(col.b)
-    }
-    function readable(col, bg) {
-        let out = col
-        const lb = lum(bg)
-        for (let i = 0; i < 14; i++) {
-            const lc = lum(out)
-            if ((Math.max(lc, lb) + 0.05) / (Math.min(lc, lb) + 0.05) >= 4.5) break
-            out = lb < 0.18 ? Qt.lighter(out, 1.12) : Qt.darker(out, 1.12)
-        }
-        return out
     }
 
     Timer { id: hideTimer; interval: Math.max(1, root.timeout); onTriggered: root.hide() }

@@ -38,18 +38,11 @@ fn state() -> MutexGuard<'static, State> {
 
 /// The folder for activity.log and crash.log (made if needed). Call once at start.
 pub fn start(dir: PathBuf) {
-    let _ = fs::create_dir_all(&dir);
     let mark = dir.join("running.mark");
     let gone = dir.join("display-gone.mark");
+    start_quiet(dir);
     let unclean = mark.exists();
     let _ = fs::write(&mark, b"");
-    {
-        let mut s = state();
-        let path = dir.join("activity.log");
-        s.size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        s.file = OpenOptions::new().create(true).append(true).open(&path).ok();
-        s.dir = Some(dir);
-    }
     trim_crash_log();
     clean_old_exits();
     if unclean {
@@ -331,23 +324,6 @@ pub fn folder(data_home: &Path) -> PathBuf {
     data_home.join("turbine-mod-manager")
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn hides_secrets_and_keeps_lines() {
-        super::secret("abcdef123456");
-        super::line("test", "key is abcdef123456\nnext");
-        let t = super::tail(1);
-        assert!(t[0].contains("[hidden]") && !t[0].contains("abcdef") && !t[0].contains('\n'));
-    }
-
-    #[test]
-    fn local_time_is_sane() {
-        let (y, mo, d, ..) = super::local_now();
-        assert!(y >= 2024 && (1..=12).contains(&mo) && (1..=31).contains(&d));
-    }
-}
-
 /// 0.59: a system error in words a player can act on. "Permission denied (os error 13)" says what happened, not what
 /// to do; the raw text still goes into the activity log.
 pub fn plain(raw: &str) -> String {
@@ -365,4 +341,21 @@ pub fn plain(raw: &str) -> String {
     };
     line("error", &format!("System error: {raw}"));
     words.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hides_secrets_and_keeps_lines() {
+        super::secret("abcdef123456");
+        super::line("test", "key is abcdef123456\nnext");
+        let t = super::tail(1);
+        assert!(t[0].contains("[hidden]") && !t[0].contains("abcdef") && !t[0].contains('\n'));
+    }
+
+    #[test]
+    fn local_time_is_sane() {
+        let (y, mo, d, ..) = super::local_now();
+        assert!(y >= 2024 && (1..=12).contains(&mo) && (1..=31).contains(&d));
+    }
 }

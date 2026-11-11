@@ -1,5 +1,5 @@
 // Tests for the extension's plain logic and the hello/token flow against a fake Turbine.
-// Run: node --test extension/test/   (Node 22 or newer, nothing to install)
+// Run: cd extension && node test/test.js   (Node 22 or newer, nothing to install)
 "use strict";
 
 const test = require("node:test");
@@ -14,18 +14,9 @@ const { createBridge } = require("../lib/bridge.js");
 const { createDownloadTracker } = require("../lib/downloads.js");
 const S = require("../lib/save.js");
 const { startFakeTurbine } = require("./fake-turbine.js");
+const { sleep, until, runWorker } = require("./helpers.js");
 
 const TOKEN = "a".repeat(32) + "0123456789abcdef0123456789abcdef";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function until(fn, ms, what) {
-  const end = Date.now() + (ms || 3000);
-  while (Date.now() < end) {
-    if (fn()) return;
-    await sleep(10);
-  }
-  throw new Error("timed out: " + (what || "condition"));
-}
 
 async function fakeOnFreePort(opts) {
   for (let port = P.PORT_MIN; port <= P.PORT_MAX; port++) {
@@ -474,8 +465,6 @@ test("Reconnects after Turbine goes away and comes back", async (t) => {
   assert.ok(states.includes("offline"));
 });
 
-// ---------- The real service worker file, with a fake chrome API ----------
-
 // ---------- Sign-in pass-through ----------
 
 const SID = "0123456789abcdef0123456789abcdef";
@@ -606,12 +595,7 @@ test("background.js wires downloads, the panel and pairing to the bridge", async
       setBadgeTextColor: () => {},
     },
   };
-  const ctx = vm.createContext({ chrome, WebSocket: globalThis.WebSocket, URL, setTimeout, clearTimeout, setInterval, clearInterval, console, JSON, Date, Math });
-  ctx.globalThis = ctx;
-  ctx.importScripts = (...files) => {
-    for (const f of files) vm.runInContext(fs.readFileSync(path.join(dir, f), "utf8"), ctx, { filename: f });
-  };
-  vm.runInContext(fs.readFileSync(path.join(dir, "background.js"), "utf8"), ctx, { filename: "background.js" });
+  const ctx = runWorker(chrome, globalThis.WebSocket);
   t.after(() => vm.runInContext("bridge.stop(); tracker.stop();", ctx));
 
   await fake.waitFor((m) => m.type === "hello");

@@ -360,16 +360,6 @@ fn put_back(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: Option<u
     Ok(before)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn stamps_sort_by_time() {
-        assert_eq!(stamp(0), "19700101-000000");
-        assert_eq!(stamp(1_794_000_000), "20261106-212000");
-    }
-}
 
 // ---- 0.58: Elden Ring's three kinds of save ----
 //
@@ -409,12 +399,8 @@ impl Kind {
     }
 }
 
-/// Which kind a save file is, by its name (the game's own .bak copies count with their save).
-pub fn kind_of(name: &str) -> Option<Kind> {
-    kind_of_with(name, "co2")
-}
-
-/// `kind_of` where Seamless Co-op's save extension was changed in its settings (save_file_extension).
+/// Which kind a save file is, by its name (the game's own .bak copies count with their save). `coop_ext` is
+/// Seamless Co-op's save extension ("co2" unless changed in its settings, save_file_extension).
 pub fn kind_of_with(name: &str, coop_ext: &str) -> Option<Kind> {
     let l = name.to_ascii_lowercase();
     let l = l.strip_suffix(".bak").unwrap_or(&l);
@@ -438,17 +424,18 @@ pub struct SaveFile {
     pub modified: u64,
 }
 
-/// The save files of one kind in the save folders now.
-pub fn files_of(folders: &[PathBuf], kind: Kind) -> Vec<SaveFile> {
-    files_of_with(folders, kind, "co2")
+/// An index line's path ("0/7656/ER0000.sl2\t1234\t...").
+fn index_rel(l: &str) -> &str {
+    l.split('\t').next().unwrap_or(l)
 }
 
+/// The save files of one kind in the save folders now.
 pub fn files_of_with(folders: &[PathBuf], kind: Kind, coop_ext: &str) -> Vec<SaveFile> {
     let mut out = Vec::new();
     for f in folders {
         let (lines, _) = index_of(f, MAX_FILES);
         for line in lines {
-            let rel = line.split('\t').next().unwrap_or(&line).to_string();
+            let rel = index_rel(&line).to_string();
             let name = rel.rsplit('/').next().unwrap_or(&rel);
             if kind_of_with(name, coop_ext) == Some(kind) {
                 let m = fs::metadata(f.join(&rel)).ok();
@@ -460,16 +447,7 @@ pub fn files_of_with(folders: &[PathBuf], kind: Kind, coop_ext: &str) -> Vec<Sav
     out
 }
 
-/// An index line's path ("0/7656/ER0000.sl2\t1234\t...").
-fn index_rel(l: &str) -> &str {
-    l.split('\t').next().unwrap_or(l)
-}
-
 /// How many files of one kind a backup holds.
-pub fn count_in(root: &Path, id: &str, kind: Kind) -> usize {
-    count_in_with(root, id, kind, "co2")
-}
-
 pub fn count_in_with(root: &Path, id: &str, kind: Kind, coop_ext: &str) -> usize {
     fs::read_to_string(root.join(id).join("index"))
         .map(|t| t.lines().map(index_rel).filter(|l| kind_of_with(l.rsplit('/').next().unwrap_or(l), coop_ext) == Some(kind)).count())
@@ -478,10 +456,6 @@ pub fn count_in_with(root: &Path, id: &str, kind: Kind, coop_ext: &str) -> usize
 
 /// Puts back only one kind's files from a backup (the saves as they are now are kept first, as a new backup).
 /// Answers how many files went back.
-pub fn restore_kind(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now: u64) -> io::Result<usize> {
-    restore_kind_with(id, kind, folders, root, now, "co2")
-}
-
 pub fn restore_kind_with(id: &str, kind: Kind, folders: &[PathBuf], root: &Path, now: u64, coop_ext: &str) -> io::Result<usize> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.starts_with('.') {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a backup"));
@@ -523,16 +497,22 @@ pub fn restore_kind_with(id: &str, kind: Kind, folders: &[PathBuf], root: &Path,
 }
 
 #[cfg(test)]
-mod kind_tests {
+mod tests {
     use super::*;
 
     #[test]
+    fn stamps_sort_by_time() {
+        assert_eq!(stamp(0), "19700101-000000");
+        assert_eq!(stamp(1_794_000_000), "20261106-212000");
+    }
+
+    #[test]
     fn kinds_apart() {
-        assert_eq!(kind_of("ER0000.sl2"), Some(Kind::Solo));
-        assert_eq!(kind_of("ER0000.sl2.bak"), Some(Kind::Solo));
-        assert_eq!(kind_of("TurbineModded.sl2"), Some(Kind::Modded));
-        assert_eq!(kind_of("ER0000.co2"), Some(Kind::Coop));
-        assert_eq!(kind_of("steam_autocloud.vdf"), None);
+        assert_eq!(kind_of_with("ER0000.sl2", "co2"), Some(Kind::Solo));
+        assert_eq!(kind_of_with("ER0000.sl2.bak", "co2"), Some(Kind::Solo));
+        assert_eq!(kind_of_with("TurbineModded.sl2", "co2"), Some(Kind::Modded));
+        assert_eq!(kind_of_with("ER0000.co2", "co2"), Some(Kind::Coop));
+        assert_eq!(kind_of_with("steam_autocloud.vdf", "co2"), None);
         assert_eq!(kind_of_with("ER0000.myco", "myco"), Some(Kind::Coop));
         assert_eq!(kind_of_with("ER0000.sl2", "sl2"), Some(Kind::Solo), "never the normal save");
         let d = std::env::temp_dir().join(format!("turbine-savekinds-{}", std::process::id()));
@@ -545,19 +525,19 @@ mod kind_tests {
         let folders = vec![d.join("EldenRing")];
         let root = d.join("backups");
         let snap = backup_with(&folders, &root, 1_000, None, &[]).unwrap().unwrap();
-        assert_eq!(files_of(&folders, Kind::Coop).len(), 1);
-        assert_eq!(count_in(&root, &snap.id, Kind::Modded), 1);
+        assert_eq!(files_of_with(&folders, Kind::Coop, "co2").len(), 1);
+        assert_eq!(count_in_with(&root, &snap.id, Kind::Modded, "co2"), 1);
         for (n, t) in [("ER0000.sl2", "solo2"), ("TurbineModded.sl2", "mod2"), ("ER0000.co2", "coop2")] {
             fs::write(saves.join(n), t).unwrap();
         }
         // Only the co-op save goes back; the others stay as they are now.
-        assert_eq!(restore_kind(&snap.id, Kind::Coop, &folders, &root, 2_000).unwrap(), 1);
+        assert_eq!(restore_kind_with(&snap.id, Kind::Coop, &folders, &root, 2_000, "co2").unwrap(), 1);
         assert_eq!(fs::read_to_string(saves.join("ER0000.co2")).unwrap(), "coop1");
         assert_eq!(fs::read_to_string(saves.join("ER0000.sl2")).unwrap(), "solo2");
         assert_eq!(fs::read_to_string(saves.join("TurbineModded.sl2")).unwrap(), "mod2");
         // The saves from just before were kept.
         assert_eq!(list(&root).len(), 2);
-        assert!(restore_kind("../x", Kind::Solo, &folders, &root, 3_000).is_err());
+        assert!(restore_kind_with("../x", Kind::Solo, &folders, &root, 3_000, "co2").is_err());
         let _ = fs::remove_dir_all(&d);
     }
 }

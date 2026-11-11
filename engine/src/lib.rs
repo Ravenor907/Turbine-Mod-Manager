@@ -48,12 +48,40 @@ pub mod vcrun;
 pub mod vdf;
 pub mod watch;
 pub mod witcher;
+pub mod wsproto;
 pub mod xml;
 pub mod zip;
 
 pub use games::{Game, Runtime, Scan, Store};
 
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::Path;
+
+/// Writes a file whole or not at all: a hidden file beside it first (synced), then renamed over it, then the folder
+/// synced so the rename itself lasts through a power cut (matters on SD cards). Makes the folder when it is missing.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p)?;
+    }
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.turbine-new"));
+    {
+        let mut f = File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    if let Some(p) = path.parent() {
+        if let Ok(d) = File::open(p) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
+}
 
 /// Every installed Steam and Heroic game under this home folder, sorted by name.
 pub fn scan_games(home: &Path) -> Scan {

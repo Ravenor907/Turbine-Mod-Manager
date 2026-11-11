@@ -24,7 +24,7 @@
 //!   mods" is on in its settings. Turbine doesn't run redMod.exe (a Windows program), so it explains this once.
 //! - Nexus mod IDs: wiki.redmodding.org "Core Mods explained" links each framework's Nexus page.
 
-use crate::rules::Check;
+use crate::rules::{lc, Check};
 
 /// One framework other mods build on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,10 +116,6 @@ they change. If you added --launcher-skip to the game's Launch Options in Steam,
 pub const REDMOD_MISSING: &str = "REDmod isn't installed. It's a free add-on for the game: in Steam, open Cyberpunk \
 2077's page, find REDmod under its downloadable content and install it. On GOG it is a free add-on for the game \
 too; install it where you installed the game.";
-
-fn lc(p: &str) -> String {
-    p.replace('\\', "/").trim_start_matches('/').to_lowercase()
-}
 
 /// The frameworks these files (game-relative) are, by their detect file.
 pub fn provides(files: &[String]) -> Vec<&'static str> {

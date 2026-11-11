@@ -27,9 +27,10 @@ use crate::json::{self, quote, Json};
 use crate::plugins;
 use crate::rules::{self, GameRules};
 use crate::zip::{self, Limits};
+use crate::write_atomic;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -639,10 +640,6 @@ pub struct Store {
 /// A staged folder's files by folder, with its inode and modification time when read.
 type FilesCache = HashMap<PathBuf, (u64, i64, Vec<String>)>;
 
-fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
 fn not_found(id: &str) -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, format!("There is no mod called {id} here."))
 }
@@ -849,19 +846,6 @@ fn writable(dir: &Path) -> bool {
     let ok = File::create(&probe).is_ok();
     let _ = fs::remove_file(&probe);
     ok
-}
-
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(p) = path.parent() {
-        fs::create_dir_all(p)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, path)
 }
 
 /// Every file under `base`, as ('/' separated relative path, full path), sorted.
@@ -1108,7 +1092,7 @@ impl Store {
     }
 
     fn now(&self) -> u64 {
-        self.clock.unwrap_or_else(now_secs)
+        self.clock.unwrap_or_else(crate::nxm::now)
     }
 
     fn state_path(&self) -> PathBuf {
@@ -1426,7 +1410,7 @@ impl Store {
             replace_ok.join(","),
             opt(&self.last_build)
         );
-        write_atomic(&self.state_path(), &text)
+        write_atomic(&self.state_path(), text.as_bytes())
     }
 
     /// Every mod's files in the game (game-relative), in Turbine's order, then the Recently removed ones (turned off),
@@ -1646,11 +1630,6 @@ impl Store {
     /// place (basic::refused, with why).
     pub fn place_conflicts(&self, files: &[String], from: &str, to: &str) -> Result<Conflicts, String> {
         conflicts_in(&self.game, &self.root, files, from, to)
-    }
-
-    /// The pending mod's conflicts for a folder the player is looking at (the overwrite sheet after "Put them here").
-    pub fn pending_conflicts(&self, pending: &PendingPlace, from: &str, to: &str) -> Result<Conflicts, String> {
-        self.place_conflicts(&pending.files, from, to)
     }
 
     /// Stages a Basic game's mod at its placement and remembers the placement for its updates.

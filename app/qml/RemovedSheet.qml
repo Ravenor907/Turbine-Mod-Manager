@@ -13,7 +13,6 @@ Overlay {
 
     property var mods: []                 // [{id, name, removedAt}]
     property int focusIndex: 0            // the mods, then Empty
-    property var now: new Date()
 
     signal activated(int index)
     signal deleteClicked(int index)
@@ -126,17 +125,5 @@ Overlay {
         Text { id: rbText; anchors.centerIn: parent; text: rb.label; color: rb.danger ? rs.ui.c.warn : rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14); font.bold: true }
         HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
         MouseArea { anchors.fill: parent; onClicked: rb.clicked() }
-    }
-    component KeyHint: Row {
-        property string k: ""
-        property string label: ""
-        spacing: rs.ui.px(6)
-        Rectangle {
-            width: rs.ui.px(24); height: width; radius: width / 2
-            anchors.verticalCenter: parent.verticalCenter
-            color: rs.ui.c.raised; border.color: rs.ui.c.accentLo; border.width: Math.max(1, rs.ui.px(1))
-            Text { anchors.centerIn: parent; text: parent.parent.k.toUpperCase(); color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13); font.bold: true }
-        }
-        Text { text: parent.label; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14); anchors.verticalCenter: parent.verticalCenter }
     }
 }

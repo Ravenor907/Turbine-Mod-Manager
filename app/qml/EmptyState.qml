@@ -3,12 +3,7 @@ import QtQuick
 // A calm message where a list would be: a title, a line or two of plain words and, optionally, one button with its
 // controller key (e.g. "A Add mods"). Content is centered in whatever size it is given, e.g. anchors.fill: parent.
 //
-// ui (required): an object that gives
-//   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
-//                 onAccent, focusFill, ok, warn, light (bool); stop is optional (a fallback is used without it)
-//   ui.px(n)      design pixels to screen pixels
-//   ui.titleFont  font family for titles
-//   ui.bodyFont   font family for everything else
+// ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
 Item {
     id: root
 
@@ -70,25 +65,7 @@ Item {
                 id: buttonRow
                 anchors.centerIn: parent
                 spacing: root.ui.px(8)
-                Rectangle {
-                    visible: root.buttonKey !== ""
-                    width: Math.max(root.ui.px(24), buttonKeyText.implicitWidth + root.ui.px(12))
-                    height: root.ui.px(24)
-                    radius: root.buttonKey.length > 1 ? root.ui.px(6) : height / 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: root.ui.c.raised
-                    border.color: root.ui.c.accentLo
-                    border.width: Math.max(1, root.ui.px(1))
-                    Text {
-                        id: buttonKeyText
-                        anchors.centerIn: parent
-                        text: root.buttonKey.toUpperCase()
-                        color: root.ui.c.text
-                        font.family: root.ui.bodyFont
-                        font.pixelSize: root.ui.fpx(14)
-                        font.bold: true
-                    }
-                }
+                KeyCap { visible: root.buttonKey !== ""; ui: root.ui; k: root.buttonKey; anchors.verticalCenter: parent.verticalCenter }
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.buttonLabel || ""

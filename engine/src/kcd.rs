@@ -25,9 +25,10 @@
 //! as it was before Turbine's first change is kept in Turbine's own folder (never in the game's), and a file Turbine
 //! made itself is taken away again when it has nothing left to list.
 
-use crate::rules::Check;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use crate::rules::{lc, mod_folders, Check};
+use crate::write_atomic;
+use std::fs;
+use std::io;
 use std::path::Path;
 
 pub const ORDER_FILE: &str = "mod_order.txt";
@@ -39,25 +40,6 @@ pub const MADE_MARK: &str = "kcd-mod_order.txt.made";
 /// hand later is listed too (a folder missing from mod_order.txt doesn't load).
 pub const SEEN_NAME: &str = "kcd-mods-seen.txt";
 pub const DEVMODE_TITLE: &str = "One-time setting for some mods";
-
-fn lc(p: &str) -> String {
-    p.replace('\\', "/").trim_start_matches('/').to_lowercase()
-}
-
-/// The mod folders (in <game>/Mods) these game-relative files belong to, in the order they first appear.
-pub fn mod_folders(files: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for f in files {
-        let clean = f.replace('\\', "/");
-        let mut parts = clean.trim_start_matches('/').split('/');
-        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) {
-            if top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
-                out.push(folder.to_string());
-            }
-        }
-    }
-    out
-}
 
 /// A folder name the games and mod_order.txt take: letters, digits and '_' only ("Better Lockpicking 1.2" becomes
 /// "BetterLockpicking12").
@@ -72,12 +54,7 @@ pub fn folder_name(name: &str) -> String {
 
 /// The new text of mod_order.txt. `existing`: the file as it is (None when there is none); `on_disk`: the folders in
 /// the Mods folder now; `order`: Turbine's turned-on mod folders in its order; `managed`: every folder Turbine places
-/// or may place (on or off).
-pub fn render_mod_order(existing: Option<&str>, on_disk: &[String], order: &[String], managed: &[String]) -> String {
-    render_mod_order_adding(existing, on_disk, order, managed, &[])
-}
-
-/// `render_mod_order` that also lists `add` (the player's own folders that are new since Turbine last looked) after
+/// or may place (on or off); `add`: the player's own folders that are new since Turbine last looked, listed after
 /// the player's lines, alphabetically, before Turbine's.
 pub fn render_mod_order_adding(existing: Option<&str>, on_disk: &[String], order: &[String], managed: &[String], add: &[String]) -> String {
     let eol = if existing.is_some_and(|t| t.contains("\r\n")) { "\r\n" } else { "\n" };
@@ -111,21 +88,6 @@ pub fn render_mod_order_adding(existing: Option<&str>, on_disk: &[String], order
     let mut out = lines.join(eol);
     out.push_str(eol);
     out
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.turbine-new"));
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
 }
 
 /// Writes <game>/Mods/mod_order.txt from Turbine's mods. `mods` are (game-relative files, turned on) for every mod
@@ -166,10 +128,9 @@ pub fn sync_mod_order(game_dir: &Path, keep: &Path, mods: &[(&[String], bool)]) 
     let seen_path = keep.join(SEEN_NAME);
     let seen: Option<Vec<String>> = fs::read_to_string(&seen_path).ok().map(|t| t.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect());
     let add: Vec<String> = match (&old, &seen) {
-        (None, _) => Vec::new(),
         (Some(_), _) if made.exists() => own_now.clone(),
         (Some(_), Some(seen)) => own_now.iter().filter(|f| !seen.iter().any(|s| s.eq_ignore_ascii_case(f))).cloned().collect(),
-        (Some(_), None) => Vec::new(),
+        _ => Vec::new(),
     };
     let mut seen_text: Vec<String> = own_now.clone();
     seen_text.sort_by_key(|f| f.to_lowercase());

@@ -1,15 +1,12 @@
 //! Update checks, offline, against the Thunderstore and Nexus samples in tests/data.
 
+mod support;
+
 use std::cmp::Ordering::*;
-use std::fs;
-use std::path::Path;
+use support::data_text as data;
 use turbine_engine::nexus;
 use turbine_engine::thunderstore;
 use turbine_engine::updates::{self, compare_versions, Installed};
-
-fn data(name: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
 
 #[test]
 fn versions_compare_by_number() {
@@ -51,21 +48,9 @@ fn thunderstore_updates_from_the_index() {
 
 #[test]
 fn nexus_updates_one_list_per_game_then_files() {
-    let updated = nexus::parse_updated(&data("nexus_updated.json")).unwrap();
-    let mine = vec![
-        installed("nexus", "skyrimspecialedition:12604:100", Some("5.1SE"), 1_500_000_000),
-        installed("nexus", "skyrimspecialedition:555:1", Some("1.0"), 1_500_000_000),
-        installed("nexus", "skyrimspecialedition:99:5", Some("1.0"), 1_800_000_000),
-        installed("nexus", "stardewvalley:12604:100", Some("1.0"), 0),
-        installed("thunderstore", "skyrimspecialedition:12604:100", None, 0),
-        installed("nexus", "broken-id", None, 0),
-    ];
-    let cand = updates::nexus_candidates("skyrimspecialedition", &mine, &updated);
-    // Only 12604 changed after it was installed (99 changed before its install; 555 isn't in the list).
-    assert_eq!(cand.iter().map(|(id, _)| *id).collect::<Vec<_>>(), vec![12604]);
-
+    let mine = installed("nexus", "skyrimspecialedition:12604:100", Some("5.1SE"), 1_500_000_000);
     let files = nexus::parse_files(&data("nexus_files.json")).unwrap();
-    let up = updates::nexus_update_from_files(cand[0].1, &files).unwrap();
+    let up = updates::nexus_update_from_files(&mine, &files).unwrap();
     assert_eq!(up.id, "skyrimspecialedition:12604:200");
     assert_eq!(up.new_version, "5.2SE");
     assert_eq!(up.target, "200");

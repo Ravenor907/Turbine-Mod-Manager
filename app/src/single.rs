@@ -17,7 +17,6 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
 /// Longest line accepted from the socket (a Nexus link is well under 1 KB).
 const MAX_LINE: u64 = 4096;
 /// What a second launch with no link sends: the running Turbine comes to the front.
@@ -26,7 +25,7 @@ pub const SHOW: &str = "turbine:show";
 /// Where the socket lives. None when there is no runtime folder.
 pub fn socket_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()).map(PathBuf::from)?;
-    let dir = if Path::new("/.flatpak-info").exists() { base.join("app").join(APP_ID) } else { base.join(APP_ID) };
+    let dir = if crate::system::in_flatpak() { base.join("app").join(crate::APP_ID) } else { base.join(crate::APP_ID) };
     Some(dir.join("turbine.sock"))
 }
 
@@ -134,7 +133,7 @@ fn accepted(line: &str) -> bool {
     line == SHOW || plausible_link(line) || turbine_engine::quick::parse_socket_line(line).is_some()
 }
 
-/// Reads one line from a connection: an nxm:// link that parses, or nothing.
+/// Reads one line from a connection: a line `accepted` takes, or nothing.
 fn read_link(stream: UnixStream) -> Option<String> {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
     let mut writer = stream.try_clone().ok();

@@ -1,13 +1,12 @@
 //! Keyless Nexus, round 2: categories (facets) and the category filter in Get mods, and update checks for installed
 //! mods through legacyModsByDomain with no key.
 
+mod support;
+
+use support::data_text as data;
 use turbine_engine::json;
 use turbine_engine::nexus::{self, SearchSort};
 use turbine_engine::updates::{self, Installed};
-
-fn data(name: &str) -> String {
-    std::fs::read_to_string(format!("{}/tests/data/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
-}
 
 fn installed(kind: &str, id: &str, v: Option<&str>, at: u64) -> Installed {
     Installed { kind: kind.into(), id: id.into(), version: v.map(String::from), installed_at: at }
@@ -23,7 +22,7 @@ fn search_asks_for_categories_and_keeps_one() {
     let q = body.str_at("query").unwrap();
     assert!(q.contains("facets: {categoryName: []}") && q.contains("facetsData") && q.contains(" category "), "{q}");
     // No category: no filter for it.
-    let plain = json::parse(&nexus::search_body("witcher3", "", SearchSort::Endorsements, 0, 30, false)).unwrap();
+    let plain = json::parse(&nexus::search_body_in("witcher3", "", "", SearchSort::Endorsements, 0, 30, false, turbine_engine::nxm::now())).unwrap();
     assert!(plain.get("variables").and_then(|v| v.get("filter")).unwrap().get("categoryName").is_none());
 
     // The live answer's shape (facetsData by category name), most mods first.

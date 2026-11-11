@@ -15,7 +15,7 @@ const EXT_VERSION = chrome.runtime.getManifest().version;
 const ADDED_KEEP_MS = 10 * 60 * 1000;
 
 // What the panel and popup show. Kept in session storage so a restarted worker still knows it.
-let view = { status: null, added: null, choices: null, lastError: null, signin: null };
+let view = { status: null, added: null, choices: null, lastError: null };
 const ports = new Set();
 
 const bridge = TurbineBridge.createBridge({
@@ -192,7 +192,6 @@ function handlePanel(msg, port) {
       if (typeof msg.url === "string") signinFlow.onWhere(msg.url);
       break;
     case "signin.send":
-    case "signin.go":
     case "key.start":
     case "key.found":
     case "key.missing":
@@ -314,7 +313,7 @@ chrome.runtime.onStartup.addListener(() => bridge.nudge());
 chrome.runtime.onInstalled.addListener(() => bridge.nudge());
 
 chrome.storage.session.get(["view", "trackedDownloads", "signin"]).then((s) => {
-  if (s.view) view = Object.assign(view, s.view, { choices: null, signin: null });
+  if (s.view) view = Object.assign(view, s.view, { choices: null });
   signinFlow.restore(s.signin);
   tracker.restore(s.trackedDownloads);
   updateBadge();

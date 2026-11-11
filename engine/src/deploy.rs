@@ -18,10 +18,10 @@
 //! - The record is kept twice (record.json and record.json.prev). `reset_from_backups` is always a way back.
 
 use crate::json::{self, quote, Json};
+use crate::write_atomic;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::OsString;
 use std::fs::{self, File, TryLockError};
-use std::io::{self, Write};
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
@@ -124,10 +124,6 @@ fn plain(kind: io::ErrorKind, msg: impl Into<String>) -> io::Error {
     io::Error::new(kind, msg.into())
 }
 
-fn lower(s: &str) -> String {
-    s.to_lowercase()
-}
-
 fn mtime_of(m: &fs::Metadata) -> i64 {
     m.mtime() * 1_000_000_000 + m.mtime_nsec()
 }
@@ -160,7 +156,7 @@ fn backup_ok(paths: &Paths, b: &Path) -> bool {
 
 /// Settings-like files are always copied, never linked: games and loaders write to them in place.
 pub fn config_like(rel: &str) -> bool {
-    let l = lower(rel);
+    let l = rel.to_lowercase();
     let parts: Vec<&str> = l.split('/').collect();
     let (name, dirs) = parts.split_last().unwrap_or((&"", &[]));
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
@@ -203,7 +199,7 @@ fn check_dirs(game: &Path, rel: &str, going: Option<&HashSet<String>>) -> io::Re
                 ))
             }
             Ok(m) if m.is_dir() => {}
-            Ok(_) if going.is_some_and(|g| g.contains(&lower(&acc))) => return Ok(false),
+            Ok(_) if going.is_some_and(|g| g.contains(&acc.to_lowercase())) => return Ok(false),
             Ok(_) => {
                 return Err(plain(
                     io::ErrorKind::InvalidInput,
@@ -256,20 +252,20 @@ impl<'a> CaseMap<'a> {
         let mut out = String::new();
         let mut dir = self.root.to_path_buf();
         for part in rel.split('/').filter(|p| !p.is_empty()) {
-            let key_prefix = if out.is_empty() { lower(part) } else { format!("{}/{}", lower(&out), lower(part)) };
+            let key_prefix = if out.is_empty() { part.to_lowercase() } else { format!("{}/{}", out.to_lowercase(), part.to_lowercase()) };
             let names = self.cache.entry(dir.clone()).or_insert_with(|| {
                 let mut m = HashMap::new();
                 if let Ok(rd) = fs::read_dir(&dir) {
                     for e in rd.flatten() {
                         let n = e.file_name().to_string_lossy().into_owned();
-                        m.entry(lower(&n)).or_insert(n);
+                        m.entry(n.to_lowercase()).or_insert(n);
                     }
                 }
                 m
             });
             // On disk first, then a casing already chosen earlier in this same plan.
             let actual = names
-                .get(&lower(part))
+                .get(&part.to_lowercase())
                 .cloned()
                 .or_else(|| planned.get(&key_prefix).map(|full| full.rsplit('/').next().unwrap_or(part).to_string()))
                 .unwrap_or_else(|| part.to_string());
@@ -388,28 +384,6 @@ fn describe(v: &Json, why: &str) -> String {
     }
 }
 
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(p) = path.parent() {
-        fs::create_dir_all(p)?;
-    }
-    let mut name = path.file_name().map(OsString::from).unwrap_or_default();
-    name.push(".tmp");
-    let tmp = path.with_file_name(name);
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, path)?;
-    // Make the rename itself last through a power cut (matters on SD cards).
-    if let Some(p) = path.parent() {
-        if let Ok(d) = File::open(p) {
-            let _ = d.sync_all();
-        }
-    }
-    Ok(())
-}
-
 fn with_suffix(p: &Path, suffix: &str) -> PathBuf {
     let mut s = p.as_os_str().to_os_string();
     s.push(suffix);
@@ -441,7 +415,7 @@ fn parse_record(text: &str, paths: Option<&Paths>, bad: &mut Vec<String>) -> io:
     let mut seen = HashSet::new();
     for f in files {
         match placed_from(f, paths) {
-            Ok(p) if seen.insert(lower(&p.rel)) => rec.files.push(p),
+            Ok(p) if seen.insert(p.rel.to_lowercase()) => rec.files.push(p),
             Ok(p) => {
                 bad.push(format!("{}: listed twice", p.rel));
                 rec.quarantine.push(to_text(f));
@@ -495,8 +469,8 @@ impl Record {
     /// Writes the record and its second copy (record.json.prev).
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let text = self.text();
-        write_atomic(path, &text)?;
-        write_atomic(&prev_path(path), &text)
+        write_atomic(path, text.as_bytes())?;
+        write_atomic(&prev_path(path), text.as_bytes())
     }
 }
 
@@ -535,7 +509,7 @@ fn load_record(paths: &Paths, report: &mut Report) -> io::Result<Record> {
                     if exists(&paths.record) {
                         fs::rename(&paths.record, with_suffix(&paths.record, ".damaged"))?;
                     }
-                    write_atomic(&paths.record, &text)?;
+                    write_atomic(&paths.record, text.as_bytes())?;
                     Err(plain(
                         io::ErrorKind::InvalidData,
                         "Turbine's list of the files it put in this game was damaged. It went back to its saved copy; try again.",
@@ -813,7 +787,7 @@ fn check_wanted(wanted: &[(String, PathBuf)]) -> io::Result<()> {
         if !safe_rel(rel) {
             return Err(plain(io::ErrorKind::InvalidInput, format!("Turbine won't place {rel:?}: it isn't a plain path inside the game's folder.")));
         }
-        let l = lower(rel);
+        let l = rel.to_lowercase();
         let parts: Vec<&str> = l.split('/').collect();
         for i in 1..parts.len() {
             folders.insert(parts[..i].join("/"));
@@ -833,9 +807,9 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
     // Final choice per path, case-insensitive, in order (later wins).
     let mut chosen: BTreeMap<String, (String, PathBuf)> = BTreeMap::new();
     for (rel, src) in wanted {
-        chosen.insert(lower(rel), (rel.clone(), src.clone()));
+        chosen.insert(rel.to_lowercase(), (rel.clone(), src.clone()));
     }
-    let current: HashMap<String, &Placed> = record.files.iter().map(|p| (lower(&p.rel), p)).collect();
+    let current: HashMap<String, &Placed> = record.files.iter().map(|p| (p.rel.to_lowercase(), p)).collect();
     let mut names = BackupNames::new();
     for p in &record.files {
         if let Some(b) = &p.backup {
@@ -849,7 +823,7 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
     // there as Turbine left it (missing, or replaced by a new file).
     let mut again: HashSet<String> = HashSet::new();
     for p in &record.files {
-        let key = lower(&p.rel);
+        let key = p.rel.to_lowercase();
         match chosen.get(&key) {
             Some((_, src)) if *src == p.source => {
                 let target = paths.game.join(&p.rel);
@@ -866,7 +840,7 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
             _ => ops.push(Op::Remove { placed: p.clone(), again: false }),
         }
     }
-    let going: HashSet<String> = ops.iter().filter_map(|o| if let Op::Remove { placed, .. } = o { Some(lower(&placed.rel)) } else { None }).collect();
+    let going: HashSet<String> = ops.iter().filter_map(|o| if let Op::Remove { placed, .. } = o { Some(placed.rel.to_lowercase()) } else { None }).collect();
     let mut case = CaseMap::new(&paths.game);
     let mut planned: HashMap<String, String> = HashMap::new();
     let mut can_link: HashMap<(u64, u64), bool> = HashMap::new();
@@ -879,7 +853,7 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
             }
         }
         let actual = case.resolve(rel, &planned);
-        let lk = lower(&actual);
+        let lk = actual.to_lowercase();
         // Remember the chosen casing of every folder on the way, for later files in the same plan.
         let mut acc = String::new();
         for part in actual.split('/') {
@@ -887,7 +861,7 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
                 acc.push('/');
             }
             acc.push_str(part);
-            planned.entry(lower(&acc)).or_insert_with(|| acc.clone());
+            planned.entry(acc.to_lowercase()).or_insert_with(|| acc.clone());
         }
         let all_dirs_there = check_dirs(&paths.game, &actual, Some(&going))?;
         let target = paths.game.join(&actual);
@@ -1159,14 +1133,14 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     }
     clean_link_tests(&paths.game);
     let mut record = load_record(paths, &mut report)?;
-    let placed: HashMap<String, &Placed> = record.files.iter().map(|p| (lower(&p.rel), p)).collect();
+    let placed: HashMap<String, &Placed> = record.files.iter().map(|p| (p.rel.to_lowercase(), p)).collect();
     // Later entries win. When the one that would land may not replace what is there (a game file, or a file
     // Turbine put over a game file with another mod's consent, or one the game has replaced since), the latest
     // earlier mod that may replace it wins instead; with none, the path is left as it is (`skipped_existing`).
     let mut order: Vec<String> = Vec::new();
     let mut by_key: HashMap<String, Vec<usize>> = HashMap::new();
     for (i, w) in wanted.iter().enumerate() {
-        let k = lower(&w.rel);
+        let k = w.rel.to_lowercase();
         if !by_key.contains_key(&k) {
             order.push(k.clone());
         }
@@ -1205,7 +1179,7 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     }
     let mut list: Vec<(String, PathBuf)> = Vec::with_capacity(wanted.len());
     for (i, w) in wanted.iter().enumerate() {
-        let k = lower(&w.rel);
+        let k = w.rel.to_lowercase();
         if skipped.contains(&k) || upto.get(&k).is_some_and(|&j| i > j) {
             continue;
         }
@@ -1221,7 +1195,7 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     }
     let lines: Vec<String> = plan.ops.iter().map(op_json).collect();
     let dirs: Vec<String> = plan.new_dirs.iter().map(|d| quote(d)).collect();
-    write_atomic(&paths.plan, &format!("{{\"ops\":[\n{}\n],\n\"new_dirs\":[{}]}}\n", lines.join(",\n"), dirs.join(",")))?;
+    write_atomic(&paths.plan, format!("{{\"ops\":[\n{}\n],\n\"new_dirs\":[{}]}}\n", lines.join(",\n"), dirs.join(",")).as_bytes())?;
     for (i, op) in plan.ops.iter().enumerate() {
         if stop_after == Some(i) {
             return Err(io::Error::other("stopped on purpose (test)"));

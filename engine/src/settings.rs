@@ -8,7 +8,7 @@
 //! Where edits live (a mod's file): Turbine's own copy in the store, `settings/<mod id>/<path>`, never the mod's staged
 //! file itself. The store deploys the copy in place of the mod's file (`effective`). Beside it: `.base` (the mod's file
 //! the edit was made from) and `.backup` (the copy before the last save). Reset to default takes the copy away (kept
-//! as `.backup`). When a mod update brings a new file, the player's changed values are carried into it (`merge`).
+//! as `.backup`). When a mod update brings a new file, the player's changed values are carried into it (`merge_report`).
 
 use std::fs;
 use std::io;
@@ -881,12 +881,6 @@ pub fn set_line(text: &str, line: usize, new: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-/// A new default file with the player's changes carried over (`merge_report`'s text). Running it again changes
-/// nothing (values are compared and written unescaped).
-pub fn merge(fmt: Format, new_default: &str, old_default: &str, edited: &str) -> String {
-    merge_report(fmt, new_default, old_default, edited).text
-}
-
 /// What carrying the player's changes into a mod's new file did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeReport {
@@ -978,7 +972,8 @@ fn item_identity(list: &[Field], prefix: &str, idx: usize) -> Option<(String, St
 /// Carries the player's changes (`edited` against `old_default`) into `new_default`. Each changed setting is
 /// matched by section, name and occurrence; a repeated name by the old default's values in order; a list item by
 /// its identity (an id or name key) when the list changed. Anything that can't be placed for sure is left as the
-/// new file has it and listed in `unsure`.
+/// new file has it and listed in `unsure`. Running it again changes nothing (values are compared and written
+/// unescaped).
 pub fn merge_report(fmt: Format, new_default: &str, old_default: &str, edited: &str) -> MergeReport {
     let old = parse(old_default, fmt);
     let mine = parse(edited, fmt);
@@ -1517,7 +1512,7 @@ mod tests {
         let old = "[a]\nx = 1\ny = 2\nz = 3\n";
         let mine = "[a]\nx = 1\ny = 9\nz = 3\n";
         let new = "[a]\n; new help\nx = 5\ny = 2\nw = 4\n";
-        assert_eq!(merge(Format::Ini, new, old, mine), "[a]\n; new help\nx = 5\ny = 9\nw = 4\n");
+        assert_eq!(merge_report(Format::Ini, new, old, mine).text, "[a]\n; new help\nx = 5\ny = 9\nw = 4\n");
     }
 
     #[test]
@@ -1606,14 +1601,14 @@ mod break_tests {
         let old = "p = \"C:\\\\A\"\n";
         let mine = "p = \"C:\\\\B&\"\n";
         let new = "# new\np = \"C:\\\\A\"\n";
-        let once = merge(Format::Toml, new, old, mine);
+        let once = merge_report(Format::Toml, new, old, mine).text;
         assert_eq!(once, "# new\np = \"C:\\\\B&\"\n");
-        assert_eq!(merge(Format::Toml, new, old, &once), once);
+        assert_eq!(merge_report(Format::Toml, new, old, &once).text, once);
         let xold = "<a><n>x</n></a>";
         let xmine = "<a><n>A &amp; B</n></a>";
-        let m1 = merge(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, xmine);
+        let m1 = merge_report(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, xmine).text;
         assert_eq!(m1, "<a><n>A &amp; B</n><m>1</m></a>");
-        assert_eq!(merge(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, &m1), m1);
+        assert_eq!(merge_report(Format::Xml, "<a><n>x</n><m>1</m></a>", xold, &m1).text, m1);
     }
 
     #[test]
@@ -1622,15 +1617,15 @@ mod break_tests {
         let old = "[p]\nplugin = a\nplugin = b\n";
         let mine = "[p]\nplugin = a\nplugin = z\n";
         let new = "[p]\n; help\nplugin = a\nplugin = b\n";
-        assert_eq!(merge(Format::Ini, new, old, mine), "[p]\n; help\nplugin = a\nplugin = z\n");
+        assert_eq!(merge_report(Format::Ini, new, old, mine).text, "[p]\n; help\nplugin = a\nplugin = z\n");
         // A JSON array that changed shape: the player's value isn't moved onto another item.
         let old = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}]}";
         let mine = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": false}]}";
         let new = "{\"l\": [{\"n\": \"w\", \"on\": true}, {\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}]}";
-        assert_eq!(merge(Format::Json, new, old, mine), new);
+        assert_eq!(merge_report(Format::Json, new, old, mine).text, new);
         // The same array: carried.
         let new2 = "{\"l\": [{\"n\": \"x\", \"on\": true}, {\"n\": \"y\", \"on\": true}], \"v\": 2}";
-        assert!(merge(Format::Json, new2, old, mine).contains("{\"n\": \"y\", \"on\": false}"));
+        assert!(merge_report(Format::Json, new2, old, mine).text.contains("{\"n\": \"y\", \"on\": false}"));
         // Saves match by name again and refuse a value that changed meanwhile.
         let text = "[a]\nx = 1\ny = 2\n";
         let e = |k: &str, was: &str, v: &str| Edit { section: "a".into(), key: k.into(), occ: 0, was: was.into(), value: v.into() };

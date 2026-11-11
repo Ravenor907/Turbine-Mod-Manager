@@ -22,11 +22,9 @@ QtObject {
     // Fades (and anything else that may run at Reduced).
     readonly property int fast: on ? 120 : 0
     readonly property int base: on ? 180 : 0
-    readonly property int slow: on ? 260 : 0
     // Travel: glides, slides, scales, the page turn. 0 unless Full.
     readonly property int moveFast: moves ? 120 : 0
     readonly property int moveBase: moves ? 180 : 0
-    readonly property int moveSlow: moves ? 260 : 0
     readonly property int page: moves ? 320 : on ? 180 : 0
 
     // Coming in, going out, and the even pace of a spinner or a ring that fills.

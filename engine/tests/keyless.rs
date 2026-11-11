@@ -1,31 +1,23 @@
 //! Browsing Nexus Mods without a key (v2 GraphQL with Turbine's application headers only), the file a mod page
 //! offers, download names, and the Game Mods folders the browser helper sorts downloads into. Canned answers only.
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use support::{data_text as data, scratch};
 use turbine_engine::json;
 use turbine_engine::net::{Client, NetError};
 use turbine_engine::nexus::{self, Nexus, SearchSort};
 use turbine_engine::store::{clean_name, nexus_ids_from_name};
 use turbine_engine::watch::{self, Basis, Catcher, Event, Seen, Skip};
 
-fn data(name: &str) -> String {
-    fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
-
 fn num(j: &json::Json) -> f64 {
     match j {
         json::Json::Num(n) => *n,
         _ => -1.0,
     }
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-keyless-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
 }
 
 // A stand-in curl: serves files named after the URL and records the headers and the posted body.
@@ -164,7 +156,7 @@ fn too_many_requests_backs_off() {
 #[test]
 fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
     let now = 1_762_473_600; // 2025-11-07
-    let body = json::parse(&nexus::search_body_at("witcher3", "", SearchSort::Trending, 0, 30, false, now)).unwrap();
+    let body = json::parse(&nexus::search_body_in("witcher3", "", "", SearchSort::Trending, 0, 30, false, now)).unwrap();
     let vars = body.get("variables").unwrap();
     let up = &vars.get("filter").unwrap().get("updatedAt").unwrap().as_array()[0];
     // Seconds at the start of the day 30 days back: Nexus reads a full time's ':' as a new search term and refuses
@@ -172,7 +164,7 @@ fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
     assert_eq!(up.str_at("value"), Some("1759881600"));
     assert_eq!(nexus::date_day(1_759_881_600), "2025-10-08");
     assert_eq!(vars.get("sort").unwrap().as_array()[0].get("endorsements").unwrap().str_at("direction"), Some("DESC"));
-    let newest = json::parse(&nexus::search_body("witcher3", "", SearchSort::Newest, 0, 30, false)).unwrap();
+    let newest = json::parse(&nexus::search_body_in("witcher3", "", "", SearchSort::Newest, 0, 30, false, turbine_engine::nxm::now())).unwrap();
     assert!(newest.get("variables").unwrap().get("sort").unwrap().as_array()[0].get("createdAt").is_some());
 
     // Nexus refuses the filter: asked again as Most endorsed, and the page says so.
@@ -190,8 +182,6 @@ fn trending_filters_by_the_last_30_days_and_falls_back_to_most_endorsed() {
 
 #[test]
 fn dates_round_trip() {
-    assert_eq!(nexus::iso_day(0), "1970-01-01T00:00:00Z");
-    assert_eq!(nexus::iso_day(1_709_164_800), "2024-02-29T00:00:00Z");
     assert_eq!(nexus::date_day(1_709_164_800), "2024-02-29");
     assert_eq!(nexus::iso_secs("2024-02-29T00:00:00Z"), 1_709_164_800);
     assert_eq!(nexus::iso_secs("2025-03-04T10:20:30Z"), 1_741_083_630);

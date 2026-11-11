@@ -29,6 +29,22 @@ pub const VERSION: &str = match option_env!("TURBINE_VERSION") {
     None => "dev",
 };
 
+/// Turbine's Flatpak id.
+pub const APP_ID: &str = "io.github.ravenor907.TurbineModManager";
+
+/// Seconds since 1970 now.
+pub(crate) use turbine_engine::nxm::now as now_secs;
+
+/// Turbine's cache folder (in the Flatpak, ~/.var/app/<id>/cache/turbine-mod-manager: the host can read it, which
+/// the self-update's installer needs).
+pub(crate) fn cache_dir() -> std::path::PathBuf {
+    std::env::var_os("XDG_CACHE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| turbine_engine::home_dir().join(".cache"))
+        .join("turbine-mod-manager")
+}
+
 extern "C" {
     // qtglue.cpp
     fn turbine_install_qt_handler(sink: extern "C" fn(i32, *const std::os::raw::c_char, *const std::os::raw::c_char));
@@ -176,11 +192,11 @@ fn choose_drawing() -> Option<&'static str> {
 }
 
 fn main() {
-    // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
     // 0.6: the host script's call once Steam has closed: make the waiting change to Steam's settings, then end.
     if let Some(code) = steamsetup::apply_from_args() {
         std::process::exit(code);
     }
+    // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
     if let Some(req) = quick::wanted() {
         std::process::exit(quick::run(req));
     }
@@ -271,8 +287,7 @@ fn main() {
     }
     // 0.6: Open or Report from Steam's menu, asked just before Steam started Turbine for it.
     if !screenshot {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        if let Some(l) = turbine_engine::quick::take_request(&log::folder(&backend::data_home()), now) {
+        if let Some(l) = turbine_engine::quick::take_request(&log::folder(&backend::data_home()), now_secs()) {
             log::line("quick", &format!("Started from Steam's menu: {l}"));
             single::push(l);
         }
@@ -291,7 +306,7 @@ fn main() {
     unsafe { turbine_window_identity() };
     // The browser's profile: kept in Turbine's data folder (signed in stays signed in), its cache in the cache folder.
     let web_data = log::folder(&backend::data_home()).join("browser");
-    let web_cache = online::temp_dir().parent().map(|p| p.join("browser")).unwrap_or_else(|| web_data.join("cache"));
+    let web_cache = cache_dir().join("browser");
     let c_data = std::ffi::CString::new(web_data.to_string_lossy().into_owned()).unwrap_or_default();
     let c_cache = std::ffi::CString::new(web_cache.to_string_lossy().into_owned()).unwrap_or_default();
     let c_origin = std::ffi::CString::new(test_origin.unwrap_or_default()).unwrap_or_default();

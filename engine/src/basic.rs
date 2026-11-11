@@ -123,10 +123,6 @@ impl GameIndex {
         rel.is_empty() || self.dirs_lc.contains_key(&rel.to_lowercase())
     }
 
-    pub fn has_file(&self, rel: &str) -> bool {
-        self.files_lc.contains_key(&rel.to_lowercase())
-    }
-
     /// Is this game path (or a folder on the way to it) a link?
     pub fn through_link(&self, rel: &str) -> bool {
         let lc = rel.to_lowercase();
@@ -254,33 +250,7 @@ impl E {
 }
 
 fn normalize(files: &[String]) -> Result<Vec<E>, String> {
-    let mut out = Vec::new();
-    for f in files {
-        let clean = f.replace('\\', "/");
-        if clean.starts_with('/') || clean.chars().nth(1) == Some(':') {
-            return Err(format!("This archive has a file that points outside its folder: {f}"));
-        }
-        if clean.ends_with('/') {
-            continue;
-        }
-        let mut parts = Vec::new();
-        for p in clean.split('/') {
-            match p {
-                "" | "." => {}
-                ".." => return Err(format!("This archive has a file that points outside its folder: {f}")),
-                _ => parts.push(p.to_string()),
-            }
-        }
-        if parts.is_empty() {
-            continue;
-        }
-        let lc: Vec<String> = parts.iter().map(|p| p.to_lowercase()).collect();
-        if lc.iter().any(|p| p == "__macosx") || matches!(lc.last().map(String::as_str), Some(".ds_store" | "thumbs.db" | "desktop.ini")) {
-            continue;
-        }
-        out.push(E { src: parts.join("/"), parts });
-    }
-    Ok(out)
+    Ok(crate::rules::archive_paths(files, true)?.into_iter().map(|parts| E { src: parts.join("/"), parts }).collect())
 }
 
 /// The entries that count at this level: readmes and images at the top are left out when there is anything else.

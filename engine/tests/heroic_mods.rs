@@ -1,17 +1,13 @@
 //! 0.6 (integration audit B4): Heroic games get the Wine or Proton DLL overrides their mod frameworks need, from
 //! Heroic's own game settings, and a Heroic game with a script loader starts the loader through Heroic's link.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
+use support::scratch as tmp;
 use turbine_engine::games::{Runtime, Scan, Store};
 use turbine_engine::{heroic, proton, rules};
-
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-heroicmods-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
 
 const USER_REG: &str = "WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n\n#arch=win64\n\n[Software\\\\Wine] 1762650000\n#time=1dc5180a1b2c3d4\n\"Version\"=\"win10\"\n";
 

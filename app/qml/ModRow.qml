@@ -1,14 +1,9 @@
 import QtQuick
 
-// One mod in a game's list: order number (only when order matters), an ON or OFF pill, the name, one line under it,
-// one optional badge and, on the focused row, what A and X do.
+// One mod in a game's list: a tick box while selecting, the order number (only when order matters), an ON or OFF
+// pill, the name, one line under it and one optional badge.
 //
-// ui (required): an object that gives
-//   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
-//                 onAccent, focusFill, ok, warn, light (bool); stop is optional (a fallback is used without it)
-//   ui.px(n)      design pixels to screen pixels
-//   ui.titleFont  font family for titles
-//   ui.bodyFont   font family for everything else
+// ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
 Rectangle {
     id: root
 
@@ -23,9 +18,6 @@ Rectangle {
     property string badge: ""             // e.g. "Needs SKSE"; empty hides it
     property string badgeLevel: "warn"    // ok, info, warn, stop
     property bool focused: false
-    property bool showHints: focused
-    property string aLabel: isOn ? "Turn off" : "Turn on"
-    property string xLabel: "Options"
 
     // A tap or click anywhere on the row (the pill included) is clicked(): Main.qml runs A on it.
     signal clicked()
@@ -35,26 +27,10 @@ Rectangle {
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
         if (level === "info") return ui.c.accentHi
-        if (level === "stop") return ui.c.stop !== undefined ? ui.c.stop : (ui.c.light ? Qt.rgba(0.557, 0.165, 0.118, 1) : Qt.rgba(0.941, 0.565, 0.478, 1))
+        if (level === "stop") return ui.c.stop
         return ui.c.warn
     }
     function wash(col, amount) { return Qt.tint(ui.c.card, Qt.rgba(col.r, col.g, col.b, amount)) }
-
-    // Contrast: the same hue, darkened on light grounds or lightened on dark ones until it reads at 4.5:1 or better.
-    function lum(col) {
-        const f = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
-        return 0.2126 * f(col.r) + 0.7152 * f(col.g) + 0.0722 * f(col.b)
-    }
-    function readable(col, bg) {
-        let out = col
-        const lb = lum(bg)
-        for (let i = 0; i < 14; i++) {
-            const lc = lum(out)
-            if ((Math.max(lc, lb) + 0.05) / (Math.min(lc, lb) + 0.05) >= 4.5) break
-            out = lb < 0.18 ? Qt.lighter(out, 1.12) : Qt.darker(out, 1.12)
-        }
-        return out
-    }
 
     // Screen readers: name, role, then what it is ("Lantern Glow, on, by STuRoK, 2 of 9").
     property int position: 0
@@ -155,7 +131,7 @@ Rectangle {
             Text {
                 anchors.centerIn: parent
                 text: root.isOn ? "ON" : "OFF"
-                color: root.isOn ? root.readable(root.ui.c.accentHi, pill.color) : root.ui.c.muted
+                color: root.isOn ? root.ui.readable(root.ui.c.accentHi, pill.color) : root.ui.c.muted
                 font.family: root.ui.bodyFont
                 font.pixelSize: root.ui.fpx(14)
                 font.bold: true
@@ -182,40 +158,10 @@ Rectangle {
                 id: badgeText
                 anchors.centerIn: parent
                 text: root.badge || ""
-                color: root.readable(root.levelColor(root.badgeLevel), parent.color)
+                color: root.ui.readable(root.levelColor(root.badgeLevel), parent.color)
                 font.family: root.ui.bodyFont
                 font.pixelSize: root.ui.fpx(14)
                 font.weight: Font.DemiBold
-            }
-        }
-
-        Row {
-            visible: root.showHints
-            spacing: root.ui.px(12)
-            anchors.verticalCenter: parent.verticalCenter
-            Row {
-                spacing: root.ui.px(6)
-                visible: root.aLabel !== ""
-                KeyCap { ui: root.ui; k: "a"; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.aLabel || ""
-                    color: root.ui.c.soft
-                    font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.fpx(14)
-                }
-            }
-            Row {
-                spacing: root.ui.px(6)
-                visible: root.xLabel !== ""
-                KeyCap { ui: root.ui; k: "x"; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.xLabel || ""
-                    color: root.ui.c.soft
-                    font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.fpx(14)
-                }
             }
         }
     }
@@ -244,32 +190,11 @@ Rectangle {
             width: parent.width
             text: root.detail || ""
             elide: Text.ElideRight
-            color: root.detailLevel !== "" ? root.readable(root.levelColor(root.detailLevel), root.focused ? root.ui.c.focusFill : root.ui.c.card)
+            color: root.detailLevel !== "" ? root.ui.readable(root.levelColor(root.detailLevel), root.focused ? root.ui.c.focusFill : root.ui.c.card)
                    : root.focused ? root.ui.c.soft : root.ui.c.muted
             font.weight: root.detailLevel !== "" ? Font.DemiBold : Font.Normal
             font.family: root.ui.bodyFont
             font.pixelSize: root.ui.fpx(14)
-        }
-    }
-
-    // A controller button drawn as a small cap.
-    component KeyCap: Rectangle {
-        required property var ui
-        property string k: ""
-        implicitWidth: Math.max(ui.px(24), capLabel.implicitWidth + ui.px(12))
-        implicitHeight: ui.px(24)
-        radius: k.length > 1 ? ui.px(6) : height / 2
-        color: ui.c.raised
-        border.color: ui.c.accentLo
-        border.width: Math.max(1, ui.px(1))
-        Text {
-            id: capLabel
-            anchors.centerIn: parent
-            text: parent.k.toUpperCase()
-            color: parent.ui.c.text
-            font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.fpx(14)
-            font.bold: true
         }
     }
 }

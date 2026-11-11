@@ -22,7 +22,7 @@ STATUS_TIMEOUT = 45
 CHANGE_TIMEOUT = 300
 MAX_GAME = 200
 HOWS = {"mods": "--play", "coop": "--play-coop", "plain": "--play-plain"}
-LAUNCH_RESULTS = {"started", "running", "closed", "not-started", "failed"}
+LAUNCH_RESULTS = {"started", "running", "closed"}
 
 
 def clean_game(game):
@@ -218,7 +218,6 @@ class Plugin:
         return code == 0
 
     async def _main(self):
-        self.lock = asyncio.Lock()
         decky.logger.info("Turbine's Steam menu plugin is ready")
 
     async def _unload(self):

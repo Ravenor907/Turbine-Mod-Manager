@@ -25,7 +25,7 @@ fn repeated_keys_follow_their_values() {
     assert_eq!(r.text, "[s]\nk = 9\nk = 2\n");
     assert_eq!(r.unsure, ["s: k"]);
     // The old behaviour stays for the simple case.
-    assert_eq!(settings::merge(Format::Ini, "[a]\n; new help\nx = 5\ny = 2\nw = 4\n", "[a]\nx = 1\ny = 2\nz = 3\n", "[a]\nx = 1\ny = 9\nz = 3\n"), "[a]\n; new help\nx = 5\ny = 9\nw = 4\n");
+    assert_eq!(settings::merge_report(Format::Ini, "[a]\n; new help\nx = 5\ny = 2\nw = 4\n", "[a]\nx = 1\ny = 2\nz = 3\n", "[a]\nx = 1\ny = 9\nz = 3\n").text, "[a]\n; new help\nx = 5\ny = 9\nw = 4\n");
 }
 
 #[test]

@@ -2,10 +2,11 @@
 //! already has, the Nexus game of games without one in their data file ("Which game on Nexus is this?"), the
 //! player's own game files, and anti-cheat. The engine decides (basic.rs, nexus_games.rs); this hands it to QML.
 
+use crate::actions::{set, Qt};
 use crate::backend::{data_home, qobject, Slot, Worker};
 use crate::online::Net;
 use core::pin::Pin;
-use cxx_qt::{CxxQtThread, CxxQtType};
+use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,8 +16,6 @@ use turbine_engine::nexus_games::{self, Answer, Picks};
 use turbine_engine::rules::{self, Support};
 use turbine_engine::store::{self, PendingPlace, PlaceInfo, Store};
 use turbine_engine::{basic, Game};
-
-type Qt = CxxQtThread<qobject::Turbine>;
 
 /// Turbine's own data folder (the activity log's folder): picks, the cached game list, the player's game files.
 pub(crate) fn turbine_data() -> PathBuf {
@@ -101,10 +100,8 @@ pub(crate) fn rules_extra(slot: &Slot) -> String {
         .map(|s| format!("{{\"source\":{},\"id\":{},\"name\":{},\"what\":{}}}", quote(&s.source), quote(&s.id), quote(&s.name), quote(&s.what)))
         .collect();
     format!(
-        ",\"supportLevel\":{},\"supportWords\":{},\"placesByDetection\":{},\"antiCheat\":{},\"domainState\":{},\"nexusName\":{},\"nexusHow\":{},\"nexusCandidates\":{},\"starters\":[{}],\"refusedWords\":{}",
+        ",\"supportLevel\":{},\"antiCheat\":{},\"domainState\":{},\"nexusName\":{},\"nexusHow\":{},\"nexusCandidates\":{},\"starters\":[{}],\"refusedWords\":{}",
         quote(r.support_level.key()),
-        quote(r.support_level.words()),
-        r.places_by_detection(),
         ac,
         quote(state),
         quote(&name),
@@ -165,18 +162,14 @@ pub(crate) fn post_place(w: &Worker) {
     });
 }
 
-fn set_qt(qt: &Qt, f: impl FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static) {
-    let _ = qt.queue(f);
-}
-
 /// The Nexus game of every game without one in its data file: the player's picks, then exact names in Nexus's game
 /// list (fetched again when it is over a week old). Sure answers are registered so links and Get mods find them.
 pub(crate) fn resolve(net: &mut Net, games: &[Game]) -> Vec<String> {
     let dir = turbine_data();
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let now = crate::now_secs();
     let mut lines = Vec::new();
     let need = games.iter().any(|g| rules::find_def(g.store, &g.store_id).and_then(|d| d.data.nexus.as_deref()).is_none());
-    if need && !net.is_sample() && nexus_games::list_is_old(&dir, now) {
+    if need && !crate::online::using_samples() && nexus_games::list_is_old(&dir, now) {
         match nexus_games::refresh_list(&net.client, &dir, crate::VERSION) {
             Ok(n) => lines.push(format!("Nexus game list: {n} games")),
             Err(e) => lines.push(format!("Nexus game list not fetched ({e}); the old copy stays")),
@@ -239,7 +232,7 @@ impl qobject::Turbine {
                 for l in turbine_engine::report::nexus_summary(&lines) {
                     crate::log::line("net", &l);
                 }
-                set_qt(qt, |t| t.reshow());
+                set(qt, |t| t.reshow());
             }),
         );
     }
@@ -303,17 +296,11 @@ impl qobject::Turbine {
                 let result = w.slot(&game).and_then(|s| s.store.finish_place(pending, &from, &to, replace));
                 match result {
                     Ok(done) => {
-                        for n in &done.notes {
-                            crate::log::line("engine", &format!("{}: {n}", done.item.name));
-                        }
-                        let words = done.placed.as_ref().map(|p| note_placed(&done.item.name, p)).unwrap_or_else(|| format!("Added {}", done.item.name));
                         if replace {
                             crate::log::line("engine", &format!("{} may replace {}'s own files (kept and put back when it goes)", done.item.name, game.name));
                         }
-                        w.say(words, "ok");
-                        crate::actions::show_notes(w, &done.item.name, &done.notes);
-                        let (g, id, n, on) = (game.id(), done.item.id.clone(), done.item.name.clone(), done.item.enabled);
-                        w.post(move |t| t.arrived(QString::from(g.as_str()), QString::from(id.as_str()), QString::from(n.as_str()), on));
+                        let words = done.placed.as_ref().map(|p| note_placed(&done.item.name, p)).unwrap_or_else(|| format!("Added {}", done.item.name));
+                        crate::actions::mod_added(w, &game, &done, words, true);
                     }
                     Err(e) => w.say(e, "error"),
                 }
@@ -413,7 +400,7 @@ impl qobject::Turbine {
         self.net_send(
             "Search Nexus games",
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let found: Result<Vec<nexus_games::NexusGame>, String> = if net.is_sample() {
+                let found: Result<Vec<nexus_games::NexusGame>, String> = if crate::online::using_samples() {
                     // The build's checks: the recorded list, matched by the same words.
                     let words: Vec<String> = nexus_games::normalize(&text).split(' ').map(String::from).collect();
                     Ok(nexus_games::cached_list(&turbine_data())
@@ -426,7 +413,7 @@ impl qobject::Turbine {
                         .take(10)
                         .collect::<Vec<_>>())
                 } else {
-                    net.nexus_public_client().games_search(&text).map_err(|e| e.to_string())
+                    net.nexus_public().games_search(&text).map_err(|e| e.to_string())
                 };
                 let j = match found {
                     Ok(list) => {
@@ -438,7 +425,7 @@ impl qobject::Turbine {
                         format!("{{\"state\":\"error\",\"error\":{},\"games\":[]}}", quote(&e))
                     }
                 };
-                set_qt(qt, move |t| t.set_nexus_games_json(QString::from(j.as_str())));
+                set(qt, move |t| t.set_nexus_games_json(QString::from(j.as_str())));
             }),
         );
     }

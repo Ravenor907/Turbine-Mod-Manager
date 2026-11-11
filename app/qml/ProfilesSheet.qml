@@ -25,7 +25,7 @@ Overlay {
     function followFocus() {
         if (typeof rowRepeater === "undefined" || !rowRepeater || typeof scroller === "undefined" || !scroller) return
         const it = rowRepeater.itemAt(focusIndex)
-        if (it) scroller.follow(it)
+        if (it) ps.ui.follow(scroller, scrollCol, it)
     }
     property bool premium: false          // the Nexus account can download inside Turbine
 
@@ -52,12 +52,6 @@ Overlay {
             contentHeight: scrollCol.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            function follow(it) {
-                if (!it) return
-                const y = it.mapToItem(scrollCol, 0, 0).y
-                if (y < contentY) contentY = Math.max(0, y)
-                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
-            }
         Column {
             id: scrollCol
             width: scroller.width

@@ -1,16 +1,11 @@
 import QtQuick
 import QtQuick.Shapes
 
-// "Before you play": the check Start runs before a modded launch. One line per check (a passed check, a warning or
-// a stop), up to 3 buttons with the focused one in brass, and an optional note under them. A centered card over a
+// "Before you play": the check Play runs before a modded launch. One line per check (a passed check, a warning or
+// a stop), up to 4 buttons (SheetButtons) and an optional note under them. A centered card over a
 // dimmed backdrop. It fills its parent; show and hide it with visible.
 //
-// ui (required): an object that gives
-//   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
-//                 onAccent, focusFill, ok, warn, light (bool); stop is optional (a fallback is used without it)
-//   ui.px(n)      design pixels to screen pixels
-//   ui.titleFont  font family for titles
-//   ui.bodyFont   font family for everything else
+// ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
 Overlay {
     id: root
     onOutsideTapped: root.closed()
@@ -27,7 +22,7 @@ Overlay {
     property string title: "Before you play"
     // Each check: { level: "ok" | "warn" | "stop", title, detail }
     property var checks: []
-    // Up to 4 buttons: { key (the button's own key: "x", "y", "b", or "" for none), label }. A runs the focused one.
+    // Up to 4 buttons: { label, main (true for the one drawn in brass) }. A runs the focused one.
     property var buttons: []
     property int focusIndex: 0
     property string note: ""              // e.g. "Wait checks again every few hours."
@@ -44,24 +39,8 @@ Overlay {
 
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
-        if (level === "stop") return ui.c.stop !== undefined ? ui.c.stop : (ui.c.light ? Qt.rgba(0.557, 0.165, 0.118, 1) : Qt.rgba(0.941, 0.565, 0.478, 1))
+        if (level === "stop") return ui.c.stop
         return ui.c.warn
-    }
-
-    // Contrast: the same hue, darkened on light grounds or lightened on dark ones until it reads at 4.5:1 or better.
-    function lum(col) {
-        const f = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
-        return 0.2126 * f(col.r) + 0.7152 * f(col.g) + 0.0722 * f(col.b)
-    }
-    function readable(col, bg) {
-        let out = col
-        const lb = lum(bg)
-        for (let i = 0; i < 14; i++) {
-            const lc = lum(out)
-            if ((Math.max(lc, lb) + 0.05) / (Math.min(lc, lb) + 0.05) >= 4.5) break
-            out = lb < 0.18 ? Qt.lighter(out, 1.12) : Qt.darker(out, 1.12)
-        }
-        return out
     }
 
     anchors.fill: parent
@@ -124,7 +103,7 @@ Overlay {
                     readonly property string level: modelData.level || "ok"
                     readonly property bool flagged: level !== "ok"
                     readonly property color hue: root.levelColor(level)
-                    readonly property color tone: root.readable(hue, color)
+                    readonly property color tone: root.ui.readable(hue, color)
                     width: content.width
                     height: Math.max(root.ui.px(44), checkText.implicitHeight + root.ui.px(16))
                     radius: root.ui.px(6)
@@ -246,79 +225,6 @@ Overlay {
             font.family: dot.ui.bodyFont
             font.pixelSize: dot.ui.fpx(15)
             font.bold: true
-        }
-    }
-
-    // A button: brass when focused, plain otherwise, with its controller key in front.
-    component ActionButton: Rectangle {
-        id: btn
-        required property var ui
-        property string k: ""
-        property string label: ""
-        property bool focused: false
-        signal clicked()
-        width: btnRow.implicitWidth + ui.px(36)
-        height: ui.px(44)
-        radius: ui.px(6)
-        color: ui.c.raised
-        border.width: Math.max(1, ui.px(1.5))
-        border.color: focused ? ui.c.accentHi : ui.c.line
-
-        Rectangle {
-            visible: btn.focused
-            anchors.fill: parent
-            anchors.margins: -btn.ui.px(3)
-            radius: btn.radius + btn.ui.px(3)
-            color: "transparent"
-            border.width: btn.ui.px(3)
-            border.color: Qt.rgba(btn.ui.c.accent.r, btn.ui.c.accent.g, btn.ui.c.accent.b, 0.22)
-        }
-        Rectangle {
-            visible: btn.focused
-            anchors.fill: parent
-            radius: btn.radius
-            border.width: Math.max(1, btn.ui.px(1.5))
-            border.color: btn.ui.c.accentHi
-            gradient: Gradient {
-                GradientStop { position: 0; color: btn.ui.c.accentHi }
-                GradientStop { position: 0.5; color: btn.ui.c.accent }
-                GradientStop { position: 1; color: btn.ui.c.accentLo }
-            }
-        }
-        HoverHandler { onHoveredChanged: btn.ui.hover(parent, hovered) }
-        TapHandler { onTapped: btn.clicked() }
-
-        Row {
-            id: btnRow
-            anchors.centerIn: parent
-            spacing: btn.ui.px(6)
-            Rectangle {
-                visible: btn.k !== ""
-                width: Math.max(btn.ui.px(24), btnKeyText.implicitWidth + btn.ui.px(12))
-                height: btn.ui.px(24)
-                radius: btn.k.length > 1 ? btn.ui.px(6) : height / 2
-                anchors.verticalCenter: parent.verticalCenter
-                color: btn.focused ? Qt.rgba(0, 0, 0, 0.2) : btn.ui.c.ground
-                border.width: btn.focused ? 0 : Math.max(1, btn.ui.px(1))
-                border.color: btn.ui.c.accentLo
-                Text {
-                    id: btnKeyText
-                    anchors.centerIn: parent
-                    text: btn.k.toUpperCase()
-                    color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
-                    font.family: btn.ui.bodyFont
-                    font.pixelSize: btn.ui.fpx(14)
-                    font.bold: true
-                }
-            }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: btn.label
-                color: btn.focused ? btn.ui.c.onAccent : btn.ui.c.text
-                font.family: btn.ui.bodyFont
-                font.pixelSize: btn.ui.fpx(16)
-                font.weight: Font.DemiBold
-            }
         }
     }
 }

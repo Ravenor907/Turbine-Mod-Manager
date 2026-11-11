@@ -127,7 +127,7 @@ fn no_dashes(what: &str, s: &str) -> Result<(), String> {
 
 /// A game-relative path in a data file: plain, relative, nothing that climbs out.
 pub fn safe_path(s: &str) -> bool {
-    !s.contains("..") && !s.contains('\\') && crate::zip::safe_relative(s).is_ok() && !s.starts_with('/')
+    !s.contains("..") && !s.contains('\\') && crate::zip::safe_relative(s).is_ok()
 }
 
 fn check_keys(v: &Json, allowed: &[&str], what: &str) -> Result<(), String> {
@@ -509,10 +509,10 @@ pub fn builtin() -> &'static Builtin {
     })
 }
 
-/// The built-in files as (file name, text), for the build's checks.
 /// Data files as (file name, text).
 pub type Sources = &'static [(&'static str, &'static str)];
 
+/// The built-in files as (file name, text), for the build's checks.
 pub fn builtin_sources() -> (Sources, Sources) {
     (BUILTIN_GAMES, BUILTIN_LOADERS)
 }

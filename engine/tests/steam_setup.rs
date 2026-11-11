@@ -93,14 +93,14 @@ fn changes_are_checked_after_steam_starts_again() {
         None => fs::remove_file(&sc).unwrap(),
     }
     fs::write(&local, CONFIG).unwrap();
-    let (held, lost) = steam_setup::check_after_restart(&data);
+    let (held, lost) = steam_setup::check_after_restart_since(&data, None);
     assert!(held.is_empty());
     assert_eq!(lost.len(), 2, "both to make again");
     assert_eq!(steam_setup::pending(&data).len(), 2, "still waiting");
     // Made again while Steam was closed: both hold, and the list empties.
     shortcuts::add_shortcut(&sc, &tile, &marker, false).unwrap();
     steam_setup::write_launch_options(&local, "1245620", &line(), false).unwrap();
-    let (held, lost) = steam_setup::check_after_restart(&data);
+    let (held, lost) = steam_setup::check_after_restart_since(&data, None);
     assert_eq!((held.len(), lost.len()), (2, 0));
     assert!(steam_setup::pending(&data).is_empty());
     assert!(!steam_setup::pending_file(&data).exists());
@@ -109,7 +109,7 @@ fn changes_are_checked_after_steam_starts_again() {
     shortcuts::remove_shortcut(&sc, &marker, false).unwrap();
     steam_setup::note_change(&data, SteamChange::NoTile { file: sc.clone(), marker: marker.clone() }).unwrap();
     assert_eq!(steam_setup::pending(&data).len(), 1);
-    let (held, _) = steam_setup::check_after_restart(&data);
+    let (held, _) = steam_setup::check_after_restart_since(&data, None);
     assert_eq!(held, vec![SteamChange::NoTile { file: sc, marker }]);
     let _ = fs::remove_dir_all(&d);
 }

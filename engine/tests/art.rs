@@ -1,15 +1,11 @@
 //! Where a Steam game's pictures come from, in order: the player's own grid art, Steam's library cache
 //! (library_600x900, then library_capsule; header for the wide one), then Turbine's copy from Steam's store.
 
-use std::path::{Path, PathBuf};
-use turbine_engine::steam;
+mod support;
 
-fn temp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-art-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
-}
+use std::path::Path;
+use support::scratch as temp;
+use turbine_engine::steam;
 
 fn put(p: &Path) {
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();

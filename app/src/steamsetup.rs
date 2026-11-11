@@ -4,25 +4,16 @@
 //! Also Turbine's own Steam library art and Labs' Proton log switch.
 
 use crate::backend::qobject;
+use crate::now_secs;
+use crate::system::in_flatpak;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use turbine_engine::anticheat as ac;
 use turbine_engine::json::quote;
 use turbine_engine::steam_restart::{self as sr, Change, Job};
 use turbine_engine::{shortcuts, steam, steam_art, steam_setup, Game};
-
-/// Turbine's Flatpak id (the host script runs Turbine's --apply-steam-setup through it).
-const FLATPAK_ID: &str = "io.github.ravenor907.TurbineModManager";
-
-fn in_flatpak() -> bool {
-    Path::new("/.flatpak-info").exists()
-}
-
-fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
 
 /// The localconfig.vdf that lists the game (the account signed in last first), or the newest one.
 fn localconfig_for(home: &Path, app_id: &str) -> Option<PathBuf> {
@@ -85,19 +76,12 @@ pub(crate) fn start(found: &[Game], game_mode: bool, job: Job) -> Result<&'stati
     let _ = std::fs::remove_file(sr::result_file(&data));
     let script = sr::write_script(&data).map_err(|e| format!("Couldn't get the restart ready: {e}"))?;
     let exe = std::env::current_exe().unwrap_or_default();
-    let apply = sr::apply_command(in_flatpak().then_some(FLATPAK_ID), &exe);
+    let apply = sr::apply_command(in_flatpak().then_some(crate::APP_ID), &exe);
     // In Game Mode Turbine closes with Steam; its Steam entry brings it back. On the desktop it stays open.
     let back = if game_mode { own.map(shortcuts::rungameid_url).unwrap_or_default() } else { String::new() };
     let args = sr::script_args(&data, game_mode, &back, &apply);
-    let mut cmd = if in_flatpak() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("bash").arg(&script);
-        c
-    } else {
-        let mut c = Command::new("bash");
-        c.arg(&script);
-        c
-    };
+    let mut cmd = crate::system::host("bash");
+    cmd.arg(&script);
     crate::log::line("steam-setup", &format!("Restarting Steam once for {} ({}): {} {}", job.what, if game_mode { "Game Mode" } else { "Desktop Mode" }, script.display(), args.join(" ")));
     let st = cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map_err(|e| format!("Couldn't start the restart: {e}"))?;
     if !st.success() {
@@ -154,7 +138,7 @@ fn job_for(g: &Game, kind: &str, resume: &str) -> Result<Job, String> {
         }
         "tile" => {
             let file = shortcuts::tile_file(&home).ok_or("Steam's list of non-Steam games for this account wasn't found. Start Steam once, then try again.")?;
-            let tile = shortcuts::coop_tile(&name.to_uppercase(), &g.id(), FLATPAK_ID);
+            let tile = shortcuts::coop_tile(&name.to_uppercase(), &g.id(), crate::APP_ID);
             Change::Tile { file, marker: shortcuts::coop_marker(&g.id()), tile, art: art_set("coop"), record: art_record(&data) }
         }
         "untile" => {
@@ -457,18 +441,10 @@ impl qobject::Turbine {
 /// 0.6 (break M3): when the running Steam started (its oldest process, asked on the host), or None when that can't
 /// be told (no Steam, or no answer): then a change that is in the file counts as held.
 fn steam_started() -> Option<std::time::SystemTime> {
-    use std::process::{Command, Stdio};
     let host = |args: &[&str]| {
-        let mut c = if std::path::Path::new("/.flatpak-info").exists() {
-            let mut c = Command::new("flatpak-spawn");
-            c.arg("--host").args(args);
-            c
-        } else {
-            let mut c = Command::new(args[0]);
-            c.args(&args[1..]);
-            c
-        };
-        c.stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        crate::system::host(args[0])
+            .args(&args[1..])
+            .stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
     };
     let pid = host(&["pgrep", "-o", "-x", "steam"])?;
     if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {

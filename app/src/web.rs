@@ -269,15 +269,9 @@ impl qobject::Turbine {
     /// for a download nor lets a Mod Manager Download link through without a question.
     pub fn browser_main_frame(&self, url: &QString) {
         let u = url.to_string();
-        if browse::note_main_frame(&u, Instant::now()) {
+        if browse::note_main_frame(&u) {
             crate::log::line("web", &format!("The page left Nexus ({}): your last press no longer counts for a download", browse::log_url(&u)));
         }
-    }
-
-    /// Must Turbine ask before this Mod Manager Download link downloads ("Get <mod> for <game>?")? True when it
-    /// wasn't for the pressed Nexus page's own mod.
-    pub fn nxm_must_ask(&self, link: &QString) -> bool {
-        browse::must_ask(&link.to_string())
     }
 
     pub fn browser_log_url(&self, url: &QString) -> QString {
@@ -389,7 +383,7 @@ impl qobject::Turbine {
         let p = PathBuf::from(path.to_string());
         let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
+        let now = crate::now_secs();
         self.as_mut().unmark_handled(&p);
         let Some(d) = self.rust().web_downloads.iter().find(|d| d.path == p).cloned() else {
             crate::log::line("web", &format!("A finished download Turbine didn't plan: {name}; deciding it the usual way"));
@@ -737,7 +731,7 @@ impl qobject::Turbine {
         let said = if step == "watch" {
             // No catch-up on the test home's old downloads: only what the check drops in counts.
             let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|x| x.as_secs()).unwrap_or(0);
+            let now = crate::now_secs();
             let _ = turbine_engine::watch::CatchState { last_seen: now, ..Default::default() }.save(&path);
             self.as_mut().start_downloads_watch();
             "watching".to_string()

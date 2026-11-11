@@ -1,65 +1,18 @@
 //! The mod store: importing zips, on/off and order, Recently removed, setups, and applying to a game folder.
 //! Rules here are made by hand so these tests don't depend on any game's real rules.
 
+mod support;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+use support::write_zip_text as write_zip;
 use turbine_engine::games::{Game, Runtime, Store as Launcher};
 use turbine_engine::json;
 use turbine_engine::store::{choose_root, clean_name, downloads, ModRules, Store, DRIVE_FOLDER, KEEP_REMOVED_SECS, KEEP_SETUPS};
-use turbine_engine::zip::crc32;
 
 // ------------------------------------------------------------------ helpers
-
-/// Writes a zip with stored (uncompressed) entries.
-fn write_zip(path: &Path, files: &[(&str, &str)]) {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    for (name, data) in files {
-        let offset = out.len() as u32;
-        let crc = crc32(data.as_bytes());
-        let len = data.len() as u32;
-        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
-        out.extend_from_slice(&20u16.to_le_bytes());
-        out.extend_from_slice(&0x0800u16.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes()); // stored
-        out.extend_from_slice(&[0; 4]); // time, date
-        out.extend_from_slice(&crc.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(data.as_bytes());
-
-        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&0x0800u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&[0; 4]);
-        central.extend_from_slice(&crc.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        central.extend_from_slice(&[0; 8]); // extra, comment, disk, internal attributes
-        central.extend_from_slice(&0u32.to_le_bytes()); // external attributes
-        central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name.as_bytes());
-    }
-    let cd_offset = out.len() as u32;
-    out.extend_from_slice(&central);
-    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
-    out.extend_from_slice(&[0; 4]);
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-    out.extend_from_slice(&cd_offset.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, out).unwrap();
-}
 
 /// Bethesda-like rules: everything goes under Data, a top-level readme is left out, SKSE plugins need the loader.
 struct TestRules;

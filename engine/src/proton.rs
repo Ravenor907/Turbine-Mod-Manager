@@ -29,7 +29,6 @@ use crate::rules::{Family, GameRules, Kind};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The key under HKEY_CURRENT_USER that holds DLL overrides, as Wine reads it (single backslashes).
 pub const OVERRIDES_KEY: &str = "Software\\Wine\\DllOverrides";
@@ -132,19 +131,6 @@ pub fn ensure_override(prefix: &Path, dll: &str, value: &str) -> Result<bool, St
             out.extend_from_slice(&line);
         }
     }
-    write_reg(prefix, &bytes, &out)?;
-    Ok(true)
-}
-
-/// Takes one DLL override out. Returns true when user.reg was changed, false when it wasn't set.
-pub fn remove_override(prefix: &Path, dll: &str) -> Result<bool, String> {
-    let bytes = read_reg(prefix)?;
-    let file = RegFile::parse(&bytes);
-    let Some(sec) = file.section(OVERRIDES_KEY) else { return Ok(false) };
-    let Some(v) = sec.find_value(dll) else { return Ok(false) };
-    let mut out = Vec::with_capacity(bytes.len());
-    out.extend_from_slice(&bytes[..v.start]);
-    out.extend_from_slice(&bytes[v.end..]);
     write_reg(prefix, &bytes, &out)?;
     Ok(true)
 }
@@ -523,7 +509,7 @@ fn value_line(name: &str, value: &str, eol: &[u8]) -> Vec<u8> {
 
 /// A new key's first lines, as save_subkeys() writes them: a blank line, "[path] seconds", "#time=ticks".
 fn key_header(path: &str, eol: &[u8]) -> Vec<u8> {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let secs = crate::nxm::now();
     // 100 ns ticks since 1601-01-01, which is 11644473600 seconds before 1970.
     let ticks = (secs + 11_644_473_600) * 10_000_000;
     let mut out = Vec::new();

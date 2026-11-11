@@ -17,21 +17,12 @@ const { spawn } = require("child_process");
 const K = require("../lib/keyfind.js");
 const P = require("../lib/protocol.js");
 const { h, page } = require("./fake-dom.js");
+const { sleep, until, runWorker } = require("./helpers.js");
 
 const EXT_ID = "iniglfblobfbekihldmgekchfehncbeb";
 const KEY = "TWFkZVVwRm9yVGhlVGVzdA==--bm90QVJlYWxLZXk5ODc2=--0a1b2c3d4e5f";
 const OTHER = "T3RoZXJBcHBLZXkxMjM0NTY3OA==--b3RoZXI5ODc2NTQ=--ffee00112233";
 const COOKIE_VALUE = "nexusSessionValueNeverPrinted42";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function until(fn, ms, what) {
-  const end = Date.now() + (ms || 5000);
-  while (Date.now() < end) {
-    if (fn()) return;
-    await sleep(10);
-  }
-  throw new Error("timed out: " + (what || "condition"));
-}
 
 // The browser's WebSocket as the helper uses it, sending the extension's Origin like Chrome does (Node's own
 // WebSocket can't), so Turbine's real server checks it exactly as on the device.
@@ -180,12 +171,7 @@ test("Sign in with my browser, end to end against Turbine's real bridge", { skip
     cookies: { onChanged: on("cookieChanged"), getAll: async (q) => jar.filter((c) => c.domain.replace(/^\./, "").endsWith(q.domain)) },
     action: { setBadgeText: () => {}, setBadgeBackgroundColor: () => {}, setBadgeTextColor: () => {} },
   };
-  const ctx = vm.createContext({ chrome, WebSocket: ExtensionSocket, URL, setTimeout, clearTimeout, setInterval, clearInterval, console, JSON, Date, Math });
-  ctx.globalThis = ctx;
-  ctx.importScripts = (...files) => {
-    for (const f of files) vm.runInContext(fs.readFileSync(path.join(extDir, f), "utf8"), ctx, { filename: f });
-  };
-  vm.runInContext(fs.readFileSync(path.join(extDir, "background.js"), "utf8"), ctx, { filename: "background.js" });
+  const ctx = runWorker(chrome, ExtensionSocket);
   t.after(() => vm.runInContext("bridge.stop(); tracker.stop(); signinFlow.stop();", ctx));
   await until(() => vm.runInContext("bridge.getState().conn", ctx) === "connected", 5000, "helper connected to Turbine");
   await until(() => said(/^BRIDGE connected/), 3000, "Turbine heard the helper connect");

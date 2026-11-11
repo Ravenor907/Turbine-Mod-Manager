@@ -110,12 +110,7 @@ fn is_ours(record: &ArtRecord, file: &Path) -> bool {
 }
 
 /// Writes the pieces from `src` (<piece>.png) into `grid` for `appid`, never over the player's own art. `record`
-/// is Turbine's record file. Answers each grid file with what happened.
-pub fn add_art(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Path) -> io::Result<Vec<(PathBuf, ArtOutcome)>> {
-    add_art_opts(src, grid, appid, parts, record, false)
-}
-
-/// `again`: the player asked for Turbine's art (Settings, Add, or a new tile), so pieces the player had cleared in
+/// is Turbine's record file. Answers each grid file with what happened. `again`: the player asked for Turbine's art (Settings, Add, or a new tile), so pieces the player had cleared in
 /// Steam are written again. Without it (every start) they stay cleared. Only files Turbine wrote (in its record) are
 /// ever treated as Turbine's (break L5: an identical file of the player's is never adopted).
 pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Path, again: bool) -> io::Result<Vec<(PathBuf, ArtOutcome)>> {
@@ -141,7 +136,7 @@ pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record:
             } else if is_ours(&rec, &dest) && sha256::same_digest(&now, &hash) {
                 ArtOutcome::Unchanged
             } else if is_ours(&rec, &dest) {
-                write_file(&dest, &bytes)?;
+                crate::write_atomic(&dest, &bytes)?;
                 rec.set(&dest, hash);
                 ArtOutcome::Written
             } else {
@@ -154,7 +149,7 @@ pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record:
             rec.set(&dest, CLEARED.to_string());
             ArtOutcome::Cleared
         } else {
-            write_file(&dest, &bytes)?;
+            crate::write_atomic(&dest, &bytes)?;
             rec.set(&dest, hash);
             ArtOutcome::Written
         };
@@ -164,9 +159,7 @@ pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record:
     Ok(out)
 }
 
-/// 0.62: one line that accounts for every piece. The older line counted only "written" and "your own kept", so a
-/// start where the art was already in place, was cleared in Steam, or was missing from Turbine itself all read
-/// "0 written, 0 of your own kept" and nobody could tell which. Zero counts are left out.
+/// 0.62: one line that accounts for every piece. Zero counts are left out.
 pub fn summary(done: &[(PathBuf, ArtOutcome)]) -> String {
     let count = |o: ArtOutcome| done.iter().filter(|(_, x)| *x == o).count();
     let parts = [
@@ -187,15 +180,6 @@ pub fn summary(done: &[(PathBuf, ArtOutcome)]) -> String {
 /// Did every piece come out badly (none written, in place or the player's own)? Then the player should hear why.
 pub fn nothing_shown(done: &[(PathBuf, ArtOutcome)]) -> bool {
     !done.iter().any(|(_, o)| matches!(o, ArtOutcome::Written | ArtOutcome::Unchanged | ArtOutcome::PlayersOwn))
-}
-
-fn write_file(dest: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(d) = dest.parent() {
-        fs::create_dir_all(d)?;
-    }
-    let tmp = dest.with_extension("turbine-tmp");
-    fs::write(&tmp, bytes)?;
-    fs::rename(tmp, dest)
 }
 
 /// Removes Turbine's own art for `appid` from `grid` (only files still exactly as Turbine wrote them). Answers the

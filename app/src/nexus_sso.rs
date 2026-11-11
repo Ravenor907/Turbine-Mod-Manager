@@ -25,9 +25,6 @@
 //! Its tests run on their own, against a stand-in SSO server on 127.0.0.1:
 //! rustc --test app/src/nexus_sso.rs --extern turbine_engine=<the engine's rlib>.
 
-// The sign-in screen calls method() and sign_in(); until it does, parts of this file are used only by its tests.
-#![allow(dead_code)]
-
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -37,6 +34,9 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use turbine_engine::json::{self, quote, Json};
+use turbine_engine::net::url_encode;
+use turbine_engine::thunderstore::base64_encode;
+use turbine_engine::wsproto::{accept_key, OP_BINARY, OP_CLOSE, OP_CONTINUATION, OP_PING, OP_PONG, OP_TEXT};
 
 /// Nexus's SSO server.
 pub const SSO_HOST: &str = "sso.nexusmods.com";
@@ -59,13 +59,6 @@ pub const SLUG_FILE: &str = "nexus-sso-slug";
 /// The slug built into this version (empty until Nexus gives one).
 const BUILT_IN: &str = include_str!("../nexus-sso-slug.txt");
 
-const OP_CONT: u8 = 0x0;
-const OP_TEXT: u8 = 0x1;
-const OP_BINARY: u8 = 0x2;
-const OP_CLOSE: u8 = 0x8;
-const OP_PING: u8 = 0x9;
-const OP_PONG: u8 = 0xA;
-const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 // ---------------------------------------------------------------------------------------------------------------
 // The slug and the sign-in method
@@ -160,16 +153,7 @@ pub fn hello_message(id: &str, token: Option<&str>) -> String {
 
 /// The page the player approves Turbine on.
 pub fn authorise_url(id: &str, slug: &str) -> String {
-    format!("{AUTHORISE_PAGE}?id={}&application={}", encode(id), encode(slug))
-}
-
-fn encode(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+    format!("{AUTHORISE_PAGE}?id={}&application={}", url_encode(id), url_encode(slug))
 }
 
 /// One message from the SSO server.
@@ -209,70 +193,6 @@ fn key_ok(k: &str) -> bool {
 // ---------------------------------------------------------------------------------------------------------------
 // WebSocket client (RFC 6455)
 
-/// SHA-1 (FIPS 180-4), only for the handshake's Sec-WebSocket-Accept check.
-pub fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
-    let mut msg = data.to_vec();
-    msg.push(0x80);
-    while msg.len() % 64 != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
-    for block in msg.chunks(64) {
-        let mut w = [0u32; 80];
-        for (i, c) in block.chunks(4).enumerate() {
-            w[i] = u32::from_be_bytes([c[0], c[1], c[2], c[3]]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e] = h;
-        for (i, wi) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | (!b & d), 0x5A827999),
-                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
-                _ => (b ^ c ^ d, 0xCA62C1D6),
-            };
-            let t = a.rotate_left(5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(*wi);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = t;
-        }
-        for (x, y) in h.iter_mut().zip([a, b, c, d, e]) {
-            *x = x.wrapping_add(y);
-        }
-    }
-    let mut out = [0u8; 20];
-    for (i, x) in h.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&x.to_be_bytes());
-    }
-    out
-}
-
-pub fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::new();
-    for c in data.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
-        for i in 0..4 {
-            if i <= c.len() {
-                s.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                s.push('=');
-            }
-        }
-    }
-    s
-}
-
-/// The Sec-WebSocket-Accept value the server must answer for `key`.
-pub fn accept_for(key: &str) -> String {
-    base64(&sha1(format!("{key}{WS_GUID}").as_bytes()))
-}
-
 /// The client's opening request.
 pub fn handshake_request(host: &str, key: &str) -> String {
     format!(
@@ -304,7 +224,7 @@ pub fn check_handshake(head: &str, key: &str) -> Result<(), String> {
     if !upgrade {
         return Err("the server didn't switch to WebSocket".into());
     }
-    if accept.as_deref() != Some(accept_for(key).as_str()) {
+    if accept.as_deref() != Some(accept_key(key).as_str()) {
         return Err("the server's WebSocket answer didn't match".into());
     }
     Ok(())
@@ -403,6 +323,7 @@ impl Drop for Conn {
 }
 
 /// A plain TCP connection (the tests' stand-in server).
+#[cfg(test)]
 pub fn tcp_connect(addr: &str) -> io::Result<Conn> {
     let s = TcpStream::connect(addr)?;
     s.set_nodelay(true)?;
@@ -618,7 +539,7 @@ fn session(
 ) -> Result<String, Stop> {
     let dropped = |e: String| Stop::Dropped(e);
     let mut conn = connect().map_err(|e| dropped(e.to_string()))?;
-    let key = base64(&{
+    let key = base64_encode(&{
         let mut k = [0u8; 16];
         for c in k.chunks_mut(4) {
             c.copy_from_slice(&random4());
@@ -679,7 +600,7 @@ fn session(
                     let _ = tx.send(Event::Gone("the server closed the connection".into()));
                     return;
                 }
-                OP_TEXT | OP_CONT if f.opcode == OP_TEXT || in_text => {
+                OP_TEXT | OP_CONTINUATION if f.opcode == OP_TEXT || in_text => {
                     if f.opcode == OP_TEXT {
                         text.clear();
                     }
@@ -696,7 +617,7 @@ fn session(
                         }
                     }
                 }
-                OP_BINARY | OP_CONT => {}
+                OP_BINARY | OP_CONTINUATION => {}
                 _ => {
                     let _ = tx.send(Event::Gone("unknown frame from the server".into()));
                     return;
@@ -764,26 +685,12 @@ mod tests {
 
     #[test]
     fn a_second_press_reuses_the_running_session() {
-        let first = Session::begin().ok().expect("the first press starts a session");
+        let Ok(first) = Session::begin() else { panic!("the first press starts a session") };
         assert_eq!(Session::begin().err(), Some(None), "page not known yet: no second session");
         first.page("https://www.nexusmods.com/sso?id=1");
         assert_eq!(Session::begin().err(), Some(Some("https://www.nexusmods.com/sso?id=1".to_string())));
         drop(first);
         assert!(Session::begin().is_ok(), "after it ends, a press starts a new one");
-    }
-
-    #[test]
-    fn sha1_and_base64_match_the_standards() {
-        let hex = |b: [u8; 20]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
-        assert_eq!(hex(sha1(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(hex(sha1(b"")), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-        assert_eq!(hex(sha1(&[b'a'; 1000])), "291e9a6c66994949b57ba5e650361e98fc36b1ba");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
-        // RFC 6455 section 1.3's example.
-        assert_eq!(accept_for("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
     }
 
     #[test]
@@ -992,7 +899,7 @@ mod tests {
                 assert!(head.starts_with("GET / HTTP/1.1\r\n"));
                 assert!(head.contains("Sec-WebSocket-Version: 13"));
                 let key = head.lines().find_map(|l| l.strip_prefix("Sec-WebSocket-Key: ")).unwrap().trim().to_string();
-                let accept = if matches!(script, Script::BadAccept) { "AAAAAAAAAAAAAAAAAAAAAAAAAAA=".into() } else { accept_for(&key) };
+                let accept = if matches!(script, Script::BadAccept) { "AAAAAAAAAAAAAAAAAAAAAAAAAAA=".into() } else { accept_key(&key) };
                 write!(s, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").unwrap();
                 if matches!(script, Script::BadAccept) {
                     continue;
@@ -1057,7 +964,7 @@ mod tests {
                         let k = key_msg();
                         let (a, b) = k.split_at(20);
                         s.write_all(&server_frame(false, OP_TEXT, a.as_bytes())).unwrap();
-                        s.write_all(&server_frame(true, OP_CONT, b.as_bytes())).unwrap();
+                        s.write_all(&server_frame(true, OP_CONTINUATION, b.as_bytes())).unwrap();
                     }
                     Script::BadAccept | Script::CloseAtOnce => unreachable!(),
                 }

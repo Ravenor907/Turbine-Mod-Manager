@@ -12,10 +12,6 @@ use turbine_engine::rules::GameRules;
 use turbine_engine::store::Store;
 use turbine_engine::{deploy, saves, steam, Game};
 
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
 /// Where a game's save backups are kept: <data>/turbine-mod-manager/saves/<store>-<id>.
 pub(crate) fn backups_root(game: &Game) -> PathBuf {
     let id: String = game.id().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
@@ -40,7 +36,7 @@ pub(crate) fn backup_before_play(w: &Worker, game: &Game) {
     }
     let root = backups_root(game);
     let newest = saves::list(&root).first().map(|s| s.id.clone());
-    match saves::backup(&folders, &root, now()) {
+    match saves::backup(&folders, &root, crate::now_secs()) {
         Ok(Some(s)) if Some(&s.id) == newest.as_ref() => crate::log::line("engine", &format!("Saves unchanged since the last backup: {}", game.name)),
         Ok(Some(s)) => crate::log::line("engine", &format!("Saves backed up before Play: {} ({} files)", game.name, s.files)),
         Ok(None) => {}
@@ -69,7 +65,7 @@ impl qobject::Turbine {
             true,
             Box::new(move |w: &mut Worker| {
                 let folders = save_locations(&game);
-                match saves::restore(&id, &folders, &backups_root(&game), now()) {
+                match saves::restore(&id, &folders, &backups_root(&game), crate::now_secs()) {
                     Ok(_) => {
                         crate::log::line("engine", &format!("Saves put back for {}: the backup {id} (the saves before it were kept)", game.name));
                         w.say(format!("{}'s saves are back as they were. The saves from just before are kept as a backup too.", game.name), "ok");

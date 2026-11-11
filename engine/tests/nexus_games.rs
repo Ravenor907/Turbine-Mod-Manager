@@ -1,7 +1,10 @@
 //! Finding a game's Nexus Mods domain: Nexus's public game list, exact name matches, the player's picks, and the
 //! GraphQL game search behind "Which game on Nexus is this?".
 
+mod support;
+
 use std::path::PathBuf;
+use support::scratch as temp;
 use turbine_engine::games::{Game, Runtime, Store};
 use turbine_engine::json;
 use turbine_engine::nexus_games::{self, Answer, Match, Picks};
@@ -23,13 +26,6 @@ fn game(id: &str, name: &str) -> Game {
         header: None,
         prefix: None,
     }
-}
-
-fn temp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let p = std::env::temp_dir().join(format!("turbine-nexusgames-{tag}-{n}"));
-    std::fs::create_dir_all(&p).unwrap();
-    p
 }
 
 #[test]

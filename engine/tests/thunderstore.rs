@@ -2,24 +2,16 @@
 //! format field for field as Thunderstore's API code defines it; it is not a recorded live answer. The share sample
 //! was zipped by Python's zipfile, an independent implementation.
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
+use support::{data, scratch};
 use turbine_engine::json::Json;
 use turbine_engine::net::{Client, NetError};
 use turbine_engine::thunderstore::{self as ts, Query, Sort};
-
-fn data(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-ts-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 fn sample() -> Vec<ts::Package> {
     let (p, skipped) = ts::parse_index(fs::File::open(data("thunderstore_v1_lethal.json")).unwrap()).unwrap();

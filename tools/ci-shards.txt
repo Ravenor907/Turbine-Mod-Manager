@@ -1,2 +1,0 @@
-# Measured seconds per picture (SHOTTIME lines from a CI run), for the shard plan in tools/ci-shots.sh.
-# name seconds

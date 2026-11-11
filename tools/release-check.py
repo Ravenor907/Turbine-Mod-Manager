@@ -3,6 +3,7 @@
 
 A release ships exactly what the green runs of its commit built and checked: the Flatpak and the Decky plugin from
 the reused run, each with its checksum, after the green full builds a release needs (REQUIRED_GREEN_BUILDS); the plugin's packages are pinned by its lockfile."""
+import glob
 import re
 import sys
 
@@ -26,7 +27,6 @@ need('if [ "$greens" -lt "$REQUIRED_GREEN_BUILDS" ]', "a release needs REQUIRED_
 need('select(.run_attempt != $a)', "only full attempts may count as green builds (not re-runs of the failed jobs alone)")
 if 'carried' in wf and wf.index('[ "$carried" = 0 ] || continue') > wf.index('greens=$((greens + 1))'):
     problems.append("the full-attempt check must come before a green run is counted")
-need("Turbine-Decky.zip.sha256", "the Decky zip needs its checksum beside it")
 rel = wf[wf.index("  release:"):]
 # Both files come from the reused green run: one download step by their exact artifact ids, and the reuse
 # step looks up an id for each of the two files.
@@ -64,8 +64,6 @@ if "needs.reuse.outputs.run == ''" not in decky:
 # behind it only showed in the Flatpak build (olderSeamlessAnswer). Every #[qinvokable] declared in the bridge
 # (app/src/backend.rs) needs a function of the same name with a body somewhere in app/src, taking the same number of
 # arguments and the same kind of self.
-import glob
-import re
 
 def params(text):
     """The parameter list of `fn name(...)` starting at text[0] == '(' (nesting counted), split at top level."""

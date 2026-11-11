@@ -17,9 +17,8 @@ pub const HIDE_MS: f64 = 3000.0;
 /// Left stick: past this much travel it counts as pushed; under `LET_GO` it is back in the middle again.
 pub const PUSH_ON: f64 = 0.5;
 pub const LET_GO: f64 = 0.35;
-/// A push that stays within `CONE` of where it started for `COMMIT_MS` is one direction press.
+/// A push that stays within `SWEEP` of where it started for `COMMIT_MS` is one direction press.
 pub const COMMIT_MS: f64 = 80.0;
-pub const CONE: f64 = 25.0 * PI / 180.0;
 /// Swept this far from where it started before the press, it is the scroll wheel instead. A push that drifts less
 /// than this (a curved thumb) is still a press, in the direction it points when `COMMIT_MS` is up.
 pub const SWEEP: f64 = 40.0 * PI / 180.0;
@@ -33,7 +32,7 @@ pub const DPAD_TURN: f64 = 55.0 * PI / 180.0;
 /// One wheel notch (three rows) for this much turning.
 pub const NOTCH: f64 = 30.0 * PI / 180.0;
 
-/// The sticks as -1..1 (x right, y down, the way SDL reports them) and the triggers as 0..1.
+/// The sticks as -1..1 (x right, y down, the way SDL reports them).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sticks {
     pub lx: f64,
@@ -111,8 +110,7 @@ pub struct Pointer {
     pub holding: bool,
     /// Only directions, never the scroll wheel (while the quick wheel is open, so every slot can be reached).
     pub dpad_only: bool,
-    /// Never hides (Turbine's browser is open: the pointer is how the page is used). It still counts how long it
-    /// has been still, so the page can dim it.
+    /// Never hides (Turbine's browser is open: the pointer is how the page is used).
     pub sticky: bool,
 }
 
@@ -162,11 +160,6 @@ impl Pointer {
         self.y = y;
         self.shown = true;
         self.idle_ms = 0.0;
-    }
-
-    /// How long the right stick has left it still, in milliseconds.
-    pub fn still_ms(&self) -> f64 {
-        self.idle_ms
     }
 
     /// Turbine stops listening to the left stick for now (it went to the back, or the keyboard came up): a held
@@ -371,8 +364,7 @@ mod tests {
     #[test]
     fn a_stick_still_held_when_the_wheel_closes_is_not_a_press() {
         // Hold View, push the stick at a wedge, let go of View: the wheel closes with the stick still pushed.
-        let mut p = Pointer::default();
-        p.dpad_only = true;
+        let mut p = Pointer { dpad_only: true, ..Default::default() };
         p.tick(&Sticks::default(), 16.0, W, H);
         p.dpad_only = false;
         p.hold_off();
@@ -490,7 +482,7 @@ mod tests {
         // Each way, the larger axis winning.
         for ((x, y), want) in [((0.6, 0.1), "right"), ((-0.6, 0.2), "left"), ((0.2, 0.7), "down")] {
             let mut p = Pointer::default();
-            let (presses, _, _) = left(&mut p, &vec![(x, y); 7]);
+            let (presses, _, _) = left(&mut p, &[(x, y); 7]);
             assert_eq!(presses, vec![want]);
         }
     }
@@ -603,7 +595,7 @@ mod tests {
     #[test]
     fn let_go_releases_and_waits_for_the_middle() {
         let mut p = Pointer::default();
-        left(&mut p, &vec![(0.0, -0.9); 7]);
+        left(&mut p, &[(0.0, -0.9); 7]);
         assert_eq!(p.let_go(), Some("up"));
         // Still pushed: nothing more, however long.
         let (presses, releases, _) = left(&mut p, &vec![(0.0, -0.9); 30]);
@@ -653,14 +645,12 @@ mod tests {
     }
 
     #[test]
-    fn a_sticky_pointer_never_hides_but_counts_its_stillness() {
-        let mut p = Pointer::default();
-        p.sticky = true;
+    fn a_sticky_pointer_never_hides() {
+        let mut p = Pointer { sticky: true, ..Default::default() };
         run(&mut p, Sticks { rx: 0.8, ..Default::default() }, 100.0);
         assert!(p.shown);
         let t = run(&mut p, Sticks::default(), 10_000.0);
         assert!(p.shown && !t.hid);
-        assert!(p.still_ms() >= HIDE_MS);
         p.sticky = false;
         let t = run(&mut p, Sticks::default(), 100.0);
         assert!(!p.shown && t.hid);

@@ -82,9 +82,6 @@ export function describeLaunch(l: Launch, nowMs: number): string {
     case "closed":
       what = l.seconds === null || l.seconds === undefined ? "it ran and closed" : "it closed after " + (l.seconds < 120 ? count(l.seconds, "second", "seconds") : count(Math.round(l.seconds / 60), "minute", "minutes"));
       break;
-    case "not-started":
-      what = "it didn't start";
-      break;
     default:
       what = "it didn't start";
   }

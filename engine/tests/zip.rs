@@ -1,19 +1,11 @@
 //! The archives in tests/data were made with Python's zipfile and zlib, an independent implementation.
 
+mod support;
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use support::{data, scratch, write_zip};
 use turbine_engine::zip::{Limits, Zip, ZipError};
-
-fn data(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-zip-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 #[test]
 fn unpacks_every_kind_of_entry() {
@@ -80,4 +72,30 @@ fn refuses_bombs() {
 #[test]
 fn not_a_zip() {
     assert!(matches!(Zip::open(&data("../scan.rs")), Err(ZipError::NotZip)));
+}
+
+#[test]
+fn many_entries_unpack() {
+    let out = scratch("many");
+    let names: Vec<String> = (0..20_000).map(|i| format!("BepInEx/plugins/p{}/f{i}.txt", i % 50)).collect();
+    let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"x" as &[u8])).collect();
+    write_zip(&out.join("t.zip"), &entries);
+    // Counted in this thread's CPU time: the clock also counts waits for a disk other tests keep busy, which made
+    // this check fail on the build machine now and then while the unpacking itself was quick.
+    let cpu = || {
+        fs::read_to_string("/proc/thread-self/schedstat")
+            .ok()
+            .and_then(|s| s.split_whitespace().next().and_then(|n| n.parse::<u64>().ok()))
+            .map(std::time::Duration::from_nanos)
+    };
+    let (c0, t) = (cpu(), std::time::Instant::now());
+    let limits = Limits { total: 64 << 20, ratio: 400 };
+    let written = Zip::open(&out.join("t.zip")).unwrap().extract_all(&out.join("m"), &limits).unwrap();
+    let took = match (c0, cpu()) {
+        (Some(a), Some(b)) => b.saturating_sub(a),
+        _ => t.elapsed(),
+    };
+    assert_eq!(written.len(), 20_000);
+    assert!(took.as_secs() < 60, "{took:?} of CPU time");
+    let _ = fs::remove_dir_all(&out);
 }

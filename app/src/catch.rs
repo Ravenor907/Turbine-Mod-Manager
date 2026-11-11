@@ -13,20 +13,20 @@
 //!
 //! Files in Downloads are never moved, changed or deleted: Turbine only reads them (the player's own downloads).
 
+use crate::actions::set;
 use crate::backend::{qobject, Worker};
+use crate::now_secs;
 use crate::bridge;
 use core::pin::Pin;
-use cxx_qt::{CxxQtThread, CxxQtType, Threading};
+use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use turbine_engine::json::{quote, Json};
 use turbine_engine::net::SourceInfo;
 use turbine_engine::watch::{self, Arrival, Basis, CatchState, Catcher, Confidence, Event, Expectation};
 use turbine_engine::{browser, nexus, Game};
-
-type Qt = CxxQtThread<qobject::Turbine>;
 
 /// Where Turbine's Flatpak keeps the browser helper (installed from the repository's extension folder).
 pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
@@ -40,17 +40,6 @@ const MAX_WATCHES: usize = 8;
 /// How long a browser's report of a download holds the Downloads watcher back once the file is ready: past this,
 /// the watcher adds it itself (0.54 left it waiting for a finish that never came).
 pub const DEFER: Duration = Duration::from_secs(20);
-
-fn now_secs() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-fn post<F>(qt: &Qt, f: F)
-where
-    F: FnOnce(Pin<&mut qobject::Turbine>) + Send + 'static,
-{
-    let _ = qt.queue(f);
-}
 
 /// The folders Turbine watches and accepts helper downloads from: ~/Downloads and the desktop's Downloads folder.
 /// Steam's own browser saves where it is told; where that is in Game Mode isn't known yet (see Labs, Steam's
@@ -154,16 +143,6 @@ fn ago(secs: u64) -> String {
     }
 }
 
-fn size_words(b: u64) -> String {
-    if b >= 1 << 20 {
-        format!("{:.1} MB", b as f64 / (1u64 << 20) as f64)
-    } else if b >= 1024 {
-        format!("{} KB", b / 1024)
-    } else {
-        format!("{b} bytes")
-    }
-}
-
 /// A download the helper is reporting.
 #[derive(Clone, Debug)]
 pub struct HelperDownload {
@@ -221,6 +200,13 @@ fn status_text(active: bool, text: &str, level: &str, progress: Option<f64>, gam
     )
 }
 
+/// The helper's "status" message (its panel on the page shows it).
+fn status_message(text: &str, level: &str, progress: Option<f64>, game: &str) -> String {
+    let p = progress.map(|p| format!("{:.3}", p.clamp(0.0, 1.0))).unwrap_or_else(|| "null".into());
+    let g = if game.is_empty() { "null".to_string() } else { quote(game) };
+    format!("{{\"type\":\"status\",\"text\":{},\"level\":{},\"progress\":{p},\"game\":{g}}}", quote(text), quote(level))
+}
+
 fn games_json(games: &[Game]) -> String {
     let items: Vec<String> = games
         .iter()
@@ -274,9 +260,7 @@ impl qobject::Turbine {
             self.as_mut().rust_mut().catching.said = text.to_string();
         }
         self.as_mut().set_status_json(QString::from(j.as_str()));
-        let p = progress.map(|p| format!("{:.3}", p.clamp(0.0, 1.0))).unwrap_or_else(|| "null".into());
-        let g = if game.is_empty() { "null".to_string() } else { quote(game) };
-        bridge::broadcast(&format!("{{\"type\":\"status\",\"text\":{},\"level\":{},\"progress\":{p},\"game\":{g}}}", quote(text), quote(level)));
+        bridge::broadcast(&status_message(text, level, progress, game));
     }
 
     /// The overlay went away (6 seconds after a result): nothing to show until the next download.
@@ -292,13 +276,13 @@ impl qobject::Turbine {
         }
         self.as_mut().rust_mut().catching.started = true;
         let _ = bridge::VERSION.set(crate::VERSION.to_string());
-        let _ = bridge::BUNDLED.set(manifest_version(&helper_source()).unwrap_or_default());
+        let _ = bridge::BUNDLED.set(manifest_version(Path::new(HELPER_SOURCE)).unwrap_or_default());
         let _ = bridge::BEFORE_RELOAD.set(refresh_helper_copy);
         let _ = refresh_helper_copy();
         let qt = self.qt_thread();
         let handler: bridge::Handler = Arc::new(move |kind: &str, msg: &Json| {
             let (kind, msg) = (kind.to_string(), msg.clone());
-            post(&qt, move |t| t.bridge_message(&kind, &msg));
+            set(&qt, move |t| t.bridge_message(&kind, &msg));
         });
         let dir = crate::log::folder(&crate::backend::data_home());
         match bridge::start(&dir, |l| crate::log::line("bridge", l), handler) {
@@ -318,7 +302,7 @@ impl qobject::Turbine {
             let c = browser::check();
             crate::log::line("browser", &format!("Browser: {}", if c.found { format!("{} ({})", c.name, c.how) } else { "none found".into() }));
             let j = browser_json(&c.to_json());
-            post(&qt, move |t| t.set_browser_json(QString::from(j.as_str())));
+            set(&qt, move |t| t.set_browser_json(QString::from(j.as_str())));
         });
     }
 
@@ -348,7 +332,7 @@ impl qobject::Turbine {
     pub fn helper_setup(self: Pin<&mut Self>) -> QString {
         crate::log::line("action", "Set up the browser helper");
         let to = helper_folder();
-        let r = bridge::copy_helper(&helper_source(), &to);
+        let r = bridge::copy_helper(Path::new(HELPER_SOURCE), &to);
         let (folder, error) = match r {
             Ok(n) => {
                 crate::log::line("bridge", &format!("Copied the browser helper ({n} files) to {}", to.display()));
@@ -426,7 +410,7 @@ impl qobject::Turbine {
                 // With the browser helper connected, its own report of a finished download comes first.
                 c.stable_looks = if bridge::connected() { 3 } else { 1 };
                 // A new game's Game Mods folder is picked up within a few seconds.
-                if looks % 5 == 0 {
+                if looks.is_multiple_of(5) {
                     let now_folders = watch_folders();
                     if now_folders != c.folders {
                         let added: Vec<String> = now_folders.iter().filter(|f| !c.folders.contains(f)).map(|f| f.display().to_string()).collect();
@@ -439,15 +423,15 @@ impl qobject::Turbine {
                 let events = c.poll();
                 let partial = events.iter().any(|e| matches!(e, Event::Downloading { .. }));
                 if !events.is_empty() || had_partial {
-                    post(&qt, move |t| t.catch_events(events));
+                    set(&qt, move |t| t.catch_events(events));
                 }
                 had_partial = partial;
                 looks += 1;
                 if looks % 30 == 5 {
-                    post(&qt, |t| t.catch_save(false));
+                    set(&qt, |t| t.catch_save(false));
                 }
                 // Files held back for a browser's report whose finish never came.
-                post(&qt, |t| t.catch_deferred());
+                set(&qt, |t| t.catch_deferred());
                 std::thread::sleep(Duration::from_secs(watch::POLL_SECS));
             }
         });
@@ -526,7 +510,7 @@ impl qobject::Turbine {
         let name = label_of(&a.path);
         crate::log::line(
             "catch",
-            &format!("Downloads: {name} finished ({}, {})", size_words(a.size), if a.catch_up { "arrived while Turbine was closed" } else { "arrived just now" }),
+            &format!("Downloads: {name} finished ({}, {})", crate::browse::size_words(a.size), if a.catch_up { "arrived while Turbine was closed" } else { "arrived just now" }),
         );
         if self.handled(&a.path) {
             crate::log::line("catch", &format!("{name} was already added"));
@@ -623,7 +607,7 @@ impl qobject::Turbine {
         let qt = self.qt_thread();
         let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
             let md5 = domains.into_iter().find_map(|(d, g)| identify(&d, &a.path).map(|s| (g, s)));
-            post(&qt, move |t| t.catch_decide(a, None, md5, page));
+            set(&qt, move |t| t.catch_decide(a, None, md5, page));
         });
     }
 
@@ -757,12 +741,19 @@ impl qobject::Turbine {
         self.asked(QString::from(j.as_str()));
     }
 
+    /// The helper's report of this download, taken off the list.
+    fn take_download(mut self: Pin<&mut Self>, id: &str) -> Option<HelperDownload> {
+        let mut rm = self.as_mut().rust_mut();
+        let downloads = &mut rm.catching.downloads;
+        let i = downloads.iter().position(|(x, _)| x == id)?;
+        Some(downloads.remove(i).1)
+    }
+
     fn take_ask(mut self: Pin<&mut Self>, path: &Path) -> Option<Ask> {
         let mut rm = self.as_mut().rust_mut();
         let asks = &mut rm.catching.asks;
-        let i = asks.iter().position(|a| a.path == path);
-        let taken = i.map(|i| asks.remove(i));
-        taken
+        let i = asks.iter().position(|a| a.path == path)?;
+        Some(asks.remove(i))
     }
 
     /// After an answer: the next question, or the question goes away (in Turbine and on the card).
@@ -852,7 +843,7 @@ impl qobject::Turbine {
                 Ok(l) => {
                     let exp = exp.with_files(&l);
                     crate::log::line("catch", &format!("Nexus lists {} files for {}:{}; matching by name and size", exp.files.len(), r.domain, r.mod_id));
-                    post(&qt, move |t| t.expect_page(exp));
+                    set(&qt, move |t| t.expect_page(exp));
                 }
                 Err(e) => crate::log::line("catch", &format!("Nexus's file list for {}:{} couldn't be read ({e}); Turbine will ask about its download", r.domain, r.mod_id)),
             }
@@ -953,7 +944,7 @@ impl qobject::Turbine {
                     source.needs = crate::online::nexus_needs(&d, m);
                 }
             }
-            post(&qt, move |mut t| {
+            set(&qt, move |mut t| {
                 let name = format!("Add {label} (caught download)");
                 // A free account's Update: this download of the mod's page takes the installed mod's place (keeping
                 // its place in the list, on or off, and installer choices).
@@ -986,7 +977,7 @@ impl qobject::Turbine {
         self.as_mut().say(&format!("Looking up {label} on Nexus Mods..."), "work");
         let _ = std::thread::Builder::new().name("turbine-identify".into()).spawn(move || {
             let source = identify(&domain, &path).unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..Default::default() });
-            post(&qt, move |mut t| {
+            set(&qt, move |mut t| {
                 t.as_mut().say(&format!("Adding {label}..."), "work");
                 t.send(
                     Some(game.id()),
@@ -1015,15 +1006,10 @@ impl qobject::Turbine {
                 if let Ok(s) = turbine_engine::json::parse(&self.status_json().to_string()) {
                     if s.get("active").and_then(Json::as_bool) == Some(true) {
                         let p = match s.get("progress") {
-                            Some(Json::Num(n)) if *n >= 0.0 => format!("{n:.3}"),
-                            _ => "null".into(),
+                            Some(Json::Num(n)) if *n >= 0.0 => Some(*n),
+                            _ => None,
                         };
-                        let g = s.str_at("game").filter(|g| !g.is_empty()).map(quote).unwrap_or_else(|| "null".into());
-                        bridge::broadcast(&format!(
-                            "{{\"type\":\"status\",\"text\":{},\"level\":{},\"progress\":{p},\"game\":{g}}}",
-                            quote(s.str_at("text").unwrap_or("")),
-                            quote(s.str_at("level").unwrap_or("ok"))
-                        ));
+                        bridge::broadcast(&status_message(s.str_at("text").unwrap_or(""), s.str_at("level").unwrap_or("ok"), p, s.str_at("game").unwrap_or("")));
                     }
                 }
                 self.send(None, "Send installer choices to the browser helper", false, Box::new(|w: &mut Worker| crate::actions::resend_fomod(w)));
@@ -1098,13 +1084,7 @@ impl qobject::Turbine {
             }
             "download.failed" => {
                 let id = id_of(msg);
-                let d = {
-                    let mut rm = self.as_mut().rust_mut();
-                    let c = &mut rm.catching;
-                    let i = c.downloads.iter().position(|(x, _)| *x == id);
-                    let taken = i.map(|i| c.downloads.remove(i).1);
-                    taken
-                };
+                let d = self.as_mut().take_download(&id);
                 let Some(d) = d else { return };
                 let why = msg.str_at("error").unwrap_or("");
                 crate::log::line("bridge", &format!("Download of {} stopped: {why}", d.label));
@@ -1114,13 +1094,7 @@ impl qobject::Turbine {
             }
             "download.finished" => {
                 let id = id_of(msg);
-                let d = {
-                    let mut rm = self.as_mut().rust_mut();
-                    let c = &mut rm.catching;
-                    let i = c.downloads.iter().position(|(x, _)| *x == id);
-                    let taken = i.map(|i| c.downloads.remove(i).1);
-                    taken
-                };
+                let d = self.as_mut().take_download(&id);
                 let raw = msg.str_at("path").unwrap_or("");
                 let label = d.as_ref().map(|d| d.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| label_of(Path::new(raw)));
                 let path = match accept_download(raw) {
@@ -1263,11 +1237,6 @@ pub fn browser_json(check: &str) -> String {
     )
 }
 
-/// Where this Turbine's helper files are (TURBINE_HELPER_SOURCE overrides it for tests).
-fn helper_source() -> PathBuf {
-    std::env::var_os("TURBINE_HELPER_SOURCE").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(HELPER_SOURCE))
-}
-
 /// The helper's folder in Downloads (Turbine puts it there for Load unpacked).
 fn helper_folder() -> PathBuf {
     turbine_engine::watch::downloads_folder(&turbine_engine::home_dir()).join(HELPER_FOLDER)
@@ -1289,7 +1258,7 @@ fn manifest_version(dir: &Path) -> Option<String> {
 /// and so is anything in it that is a link (nothing is ever written through one, inside the folder or out of it).
 /// True when the folder now holds Turbine's version, so asking the helper to reload is worth it.
 pub fn refresh_helper_copy() -> bool {
-    let (from, to) = (helper_source(), helper_folder());
+    let (from, to) = (PathBuf::from(HELPER_SOURCE), helper_folder());
     if bridge::is_link(&to) || bridge::is_link(&to.join("manifest.json")) {
         crate::log::line("bridge", &format!("Left the browser helper in {} alone: it is a link", to.display()));
         return false;
@@ -1316,8 +1285,7 @@ extern "C" {
     fn turbine_overlay_mark(on: i32) -> i32;
 }
 
-/// Starts a choice from the extension on a fresh session only when it names the installer on screen; used by tests
-/// of the id format the extension sends back.
+/// An installer option's id in the helper's "choices" message: "g<group>o<option>".
 pub fn option_id(group: usize, option: usize) -> String {
     format!("g{group}o{option}")
 }

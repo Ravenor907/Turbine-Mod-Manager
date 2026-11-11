@@ -1,16 +1,15 @@
-//! The Downloads watcher for Nexus's Slow download: made-up folders and clocks for the matching rules, and real
-//! folders for the polling helpers.
+//! The Downloads watcher: made-up folders and clocks for the catching and matching rules, and real folders for the
+//! polling helpers.
 
 mod support;
 
-use std::cell::Cell;
 use std::fs;
 use std::path::PathBuf;
 use support::TempDir;
 use turbine_engine::nexus;
 use turbine_engine::watch::{
-    arrived_secs, catch_up_since, decide, default_folders, ignore_key, parse_user_dirs, same_download_name, scan, wait, Arrival, Basis,
-    CatchState, Catcher, Confidence, Event, ExpectedFile, Expectation, Seen, Skip, Watcher, FIRST_RUN_SECS, MAX_IGNORED, WINDOW_SECS,
+    arrived_secs, catch_up_since, decide, default_folders, ignore_key, parse_user_dirs, same_download_name, scan, Arrival, Basis, CatchState,
+    Catcher, Confidence, Event, ExpectedFile, Expectation, Seen, Skip, FIRST_RUN_SECS, MAX_IGNORED, WINDOW_SECS,
 };
 
 const T0: u64 = 1_800_000_000;
@@ -47,87 +46,36 @@ fn names_browsers_give_copies() {
 }
 
 #[test]
-fn a_finished_download_matches_by_name_after_two_looks() {
-    let mut w = Watcher::new(expect(&[("Cyber Engine Tweaks-107-1-36-0.zip", 23_606_784)]), vec![]);
-    let name = "Cyber Engine Tweaks-107-1-36-0.zip";
-    // Firefox: the empty final file and the .part next to it while it downloads.
-    assert_eq!(w.step(&[seen(name, 0, T0 + 5), seen(&format!("{name}.part"), 1000, T0 + 5)]), None);
-    assert_eq!(w.step(&[seen(name, 0, T0 + 6), seen(&format!("{name}.part"), 9000, T0 + 6)]), None);
-    // Done: the .part is gone, but the size has only been seen once.
-    assert_eq!(w.step(&[seen(name, 23_606_784, T0 + 7)]), None);
-    let f = w.step(&[seen(name, 23_606_784, T0 + 7)]).unwrap();
-    assert_eq!(f.confidence, Confidence::Name);
-    assert_eq!(f.confidence.label(), "high");
-    assert_eq!(f.file.unwrap().file_id, 1);
-    assert_eq!(f.path, PathBuf::from("/home/deck/Downloads").join(name));
-}
-
-#[test]
 fn chrome_and_other_browsers_partial_files_hold_it_back() {
     let name = "Mod.7z";
     for suffix in [".crdownload", ".download", ".PART"] {
-        let mut w = Watcher::new(expect(&[(name, 5000)]), vec![]);
+        let mut c = Catcher::new(vec![], T0, T0);
         let listing = [seen(name, 5000, T0 + 1), seen(&format!("{name}{suffix}"), 10, T0 + 1)];
-        assert_eq!(w.step(&listing), None);
-        assert_eq!(w.step(&listing), None, "{suffix} still there");
+        assert_eq!(skips(&c.step(&listing)), vec![(name.to_string(), Skip::Unfinished)], "{suffix}");
+        assert!(ready(&c.step(&listing)).is_empty(), "{suffix} still there");
     }
 }
 
 #[test]
-fn a_still_growing_file_waits() {
-    let mut w = Watcher::new(expect(&[("Big.zip", 0)]), vec![]);
-    assert_eq!(w.step(&[seen("Big.zip", 100, T0 + 1)]), None);
-    assert_eq!(w.step(&[seen("Big.zip", 200, T0 + 2)]), None);
-    assert_eq!(w.step(&[seen("Big.zip", 300, T0 + 3)]), None);
-    assert!(w.step(&[seen("Big.zip", 300, T0 + 3)]).is_some());
-}
-
-#[test]
-fn size_match_and_older_files_and_others_are_left_alone() {
-    let mut w = Watcher::new(expect(&[("Real Name.zip", 4096)]), vec![]);
-    let listing = [
-        seen("renamed by the player.zip", 4096, T0 + 10),
-        seen("Real Name.zip", 4096, T0 - 60),     // there before the page was opened
-        seen("something else.zip", 777, T0 + 20), // another download
-        seen("notes.txt", 4096, T0 + 20),         // not an archive
-    ];
-    assert_eq!(w.step(&listing), None);
-    let f = w.step(&listing).unwrap();
-    assert_eq!(f.confidence, Confidence::Size);
-    assert!(f.path.ends_with("renamed by the player.zip"));
+fn expectation_matches_by_name_then_size() {
+    let e = expect(&[("Cyber Engine Tweaks-107-1-36-0.zip", 23_606_784), ("Real Name.zip", 4096)]);
+    let (file, c) = e.match_file("Cyber Engine Tweaks-107-1-36-0.zip", 1).unwrap();
+    assert_eq!((file.unwrap().file_id, c, c.label()), (1, Confidence::Name, "high"));
+    let (file, c) = e.match_file("renamed by the player.zip", 4096).unwrap();
+    assert_eq!((file.unwrap().file_id, c, c.label()), (2, Confidence::Size, "medium"));
     // Nexus sizes in whole KB still match.
-    let mut w = Watcher::new(expect(&[("x.zip", 2048)]), vec![]);
-    let l = [seen("y.zip", 2048 + 1000, T0 + 1)];
-    w.step(&l);
-    assert_eq!(w.step(&l).unwrap().confidence, Confidence::Size);
+    assert_eq!(expect(&[("x.zip", 2048)]).match_file("y.zip", 2048 + 1000).unwrap().1, Confidence::Size);
     // When the file list is known, a download that matches nothing is never taken.
-    let mut w = Watcher::new(expect(&[("x.zip", 2048)]), vec![]);
-    let l = [seen("other.zip", 999_999, T0 + 1)];
-    w.step(&l);
-    assert_eq!(w.step(&l), None);
+    assert_eq!(e.match_file("something else.zip", 777), None);
 }
 
 #[test]
-fn name_wins_over_size_and_newer_wins_over_older() {
-    let mut w = Watcher::new(expect(&[("A.zip", 10), ("B.zip", 20)]), vec![]);
-    let l = [seen("whatever.zip", 10, T0 + 50), seen("B (1).zip", 20, T0 + 5), seen("B.zip", 20, T0 + 9)];
-    w.step(&l);
-    let f = w.step(&l).unwrap();
-    assert_eq!(f.confidence, Confidence::Name);
-    assert!(f.path.ends_with("B.zip"));
-}
-
-#[test]
-fn without_a_file_list_the_newest_within_30_minutes_is_a_guess() {
-    let mut w = Watcher::new(Expectation::new("gog:1423049311", "cyberpunk2077", 4198, T0), vec![]);
-    let l = [seen("old.zip", 5, T0 + 100), seen("new.7z", 5, T0 + 200), seen("late.rar", 5, T0 + WINDOW_SECS + 1)];
-    w.step(&l);
-    let f = w.step(&l).unwrap();
-    assert_eq!((f.confidence, f.file.clone()), (Confidence::Guess, None));
-    assert_eq!(f.confidence.label(), "low");
-    assert!(f.path.ends_with("new.7z"));
-    assert!(w.expectation.expired_at(T0 + WINDOW_SECS + 1));
-    assert!(!w.expectation.expired_at(T0 + WINDOW_SECS));
+fn without_a_file_list_any_archive_is_a_guess_for_30_minutes() {
+    let e = Expectation::new("gog:1423049311", "cyberpunk2077", 4198, T0);
+    let (file, c) = e.match_file("new.7z", 5).unwrap();
+    assert_eq!((file, c, c.label()), (None, Confidence::Guess, "low"));
+    assert!(e.expired_at(T0 + WINDOW_SECS + 1));
+    assert!(!e.expired_at(T0 + WINDOW_SECS));
 }
 
 #[test]
@@ -137,14 +85,11 @@ fn expectation_from_nexus_file_list() {
     assert!(!e.files.is_empty());
     assert!(e.files.iter().all(|f| !f.file_name.is_empty()));
     let first = e.files[0].clone();
-    let mut w = Watcher::new(e, vec![]);
-    let l = [seen(&first.file_name, first.size_bytes.max(1), T0 + 3)];
-    w.step(&l);
-    assert_eq!(w.step(&l).unwrap().file.unwrap().file_id, first.file_id);
+    assert_eq!(e.match_file(&first.file_name, first.size_bytes.max(1)).unwrap().0.unwrap().file_id, first.file_id);
 }
 
 #[test]
-fn real_folders_poll_and_wait() {
+fn real_folders_are_scanned_without_subfolders_or_links() {
     let t = TempDir::new("watch");
     let dl = t.path("Downloads");
     fs::create_dir_all(&dl).unwrap();
@@ -155,21 +100,6 @@ fn real_folders_poll_and_wait() {
     std::os::unix::fs::symlink(dl.join("Mod.zip"), dl.join("link.zip")).unwrap();
     let listing = scan(std::slice::from_ref(&dl));
     assert_eq!(listing.iter().map(|s| s.path.file_name().unwrap().to_string_lossy().into_owned()).collect::<Vec<_>>(), vec!["Mod.zip"]);
-
-    let now = listing[0].modified;
-    let mut w = Watcher::new(expect(&[("Mod.zip", 9)]), vec![dl.clone()]);
-    w.expectation.started_at = now;
-    let sleeps = Cell::new(0);
-    let found = wait(&mut w, &|| now, &|_| sleeps.set(sleeps.get() + 1), &|| false).unwrap();
-    assert_eq!(found.confidence, Confidence::Name);
-    assert_eq!(sleeps.get(), 1, "one second between the two looks");
-    assert_eq!(fs::read(dl.join("Mod.zip")).unwrap(), b"zip bytes", "the file is left as it was");
-
-    // Stopped, or past the 30 minutes: nothing.
-    let mut w = Watcher::new(expect(&[("Mod.zip", 9)]), vec![dl.clone()]);
-    w.expectation.started_at = now;
-    assert_eq!(wait(&mut w, &|| now, &|_| {}, &|| true), None);
-    assert_eq!(wait(&mut w, &|| now + WINDOW_SECS + 5, &|_| {}, &|| false), None);
 }
 
 #[test]

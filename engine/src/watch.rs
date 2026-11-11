@@ -1,31 +1,29 @@
-//! "Slow download" from Nexus: the player presses it in their own browser, the browser saves the file in Downloads,
-//! and Turbine picks it up and adds it to the right game.
+//! Catching downloads: the player downloads a mod in their own browser, the browser saves it in Downloads, and
+//! Turbine picks it up and adds it to the right game.
+//!
+//! A `Catcher` looks at the Downloads folder (and any others it is given) once a second for every new zip, 7z or rar
+//! archive that is finished: its size was the same at two looks in a row, and the browser's unfinished-download file
+//! next to it is gone (Firefox writes "<name>.part", Chromium-based browsers "<name>.crdownload", others
+//! "<name>.download"). Files it leaves alone are reported once with the reason. It only reads folder listings and
+//! file sizes, and hands back paths.
 //!
 //! When Turbine opens a Nexus mod page it records an `Expectation`: which game, which mod, the files Nexus lists for
-//! it (names and sizes, when known) and when the page was opened. A `Watcher` then looks at the Downloads folder (and
-//! any others it is given) once a second for a new zip, 7z or rar archive that:
-//! - was last changed after the page was opened;
-//! - is finished: its size was the same at two checks in a row, and the browser's unfinished-download file next to
-//!   it is gone (Firefox writes "<name>.part", Chromium-based browsers "<name>.crdownload", others "<name>.download");
-//! - matches one of the mod's files by name (browsers add " (1)" or "(1)" to names they already have) or by size.
+//! it (names and sizes, when known) and when the page was opened. A finished archive matches it by name (browsers add
+//! " (1)" or "(1)" to names they already have) or by size; with no file list, any archive within 30 minutes is a
+//! guess, so the app asks before adding it. `decide` picks the game from what is known.
 //!
-//! When Nexus's file list isn't known, the newest finished archive within 30 minutes of opening the page is taken,
-//! marked as a guess so the app can ask before adding it. Files that don't match are never touched: the watcher only
-//! reads folder listings and file sizes, and hands back a path.
-//!
-//! `Watcher::step` is pure (a listing in, a match out) and is what the tests drive with made-up folders and clocks;
-//! `scan`, `poll` and `wait` read the real folders.
+//! `Catcher::step` is pure (a listing in, events out) and is what the tests drive with made-up folders and clocks;
+//! `scan` and `poll` read the real folders.
 
 use crate::archives;
 use crate::nexus::FileList;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 /// How long after opening the page a download still counts (seconds).
 pub const WINDOW_SECS: u64 = 30 * 60;
-/// How often `wait` looks (seconds).
+/// How often the folders are looked at (seconds).
 pub const POLL_SECS: u64 = 1;
 /// Endings of the files browsers write while a download is still going.
 pub const PARTIAL_SUFFIXES: &[&str] = &[".part", ".crdownload", ".download", ".tmp"];
@@ -127,16 +125,6 @@ impl Confidence {
     }
 }
 
-/// A finished download that belongs to the expectation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Found {
-    pub path: PathBuf,
-    pub size: u64,
-    /// The Nexus file it matched, when it matched one.
-    pub file: Option<ExpectedFile>,
-    pub confidence: Confidence,
-}
-
 /// "name (1).zip" and "name(1).zip" are the browser's copies of "name.zip".
 fn without_copy_number(stem: &str) -> &str {
     let s = stem.trim_end();
@@ -178,70 +166,6 @@ fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Watches folders for the download an expectation describes.
-#[derive(Clone, Debug)]
-pub struct Watcher {
-    pub expectation: Expectation,
-    pub folders: Vec<PathBuf>,
-    /// Sizes at the previous look, to tell when a file stopped growing.
-    sizes: HashMap<PathBuf, u64>,
-}
-
-impl Watcher {
-    pub fn new(expectation: Expectation, folders: Vec<PathBuf>) -> Watcher {
-        Watcher { expectation, folders, sizes: HashMap::new() }
-    }
-
-    /// One look at the folders' listing. Returns the best finished match, if there is one yet.
-    pub fn step(&mut self, listing: &[Seen]) -> Option<Found> {
-        let exp = &self.expectation;
-        // Unfinished downloads: "<name>.part" means "<name>" isn't done.
-        let busy: Vec<PathBuf> = listing
-            .iter()
-            .filter_map(|s| {
-                let name = file_name(&s.path);
-                let lc = name.to_ascii_lowercase();
-                let suffix = PARTIAL_SUFFIXES.iter().find(|x| lc.ends_with(*x))?;
-                Some(s.path.with_file_name(&name[..name.len() - suffix.len()]))
-            })
-            .collect();
-        let since = exp.started_at.saturating_sub(SLACK_SECS);
-        let mut sizes = HashMap::new();
-        let mut best: Option<(Found, u64)> = None;
-        for s in listing {
-            let name = file_name(&s.path);
-            if !archives::is_archive_name(&name) || s.modified < since {
-                continue;
-            }
-            sizes.insert(s.path.clone(), s.size);
-            let stable = self.sizes.get(&s.path) == Some(&s.size);
-            if !stable || s.size == 0 || busy.contains(&s.path) {
-                continue;
-            }
-            if !exp.knows_files() && s.modified > exp.started_at.saturating_add(WINDOW_SECS) {
-                continue;
-            }
-            let Some((file, confidence)) = exp.match_file(&name, s.size) else { continue };
-            let found = Found { path: s.path.clone(), size: s.size, file, confidence };
-            let better = match &best {
-                None => true,
-                Some((b, m)) => (found.confidence, s.modified, &found.path) > (b.confidence, *m, &b.path),
-            };
-            if better {
-                best = Some((found, s.modified));
-            }
-        }
-        self.sizes = sizes;
-        best.map(|(f, _)| f)
-    }
-
-    /// Looks at the real folders once.
-    pub fn poll(&mut self) -> Option<Found> {
-        let listing = scan(&self.folders);
-        self.step(&listing)
-    }
-}
-
 /// When a file counts as arrived: the later of its modification time and its status change time (seconds since
 /// 1970). Some browsers give a finished download the server's own date, which can be years old; the status change
 /// time is still the moment the file was written or renamed into Downloads, which the player's system sets.
@@ -277,20 +201,6 @@ pub fn scan(folders: &[PathBuf]) -> Vec<Seen> {
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
-}
-
-/// Looks once a second until a match turns up, `stop` says to give up (the player left the page, or Turbine is
-/// closing), or the 30 minutes are over. `now` and `sleep` are given so tests can run it without waiting.
-pub fn wait(watcher: &mut Watcher, now: &dyn Fn() -> u64, sleep: &dyn Fn(Duration), stop: &dyn Fn() -> bool) -> Option<Found> {
-    loop {
-        if stop() || watcher.expectation.expired_at(now()) {
-            return None;
-        }
-        if let Some(f) = watcher.poll() {
-            return Some(f);
-        }
-        sleep(Duration::from_secs(POLL_SECS));
-    }
 }
 
 /// The Downloads folder from the text of ~/.config/user-dirs.dirs (XDG_DOWNLOAD_DIR="$HOME/Downloads"), when set.

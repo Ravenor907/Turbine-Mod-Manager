@@ -1,23 +1,15 @@
 //! Self-update, offline. tests/data/github_turbine_releases.json is a recorded answer from GitHub's API for this
 //! project's releases (one pre-release, 0.1, with GitHub's SHA-256 digest on the bundle).
 
+mod support;
+
 use std::cmp::Ordering::*;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use support::{data_text as data, scratch};
 use turbine_engine::net::{Client, NetError};
 use turbine_engine::selfupdate::{self as su, Check};
-
-fn data(name: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-su-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 #[test]
 fn one_dot_versions_compare_as_decimals() {

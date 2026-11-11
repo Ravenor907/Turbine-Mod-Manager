@@ -16,9 +16,10 @@
 //! - Two mods that change the same script (content/scripts/...) don't both work: the game uses one. Script Merger, a
 //!   Windows tool, combines them into mod0000_MergedFiles; Turbine doesn't run it, it warns before Play instead.
 
-use crate::rules::Check;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use crate::rules::{lc, mod_folders, Check};
+use crate::write_atomic;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub const MODS_SETTINGS: &str = "mods.settings";
@@ -29,10 +30,6 @@ pub const MERGED_FOLDER: &str = "mod0000_MergedFiles";
 /// Where the game keeps its settings, inside a Proton prefix (pfx folder), for Proton's usual user name.
 pub const DOCS_IN_PREFIX: &str = "drive_c/users/steamuser/Documents/The Witcher 3";
 pub const NOT_STARTED: &str = "The Witcher 3 hasn't made its settings folder yet. Start the game once, then try again.";
-
-fn lc(p: &str) -> String {
-    p.replace('\\', "/").trim_start_matches('/').to_lowercase()
-}
 
 /// The game's settings folder inside a Proton prefix: steamuser's, or the first other user's that has one.
 pub fn documents_dir(prefix: &Path) -> PathBuf {
@@ -51,21 +48,6 @@ pub fn documents_dir(prefix: &Path) -> PathBuf {
         }
     }
     usual
-}
-
-/// The mod folders (in <game>/mods) these game-relative files belong to, in the order they first appear.
-pub fn mod_folders(files: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for f in files {
-        let clean = f.replace('\\', "/");
-        let mut parts = clean.trim_start_matches('/').split('/');
-        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) {
-            if top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
-                out.push(folder.to_string());
-            }
-        }
-    }
-    out
 }
 
 /// One "[name]" section of mods.settings with its lines as they were.
@@ -124,26 +106,6 @@ pub fn render_mods_settings(existing: &str, order: &[String], managed: &[String]
         out.push_str(&format!("[{name}]{eol}Enabled=1{eol}Priority={}{eol}", n - i));
     }
     out
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.turbine-new"));
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    if let Some(dir) = path.parent() {
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
-        }
-    }
-    Ok(())
 }
 
 /// Writes mods.settings in the game's settings folder `docs`. Returns true when it changed the file. The first time

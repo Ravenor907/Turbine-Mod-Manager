@@ -438,11 +438,6 @@ pub fn write_proton_record(data: &Path, app_id: &str, proton_dir: &Path, how: Pr
     write_record(&proton_file(data, app_id), proton_dir, how.word())
 }
 
-/// Writes down the Proton Steam used for a game.
-pub fn write_proton_choice(data: &Path, app_id: &str, proton_dir: &Path) -> io::Result<()> {
-    write_proton_record(data, app_id, proton_dir, ProtonHow::Steam)
-}
-
 /// The player's pick for a game: a Proton folder, or None for "Automatic" (the record goes and stays gone: the tool
 /// then takes default.proton at each launch, or the Proton of a later launch by Steam itself).
 pub fn set_proton_pick(data: &Path, app_id: &str, proton_dir: Option<&Path>) -> io::Result<()> {
@@ -494,34 +489,6 @@ pub fn last_steam_proton_in(log: &str, app_id: &str) -> Option<PathBuf> {
                 // The folder starts at the last " /" after the "-- " in front of Proton (paths hold spaces).
                 let start = head.rfind(" -- /").map(|i| i + 4).or_else(|| head.rfind(": /").map(|i| i + 2))?;
                 return Some(PathBuf::from(&head[start..]));
-            }
-        }
-    }
-    None
-}
-
-/// The Proton the game's newest launch in the helper's log ran with, and whose choice it was: Steam's own command
-/// (`last_steam_proton_in`'s kind of line), or the tool's own pick at a launch through the tool.
-pub fn last_proton_seen_in(log: &str, app_id: &str) -> Option<(PathBuf, ProtonHow)> {
-    let steam_mark = format!(" Steam started app {app_id} in ");
-    let tool_start = " Turbine (mods): Steam started app ";
-    let pick_mark = " Turbine (mods): Proton for this game: ";
-    let mut picked: Option<PathBuf> = None;
-    for line in log.lines().rev() {
-        if let Some(at) = line.find(pick_mark) {
-            let rest = &line[at + pick_mark.len()..];
-            picked = rest.split_once(" [why: ").map(|(d, _)| PathBuf::from(d));
-        } else if let Some(at) = line.find(tool_start) {
-            let ours = line[at + tool_start.len()..].starts_with(&format!("{app_id} ("));
-            match (ours, picked.take()) {
-                (true, Some(d)) => return Some((d, ProtonHow::Tool)),
-                // The tool started this game and chose nothing (no Proton found): look further back.
-                _ => continue,
-            }
-        } else if line.contains(&steam_mark) && line.contains(&format!("SteamLaunch AppId={app_id} ")) {
-            let one = format!("{line}\n");
-            if let Some(d) = last_steam_proton_in(&one, app_id) {
-                return Some((d, ProtonHow::Steam));
             }
         }
     }
@@ -719,12 +686,6 @@ pub fn installed_protons(steam_root: &Path) -> Vec<Proton> {
     out
 }
 
-/// The Proton Turbine chooses by itself: the first usable one of `installed_protons` (a finished, numbered Proton
-/// before any Beta or Experimental).
-pub fn best_proton(steam_root: &Path) -> Option<Proton> {
-    installed_protons(steam_root).into_iter().find(|p| p.usable)
-}
-
 /// The file that names the Proton for games without a record of their own (read by the script).
 pub fn default_proton_file(data: &Path) -> PathBuf {
     crate::anticheat::launch_dir(data).join("default.proton")
@@ -781,11 +742,6 @@ pub fn proton_json(steam_root: &Path, data: &Path, app_id: &str) -> String {
 }
 
 // ---- What the tool said (for the launch check and reports) ----
-
-/// The tool's own lines among the helper log's lines (each starts with its name after the time).
-pub fn tool_lines(lines: &[String]) -> Vec<String> {
-    lines.iter().filter(|l| l.contains(" Turbine (mods): ")).cloned().collect()
-}
 
 /// The Proton the tool used in these log lines, with why: ("/path/Proton 11.0", "the newest Proton installed ...").
 pub fn proton_used(lines: &[String]) -> Option<(String, String)> {
@@ -888,15 +844,6 @@ pub fn steps(game_name: &str, listed: bool) -> Vec<String> {
     s
 }
 
-/// What to say when Turbine's tool should go but games still use it.
-pub fn still_used_words(names: &[String]) -> String {
-    format!(
-        "Turbine's Steam tool stays: {} still {} it. In Steam, open the game's Properties, Compatibility and pick another tool (or turn the setting off) first, or the game would not start.",
-        names.join(", "),
-        if names.len() == 1 { "uses" } else { "use" }
-    )
-}
-
 // ---- The Co-op tile (0.62 decision) ----
 //
 // Steam keeps its non-Steam games in a file it writes back from memory when it closes, and Game Mode starts Steam
@@ -978,7 +925,7 @@ pub const TILE_NEEDS_STEAM_CLOSED: &str = "Steam is running, so Turbine can't ch
 
 // ---- For the app ----
 
-/// Why Turbine doesn't restart Steam to change Steam's own settings files in Game Mode (0.62: that way is gone).
+/// Why Turbine doesn't restart Steam to change Steam's own settings files in Game Mode.
 pub const GAME_MODE_NO_WRITE: &str = "Game Mode starts Steam again at once, so Turbine can't change Steam's own settings here. Pick \"Turbine (mods)\" for the game in Steam instead (Turbine shows the three steps), or do this in Desktop Mode.";
 
 /// May Turbine close Steam, write one of Steam's settings files and start it again? Never in Game Mode while Steam

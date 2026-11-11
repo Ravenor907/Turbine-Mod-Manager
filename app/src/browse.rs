@@ -13,7 +13,7 @@
 //! - `lock_instance`: one Turbine at a time holds the lock; only that one removes partial downloads and opens the
 //!   browser's profile.
 //! - `log_url`: page addresses go into the activity log as host and path only (signed links and codes stay out).
-//! - `start_url`, `zoom_default`, `same_page`, `user_matches`, the pill's words.
+//! - `start_url`, `zoom_default`, `same_page`, `user_matches`.
 //! - the build's stand-in page: only with --selftest-data and --browser-test=<url> does its 127.0.0.1 host count as
 //!   Nexus (and plain http from it as allowed).
 //!
@@ -39,9 +39,8 @@ pub const DL_PRESS: Duration = Duration::from_secs(60);
 /// Free space a download of unknown size needs before it starts, and what a running download leaves free at least.
 pub const FREE_FLOOR: u64 = 1 << 30;
 pub const FREE_STOP: u64 = 512 << 20;
-/// The longest file name most file systems take, in bytes, and how much of it a name's stem may use (room is left for
-/// " (999)" and ".download").
-pub const NAME_MAX: usize = 255;
+/// How much of a file name its stem may use, in bytes: most file systems take 255, and room is left for " (999)" and
+/// ".download".
 pub const STEM_MAX: usize = 180;
 
 // ------------------------------------------------------------------------------------------------ presses
@@ -144,7 +143,7 @@ pub fn note_pointer_up(now: Instant) -> bool {
 }
 
 /// The main frame shows this address now (QML's urlChanged). True when it is off Nexus (the press is gone).
-pub fn note_main_frame(url: &str, _now: Instant) -> bool {
+pub fn note_main_frame(url: &str) -> bool {
     let u = url.trim();
     if u.is_empty() || u.to_ascii_lowercase().starts_with("about:") {
         return false;
@@ -181,12 +180,6 @@ pub struct Plan {
     pub folder: String,
     /// From Nexus's own file hosts after a press: added to the page's game without asking.
     pub sure: bool,
-}
-
-impl Plan {
-    pub fn path(&self) -> PathBuf {
-        self.dir.join(&self.name)
-    }
 }
 
 /// The host of an address (lower case, no port), and whether it is https.
@@ -328,7 +321,7 @@ pub fn page_ids(url: &str) -> Option<(String, u64, Option<u64>)> {
 /// A file name from what the page suggested (or the address's last part): no folders, no characters file systems or
 /// browsers refuse, no leading dots. Long names are cut by bytes (file systems count bytes, and a CJK or Cyrillic
 /// character takes 2 to 4): the stem to at most STEM_MAX bytes on a character boundary, the extension kept, so the
-/// name plus " (999)" and ".download" stays within NAME_MAX.
+/// name plus " (999)" and ".download" stays within 255 bytes.
 pub fn clean_name(suggested: &str, url: &str) -> String {
     let from = if suggested.trim().is_empty() { last_part(url) } else { suggested.to_string() };
     let base = from.rsplit(['/', '\\']).next().unwrap_or("").to_string();
@@ -684,7 +677,7 @@ fn key_of(url: &str) -> String {
 /// (`push`, single::push in the app) only with all of: its key, expiry and account number; an initiator on Nexus; the
 /// navigation guard's permit for this very link; a press of the player's within 30 seconds that no other link used
 /// and that wasn't followed by a page off Nexus (`presses`); and never used before (in any order of its parts). Even
-/// then it only reaches Turbine's question (`must_ask`): nothing downloads until the player says Get it.
+/// then it only reaches Turbine's question: nothing downloads until the player says Get it.
 pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Instant, push: &mut dyn FnMut(String)) -> NxmFromPage {
     let url = url.trim();
     if url.len() > 2048 {
@@ -710,7 +703,7 @@ pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Ins
     if permit.is_none() {
         return NxmFromPage::Refused(format!("{r} wasn't the page itself going there (a frame, an image or a script's request)"));
     }
-    if USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == key) {
+    if USED.lock().unwrap_or_else(|e| e.into_inner()).contains(&key) {
         return NxmFromPage::Refused(format!("{r} was used already"));
     }
     if let Err(e) = presses.take_for_nxm(now) {
@@ -718,16 +711,9 @@ pub fn nxm_from_page(url: &str, initiator: &str, presses: &mut Presses, now: Ins
     }
     {
         let mut used = USED.lock().unwrap_or_else(|e| e.into_inner());
-        used.push(key.clone());
+        used.push(key);
         if used.len() > 2000 {
             used.remove(0);
-        }
-    }
-    {
-        let mut a = ASK.lock().unwrap_or_else(|e| e.into_inner());
-        a.push(key);
-        if a.len() > 200 {
-            a.remove(0);
         }
     }
     push(url.to_string());
@@ -740,18 +726,10 @@ pub fn nxm_from_page_now(url: &str, initiator: &str, now: Instant, push: &mut dy
     nxm_from_page(url, initiator, &mut p, now, push)
 }
 
-/// Links from the page: Turbine asks "Get <mod> (<file>) for <game>?" before downloading any of them.
-static ASK: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-pub fn must_ask(url: &str) -> bool {
-    let k = key_of(url);
-    ASK.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == k)
-}
-
 /// Did this link come from Turbine's browser? Its file then goes into Game Mods/<Game>.
 pub fn from_page(url: &str) -> bool {
     let k = key_of(url);
-    USED.lock().unwrap_or_else(|e| e.into_inner()).iter().any(|u| *u == k)
+    USED.lock().unwrap_or_else(|e| e.into_inner()).contains(&k)
 }
 
 // ------------------------------------------------------------------------------------------------ pages
@@ -769,26 +747,9 @@ pub fn zoom_default(window_height: f64, size_percent: f64) -> f64 {
     (z * 100.0).round() / 100.0
 }
 
-// ------------------------------------------------------------------------------------------------ the status pill
-
-/// The download pill's words for one download.
-pub fn pill(state: &str, name: &str, got: i64, total: i64, game: &str) -> String {
-    match state {
-        "requested" => format!("Starting {name}"),
-        "progress" if total > 0 => format!("Downloading {name} {}%", ((got as f64 / total as f64) * 100.0).floor().clamp(0.0, 99.0) as i64),
-        "progress" => format!("Downloading {name} {}", size_words(got.max(0) as u64)),
-        "adding" => "Adding...".to_string(),
-        "added" if !game.is_empty() => format!("Added to {game}: {name}. It's on."),
-        "added" => format!("Added: {name}. It's on."),
-        "interrupted" => format!("{name} stopped. Try again"),
-        "cancelled" => format!("{name} was cancelled"),
-        _ => String::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    // The permits, used links and asks are shared statics: tests that touch them take turns (run in parallel, one
+    // The permits and used links are shared statics: tests that touch them take turns (run in parallel, one
     // could clear another's permit between its two steps).
     static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn serial() -> std::sync::MutexGuard<'static, ()> {
@@ -818,11 +779,11 @@ mod tests {
         let _serial = serial();
         let dl = temp("plan");
         let p = planned(&req("https://cf-files.nexus-cdn.com/files/1/Bigger.zip?md5=x", "TurbineTest-Bigger_Pockets-1.0.3.zip", 1000), &dl, Some("Skyrim Special Edition"), Some(1 << 30), &[]).unwrap();
-        assert_eq!(p.path(), dl.join("Game Mods/Skyrim Special Edition/TurbineTest-Bigger_Pockets-1.0.3.zip"));
+        assert_eq!(p.dir.join(&p.name), dl.join("Game Mods/Skyrim Special Edition/TurbineTest-Bigger_Pockets-1.0.3.zip"));
         assert_eq!(p.folder, "Skyrim Special Edition");
         assert!(p.sure);
         let p = planned(&req("https://example.org/req.7z", "", -1), &dl, None, None, &[]).unwrap();
-        assert_eq!(p.path(), dl.join("Game Mods/Other/req.7z"));
+        assert_eq!(p.dir.join(&p.name), dl.join("Game Mods/Other/req.7z"));
     }
 
     #[test]
@@ -932,7 +893,7 @@ mod tests {
         for (stem, ext) in [("漢".repeat(150), ".zip"), ("Ж".repeat(126), ".7z"), ("a".repeat(300), ".rar"), ("é".repeat(200), ".zip")] {
             let n = clean_name(&format!("{stem}{ext}"), "");
             assert!(n.ends_with(ext), "{n}");
-            assert!(n.len() <= NAME_MAX && worst(&n) <= NAME_MAX, "{} bytes", n.len());
+            assert!(n.len() <= 255 && worst(&n) <= 255, "{} bytes", n.len());
             assert!(turbine_engine::archives::is_archive_name(&n));
             // The file can really be made, with its ".download" while it runs.
             std::fs::write(dl.join(format!("{n}.download")), b"x").unwrap();
@@ -1011,7 +972,7 @@ mod tests {
         let r = nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u));
         assert!(matches!(r, NxmFromPage::Ask(ref s) if !s.contains("abc") && !s.contains("user_id")), "{r:?}");
         assert_eq!(got.len(), 1);
-        assert!(from_page(l) && must_ask(l));
+        assert!(from_page(l));
         // The same link again, even with a fresh press, and not with its parts in another order either.
         let mut p = pressed(now, 1);
         nxm_permit(l, true, PAGE, now).unwrap();
@@ -1019,7 +980,7 @@ mod tests {
         let reordered = "nxm://skyrimspecialedition/mods/1/files/5?user_id=1&expires=4102444800&key=abc";
         nxm_permit(reordered, true, PAGE, now).unwrap();
         assert!(matches!(nxm_from_page(reordered, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Refused(ref e) if e.contains("used already")));
-        assert!(from_page(reordered) && must_ask(reordered));
+        assert!(from_page(reordered));
         assert_eq!(got.len(), 1);
     }
 
@@ -1114,7 +1075,6 @@ mod tests {
             p.frame(page);
             nxm_permit(l, true, page, now).unwrap();
             assert!(matches!(nxm_from_page(l, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)), "{l}");
-            assert!(must_ask(l));
         }
     }
 
@@ -1144,7 +1104,6 @@ mod tests {
         let l2 = "nxm://skyrimspecialedition/mods/900/files/6?key=k&expires=4102444800&user_id=7";
         nxm_permit(l2, true, target, now).unwrap();
         assert!(matches!(nxm_from_page(l2, NEXUS, &mut p, now, &mut |u| got.push(u)), NxmFromPage::Ask(_)));
-        assert!(must_ask(l2));
         // A tap on Nexus with no frame change counts for a Slow download.
         let mut q = Presses::default();
         q.frame(PAGE);
@@ -1164,18 +1123,18 @@ mod tests {
         assert!(p.frame("https://evil.example/x"));
         assert!(p.for_download().is_none());
         // The app's record: Nexus pages and about:blank keep the press, anything else drops it.
-        note_main_frame(PAGE, now);
+        note_main_frame(PAGE);
         note_press(now);
-        assert!(!note_main_frame("https://www.nexusmods.com/skyrimspecialedition/mods/1", now));
-        assert!(!note_main_frame("about:blank", now));
+        assert!(!note_main_frame("https://www.nexusmods.com/skyrimspecialedition/mods/1"));
+        assert!(!note_main_frame("about:blank"));
         assert!(last_press().is_some());
-        assert!(note_main_frame("https://evil.example/bounce", now));
+        assert!(note_main_frame("https://evil.example/bounce"));
         assert!(last_press().is_none());
         note_press(now);
         assert!(last_press().is_none(), "a press made off Nexus never counts for a download");
-        note_main_frame(PAGE, now);
+        note_main_frame(PAGE);
         note_press(now);
-        assert!(note_main_frame("data:text/html,x", now));
+        assert!(note_main_frame("data:text/html,x"));
         assert!(last_press().is_none());
     }
 
@@ -1298,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn start_pages_zoom_and_pill() {
+    fn start_pages_and_zoom() {
         let _serial = serial();
         assert_eq!(start_url("witcher3", 2109, 1), "https://www.nexusmods.com/witcher3/mods/2109?tab=files&file_id=1");
         assert_eq!(start_url("witcher3", 2109, 0), "https://www.nexusmods.com/witcher3/mods/2109?tab=files");
@@ -1306,10 +1265,6 @@ mod tests {
         assert_eq!(zoom_default(1080.0, 100.0), 1.69);
         assert_eq!(zoom_default(400.0, 100.0), 1.0);
         assert_eq!(zoom_default(2160.0, 100.0), 2.0);
-        assert_eq!(pill("progress", "SkyUI", 42, 100, ""), "Downloading SkyUI 42%");
-        assert_eq!(pill("progress", "SkyUI", 100, 100, ""), "Downloading SkyUI 99%");
-        assert_eq!(pill("added", "SkyUI", 0, 0, "Skyrim Special Edition"), "Added to Skyrim Special Edition: SkyUI. It's on.");
-        assert_eq!(pill("adding", "x", 0, 0, ""), "Adding...");
     }
 
     #[test]

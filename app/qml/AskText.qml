@@ -2,7 +2,7 @@ import QtQuick
 
 // A line of text from the player: a search, a profile name, a Thunderstore profile code, the Nexus Mods key. In Game
 // Mode Steam's on-screen keyboard opens with it (Main.qml asks Steam). The field has the focus first: A opens the
-// keyboard again. Down: the buttons Clear, Cancel and Done (SheetButtons). Start or Enter is Done, B or Esc cancels.
+// keyboard again. Down: the buttons Clear, Cancel and Done (SheetButtons). Enter is Done, B or Esc cancels.
 Overlay {
     id: ask
     onOutsideTapped: ask.cancel()
@@ -37,10 +37,6 @@ Overlay {
     function accept() { const t = field.text.trim(); shown = false; accepted(t) }
     function cancel() { shown = false; cancelled() }
     function clear() { field.text = "" }
-    function handleButton(b) {
-        if (b === "a" || b === "start") accept()
-        else if (b === "b") cancel()
-    }
 
     Rectangle { anchors.fill: parent; color: "#C8000000" }
     Rectangle {

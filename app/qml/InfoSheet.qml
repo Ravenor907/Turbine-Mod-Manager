@@ -2,9 +2,9 @@ import QtQuick
 
 // A plain sheet: a title, a few sentences, numbered steps or a list of notes, and one or two buttons. Used for the
 // no-browser warning, the browser helper's setup steps, a mod's install notes and "Add this file?" for a download
-// the watcher could only guess. A presses the highlighted button, B the cancel one, Start the
-// first (SheetButtons); Main.qml handles the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the
-// wheel) and the buttons stay in view at the bottom.
+// the watcher could only guess. A presses the highlighted button, B the cancel one (SheetButtons); Main.qml handles
+// the keys. When the words don't fit (a large interface size), they scroll (Up and Down, or the wheel) and the
+// buttons stay in view at the bottom.
 Overlay {
     id: sh
     onOutsideTapped: sh.closed()

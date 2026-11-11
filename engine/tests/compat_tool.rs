@@ -2,24 +2,16 @@
 //! reaper in front, as Steam puts them) with stub runtimes, Protons and me3: each stub writes its arguments to a
 //! trace and passes control on the way the real one does. Paths hold spaces, as on the device.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use support::{has_bash, scratch as tmp};
 use turbine_engine::anticheat::{self, Coop};
 use turbine_engine::compat_tool::{self as tool, Route, TileWay};
 
 const APP: &str = "1245620";
-
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-compattool-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
-
-fn has_bash() -> bool {
-    Command::new("bash").arg("--version").output().is_ok()
-}
 
 fn write(p: &Path, text: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -272,7 +264,6 @@ fn install_writes_only_what_differs_and_never_goes_while_a_game_uses_it() {
     // The folder stays while a game names the tool.
     assert_eq!(tool::remove(&root), Err(vec!["1245620".to_string()]));
     assert!(tool::is_installed(&root, &data));
-    assert!(tool::still_used_words(&["Elden Ring".to_string()]).contains("Elden Ring still uses it"));
     write(&tool::config_file(&root), &config.replace("turbine-mods", "proton_11"));
     assert_eq!(tool::remove(&root), Ok(true));
     assert!(!dir.exists());
@@ -289,7 +280,7 @@ fn proton_11_with_its_runtime_and_mods_on() {
     }
     let s = Steam::new("p11");
     // Turbine kept the Proton Steam last used for the game.
-    tool::write_proton_choice(&s.data, APP, &s.proton11).unwrap();
+    tool::write_proton_record(&s.data, APP, &s.proton11, tool::ProtonHow::Steam).unwrap();
     let args = s.arm();
     let (code, t) = s.play();
     assert_eq!(code, 0, "{t:?}\n{}", s.log());
@@ -356,7 +347,7 @@ fn an_older_proton_gets_its_own_runtime() {
         return;
     }
     let s = Steam::new("p9");
-    tool::write_proton_choice(&s.data, APP, &s.proton9).unwrap();
+    tool::write_proton_record(&s.data, APP, &s.proton9, tool::ProtonHow::Steam).unwrap();
     let args = s.arm();
     let (code, t) = s.play();
     assert_eq!(code, 0, "{}", s.log());
@@ -367,7 +358,7 @@ fn an_older_proton_gets_its_own_runtime() {
     // A Proton that names no runtime (very old ones) runs as it is.
     let bare = s.root.join("steamapps/common/Proton 4.11");
     proton(&bare, &s.trace, "proton4", None);
-    tool::write_proton_choice(&s.data, APP, &bare).unwrap();
+    tool::write_proton_record(&s.data, APP, &bare, tool::ProtonHow::Steam).unwrap();
     anticheat::arm(&s.data, APP, None).unwrap();
     let (code, t) = s.play();
     assert_eq!(code, 0);
@@ -396,7 +387,6 @@ fn without_a_record_the_newest_proton_is_picked_and_said() {
     assert_eq!(dir, s.proton11.display().to_string());
     assert!(why.starts_with("the newest Proton installed (Turbine has no record of the one Steam used for this game; 3 numbered Proton found"), "{why}");
     assert_eq!(tool::proton_words(&lines).unwrap(), format!("Started with Proton 11.0: {why}."));
-    assert!(tool::tool_lines(&lines).len() >= 4);
     // default.proton (Turbine's choice for every game) comes before the search.
     fs::write(anticheat::launch_dir(&s.data).join("default.proton"), format!("{}\r\n", p10.display())).unwrap();
     let (_, t) = s.play();
@@ -420,7 +410,7 @@ fn a_missing_runtime_moves_on_to_a_proton_that_can_run_or_says_so() {
         return;
     }
     let s = Steam::new("nort");
-    tool::write_proton_choice(&s.data, APP, &s.proton9).unwrap();
+    tool::write_proton_record(&s.data, APP, &s.proton9, tool::ProtonHow::Steam).unwrap();
     // The recorded Proton's runtime is gone: the next Proton that can run is used, and the log names both.
     fs::remove_dir_all(&s.sniper).unwrap();
     let (code, t) = s.play();
@@ -449,7 +439,7 @@ fn a_missing_proton_is_said_and_nothing_starts() {
     }
     let s = Steam::new("noproton");
     // The recorded Proton was uninstalled: the search goes on.
-    tool::write_proton_choice(&s.data, APP, &s.d.join("gone/Proton 12.0")).unwrap();
+    tool::write_proton_record(&s.data, APP, &s.d.join("gone/Proton 12.0"), tool::ProtonHow::Steam).unwrap();
     let (code, t) = s.play();
     assert_eq!(code, 0);
     assert!(names(&t).contains(&"proton11"), "{t:?}");
@@ -499,7 +489,7 @@ fn the_run_verb_never_gets_mods() {
         return;
     }
     let s = Steam::new("run");
-    tool::write_proton_choice(&s.data, APP, &s.proton11).unwrap();
+    tool::write_proton_record(&s.data, APP, &s.proton11, tool::ProtonHow::Steam).unwrap();
     s.arm();
     let coop = vec![s.me3_exe.display().to_string(), "launch".to_string()];
     anticheat::arm_once(&s.data, APP, &coop, "co-op").unwrap();
@@ -621,8 +611,8 @@ fn the_proton_steam_last_used_is_kept_from_the_helpers_log() {
     write(&p.join("toolmanifest.vdf"), "x");
     assert_eq!(tool::remember_proton(&data, "1245620"), Some(p.clone()));
     assert_eq!(fs::read_to_string(tool::proton_file(&data, "1245620")).unwrap(), format!("{}\nsteam\n", p.display()));
-    assert!(tool::write_proton_choice(&data, "12a", &p).is_err());
-    assert!(tool::write_proton_choice(&data, "1", Path::new("relative/Proton")).is_err());
+    assert!(tool::write_proton_record(&data, "12a", &p, tool::ProtonHow::Steam).is_err());
+    assert!(tool::write_proton_record(&data, "1", Path::new("relative/Proton"), tool::ProtonHow::Steam).is_err());
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -720,7 +710,7 @@ fn the_state_for_the_app_and_no_restart_in_game_mode() {
     let p = d.join("Proton 11.0");
     write(&p.join("proton"), "x");
     write(&p.join("toolmanifest.vdf"), "x");
-    tool::write_proton_choice(&data, APP, &p).unwrap();
+    tool::write_proton_record(&data, APP, &p, tool::ProtonHow::Steam).unwrap();
     write(&anticheat::helper_log(&data), &format!("2026-11-10 10:00:00 Turbine (mods): Steam started app {APP} (waitforexitandrun) in /g: /g/x.exe\n2026-11-10 10:00:00 Turbine (mods): Proton for this game: {} [why: the Proton Steam last used for this game, kept by Turbine]\n", p.display()));
     let v = ask(Some(made + std::time::Duration::from_secs(5)));
     assert_eq!(v.str_at("protonName"), Some("Proton 11.0"));
@@ -772,9 +762,9 @@ fn a_beta_is_never_picked_over_a_finished_proton() {
     assert_eq!(list.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["Proton 11.0", "Proton 12.0 (Beta)", "Proton 9.0 (Beta)", "Proton - Experimental"]);
     assert_eq!(list.iter().map(|p| p.kind.word()).collect::<Vec<_>>(), ["stable", "beta", "beta", "experimental"]);
     assert!(list.iter().all(|p| p.usable));
-    assert_eq!(tool::best_proton(&s.root).unwrap().name, "Proton 11.0");
+    assert_eq!(tool::installed_protons(&s.root).into_iter().find(|p| p.usable).unwrap().name, "Proton 11.0");
     // The Beta is used when Steam itself last used it for this game.
-    tool::write_proton_choice(&s.data, APP, &beta).unwrap();
+    tool::write_proton_record(&s.data, APP, &beta, tool::ProtonHow::Steam).unwrap();
     let (_, t) = s.play();
     assert_eq!(names(&t), ["wrapper", "reaper", "slr4", "proton12beta", "game"], "{t:?}");
     // No record and no finished Proton left: the newest Beta, and the log says it is one.
@@ -787,7 +777,7 @@ fn a_beta_is_never_picked_over_a_finished_proton() {
     fs::remove_dir_all(&s.slr4).unwrap();
     let list = tool::installed_protons(&s.root);
     assert_eq!(list.iter().find(|p| p.name == "Proton 12.0 (Beta)").map(|p| p.usable), Some(false));
-    assert_eq!(tool::best_proton(&s.root).unwrap().name, "Proton 9.0 (Beta)");
+    assert_eq!(tool::installed_protons(&s.root).into_iter().find(|p| p.usable).unwrap().name, "Proton 9.0 (Beta)");
     s.done();
 }
 
@@ -803,7 +793,6 @@ fn the_proton_record_follows_launches_and_the_players_pick() {
     // N3: such a record froze the game on the tool's first pick).
     assert_eq!(tool::proton_record(&s.data, APP), None);
     s.play();
-    assert_eq!(tool::last_proton_seen_in(&s.log(), APP), Some((s.proton11.clone(), tool::ProtonHow::Tool)));
     assert_eq!(tool::remember_proton(&s.data, APP), None);
     assert_eq!(tool::proton_record(&s.data, APP), None);
     // A record of the tool's pick left by an earlier build goes.

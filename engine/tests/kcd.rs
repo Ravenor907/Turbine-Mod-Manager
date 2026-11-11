@@ -81,12 +81,12 @@ fn mod_layouts() {
 fn mod_order_text() {
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
     // No file yet: the player's own folders first (alphabetically, as the game loaded them), then Turbine's order.
-    assert_eq!(kcd::render_mod_order(None, &s(&["zeta", "Alpha", "B"]), &s(&["B"]), &s(&["B", "C"])), "Alpha\nzeta\nB\n");
+    assert_eq!(kcd::render_mod_order_adding(None, &s(&["zeta", "Alpha", "B"]), &s(&["B"]), &s(&["B", "C"]), &[]), "Alpha\nzeta\nB\n");
     // A file: its other lines stay as they were, Turbine's come after; turned-off ones leave.
-    assert_eq!(kcd::render_mod_order(Some("C\r\nOwn\r\nB\r\n"), &[], &s(&["B"]), &s(&["B", "C"])), "Own\r\nB\r\n");
-    assert_eq!(kcd::render_mod_order(Some("Own\n"), &[], &[], &s(&["B"])), "Own\n");
-    assert_eq!(kcd::render_mod_order(None, &s(&["B"]), &[], &s(&["B"])), "");
-    assert_eq!(kcd::mod_folders(&s(&["mods/A/Data/a.pak", "Mods/A/mod.manifest", "Mods/B/Data/b.pak", "user.cfg"])), s(&["A", "B"]));
+    assert_eq!(kcd::render_mod_order_adding(Some("C\r\nOwn\r\nB\r\n"), &[], &s(&["B"]), &s(&["B", "C"]), &[]), "Own\r\nB\r\n");
+    assert_eq!(kcd::render_mod_order_adding(Some("Own\n"), &[], &[], &s(&["B"]), &[]), "Own\n");
+    assert_eq!(kcd::render_mod_order_adding(None, &s(&["B"]), &[], &s(&["B"]), &[]), "");
+    assert_eq!(rules::mod_folders(&s(&["mods/A/Data/a.pak", "Mods/A/mod.manifest", "Mods/B/Data/b.pak", "user.cfg"])), s(&["A", "B"]));
 }
 
 #[test]

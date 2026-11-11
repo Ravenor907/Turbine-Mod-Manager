@@ -208,13 +208,6 @@ impl RateLimit {
             _ => None,
         }
     }
-
-    /// Few requests left: update checks should wait so browsing still works.
-    pub fn low(&self) -> bool {
-        let h = self.hourly_remaining.unwrap_or(u64::MAX);
-        let d = self.daily_remaining.unwrap_or(u64::MAX);
-        h < 10 && d < 50
-    }
 }
 
 // ---- Parsing (pure) ----
@@ -327,11 +320,6 @@ impl FileInfo {
     /// Removed by the author: listed by Nexus but not downloadable.
     pub fn is_removed(&self) -> bool {
         matches!(self.category.as_str(), "DELETED" | "REMOVED")
-    }
-
-    /// The plain heading for the file's category, as the details page shows it.
-    pub fn category_label(&self) -> &'static str {
-        category_label(&self.category)
     }
 }
 
@@ -544,18 +532,6 @@ pub fn parse_updated(text: &str) -> Result<Vec<UpdatedEntry>, String> {
         .collect())
 }
 
-/// The shortest period Nexus offers ("1d", "1w", "1m") that covers the time since the last check. None means it
-/// has been longer than a month: check each mod's own details instead.
-pub fn update_period(seconds_since_last_check: u64) -> Option<&'static str> {
-    const DAY: u64 = 86_400;
-    match seconds_since_last_check {
-        s if s < DAY => Some("1d"),
-        s if s < 7 * DAY => Some("1w"),
-        s if s < 28 * DAY => Some("1m"),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DownloadLink {
     pub name: String,
@@ -632,21 +608,6 @@ mods(filter: $filter, sort: $sort, offset: $offset, count: $count, facets: {cate
 nodes { modId name summary version author endorsements downloads pictureUrl thumbnailUrl adultContent updatedAt \
 category } } }";
 
-/// The JSON body for a search: mods for one game, optionally by name (wildcard match), adult mods left out unless
-/// asked for, sorted (most endorsed first by default).
-pub fn search_body(domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> String {
-    search_body_at(domain, text, sort, offset, count, adult, net_now())
-}
-
-fn net_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-/// "2026-11-07T00:00:00Z" for seconds since 1970 (UTC, whole days are enough here).
-pub fn iso_day(secs: u64) -> String {
-    format!("{}T00:00:00Z", date_day(secs))
-}
-
 /// Trending's updatedAt filter value: seconds since 1970, at the start of that day (UTC). Nexus puts the value into a
 /// search query as it is: a full time's ':' is read as the start of another term (the whole search refused with a 400
 /// parse_exception), and a plain day ("2026-10-08") is read but matches nothing. Seconds match (the build's live
@@ -672,12 +633,9 @@ pub fn date_day(secs: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-/// `search_body` with the time given (Trending's 30 days are counted back from `now`).
-pub fn search_body_at(domain: &str, text: &str, sort: SearchSort, offset: u32, count: u32, adult: bool, now: u64) -> String {
-    search_body_in(domain, text, "", sort, offset, count, adult, now)
-}
-
-/// `search_body_at` that keeps one category ("" for all).
+/// The JSON body for a search: mods for one game, optionally by name (wildcard match) and in one category ("" for
+/// all), adult mods left out unless asked for, sorted (most endorsed first by default). Trending's 30 days are
+/// counted back from `now`.
 #[allow(clippy::too_many_arguments)]
 pub fn search_body_in(domain: &str, text: &str, category: &str, sort: SearchSort, offset: u32, count: u32, adult: bool, now: u64) -> String {
     let mut filter = format!("\"op\":\"AND\",\"gameDomainName\":[{{\"value\":{},\"op\":\"EQUALS\"}}]", quote(domain));
@@ -1211,33 +1169,6 @@ pub fn requirements_json(check: &RequirementCheck, premium: bool) -> String {
     )
 }
 
-fn file_group_json(g: &FileGroup) -> String {
-    let files: Vec<String> = g
-        .files
-        .iter()
-        .map(|f| {
-            format!(
-                "{{\"fileId\":{},\"name\":{},\"version\":{},\"category\":{},\"fileName\":{},\"size\":{},\"uploaded\":{},\"primary\":{},\"description\":{}}}",
-                f.file_id,
-                quote(&f.name),
-                quote(&f.version),
-                quote(&f.category),
-                quote(&f.file_name),
-                f.size_bytes,
-                f.uploaded_timestamp,
-                f.is_primary,
-                quote(&f.description)
-            )
-        })
-        .collect();
-    format!("{{\"category\":{},\"label\":{},\"files\":[{}]}}", quote(&g.category), quote(g.label), files.join(","))
-}
-
-/// File groups as JSON for the details page: [{"category","label","files":[{"fileId","name","version",...}]}].
-pub fn file_groups_json(groups: &[FileGroup]) -> String {
-    format!("[{}]", groups.iter().map(file_group_json).collect::<Vec<_>>().join(","))
-}
-
 pub fn source_info(domain: &str, mod_id: u64, file: &FileInfo, sha256: Option<String>) -> SourceInfo {
     SourceInfo {
         kind: "nexus".into(),
@@ -1296,7 +1227,7 @@ impl Nexus {
         if let Some(why) = blocked {
             return Err(NetError::Failed(why));
         }
-        let now = net_now();
+        let now = nxm::now();
         if self.backoff_until.get() > now {
             return Err(NetError::RateLimited);
         }
@@ -1427,12 +1358,6 @@ impl Nexus {
         parse_file(&text).map_err(|e| NetError::Failed(format!("{e}.")))
     }
 
-    /// Every file of a mod grouped for the details page's "Other versions" (main, updates, optional, other, old
-    /// versions, archived). One request.
-    pub fn file_groups(&self, domain: &str, mod_id: u64) -> Result<Vec<FileGroup>, NetError> {
-        Ok(self.files(domain, mod_id)?.groups())
-    }
-
     /// Downloads what an nxm link points at. Works for free accounts too: the link's key lets Nexus hand out this
     /// one download. The app adds the result to the game `link.store_ids()` names. Checks the expiry time first, so
     /// an old link gets `nxm::EXPIRED_MESSAGE` without a request.
@@ -1520,7 +1445,7 @@ impl Nexus {
     #[allow(clippy::too_many_arguments)]
     pub fn search_in(&self, domain: &str, text: &str, category: &str, sort: SearchSort, offset: u32, count: u32, adult: bool) -> Result<SearchPage, NetError> {
         Self::check_domain(domain)?;
-        let now = net_now();
+        let now = nxm::now();
         let answer = self.graphql(&search_body_in(domain, text, category, sort, offset, count, adult, now))?;
         match parse_search(&answer) {
             Ok(p) => Ok(p),

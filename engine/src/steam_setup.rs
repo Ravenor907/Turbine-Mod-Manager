@@ -435,11 +435,8 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
 
 /// After Steam started again: the changes that held are done and leave the list; the ones that didn't are answered
 /// so the app makes them again the next time Steam is closed (and tells the player). Answers (held, lost).
-pub fn check_after_restart(data: &Path) -> (Vec<SteamChange>, Vec<SteamChange>) {
-    check_after_restart_since(data, None)
-}
-
-/// 0.6 (break M3): the same, with when the running Steam started. A change only counts as held when its file was
+///
+/// 0.6 (break M3): `steam_started` is when the running Steam started (None: not known). A change only counts as held when its file was
 /// written before Steam started (Steam then read it); written after, Steam is running on the old copy and writes
 /// it back when it closes, so it is lost even though the file has it now.
 ///

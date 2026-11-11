@@ -2,24 +2,16 @@
 //! couldn't be fetched from the build machine); github_smapi_latest.json follows GitHub's release format with the
 //! asset names SMAPI's build scripts produce.
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use support::{data_text as data, scratch};
 use turbine_engine::loaders::{self, Hook, SkseEdition, SkseSource};
 use turbine_engine::net::{Client, NetError};
 use turbine_engine::nexus::{Account, Nexus};
 use turbine_engine::thunderstore;
-
-fn data(name: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-loaders-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 #[test]
 fn reads_the_skse_page() {

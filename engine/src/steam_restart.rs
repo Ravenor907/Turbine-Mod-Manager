@@ -135,7 +135,7 @@ impl Job {
 }
 
 /// Makes the job's changes (Steam is closed: the script only runs this after Steam has gone). Each change is noted
-/// for `steam_setup::check_after_restart`. Answers one line per change, or the first error.
+/// for `steam_setup::check_after_restart_since`. Answers one line per change, or the first error.
 pub fn apply_job(data: &Path, job: &Job) -> Result<Vec<String>, String> {
     let mut lines = Vec::new();
     for c in &job.changes {

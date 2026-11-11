@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Builds Turbine's Steam library art (SVG sources and PNGs) into packaging/steam-art/ (run from anywhere).
 
+Usage: python3 tools/make-steam-art.py
+
 Sets: turbine/ (Turbine Mod Manager) and coop/ (the optional ELDEN RING Co-op tile, Turbine-styled, plain text).
 Each set: capsule (600x900, <appid>p.png), wide (920x430, <appid>.png), hero (1920x620, <appid>_hero.png),
 logo (1280x400 transparent, <appid>_logo.png), icon (256x256, <appid>_icon.png). Turbine's own icon is the app icon

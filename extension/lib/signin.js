@@ -37,7 +37,6 @@
     keyNoKey: "There's no Personal API Key on this page yet. Scroll to the bottom of the page and request one, then press Try again.",
     backSteam: "Turbine comes back by itself. If it doesn't, press the Steam button, then pick Turbine at the top of the menu (it's still running).",
     backDesktop: "Turbine comes to the front by itself. If it doesn't, switch to it in the taskbar.",
-    keyOk: "You can close this tab.",
     keyUnclear: "Turbine couldn't tell which key on this page is your Personal API Key. Copy it yourself, then in Turbine open Settings, Accounts and press Paste.",
   };
 
@@ -48,7 +47,7 @@
     const now = o.now || (() => Date.now());
     const pageUrl = o.pageUrl;
 
-    // {id, at, steam, tabId, phase, text, keyAt}. phase: waiting, sending, sent, ok, failed, key-reading,
+    // {id, at, steam, tabId, phase, text}. phase: waiting, sent, ok, failed, key-reading,
     // key-checking, key-ok, key-failed, key-missing.
     let s = null;
     let sentSig = "";
@@ -61,7 +60,7 @@
       return !!s && now() - s.at < KEEP_MS;
     }
     function waiting() {
-      return live() && (s.phase === "waiting" || s.phase === "sending" || s.phase === "sent" || s.phase === "failed");
+      return live() && (s.phase === "waiting" || s.phase === "sent" || s.phase === "failed");
     }
 
     function save() {
@@ -229,7 +228,7 @@
           return;
         }
         const tabId = s ? s.tabId : null;
-        s = { id: msg.id, at: now(), steam: msg.steam === true, tabId, phase: "waiting", text: TEXT.waiting, keyAt: 0 };
+        s = { id: msg.id, at: now(), steam: msg.steam === true, tabId, phase: "waiting", text: TEXT.waiting };
         sentSig = "";
         lastStep = "";
         changed();
@@ -273,7 +272,6 @@
           // Only after Turbine took the sign-in, and only within the request's 15 minutes.
           if (!live() || !["ok", "key-failed", "key-missing"].includes(s.phase)) return;
           if (senderTab !== null) s.tabId = senderTab;
-          s.keyAt = now();
           set("key-reading", TEXT.keyReading);
           step("keypage");
           goTo(P.KEY_PAGE_URL);
@@ -351,7 +349,6 @@
         tabId: typeof saved.tabId === "number" ? saved.tabId : null,
         phase: typeof saved.phase === "string" ? saved.phase : "waiting",
         text: typeof saved.text === "string" ? saved.text : TEXT.waiting,
-        keyAt: 0,
       };
       // A key read that was under way when the worker stopped starts over on the player's press.
       if (s.phase === "key-reading" || s.phase === "key-checking") s.phase = "key-failed";

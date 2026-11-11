@@ -100,17 +100,9 @@ pub fn downloads() -> PathBuf {
 
 /// Where the report screen's screenshot waits until Send (Turbine's cache folder).
 pub fn shot_temp() -> PathBuf {
-    let cache = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| turbine_engine::home_dir().join(".cache"));
-    let dir = cache.join("turbine-mod-manager");
+    let dir = crate::cache_dir();
     let _ = fs::create_dir_all(&dir);
     dir.join("report-screenshot.png")
-}
-
-fn runtime_words(g: &Game) -> String {
-    format!("{:?}", g.runtime)
 }
 
 /// A game in a few lines.
@@ -118,7 +110,7 @@ pub fn game_lines(g: &Game) -> Vec<String> {
     vec![
         format!("Name: {} ({})", g.name, g.id()),
         format!("Store: {} through {}", g.store.label(), g.store.launcher()),
-        format!("Runs as: {}", runtime_words(g)),
+        format!("Runs as: {:?}", g.runtime),
         format!("Stored on: {} ({})", g.drive_label(), g.library.display()),
         format!("Folder: {}", g.install_dir.display()),
         format!("Build: {}", g.build.as_deref().unwrap_or("not reported")),

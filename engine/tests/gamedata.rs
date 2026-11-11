@@ -2,8 +2,11 @@
 //! 0.55's tables (a snapshot of those tables is kept below), and players' own files can add games but never change
 //! Turbine's.
 
+mod support;
+
 use std::fs;
 use std::path::PathBuf;
+use support::scratch as temp;
 use turbine_engine::gamedata::{self, parse_game};
 use turbine_engine::games::{Game, Runtime, Store};
 use turbine_engine::rules::{self, Family, GameRules, Kind, Support};
@@ -333,13 +336,6 @@ fn golden_rules_unchanged() {
         assert_eq!(turbine_engine::thunderstore::community_for_steam_app(id), Some(c));
     }
     assert_eq!(turbine_engine::thunderstore::community_for_steam_app("413150"), None);
-}
-
-fn temp(tag: &str) -> PathBuf {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let p = std::env::temp_dir().join(format!("turbine-gamedata-{tag}-{n}"));
-    fs::create_dir_all(&p).unwrap();
-    p
 }
 
 #[test]

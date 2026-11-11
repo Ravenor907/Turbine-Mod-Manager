@@ -215,31 +215,6 @@ pub fn check() -> BrowserCheck {
     check_with(&host_output)
 }
 
-/// The program and arguments that open `url` in the browser the check found, run on the host (Game Mode: gamescope
-/// shows only windows of the focused Steam app, so the browser is started with Turbine's own SteamGameId and
-/// SteamAppId, and its window counts as Turbine's). Fixed arguments, never a shell. None when the browser isn't one
-/// Turbine knows how to start, or the address isn't https.
-pub fn game_mode_command(name: &str, how: &str, url: &str, steam_game_id: Option<&str>) -> Option<Vec<String>> {
-    if !url.starts_with("https://") || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return None;
-    }
-    let mut out = vec!["flatpak-spawn".to_string(), "--host".to_string()];
-    if let Some(id) = steam_game_id.filter(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit())) {
-        out.push(format!("--env=SteamGameId={id}"));
-        out.push(format!("--env=SteamAppId={id}"));
-    }
-    let flatpak = FLATPAK_BROWSERS.iter().find(|(_, n)| n.eq_ignore_ascii_case(name)).map(|(id, _)| *id);
-    let host = HOST_BROWSERS.iter().find(|(_, n)| n.eq_ignore_ascii_case(name)).map(|(p, _)| *p);
-    match (how, flatpak, host) {
-        ("system", _, Some(p)) | ("default", None, Some(p)) => out.push(p.to_string()),
-        (_, Some(id), _) => out.extend(["flatpak".to_string(), "run".to_string(), id.to_string()]),
-        (_, None, Some(p)) => out.push(p.to_string()),
-        _ => return None,
-    }
-    out.push(url.to_string());
-    Some(out)
-}
-
 /// Steam's own browser: the steam://openurl/<url> link. The app opens it the way Play opens steam://rungameid
 /// (Qt.openUrlExternally, through the desktop portal), which Game Mode shows.
 pub fn steam_browser_link(url: &str) -> Option<String> {

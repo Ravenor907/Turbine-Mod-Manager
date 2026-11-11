@@ -14,7 +14,7 @@ use libloot::{EvalMode, GameType, MergeMode};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use turbine_engine::net::{Client, NetError, Request};
 use turbine_engine::plugins::{Files, LoadOrder};
 use turbine_engine::Game;
@@ -53,10 +53,6 @@ pub struct Sorted {
     pub unread: Vec<String>,
     pub messages: HashMap<String, Vec<Msg>>,
     pub general: Vec<Msg>,
-}
-
-fn now_secs() -> u64 {
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Where the masterlist is kept, in Turbine's cache folder.
@@ -142,7 +138,7 @@ fn etag_file(list: &Path) -> PathBuf {
 pub fn lists(client: &Client, dir: &Path, force: bool) -> (Option<Lists>, String) {
     let have = on_device(dir);
     if let Some(l) = &have {
-        let age = now_secs().saturating_sub(l.fetched);
+        let age = crate::now_secs().saturating_sub(l.fetched);
         if !force && age < REFRESH_AFTER.as_secs() {
             return (have, String::new());
         }
@@ -159,7 +155,7 @@ pub fn lists(client: &Client, dir: &Path, force: bool) -> (Option<Lists>, String
             fs::rename(from, dir.join(name)).map_err(|e| format!("couldn't keep it ({e})"))?;
             let _ = fs::write(etag_file(&dir.join(name)), tag.unwrap_or_default());
         }
-        let at = now_secs();
+        let at = crate::now_secs();
         let _ = fs::write(stamp_file(dir), at.to_string());
         let _ = fs::remove_dir_all(&new);
         on_device(dir).ok_or_else(|| "it went missing after the download".to_string())
@@ -358,9 +354,8 @@ pub fn sort(game: &Game, lo: &LoadOrder, lists: &Lists) -> Result<Sorted, String
 }
 
 /// Puts a load order in the order LOOT gave (plugins it didn't read keep their order after the others). The game's
-/// own plugins stay where they always load. Returns true when something moved.
-pub fn apply(lo: &mut LoadOrder, sorted: &Sorted) -> bool {
-    let before: Vec<String> = lo.plugins().iter().map(|p| p.name.clone()).collect();
+/// own plugins stay where they always load.
+pub fn apply(lo: &mut LoadOrder, sorted: &Sorted) {
     let fixed = lo.plugins().iter().filter(|p| p.fixed).count();
     let mut at = fixed;
     for name in sorted.order.iter().chain(sorted.unread.iter()) {
@@ -372,7 +367,6 @@ pub fn apply(lo: &mut LoadOrder, sorted: &Sorted) -> bool {
             at = i + 1;
         }
     }
-    lo.plugins().iter().map(|p| &p.name).ne(before.iter())
 }
 
 /// Messages as JSON for the interface: {"plugin name lowercased": [{"level","text"}]}.

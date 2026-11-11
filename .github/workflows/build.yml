@@ -31,9 +31,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  # 0.6: a release of a commit that already passed every check publishes that run's checked bundle (same commit, its
-  # artifact's digest checked) instead of building and checking it all again. With no green run for the commit, the
-  # full build runs as before.
+  # 0.6: a release publishes the checked bundle of a green run of the same commit (its artifact's digest checked),
+  # never a new build; with no such run it stops here. Other runs find nothing to reuse and build in full.
   reuse:
     name: A checked build of this commit?
     runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
@@ -207,38 +206,36 @@ jobs:
           cd engine
           cargo +1.97.0 test --release
           cargo +1.97.0 clippy --all-targets -- -D warnings
-      - name: Test the browser helper's link (app/src/bridge.rs needs only the engine)
+      - name: Build the engine as a plain library (the app files tested below need only the engine)
         shell: bash
         run: |
-          mkdir -p /tmp/bridge
+          mkdir -p /tmp/engine
           # The engine's built-in game data (build.rs does this under cargo).
-          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/bridge/gen
-          CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/bridge /tmp/bridge/gen > /dev/null
-          OUT_DIR=/tmp/bridge rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/bridge/libturbine_engine.rlib
-          rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/tests
-          /tmp/bridge/tests
+          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/engine/gen
+          CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/engine /tmp/engine/gen > /dev/null
+          OUT_DIR=/tmp/engine rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/engine/libturbine_engine.rlib
+      - name: Test the browser helper's link (app/src/bridge.rs)
+        shell: bash
+        run: |
+          rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/bridge-tests
+          /tmp/engine/bridge-tests
           # Turbine's end of Sign in with my browser, from the same bridge.rs, for the helper's whole-handshake check.
-          rustc +1.97.0 --edition 2021 tools/signin-standin.rs --extern turbine_engine=/tmp/bridge/libturbine_engine.rlib -o /tmp/bridge/signin-standin
+          rustc +1.97.0 --edition 2021 tools/signin-standin.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/signin-standin
       - name: Test the controller pointer (app/src/pointer.rs needs only the standard library)
         shell: bash
         run: |
           rustc +1.97.0 --edition 2021 --test app/src/pointer.rs -o /tmp/pointer-tests
           /tmp/pointer-tests
-      - name: Test Turbine's browser decisions (app/src/browse.rs needs only the engine)
+      - name: Test Turbine's browser decisions (app/src/browse.rs)
         shell: bash
         run: |
-          mkdir -p /tmp/browse
-          # The engine's built-in game data (build.rs does this under cargo).
-          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/browse/gen
-          CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/browse /tmp/browse/gen > /dev/null
-          OUT_DIR=/tmp/browse rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/browse/libturbine_engine.rlib
-          rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/tests
-          /tmp/browse/tests
-      - name: Test Nexus single sign-on against a stand-in server (app/src/nexus_sso.rs needs only the engine)
+          rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/browse-tests
+          /tmp/engine/browse-tests
+      - name: Test Nexus single sign-on against a stand-in server (app/src/nexus_sso.rs)
         shell: bash
         run: |
-          rustc +1.97.0 --edition 2021 --test app/src/nexus_sso.rs --extern turbine_engine=/tmp/browse/libturbine_engine.rlib -o /tmp/browse/sso-tests
-          /tmp/browse/sso-tests
+          rustc +1.97.0 --edition 2021 --test app/src/nexus_sso.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/sso-tests
+          /tmp/engine/sso-tests
       - name: Test the browser helper (extension/, Node 22)
         shell: bash
         run: |
@@ -246,7 +243,7 @@ jobs:
           cd extension && node test/test.js
           # Sign in with my browser end to end: the helper's service worker against Turbine's real bridge server,
           # with a mocked Nexus sign-in and API Keys page.
-          TURBINE_STANDIN=/tmp/bridge/signin-standin node test/handshake.js
+          TURBINE_STANDIN=/tmp/engine/signin-standin node test/handshake.js
 
   nexus:
     name: Nexus without a key (live)
@@ -482,8 +479,8 @@ jobs:
         with:
           name: TurbineModManager.flatpak
           path: .
-      # The KDE runtime the bundle runs on, installed once and kept (not Turbine itself, installed fresh each time).
-      # The KDE runtime: one cache for every shard, saved only when the manifest changes.
+      # The KDE runtime the bundle runs on (not Turbine itself, installed fresh each time): one cache for every shard,
+      # saved only when the manifest changes.
       - id: rtcache
         if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
@@ -519,7 +516,7 @@ jobs:
   release:
     name: Release (owner approved)
     needs: [reuse, rules, engine, flatpak, checks, decky]
-    # The bundle this run built and checked, or (reuse) the one a green run of the same commit built and checked.
+    # Only the bundle and plugin a green run of the same commit built and checked (found by reuse), never a new build.
     if: >-
       always() && github.event_name == 'workflow_dispatch' && inputs.release &&
       needs.reuse.result == 'success' && needs.reuse.outputs.run != '' && needs.rules.result == 'success' && needs.engine.result == 'success'

@@ -1,6 +1,35 @@
 //! Facts about the system Turbine runs on.
 
 use std::fs;
+use std::process::{Command, Stdio};
+
+/// Turbine runs as a Flatpak.
+pub fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
+/// A program run on the host: through flatpak-spawn --host inside the Flatpak (which can't see or change the host by
+/// itself), else directly.
+pub fn host(program: &str) -> Command {
+    if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.arg("--host").arg(program);
+        c
+    } else {
+        Command::new(program)
+    }
+}
+
+/// Runs a yes-or-no command quietly: exit code 0 is yes, 1 (or any code in `no`) is no. None when it couldn't run or
+/// said something else.
+fn answer(cmd: &mut Command, no: &[i32]) -> Option<bool> {
+    let status = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
+    match status.code()? {
+        0 => Some(true),
+        c if c == 1 || no.contains(&c) => Some(false),
+        _ => None,
+    }
+}
 
 /// SteamOS, read from the host's os-release (inside the Flatpak /etc/os-release is the runtime's own).
 pub fn is_steamos() -> bool {
@@ -86,39 +115,13 @@ pub fn free_bytes(_path: &std::path::Path) -> Option<u64> {
 /// Is a process running whose command line holds this game folder (the game, or Proton starting it)? Asked on the
 /// host through flatpak-spawn, since the Flatpak can't see the game's processes by itself. None when it can't tell.
 pub fn game_running(dir: &std::path::Path) -> Option<bool> {
-    use std::process::{Command, Stdio};
     let pattern = turbine_engine::proton::running_pattern(dir);
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("pgrep");
-        c
-    } else {
-        Command::new("pgrep")
-    };
-    let status = cmd.arg("-f").arg("--").arg(&pattern).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(1) => Some(false),
-        _ => None,
-    }
+    answer(host("pgrep").arg("-f").arg("--").arg(&pattern), &[])
 }
 
 /// Is Steam running on the host? None when it can't be asked.
 pub fn steam_running() -> Option<bool> {
-    use std::process::{Command, Stdio};
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("pgrep");
-        c
-    } else {
-        Command::new("pgrep")
-    };
-    let status = cmd.arg("-x").arg("steam").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(1) => Some(false),
-        _ => None,
-    }
+    answer(host("pgrep").arg("-x").arg("steam"), &[])
 }
 
 /// The desktop file Turbine is installed with (it says it opens nxm:// links).
@@ -127,15 +130,7 @@ const NXM_TYPE: &str = "x-scheme-handler/nxm";
 
 /// xdg-mime on the host (the Flatpak can't change the host's defaults by itself), with fixed arguments.
 fn xdg_mime(args: &[&str]) -> Result<String, String> {
-    use std::process::{Command, Stdio};
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("xdg-mime");
-        c
-    } else {
-        Command::new("xdg-mime")
-    };
-    let out = cmd.args(args).stdin(Stdio::null()).output().map_err(|e| format!("xdg-mime couldn't start: {e}"))?;
+    let out = host("xdg-mime").args(args).stdin(Stdio::null()).output().map_err(|e| format!("xdg-mime couldn't start: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(if err.is_empty() { "xdg-mime stopped with an error".into() } else { err });
@@ -167,6 +162,42 @@ pub fn set_nxm_handler() -> Result<(), String> {
     r
 }
 
+/// 0.6: where the Steam menu plugin (decky/) is downloaded from: always the newest release's.
+pub const DECKY_PLUGIN_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip";
+
+/// Is there a file or folder at this path on the host (`test -e`, fixed arguments)? None when it can't be asked.
+fn host_exists(path: &std::path::Path) -> Option<bool> {
+    answer(host("test").arg("-e").arg(path), &[])
+}
+
+/// Is Turbine's plugin among Decky's plugins (whatever its folder is called)? Its package.json names it
+/// "turbine-decky". Asked with grep on the host, fixed arguments, only package.json files read.
+fn host_has_plugin(plugins: &std::path::Path) -> Option<bool> {
+    // grep says 2 when the folder isn't there.
+    answer(host("grep").args(["-r", "-l", "-s", "-F", "--include=package.json", "\"name\": \"turbine-decky\"", "--"]).arg(plugins), &[2])
+}
+
+/// 0.62: is Turbine's Steam menu plugin installed in Decky (for the Co-op tile, which the plugin adds with Steam's
+/// own call)? Read only.
+pub fn decky_plugin_installed() -> bool {
+    host_has_plugin(&turbine_engine::home_dir().join("homebrew/plugins")) == Some(true)
+}
+
+/// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
+/// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
+pub fn decky_json() -> String {
+    use turbine_engine::json::quote;
+    let home = turbine_engine::home_dir();
+    let decky = host_exists(&home.join("homebrew/services/PluginLoader"));
+    let plugin = host_has_plugin(&home.join("homebrew/plugins")) == Some(true);
+    crate::log::line("app", &format!("Steam menu plugin: Decky {}, Turbine's plugin {}", match decky { Some(true) => "found", Some(false) => "not found", None => "unknown" }, if plugin { "installed" } else { "not installed" }));
+    format!(
+        "{{\"checked\":true,\"decky\":{},\"plugin\":{plugin},\"url\":{}}}",
+        decky.map(|d| d.to_string()).unwrap_or_else(|| "null".into()),
+        quote(DECKY_PLUGIN_URL)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -190,72 +221,4 @@ mod tests {
         assert!(super::free_bytes(std::path::Path::new("/")).is_some());
         assert!(super::free_bytes(std::path::Path::new("/no/such/folder")).is_none());
     }
-}
-
-/// 0.6: where the Steam menu plugin (decky/) is downloaded from: always the newest release's.
-pub const DECKY_PLUGIN_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip";
-
-/// Is there a file or folder at this path on the host (`test -e`, fixed arguments)? None when it can't be asked.
-fn host_exists(path: &std::path::Path) -> Option<bool> {
-    use std::process::{Command, Stdio};
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("test");
-        c
-    } else {
-        Command::new("test")
-    };
-    let status = cmd.arg("-e").arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(1) => Some(false),
-        _ => None,
-    }
-}
-
-/// Is Turbine's plugin among Decky's plugins (whatever its folder is called)? Its package.json names it
-/// "turbine-decky". Asked with grep on the host, fixed arguments, only package.json files read.
-fn host_has_plugin(plugins: &std::path::Path) -> Option<bool> {
-    use std::process::{Command, Stdio};
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("grep");
-        c
-    } else {
-        Command::new("grep")
-    };
-    let status = cmd
-        .args(["-r", "-l", "-s", "-F", "--include=package.json", "\"name\": \"turbine-decky\"", "--"])
-        .arg(plugins)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .ok()?;
-    match status.code() {
-        Some(0) => Some(true),
-        Some(1) | Some(2) => Some(false),
-        _ => None,
-    }
-}
-
-/// 0.62: is Turbine's Steam menu plugin installed in Decky (for the Co-op tile, which the plugin adds with Steam's
-/// own call)? Read only.
-pub fn decky_plugin_installed() -> bool {
-    host_has_plugin(&turbine_engine::home_dir().join("homebrew/plugins")) == Some(true)
-}
-
-/// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
-/// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
-pub fn decky_json() -> String {
-    use turbine_engine::json::quote;
-    let home = turbine_engine::home_dir();
-    let decky = host_exists(&home.join("homebrew/services/PluginLoader"));
-    let plugin = host_has_plugin(&home.join("homebrew/plugins")) == Some(true);
-    crate::log::line("app", &format!("Steam menu plugin: Decky {}, Turbine's plugin {}", match decky { Some(true) => "found", Some(false) => "not found", None => "unknown" }, if plugin { "installed" } else { "not installed" }));
-    format!(
-        "{{\"checked\":true,\"decky\":{},\"plugin\":{plugin},\"url\":{}}}",
-        decky.map(|d| d.to_string()).unwrap_or_else(|| "null".into()),
-        quote(DECKY_PLUGIN_URL)
-    )
 }

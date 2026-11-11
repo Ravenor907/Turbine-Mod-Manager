@@ -11,8 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Set by Cancel (from the interface thread); the download under way stops at its next progress report.
-pub static CANCEL: AtomicBool = AtomicBool::new(false);
 use turbine_engine::json::quote;
 use turbine_engine::net::{self, Client, Download, NetError, SourceInfo};
 use turbine_engine::nexus::{self, Account, Nexus};
@@ -41,12 +39,7 @@ pub fn nexus_key() -> Option<String> {
 
 /// Where downloads and API answers go while they are read (the same folder the download lane uses).
 pub fn temp_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| turbine_engine::home_dir().join(".cache"))
-        .join("turbine-mod-manager")
-        .join("downloads")
+    crate::cache_dir().join("downloads")
 }
 
 /// A downloaded file ready for the mod worker.
@@ -136,22 +129,9 @@ pub const NEXUS_MOD: &str = "nexus-mod:";
 pub const FREE_WORDS: &str =
     "Opens Nexus right here in Turbine. Sign in if it asks (free), then press Slow download. Turbine adds it and closes the page.";
 
-/// "2026-11-06" from seconds since 1970 (UTC).
-pub fn date_of(secs: u64) -> String {
-    if secs == 0 {
-        return String::new();
-    }
-    // Days to a civil date (Howard Hinnant's algorithm).
-    let z = (secs / 86_400) as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{y:04}-{m:02}-{d:02}")
+/// "2026-11-06" from seconds since 1970 (UTC), "" for 0.
+fn date_of(secs: u64) -> String {
+    if secs == 0 { String::new() } else { nexus::date_day(secs) }
 }
 
 /// A short date from Thunderstore's "2024-05-01T12:00:00Z".
@@ -212,16 +192,6 @@ impl Net {
             release: None,
             sample_nexus_fail: false,
         }
-    }
-
-    /// Recorded samples instead of the internet (the build's checks).
-    pub fn is_sample(&self) -> bool {
-        self.sample.is_some()
-    }
-
-    /// Nexus without a key, for the game search.
-    pub fn nexus_public_client(&self) -> Nexus {
-        self.nexus_public()
     }
 
     /// Recorded samples instead of the internet (the build's screenshot checks).
@@ -420,10 +390,9 @@ impl Net {
         let mut n = 0;
         for pick in &plan.install {
             let label = format!("{} {}", pick.full_name.rsplit_once('-').map(|(_, n)| n.replace('_', " ")).unwrap_or_default(), pick.version);
-            CANCEL.store(false, Ordering::SeqCst);
-                        let mut cb = |got: u64, total: Option<u64>| {
+            let mut cb = |got: u64, total: Option<u64>| {
                 progress(&label, got, total);
-                !CANCEL.load(Ordering::SeqCst)
+                true
             };
             let (d, source) = thunderstore::download(&self.client, pick, Some(&mut cb)).map_err(err)?;
             let path = rename(&d, &label, "zip");
@@ -508,7 +477,8 @@ impl Net {
         Nexus::with_key(self.client.clone(), self.key.as_deref(), &self.version)
     }
 
-    fn nexus_public(&self) -> Nexus {
+    /// Nexus without a key (also the game search's).
+    pub(crate) fn nexus_public(&self) -> Nexus {
         Nexus::public(self.client.clone(), &self.version)
     }
 
@@ -535,8 +505,6 @@ impl Net {
         };
         if self.sample.is_none() {
             nexus::save_key(&self.key_file, &key).map_err(|e| format!("The key works, but couldn't be saved ({e})."))?;
-        }
-        if self.sample.is_none() {
             *shared_key() = Some(key.clone());
         }
         self.key = Some(key);
@@ -799,7 +767,7 @@ impl Net {
             .as_ref()
             .map(|f| format!("Main file: {} {}{}", f.name, f.version, if f.size_bytes > 0 { format!(" · {}", net::human_size(f.size_bytes)) } else { String::new() }))
             .unwrap_or_default();
-        let updated = if info.updated_timestamp > 0 { date_of(info.updated_timestamp) } else { String::new() };
+        let updated = date_of(info.updated_timestamp);
         let detail_json = format!(
             ",\"filesNote\":{},\"filePage\":{},\"fileId\":{},\"mainLine\":{},\"updatedText\":{},\"author\":{},\"endorsements\":{},\"installed\":{},\"picture\":{}",
             quote(&files_note),
@@ -876,10 +844,9 @@ impl Net {
         let account = self.account()?;
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
         let label = name.to_string();
-        CANCEL.store(false, Ordering::SeqCst);
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         if !account.is_premium {
             return Err(nexus::FREE_ACCOUNT_MESSAGE.into());
@@ -910,10 +877,9 @@ impl Net {
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.")?;
         let file = nx.file_info(&link.domain, link.mod_id, link.file_id).map_err(err)?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
-        CANCEL.store(false, Ordering::SeqCst);
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let (d, source) = nx.download_from_nxm(link, Some(&mut cb)).map_err(err)?;
         let path = rename(&d, &label, &ext_of(&file.file_name));
@@ -925,15 +891,11 @@ impl Net {
         let file = nexus::parse_file(&self.sample_text("nexus_file.json").ok_or("The sample file details are missing.")??)?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
         let total = file.size_bytes.max(1);
-        CANCEL.store(false, Ordering::SeqCst);
         match into {
             Some(dir) => crate::log::line("nxm", &format!("Test run: pretending to download {} into Game Mods/{}", link.redacted(), dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
             None => crate::log::line("nxm", &format!("Test run: pretending to download {}", link.redacted())),
         }
         for i in 0..=200u64 {
-            if CANCEL.load(Ordering::SeqCst) {
-                break;
-            }
             progress(&label, total * i.min(16) * 4 / 100, Some(total));
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -962,10 +924,9 @@ impl Net {
             .ok_or("Nexus lists no file to download for that mod.")?;
         let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
-        CANCEL.store(false, Ordering::SeqCst);
-                let mut cb = |got: u64, total: Option<u64>| {
+        let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let (d, mut source) = nx.download(&account, &domain, mod_id, &file, Some(&mut cb)).map_err(err)?;
         source.needs = nexus_needs(&domain, mod_id);
@@ -982,11 +943,10 @@ impl Net {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make a folder for the installer ({e})."))?;
         let client = Client { temp_dir: dir.clone(), ..self.client.clone() };
-        CANCEL.store(false, Ordering::SeqCst);
         let label = "Visual C++ runtime".to_string();
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let d = turbine_engine::vcrun::download(&client, Some(&mut cb)).map_err(err)?;
         let exe = dir.join("vc_redist.x64.exe");
@@ -1017,8 +977,7 @@ impl Net {
 
     pub fn fetch_loader(&mut self, game: &GameInfo, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<Fetched, String> {
         self.no_downloads()?;
-        CANCEL.store(false, Ordering::SeqCst);
-                let (label, ext) = match game.kind.as_str() {
+        let (label, ext) = match game.kind.as_str() {
             "bethesda" => ("SKSE", "7z"),
             "bepinex" => ("BepInEx", "zip"),
             "smapi" => ("SMAPI", "zip"),
@@ -1026,7 +985,7 @@ impl Net {
         };
         let mut cb = |got: u64, total: Option<u64>| {
             progress(label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let got = match game.kind.as_str() {
             "bethesda" => {
@@ -1061,11 +1020,10 @@ impl Net {
     /// Turbine's own data folder. Nothing in it is run here.
     pub fn fetch_me3(&mut self, data: &Path, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<PathBuf, String> {
         self.no_downloads()?;
-        CANCEL.store(false, Ordering::SeqCst);
         let label = format!("me3 {}", anticheat::ME3_VERSION);
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let check = net::Expect { max_bytes: anticheat::ME3_SIZE, size: Some(anticheat::ME3_SIZE), sha256: Some(anticheat::ME3_SHA256.into()) };
         let d = self.client.download(anticheat::ME3_URL, &check, Some(&mut cb)).map_err(err)?;
@@ -1087,7 +1045,6 @@ impl Net {
     /// download, with the words that say which version it is.
     pub fn fetch_seamless(&mut self, have: Option<&str>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<(Option<Fetched>, String), String> {
         self.no_downloads()?;
-        CANCEL.store(false, Ordering::SeqCst);
         let rel = loaders::seamless_latest(&self.client).map_err(err)?;
         if let loaders::SeamlessGet::HaveIt(words) = loaders::seamless_get(have, &rel) {
             crate::log::line("net", &format!("Seamless Co-op: GitHub's newest release is {}, installed is {}: nothing downloaded", rel.version, have.unwrap_or("none")));
@@ -1096,7 +1053,7 @@ impl Net {
         let label = format!("Seamless Co-op {}", rel.version);
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let (d, source) = loaders::fetch_seamless_release(&self.client, &rel, Some(&mut cb)).map_err(err)?;
         crate::log::line("net", &format!("{label} from {} ({} bytes, SHA-256 {})", source.url.clone().unwrap_or_default(), d.size, d.sha256));
@@ -1270,7 +1227,7 @@ impl Net {
             return selfupdate::latest(&self.client).map_err(err);
         }
         let kept = self.cache.join("update-check");
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let now = crate::now_secs();
         let answer = |c: selfupdate::Check| match c {
             selfupdate::Check::Available(r) => Some(*r),
             selfupdate::Check::UpToDate => None,
@@ -1296,10 +1253,9 @@ impl Net {
         fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make the update folder ({e})."))?;
         let client = Client { temp_dir: dir.clone(), ..self.client.clone() };
         let label = format!("Turbine {}", release.version);
-        CANCEL.store(false, Ordering::SeqCst);
-                let mut cb = |got: u64, total: Option<u64>| {
+        let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
-            !CANCEL.load(Ordering::SeqCst)
+            true
         };
         let d = selfupdate::download(&client, release, Some(&mut cb)).map_err(err)?;
         let bundle = dir.join(selfupdate::ASSET);
@@ -1390,8 +1346,19 @@ mod tests {
     use super::*;
     use turbine_engine::json;
 
+    /// The recorded samples as the screenshot checks lay them out (tools/ci-shots.sh): the engine's, then the app's.
     fn data() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("engine/tests/data")
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let dir = std::env::temp_dir().join(format!("turbine-online-samples-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        for from in [root.join("engine/tests/data"), root.join("tools/selftest-data")] {
+            for e in fs::read_dir(&from).unwrap().flatten() {
+                if e.path().is_file() {
+                    fs::copy(e.path(), dir.join(e.file_name())).unwrap();
+                }
+            }
+        }
+        dir
     }
 
     fn game() -> GameInfo {
@@ -1420,13 +1387,12 @@ mod tests {
         let first = items[0].str_at("id").unwrap().to_string();
         let d = n.details_ts(&game(), &first).unwrap();
         assert!(json::parse(&d).is_ok(), "{d}");
-        let nb = n.browse_nexus(&game(), "", "", 0).unwrap();
+        let nb = n.browse_nexus(&game(), "", "", "", 0).unwrap();
         assert!(json::parse(&nb).is_ok());
         let nd = n.details_nexus(&game(), 2400).unwrap();
         assert!(json::parse(&nd).is_ok(), "{nd}");
         assert!(n.install_ts(&game(), &[first], false, &mut |_| {}, &mut |_, _, _| {}).is_err());
-        let r = n.self_check("0.2", false, false, false).unwrap();
-        println!("{:?}", r.map(|r| r.version));
+        assert!(n.self_check("0.2", false, false, false).is_ok());
         let u = n.check_updates(&game()).unwrap();
         assert!(json::parse(&u).is_ok());
         n.sample_sign_in(false);

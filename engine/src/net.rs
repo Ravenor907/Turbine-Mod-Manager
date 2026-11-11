@@ -397,16 +397,6 @@ pub struct Client {
     pub temp_dir: PathBuf,
 }
 
-/// "0.3" from Cargo's "0.3.0": Turbine's versions have one dot.
-pub fn short_version(cargo_version: &str) -> String {
-    let mut parts: Vec<&str> = cargo_version.split('.').collect();
-    while parts.len() > 2 && parts.last() == Some(&"0") {
-        parts.pop();
-    }
-    // 0.31.0 becomes 0.31; a third non-zero part (never used) is kept so nothing is hidden.
-    parts.join(".")
-}
-
 impl Client {
     /// `version` is Turbine's own one-dot version, sent in the User-Agent.
     pub fn new(version: &str, temp_dir: &Path) -> Client {
@@ -510,7 +500,7 @@ impl Client {
             if site_down(&e, &headers, &page) {
                 return Err(NetError::Down);
             }
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let now = crate::nxm::now();
             return Err(match github_limit(&e, &req.url, &headers, now) {
                 Some(m) => NetError::GitHubLimit(m),
                 None => e,

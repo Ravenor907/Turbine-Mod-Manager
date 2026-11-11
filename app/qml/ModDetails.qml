@@ -2,9 +2,9 @@ import QtQuick
 
 // A mod's page, pushed over Get mods. Left (60%): the largest picture the source gives, name, author, version,
 // size, updated date, likes (Nexus endorsements) and downloads, then the summary. Right (40%): the main button with one line
-// under it ("Get it on Nexus", "Install", "Installed · On"), "Other files", then "Also needs" (each requirement with
-// Installed, Will be added or Not yet; A on one opens its page). On a narrow window the right column goes under the
-// picture. Main.qml moves the focus (focusIndex: 0 main button, 1 Other files, 2 and on the requirements) and scrolls
+// under it ("Get it on Nexus", "Install", "Installed · On"), then "Also needs" (each requirement with Installed, Will
+// be added or Not yet; A on one opens its page). Other files are in X Options. On a narrow window the right column
+// goes under the picture. Main.qml moves the focus (focusIndex: 0 main button, 2 and on the requirements) and scrolls
 // with the D-pad (scroll()). After 8 seconds with Turbine still in front, two buttons show under the main one
 // ("Open in Steam's browser", "Always use Steam's browser": helpLabels, helpFocus, helpClicked). No key caps on the
 // page: the legend says what A and X do.
@@ -16,8 +16,6 @@ Item {
     property bool focused: true
     property string mainLabel: ""
     property string mainLine: ""
-    property bool fileRows: false         // the main file's line and the Other files row (else under X Options)
-    property bool mainBusy: false
     property real mainProgress: -1
     property int focusIndex: 0
     property var helpLabels: []           // the two browser buttons, when they show
@@ -25,7 +23,6 @@ Item {
 
     signal installClicked()
     signal helpClicked(int index)
-    signal versionsClicked()
     signal needClicked(int index)
     // 0.6: the installed mod's settings, under the description ("" when it has none: no button at all).
     property string settingsLabel: ""
@@ -33,7 +30,6 @@ Item {
     signal settingsClicked()
 
     readonly property bool loading: !info || info.loading === true
-    readonly property int otherCount: info && info.versions ? info.versions.length : 0
     readonly property bool stacked: width < ui.px(640)
     // Nexus requirements: {missing, installed, unchecked, steps}.
     readonly property var needs: info && info.needs ? info.needs : null
@@ -48,32 +44,12 @@ Item {
     // Thunderstore: what Install brings along.
     readonly property var install: info && info.install ? info.install : []
     readonly property var extra: install.filter(x => !x.main)
-    function size(b) {
-        if (!b) return "Not listed"
-        if (b >= 1073741824) return (b / 1073741824).toFixed(1) + " GB"
-        if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB"
-        if (b >= 1024) return Math.round(b / 1024) + " KB"
-        return b + " bytes"
-    }
-    // "2025-03-04" reads as "Mar 4, 2025"; anything else stays as it is.
-    function niceDate(t) {
-        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t || "")
-        return m ? Qt.formatDate(new Date(+m[1], +m[2] - 1, +m[3]), "MMM d, yyyy") : (t || "")
-    }
-    // A size stays together and with what comes before it ("24.0 MB" never breaks before MB).
-    function keepTogether(t) { return (t || "").replace(/ (bytes|KB|MB|GB)\b/g, "\u00a0$1").replace(/ · /g, "\u00a0· ") }
-    function count(n) {
-        n = n || 0
-        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".0", "") + "M"
-        if (n >= 1000) return Math.round(n / 1000) + "K"
-        return String(n)
-    }
     function scroll(d) {
         view.contentY = Math.max(0, Math.min(Math.max(0, view.contentHeight - view.height), view.contentY + d * ui.px(70)))
     }
     function focusItem() {
         if (helpFocus >= 0) return helpRep.itemAt(helpFocus)
-        return focusIndex === 0 ? mainBtn : focusIndex === 1 ? otherRow : needRep.itemAt(focusIndex - 2)
+        return focusIndex === 0 ? mainBtn : focusIndex === 1 ? null : needRep.itemAt(focusIndex - 2)
     }
     onHelpFocusChanged: follow()
     onFocusIndexChanged: follow()
@@ -146,13 +122,13 @@ Item {
                 text: !md.info || md.loading ? "" : [
                     md.info.owner ? "By " + md.info.owner : "",
                     md.info.version ? "Version " + md.info.version : "",
-                    md.info.size ? md.size(md.info.size) : "",
-                    (md.info.updatedText || md.info.updated) ? "Updated " + md.niceDate(md.info.updatedText || md.info.updated) : ""
+                    md.info.size ? md.ui.fileSize(md.info.size) : "",
+                    (md.info.updatedText || md.info.updated) ? "Updated " + md.ui.niceDate(md.info.updatedText || md.info.updated) : ""
                 ].filter(x => x !== "").join(" · ")
                 color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
-                text: !md.info || md.loading ? "" : md.count(md.info.rating) + (md.info.source === "nexus" ? " likes" : " ratings") + " · " + md.count(md.info.downloads) + " downloads"
+                text: !md.info || md.loading ? "" : md.ui.shortCount(md.info.rating) + (md.info.source === "nexus" ? " likes" : " ratings") + " · " + md.ui.shortCount(md.info.downloads) + " downloads"
                 color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
@@ -252,15 +228,6 @@ Item {
             }
             // Which file and its size, and Other files: under X Options (a first look shouldn't ask for a choice).
             Text {
-                visible: md.fileRows && !!md.info && !!md.info.mainLine
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: md.info && md.info.mainLine ? md.keepTogether(md.info.mainLine) : ""
-                color: md.ui.c.text
-                font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.fpx(14)
-            }
-            Text {
                 visible: !!md.info && !!md.info.filesNote
                 width: parent.width
                 wrapMode: Text.WordWrap
@@ -268,22 +235,6 @@ Item {
                 color: md.ui.c.soft
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.fpx(14)
-            }
-            Rectangle {
-                id: otherRow
-                visible: md.fileRows && md.otherCount > 0
-                width: parent.width; height: md.ui.px(40); radius: md.ui.px(6)
-                color: md.focused && md.focusIndex === 1 ? md.ui.c.focusFill : md.ui.c.card
-                border.color: md.ui.c.accent
-                border.width: md.focused && md.focusIndex === 1 ? md.ui.px(2) : 0
-                Row {
-                    x: md.ui.px(12)
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: md.ui.px(8)
-                    Text { text: "Other files (" + md.otherCount + ")"; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                }
-                HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
-                TapHandler { onTapped: md.versionsClicked() }
             }
             // Thunderstore: what Install brings along.
             Text {

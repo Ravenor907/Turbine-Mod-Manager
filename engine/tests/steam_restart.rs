@@ -2,19 +2,15 @@
 //! it closes Steam, makes the change only once Steam is gone, starts Steam again (or lets Game Mode's session do it)
 //! and brings Turbine back. Also the job file, applying it, and the busy check.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
+use support::scratch as tmp;
 use turbine_engine::steam_restart::{self, Change, Job};
 use turbine_engine::{shortcuts, steam, steam_setup};
-
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-restart-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
 
 fn script(p: &Path, body: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();

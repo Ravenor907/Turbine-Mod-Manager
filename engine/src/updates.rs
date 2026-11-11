@@ -2,7 +2,7 @@
 //! functions; the app fetches the index (thunderstore::fetch_index) and Nexus lists (Nexus::updated, Nexus::files)
 //! and passes them in, so one Nexus request covers every mod of a game.
 
-use crate::nexus::{self, FileList, UpdatedEntry};
+use crate::nexus::{self, FileList};
 use crate::thunderstore::Package;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -93,26 +93,6 @@ pub fn thunderstore_updates(installed: &[Installed], index: &[Package]) -> Vec<U
                 target: format!("{}-{}", p.full_name, latest.number),
                 deprecated: p.is_deprecated,
             });
-        }
-    }
-    out
-}
-
-/// Nexus mods of one game that may have a newer file: those in the game's update list whose latest file change is
-/// after they were installed. The app then fetches each candidate's file list (`Nexus::files`) and calls
-/// `nexus_update_from_files`. Returns (mod id, installed entry).
-pub fn nexus_candidates<'a>(domain: &str, installed: &'a [Installed], updated: &[UpdatedEntry]) -> Vec<(u64, &'a Installed)> {
-    let changed: HashMap<u64, u64> = updated.iter().map(|e| (e.mod_id, e.latest_file_update)).collect();
-    let mut out = Vec::new();
-    for m in installed.iter().filter(|m| m.kind == "nexus") {
-        let Some((d, mod_id, _)) = nexus::parse_source_id(&m.id) else { continue };
-        if d != domain {
-            continue;
-        }
-        if let Some(&when) = changed.get(&mod_id) {
-            if when > m.installed_at && !out.iter().any(|(id, _)| *id == mod_id) {
-                out.push((mod_id, m));
-            }
         }
     }
     out

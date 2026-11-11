@@ -3,25 +3,17 @@
 //! of the published schema); they are not recorded live answers (api.nexusmods.com can't be reached from the build
 //! machine).
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use support::{data_text as data, scratch};
 use turbine_engine::json;
 use turbine_engine::net::{Client, NetError};
 use turbine_engine::net::SourceInfo;
 use turbine_engine::nexus::{self, Account, Nexus, RateLimit, Requirement, RequirementStep, SearchSort};
 use turbine_engine::nxm;
-
-fn data(name: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-nexus-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 #[test]
 fn reads_the_account() {
@@ -57,10 +49,6 @@ fn reads_update_lists_and_links() {
     assert_eq!(u[0].mod_id, 12604);
     assert_eq!(u[0].latest_file_update, 1600000000);
     assert!(nexus::parse_updated("{}").is_err());
-    assert_eq!(nexus::update_period(3600), Some("1d"));
-    assert_eq!(nexus::update_period(3 * 86400), Some("1w"));
-    assert_eq!(nexus::update_period(20 * 86400), Some("1m"));
-    assert_eq!(nexus::update_period(40 * 86400), None);
     // Mirrors on hosts Turbine doesn't download from are dropped.
     let l = nexus::parse_download_links(&data("nexus_download_link.json")).unwrap();
     assert_eq!(l.len(), 1);
@@ -75,18 +63,16 @@ fn rate_limits_are_respected() {
     assert_eq!(rl.hourly_remaining, Some(99));
     assert_eq!(rl.daily_remaining, Some(2400));
     assert_eq!(rl.blocked(), None);
-    assert!(!rl.low());
     // The hourly allowance used up still leaves the daily one.
     assert_eq!(nexus::rate_limit(&h("0", "100")).blocked(), None);
     let stop = nexus::rate_limit(&h("0", "0")).blocked().unwrap();
     assert_eq!(stop, "Nexus's daily request limit is used up. It resets at 2026-11-07 00:00:00 +0000. Turbine tries again after that.");
-    assert!(nexus::rate_limit(&h("3", "20")).low());
     assert_eq!(RateLimit::default().blocked(), None);
 }
 
 #[test]
 fn graphql_search_body_and_answer() {
-    let body = nexus::search_body("stardewvalley", "content \"patcher\"", SearchSort::Endorsements, 20, 500, false);
+    let body = nexus::search_body_in("stardewvalley", "content \"patcher\"", "", SearchSort::Endorsements, 20, 500, false, nxm::now());
     let j = json::parse(&body).unwrap();
     assert!(j.str_at("query").unwrap().contains("mods(filter: $filter, sort: $sort, offset: $offset, count: $count, facets: {categoryName: []})"));
     let v = j.get("variables").unwrap();
@@ -97,7 +83,7 @@ fn graphql_search_body_and_answer() {
     assert_eq!(f.get("adultContent").unwrap().as_array()[0].get("value"), Some(&json::Json::Bool(false)));
     assert_eq!(v.get("sort").unwrap().as_array()[0].get("endorsements").unwrap().str_at("direction"), Some("DESC"));
     assert_eq!(v.get("count"), Some(&json::Json::Num(100.0)), "count is capped");
-    let plain = json::parse(&nexus::search_body("valheim", " ", SearchSort::Name, 0, 10, true)).unwrap();
+    let plain = json::parse(&nexus::search_body_in("valheim", " ", "", SearchSort::Name, 0, 10, true, nxm::now())).unwrap();
     let f = plain.get("variables").unwrap().get("filter").unwrap();
     assert!(f.get("name").is_none() && f.get("adultContent").is_none());
 
@@ -311,11 +297,6 @@ fn files_are_grouped_for_other_versions() {
     let other = list.other_versions(200);
     assert_eq!(other[0].category, "UPDATE", "the installed file's group is gone when it was the only one");
     assert_eq!(other.iter().map(|g| g.files.len()).sum::<usize>(), 7);
-    let j = json::parse(&nexus::file_groups_json(&groups)).unwrap();
-    let first = &j.as_array()[0];
-    assert_eq!(first.str_at("label"), Some("Main files"));
-    assert_eq!(first.get("files").unwrap().as_array()[0].get("fileId"), Some(&json::Json::Num(200.0)));
-    assert_eq!(first.get("files").unwrap().as_array()[0].get("size"), Some(&json::Json::Num(2816572.0)));
 
     // Picking a file: the wanted one while it can be downloaded, else what replaced it, else the main file.
     assert_eq!(list.pick(Some(100)).unwrap().file_id, 100, "old versions can still be downloaded");
@@ -326,7 +307,7 @@ fn files_are_grouped_for_other_versions() {
     assert_eq!(gone.pick(Some(5)).unwrap().file_id, 1, "a file missing from the list follows its replacement");
 
     let one = nexus::parse_file(&data("nexus_file.json")).unwrap();
-    assert_eq!((one.file_id, one.size_bytes, one.category_label()), (200, 2816572, "Main files"));
+    assert_eq!((one.file_id, one.size_bytes, nexus::category_label(&one.category)), (200, 2816572, "Main files"));
     assert!(nexus::parse_file("{}").is_err());
     assert_eq!(nexus::files_page_url("valheim", 7), "https://www.nexusmods.com/valheim/mods/7?tab=files");
     assert_eq!(nexus::file_page_url("valheim", 7, 9), "https://www.nexusmods.com/valheim/mods/7?tab=files&file_id=9");
@@ -519,7 +500,7 @@ fn premium_downloads_by_id() {
     let before = f.requests();
     assert_eq!(f.nx.download_by_id(&free, "skyrimspecialedition", 12604, None, None).unwrap_err().to_string(), nexus::FREE_ACCOUNT_MESSAGE);
     assert_eq!(f.requests(), before);
-    let groups = f.nx.file_groups("skyrimspecialedition", 12604).unwrap();
+    let groups = f.nx.files("skyrimspecialedition", 12604).unwrap().groups();
     assert_eq!(groups.len(), 6);
     f.serve("https://api.nexusmods.com/v1/games/skyrimspecialedition/mods/12604/files/200.json", data("nexus_file.json").as_bytes());
     assert_eq!(f.nx.file_info("skyrimspecialedition", 12604, 200).unwrap().version, "5.2SE");

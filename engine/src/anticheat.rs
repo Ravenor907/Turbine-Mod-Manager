@@ -41,11 +41,8 @@ pub const ME3_FILES: &[&str] = &["bin/me3", "bin/win64/me3-launcher.exe", "bin/w
 /// Seamless Co-op for Elden Ring. 0.62: no fixed version any more. The mod refuses to run when it is out of date,
 /// so a pinned release can never be right for long: Turbine gets the newest release its repository lists
 /// (loaders::fetch_seamless, size and SHA-256 recorded at the download) or the player gets it from Nexus.
-pub const SEAMLESS_PAGE: &str = "https://www.nexusmods.com/eldenring/mods/510";
-/// Seamless Co-op on Nexus: the game's domain and the mod's number (its page usually has the newest version first).
+/// On Nexus: the game's domain and the mod's number (its page usually has the newest version first).
 pub const SEAMLESS_NEXUS: (&str, u64) = ("eldenring", 510);
-/// Seamless Co-op's DLL inside its zip; me3 loads it as a native.
-pub const SEAMLESS_DLL: &str = "SeamlessCoop/ersc.dll";
 
 /// The save file me3 uses instead of the game's own, so a modded save is never the online one.
 pub const ME3_SAVEFILE: &str = "TurbineModded.sl2";
@@ -360,20 +357,6 @@ pub fn profile_text(game: &str, natives: &[String], savefile: Option<&str>) -> S
         t.push_str(&format!("\n[[natives]]\npath = {}\n", toml_str(n)));
     }
     t
-}
-
-/// Writes the profile for what is in the package folder now. Returns the profile file and the natives listed.
-pub fn write_profile(store_root: &Path, game: &str) -> io::Result<(PathBuf, Vec<String>)> {
-    let mods = profile_mods(store_root);
-    fs::create_dir_all(&mods)?;
-    let nat = natives(&mods);
-    let seamless = nat.iter().any(|n| n.to_ascii_lowercase().ends_with("/ersc.dll"));
-    let text = profile_text(game, &nat, if seamless { None } else { Some(ME3_SAVEFILE) });
-    let file = profile_file(store_root);
-    let tmp = file.with_extension("tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, &file)?;
-    Ok((file, nat))
 }
 
 // ---- me3 itself ----
@@ -956,12 +939,8 @@ pub fn helper_log_since(data: &Path, since_len: u64) -> Vec<String> {
 
 /// Turbine's state for Steam's own Play of a game me3 starts: Ok when the helper may start me3 (mods on, the player
 /// turned the anti-cheat off for them, nothing holds them back, the last apply worked, me3 is there); otherwise why
-/// not, and the helper is cleared. Every way of turning mods off ends here.
-pub fn helper_state(mods_on: usize, consent: bool, held: bool, apply_failed: bool, me3_ok: bool) -> Result<(), &'static str> {
-    helper_state_undone(mods_on, consent, held, apply_failed, me3_ok, false)
-}
-
-/// `helper_state`, also off after Undo the launch options change until the line is set again.
+/// not, and the helper is cleared. Every way of turning mods off ends here. `undone`: also off after Undo the launch
+/// options change until the line is set again.
 pub fn helper_state_undone(mods_on: usize, consent: bool, held: bool, apply_failed: bool, me3_ok: bool, undone: bool) -> Result<(), &'static str> {
     if undone {
         return Err("the launch options change was undone");
@@ -1106,18 +1085,6 @@ pub fn coop_password(store_root: &Path) -> CoopPassword {
     }
 }
 
-/// Arms the next Play only for Seamless Co-op (the once file the helper and the Steam tool read), after the
-/// password check: with an empty password nothing is armed and an older once file goes, so no co-op Play can start
-/// into the mod's own error.
-pub fn arm_coop_once(data: &Path, store_root: &Path, app_id: &str, args: &[String]) -> Result<(), String> {
-    check_app_id(app_id).map_err(|e| e.to_string())?;
-    if let Err(why) = coop_password(store_root).ready() {
-        let _ = remove_if(&once_file(data, app_id));
-        return Err(why);
-    }
-    arm_once(data, app_id, args, "Seamless Co-op, this Play only").map_err(|e| format!("Couldn't get the launch helper ready: {e}"))
-}
-
 // ---- Which Seamless Co-op the game loads (0.62) ----
 
 /// Is this path Seamless Co-op's DLL (whatever folder it is in)?
@@ -1168,14 +1135,11 @@ pub fn older_seamless_in(words: &str) -> Option<(String, String)> {
 /// The version a Windows program file says it is ("2.0.2"), from its version block (VS_FIXEDFILEINFO: the file
 /// version's four numbers). None when the file carries none. Trailing ".0" parts beyond the second are dropped.
 pub fn dll_version_in(bytes: &[u8]) -> Option<String> {
-    const SIGNATURE: [u8; 4] = [0xBD, 0x04, 0xEF, 0xFE];
-    let at = bytes.windows(4).position(|w| w == SIGNATURE)?;
-    let word = |o: usize| -> Option<u32> { bytes.get(at + o..at + o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) };
+    let (struc, ms, ls) = crate::vcrun::fixed_file_info(bytes)?;
     // dwStrucVersion must be 1.0.
-    if word(4)? != 0x0001_0000 {
+    if struc != 0x0001_0000 {
         return None;
     }
-    let (ms, ls) = (word(8)?, word(12)?);
     let mut parts = vec![ms >> 16, ms & 0xFFFF, ls >> 16, ls & 0xFFFF];
     if parts.iter().all(|p| *p == 0) {
         return None;
@@ -1383,8 +1347,7 @@ pub fn tar_entries(tar: &[u8]) -> Result<Vec<(String, std::ops::Range<usize>)>, 
                 zip::safe_relative(&name).map_err(|_| format!("the tar file has an unsafe name: {name}"))?;
                 out.push((name, data.clone()));
             }
-            b'5' | b'x' | b'g' => {}
-            _ => {} // links and devices are never taken
+            _ => {} // folders and headers need nothing; links and devices are never taken
         }
         i += 512 + size.div_ceil(512) * 512;
     }
@@ -1543,13 +1506,14 @@ mod tests {
         fs::create_dir_all(mods.join("parts")).unwrap();
         fs::write(mods.join("parts/a.partsbnd.dcx"), b"x").unwrap();
         fs::write(mods.join("SkipIntro.dll"), b"x").unwrap();
-        let (file, nat) = write_profile(&d, "eldenring").unwrap();
+        let (file, nat) = write_profile_for(&d, "eldenring", Coop::Solo).unwrap();
         assert_eq!(nat, vec!["mods/SkipIntro.dll".to_string()]);
         let t = fs::read_to_string(&file).unwrap();
         assert!(t.contains("game = \"eldenring\"") && t.contains("path = 'mods'") && t.contains("savefile = 'TurbineModded.sl2'"));
         // Seamless Co-op on: its own .co2 saves, no savefile of Turbine's.
         fs::write(mods.join("SeamlessCoop/ersc.dll"), b"x").unwrap();
-        let (file, nat) = write_profile(&d, "eldenring").unwrap();
+        fs::write(mods.join("SeamlessCoop/ersc_settings.ini"), b"[PASSWORD]\ncooppassword = x\n").unwrap();
+        let (file, nat) = write_profile_for(&d, "eldenring", Coop::Seamless).unwrap();
         assert_eq!(nat.len(), 2);
         let t = fs::read_to_string(&file).unwrap();
         assert!(!t.contains("savefile") && t.contains("path = 'mods/SeamlessCoop/ersc.dll'"));

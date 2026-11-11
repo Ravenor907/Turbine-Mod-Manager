@@ -6,8 +6,8 @@
 set -eo pipefail
 MODE=${1:?"tools/ci-shots.sh 1280x800|1920x1080|x11|nexus [shard shards]"}
 # 0.6: the pictures of one size split over parallel jobs: this job takes its share (shard of shards). Each picture
-# goes to a shard by its run time (tools/ci-shards.txt, measured; a guess by its kind otherwise), the longest first
-# onto the least loaded shard, the same way in every job; checks only read pictures their own shard took.
+# goes to a shard by a guess of its run time from its kind, the longest first onto the least loaded shard, the same
+# way in every job; checks only read pictures their own shard took.
 SHARD=${2:-0}
 SHARDS=${3:-1}
 case "$MODE" in
@@ -18,7 +18,7 @@ esac
 flatpak install --user -y --noninteractive --reinstall TurbineModManager.flatpak > /dev/null
 # X11 checks need Xvfb in the build container.
 if { [ "$MODE" = x11 ] || [ "$MODE" = nexus ]; } && ! command -v Xvfb > /dev/null; then
-  (dnf install -y xorg-x11-server-Xvfb xprop > /dev/null 2>&1 || (apt-get update > /dev/null 2>&1 && apt-get install -y xvfb x11-utils > /dev/null 2>&1)) || true
+  dnf install -y xorg-x11-server-Xvfb > /dev/null 2>&1 || true
 fi
 if [ "$MODE" = x11 ]; then
 # Qt WebEngine is inside the app (from the BaseApp), with its helper process.
@@ -45,7 +45,7 @@ fi
 mkdir -p shots home empty data samples
 python3 tools/fake-home.py "$PWD/home"
 # Recorded answers instead of the internet: the engine's samples, then the app's own.
-cp engine/tests/data/*.json engine/tests/data/*.html samples/
+cp engine/tests/data/*.json samples/
 cp tools/selftest-data/* samples/
 fail=0
 hung=0
@@ -65,7 +65,6 @@ if [ "$SHARDS" -gt 1 ]; then
   names=$(grep -oE '^\s*(SHOOT_ENV="[^"]*" )?shoot "[^"]+"' "$0" | sed -E 's/.*shoot "([^"]+)"/\1/' | sed -E 's/\$size/'"$MODE"'/g; s/\$\{p\/modpage\/modpage-\}/modpage-x/g' | grep -v "$( [ "$MODE" = 1280x800 ] && echo 1920x1080 || echo 1280x800 )" | grep -v '\$' | sort -u)
   declare -A W
   for n in $names; do W[$n]=$(guess "$n"); done
-  if [ -f tools/ci-shards.txt ]; then while read -r n w; do [ -n "$n" ] && [ "${n:0:1}" != "#" ] && W[$n]=$w; done < tools/ci-shards.txt; fi
   declare -a LOAD; for ((k = 0; k < SHARDS; k++)); do LOAD[$k]=0; done
   for n in $(for k in "${!W[@]}"; do echo "${W[$k]} $k"; done | sort -k1,1nr -k2,2 | awk '{print $2}'); do
     best=0; for ((k = 1; k < SHARDS; k++)); do [ "${LOAD[$k]}" -lt "${LOAD[$best]}" ] && best=$k; done
@@ -708,10 +707,7 @@ echo "Browser helper in the Flatpak: $ext"
 case "$ext" in *manifest.json*) ;; *) echo "::error title=Browser helper missing::$ext"; fail=1 ;; esac
 case "$ext" in *test*) echo "::error title=Browser helper ships its tests::$ext"; fail=1 ;; esac
 # X11 (what SteamOS uses for Turbine now): the main window draws, and the Game Mode overlay window gets
-# GAMESCOPE_EXTERNAL_OVERLAY. Needs Xvfb in the build container; said as a warning when it can't be had.
-if ! command -v Xvfb > /dev/null; then
-  (dnf install -y xorg-x11-server-Xvfb xprop > /dev/null 2>&1 || (apt-get update > /dev/null 2>&1 && apt-get install -y xvfb x11-utils > /dev/null 2>&1)) || true
-fi
+# GAMESCOPE_EXTERNAL_OVERLAY. Needs Xvfb (installed at the top); said as a warning when it can't be had.
 if command -v Xvfb > /dev/null; then
   Xvfb :77 -screen 0 1280x800x24 > /dev/null 2>&1 &
   xvfb=$!
@@ -1149,7 +1145,6 @@ for size in $SIZES; do
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
   fi
-  # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
   # 0.6: outcome checks by real presses and clicks (not pictures): A and B on every screen, nothing through a pop-up,
   # and the golden path from an empty game to Play and back.
   rm -rf "$PWD/fh/abcheck-$size"; python3 tools/fake-home.py "$PWD/fh/abcheck-$size" > /dev/null; h="$PWD/fh/abcheck-$size"
@@ -1198,6 +1193,7 @@ for size in $SIZES; do
   need "heldcheck-$size" "Turn them back on by a tap ($size)" "Held back on by a tap: 2 of 2 on, note gone"
   if ran "heldcheck-$size" && ! grep -q "Held back on by a tap: 2 of 2 on" "$PWD/data/heldcheck-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     grep -h "engine\|action\|quick\|Held" "$PWD/data/heldcheck-$size/turbine-mod-manager/activity.log" | tail -n 25 | sed 's/^/::notice title=heldcheck log::/' || true; fi
+  # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
   fresh "editbutton-$size"; h="$PWD/fh/editbutton-$size"
   shoot "editbutton-$size" "$size" editbutton "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
   if grep -q "Edit button: the panel doesn't fit here" "$PWD/data/editbutton-$size/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=I8: no panel at $size::the row's X menu has Edit settings"; else

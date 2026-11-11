@@ -3,23 +3,15 @@
 //! for me3's Windows build. These tests run the helper behind a stub of Steam's chain: each stub is a real program that
 //! writes its arguments to a trace file and passes control on the way Steam's own do.
 
+mod support;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use support::{has_bash, scratch as tmp};
 use turbine_engine::anticheat::{self, Coop};
 
 const APP: &str = "1245620";
-
-fn tmp(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("turbine-steamlaunch-{}-{name}", std::process::id()));
-    let _ = fs::remove_dir_all(&d);
-    fs::create_dir_all(&d).unwrap();
-    d
-}
-
-fn has_bash() -> bool {
-    Command::new("bash").arg("--version").output().is_ok()
-}
 
 fn script(p: &Path, body: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -551,7 +543,7 @@ fn once_files_and_plain_play() {
 /// 0.58 break test H1: every way of turning mods off clears what Steam's Play starts.
 #[test]
 fn every_off_path_clears_the_helper() {
-    use anticheat::helper_state;
+    let helper_state = |a, b, c, d, e| anticheat::helper_state_undone(a, b, c, d, e, false);
     assert!(helper_state(2, true, false, false, true).is_ok());
     // No mods on (Reset game files, the last mod removed, a loadout with none on, every mod off).
     assert_eq!(helper_state(0, true, false, false, true), Err("no mods on"));

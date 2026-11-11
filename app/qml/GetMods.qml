@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Shapes
 
 // Get mods: the mods as picture cards, four to a row (0.57: no bar over them; Y opens the pop-up with Search, Sort
 // and Category, and Add from Downloads is in the game menu): thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
@@ -14,8 +13,6 @@ Item {
     property var result: null               // {source, items, categories, total, error, fallback}
     property bool loading: false
     property bool loadingMore: false
-    property string search: ""
-    property string category: ""
     // 0.59: what is in effect ("Most liked · Armour · \"cloak\""), shown over the cards whenever it isn't the
     // default, and "Looking..." over the old cards while a new answer comes.
     property string summary: ""
@@ -28,7 +25,6 @@ Item {
     property bool active: true
     property int columns: 3
     readonly property var items: result && result.items ? result.items : []
-    readonly property var cats: result && result.categories ? [""].concat(result.categories) : []
     readonly property bool showRecent: recent.length > 0 && summary === "" && !fallback
 
     signal recentClicked(int index)
@@ -40,12 +36,6 @@ Item {
     // A scroll by touch or the wheel: where the cards are now and before, and whether there is more than a screen.
     signal contentScrolled(real y, real before, bool longer)
 
-    function count(n) {
-        n = n || 0
-        if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".0", "") + "M"
-        if (n >= 1000) return Math.round(n / 1000) + "K"
-        return String(n)
-    }
     onFocusIndexChanged: if (focusArea === "grid") gm.ui.glide(grid, () => { grid.positionViewAtIndex(gm.focusIndex, GridView.Contain); grid.snapRow() })
     onFocusAreaChanged: if (focusArea === "grid") grid.positionViewAtIndex(focusIndex, GridView.Contain); else if (focusArea === "recent") grid.positionViewAtBeginning()
     function gridItem(i) { return grid.itemAtIndex(i) }
@@ -99,10 +89,10 @@ Item {
                     Flow {
                         width: parent.width
                         spacing: gm.ui.px(14)
-                        ActionKey { k: "a"; label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
-                        ActionKey { k: "x"; label: "Try again here"; onClicked: gm.fallbackClicked("x") }
+                        ActionKey { label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
+                        ActionKey { label: "Try again here"; onClicked: gm.fallbackClicked("x") }
                         // A file that landed but wasn't caught can still be added from here.
-                        ActionKey { k: ""; label: "Add from Downloads"; onClicked: gm.fallbackClicked("add") }
+                        ActionKey { label: "Add from Downloads"; onClicked: gm.fallbackClicked("add") }
                     }
                 }
                 HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -256,8 +246,8 @@ Item {
                             Text {
                                 width: parent.width; elide: Text.ElideRight
                                 text: (cell.modelData.source === "thunderstore" || gm.result && gm.result.source === "thunderstore"
-                                       ? gm.count(cell.modelData.rating) + " ratings" : gm.count(cell.modelData.rating) + " likes")
-                                      + " · " + gm.count(cell.modelData.downloads) + " downloads"
+                                       ? gm.ui.shortCount(cell.modelData.rating) + " ratings" : gm.ui.shortCount(cell.modelData.rating) + " likes")
+                                      + " · " + gm.ui.shortCount(cell.modelData.downloads) + " downloads"
                                 color: gm.ui.c.muted; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13)
                             }
                         }
@@ -271,7 +261,6 @@ Item {
         }
     }
 
-    // A thumbnail: the picture, or a raised tile with the mod's first letter.
     // A new search, sort or category is on its way: the old cards dim under "Looking..." until it lands.
     Rectangle {
         objectName: "getLooking"
@@ -286,6 +275,7 @@ Item {
             Text { id: lookText; anchors.centerIn: parent; text: "Looking..."; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(16); font.bold: true }
         }
     }
+    // A thumbnail: the picture, or a raised tile with the mod's first letter.
     component Thumb: Rectangle {
         id: th
         property string src: ""
@@ -313,14 +303,8 @@ Item {
             font.family: gm.ui.bodyFont; font.pixelSize: Math.max(gm.ui.px(16), th.height * 0.4); font.bold: true
         }
     }
-    component InfoMark: Rectangle {
-        width: gm.ui.px(20); height: width; radius: width / 2
-        color: "transparent"; border.color: gm.ui.c.accentHi; border.width: Math.max(1, gm.ui.px(1.5))
-        Text { anchors.centerIn: parent; text: "i"; color: gm.ui.c.accentHi; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
-    }
     component ActionKey: Rectangle {
         id: ak
-        property string k: ""
         property string label: ""
         property bool strong: false
         signal clicked()
@@ -334,13 +318,6 @@ Item {
             anchors.centerIn: parent
             spacing: gm.ui.px(8)
             // No key caps on cards: the legend says what A and X do.
-            Rectangle {
-                visible: false
-                width: gm.ui.px(24); height: width; radius: width / 2
-                anchors.verticalCenter: parent.verticalCenter
-                color: ak.strong ? Qt.rgba(0, 0, 0, 0.18) : gm.ui.c.panel
-                Text { anchors.centerIn: parent; text: ak.k.toUpperCase(); color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13); font.bold: true }
-            }
             Text { text: ak.label; color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
         }
         HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }

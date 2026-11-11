@@ -3,45 +3,33 @@
 //! (a list of {"mod", "file_details"}), with the fields of the other v1 samples; it is not a recorded live answer
 //! (api.nexusmods.com can't be reached from the build machine).
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use turbine_engine::md5::md5_hex;
+use std::path::PathBuf;
+use support::{data_text as data, scratch};
 use turbine_engine::net::Client;
 use turbine_engine::nexus::{self, Nexus};
 use turbine_engine::nxm;
 
-fn data(name: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)).unwrap()
-}
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-nexusmd5-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
-
 const FAKE_CURL: &str = r#"#!/bin/sh
 SERVED='@SERVED@'
-out=; hdr=; url=; data=
+out=; hdr=; url=
 while [ $# -gt 0 ]; do
   case "$1" in
     --output) out=$2; shift;;
     --dump-header) hdr=$2; shift;;
-    --data-binary) data=$2; shift;;
-    --header) printf '%s\n' "$2" >> "$SERVED/sent_headers"; shift;;
+    --data-binary|--header) shift;;
     --) url=$2; shift;;
   esac
   shift
 done
 printf '%s\n' "$url" >> "$SERVED/requests.log"
-if [ -n "$data" ]; then cp "${data#@}" "$SERVED/last_post"; fi
 key=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
 status=200
-if [ -f "$SERVED/$key.status" ]; then status=$(cat "$SERVED/$key.status"); fi
 if [ ! -f "$SERVED/$key" ]; then status=404; fi
-{ printf 'HTTP/2 %s\r\n' "$status"; if [ -f "$SERVED/rl" ]; then cat "$SERVED/rl"; fi; printf '\r\n'; } > "$hdr"
+printf 'HTTP/2 %s\r\n\r\n' "$status" > "$hdr"
 if [ "$status" -ge 400 ]; then printf '%s %s' "$status" "$url"; exit 22; fi
 cp "$SERVED/$key" "$out"
 printf '%s %s' "$status" "$url"
@@ -52,7 +40,6 @@ struct Fake {
     nx: Nexus,
 }
 
-#[allow(dead_code)]
 impl Fake {
     fn new(tag: &str) -> Fake {
         let dir = scratch(tag);
@@ -68,16 +55,6 @@ impl Fake {
     fn serve(&self, url: &str, body: &[u8]) {
         let key: String = url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         fs::write(self.dir.join("served").join(key), body).unwrap();
-    }
-    fn status(&self, url: &str, s: u16) {
-        let key: String = url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-        fs::write(self.dir.join("served").join(key + ".status"), s.to_string()).unwrap();
-    }
-    fn rl(&self, hourly: u32, daily: u32) {
-        fs::write(self.dir.join("served/rl"), format!("x-rl-hourly-remaining: {hourly}\r\nx-rl-daily-remaining: {daily}\r\n")).unwrap();
-    }
-    fn requests(&self) -> usize {
-        fs::read_to_string(self.dir.join("served/requests.log")).unwrap_or_default().lines().count()
     }
 }
 
@@ -111,7 +88,7 @@ fn identify_hashes_the_file_and_asks_nexus() {
     let f = Fake::new("identify");
     let archive = f.dir.join("Cyber Engine Tweaks.zip");
     fs::write(&archive, b"pretend archive").unwrap();
-    let md5 = md5_hex(b"pretend archive");
+    let md5 = turbine_engine::md5::md5_file(&archive).unwrap();
     let url = format!("https://api.nexusmods.com/v1/games/cyberpunk2077/mods/md5_search/{md5}.json");
     f.serve(&url, data("nexus_md5_search.json").as_bytes());
     let m = f.nx.identify("cyberpunk2077", &archive).unwrap().unwrap();

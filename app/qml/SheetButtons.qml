@@ -2,14 +2,14 @@ import QtQuick
 
 // The row of buttons every sheet with buttons uses (Before you play, the loader prompt, the plain sheets, text
 // entry, Delete for good). One rule everywhere, kept in Main.qml (buttonSheet): the D-pad moves the highlight, A
-// presses the highlighted button, B is the cancel button and Start the main one. No key caps on the buttons: the
-// legend says what A, B and Start do. A tap presses a button too.
+// presses the highlighted button, B is the cancel button (0.62: Start does nothing here). No key caps on the buttons:
+// the legend says what A and B do. A tap presses a button too.
 Flow {
     id: sb
     required property var ui
     property var labels: []               // the buttons' words, in order
     property int focusIndex: 0            // the highlighted one (-1: none, the focus is elsewhere on the sheet)
-    property int mainIndex: -1            // Start's button: drawn a little stronger
+    property int mainIndex: -1            // the main button: drawn a little stronger
     signal activated(int index)
     // Pressed down (true) and let go or slid off (false): the hold buttons (Delete for good).
     signal held(int index, bool down)

@@ -1,19 +1,15 @@
 //! 0.64: the Visual C++ 2022 runtime in a Proton prefix (Cyberpunk's RED4ext and Cyber Engine Tweaks, error 998).
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use support::scratch;
 use turbine_engine::net::{self, Client, NetError};
 use turbine_engine::vcrun::{self, State};
 
 const REG: &str = "WINE REGISTRY Version 2\n;; All keys relative to \\\\User\\\\S-1-5-21-0-0-0-1000\n\n#arch=win64\n\n[Software\\\\Wine\\\\DllOverrides] 1730000001\n#time=1db2f8e7a6c1a01\n\"atl100\"=\"native,builtin\"\n";
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-vcrun-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 /// A DLL with a version resource: "MZ", padding, then VS_FIXEDFILEINFO.
 fn dll(major: u16, minor: u16, build: u16, wine: bool) -> Vec<u8> {

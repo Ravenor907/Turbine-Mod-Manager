@@ -26,7 +26,7 @@ Overlay {
         color: cs.ui.c.panel
         border.color: cs.ui.c.line
         CardGuard {}
-        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        // 0.59: scrolls by touch when the words don't fit (150%).
         Flickable {
             id: scroller
             anchors.fill: parent
@@ -34,12 +34,6 @@ Overlay {
             contentHeight: col.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            function follow(it) {
-                if (!it) return
-                const y = it.mapToItem(col, 0, 0).y
-                if (y < contentY) contentY = Math.max(0, y)
-                else if (y + it.height > contentY + height) contentY = Math.min(Math.max(0, contentHeight - height), y + it.height - height)
-            }
         Column {
             id: col
             width: scroller.width

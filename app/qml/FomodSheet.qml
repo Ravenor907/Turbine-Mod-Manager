@@ -102,7 +102,7 @@ Overlay {
                         anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: "B"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13); font.bold: true }
                     }
-                    Text { text: fs.page > 0 || (fs.step && fs.step.canGoBack) ? "Back a step" : "Stop"; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: fs.canStepBack ? "Back a step" : "Stop"; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                 TapHandler { onTapped: fs.goBack() }
@@ -288,7 +288,6 @@ Overlay {
             Text { text: "Stop installing?"; color: fs.ui.c.text; font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true }
             Text { width: parent.width; wrapMode: Text.WordWrap; text: "The mod isn't added. Nothing in the game changes."; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15) }
             SheetButtons {
-                id: stopButtons
                 objectName: "fomodStopButtons"
                 ui: fs.ui
                 width: parent.width

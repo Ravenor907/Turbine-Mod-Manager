@@ -116,7 +116,7 @@ fn mods_settings_text() {
     // Names match ignoring case; a folder listed twice counts where it last appears.
     let t = witcher::render_mods_settings("[MODA]\nEnabled=1\nPriority=9\n", &list(&["modA", "modB", "moda"]), &[]);
     assert_eq!(t, "[modB]\nEnabled=1\nPriority=2\n\n[moda]\nEnabled=1\nPriority=1\n");
-    assert_eq!(witcher::mod_folders(&list(&["mods/modA/content/x", "mods/modA/content/y", "mods/modB/content/z", "dlc/d/content/q", "mods/top.txt"])), list(&["modA", "modB"]));
+    assert_eq!(rules::mod_folders(&list(&["mods/modA/content/x", "mods/modA/content/y", "mods/modB/content/z", "dlc/d/content/q", "mods/top.txt"])), list(&["modA", "modB"]));
 }
 
 #[test]

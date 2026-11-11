@@ -68,7 +68,6 @@ function startFakeTurbine(opts) {
     server,
     received: [], // every JSON message from any client, in order
     clients: new Set(),
-    origins: [],
     rejected: 0,
     waiters: [],
     send(msg) {
@@ -102,7 +101,6 @@ function startFakeTurbine(opts) {
       socket.destroy();
       return;
     }
-    fake.origins.push(req.headers.origin || null);
     const accept = crypto
       .createHash("sha1")
       .update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")

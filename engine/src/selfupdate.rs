@@ -8,18 +8,23 @@ use crate::sha256;
 use std::cmp::Ordering;
 use std::path::Path;
 
-pub const REPO: &str = "Ravenor907/Turbine-Mod-Manager";
+/// The repository's path on GitHub, for the addresses below.
+macro_rules! repo {
+    () => {
+        "Ravenor907/Turbine-Mod-Manager"
+    };
+}
 /// 0.63: the newest full release's own page. GitHub redirects it to ".../releases/tag/<tag>", so the tag is read
 /// from where the request ends up and GitHub's API (60 requests an hour for a connection that isn't signed in,
 /// which Check for updates ran into as a 403) isn't asked.
-pub const LATEST_PAGE: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest";
+pub const LATEST_PAGE: &str = concat!("https://github.com/", repo!(), "/releases/latest");
 /// Every release with its tag, pre-releases included (Labs mode), as the repository's feed.
-pub const FEED_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases.atom";
-const TAG_MARK: &str = "/Ravenor907/Turbine-Mod-Manager/releases/tag/";
-const DOWNLOAD_BASE: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/download/";
+pub const FEED_URL: &str = concat!("https://github.com/", repo!(), "/releases.atom");
+const TAG_MARK: &str = concat!("/", repo!(), "/releases/tag/");
+const DOWNLOAD_BASE: &str = concat!("https://github.com/", repo!(), "/releases/download/");
 /// One release by its tag from GitHub's API: asked only while installing a release that has no checksum file
 /// beside its bundle (releases before 0.63), for GitHub's own digest.
-pub const TAG_API: &str = "https://api.github.com/repos/Ravenor907/Turbine-Mod-Manager/releases/tags/";
+pub const TAG_API: &str = concat!("https://api.github.com/repos/", repo!(), "/releases/tags/");
 /// A check at start asks GitHub at most this often; in between the last answer is used.
 pub const CHECK_EVERY_SECS: u64 = 6 * 60 * 60;
 pub const ASSET: &str = "TurbineModManager.flatpak";

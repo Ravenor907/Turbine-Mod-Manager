@@ -12,8 +12,8 @@
 //! - Every message is a JSON text frame. Client frames must be masked; binary frames, frames over 1 MB and broken
 //!   frames close the connection. Pings get pongs; Turbine pings a quiet connection every 20 seconds.
 //!
-//! The SHA-1 and Base64 here exist only for the handshake's Sec-WebSocket-Accept value (RFC 6455 section 4.2.2);
-//! SHA-1 follows FIPS 180-4. Neither is used for anything secret: the token is what keeps the bridge private.
+//! The handshake's Sec-WebSocket-Accept value and the frame opcodes come from the engine (wsproto.rs). The token is
+//! what keeps the bridge private.
 //!
 //! This file needs nothing from the rest of the app (only the engine's JSON reader), so its tests also run on their
 //! own: rustc --test app/src/bridge.rs --extern turbine_engine=<the engine's rlib>.
@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 use turbine_engine::json::{self, quote, Json};
+use turbine_engine::wsproto::{accept_key, OP_BINARY, OP_CLOSE, OP_CONTINUATION, OP_PING, OP_PONG, OP_TEXT};
 
 /// The ports Turbine tries, in order.
 pub const FIRST_PORT: u16 = 47701;
@@ -37,88 +38,15 @@ pub const MAX_REQUEST: usize = 8 * 1024;
 pub const MAX_MESSAGE: usize = 1 << 20;
 /// Most connections at once (one per browser profile is the usual case).
 pub const MAX_CLIENTS: usize = 8;
-/// The fixed string RFC 6455 appends to the client's key.
-const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const HELLO_WAIT: Duration = Duration::from_secs(10);
 const PING_EVERY: Duration = Duration::from_secs(20);
 
-// ---------------------------------------------------------------------------------------------------- SHA-1
-
-/// SHA-1 of `data` (FIPS 180-4, section 6.1).
-pub fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
-    let mut msg = data.to_vec();
-    let bits = (data.len() as u64).wrapping_mul(8);
-    msg.push(0x80);
-    while msg.len() % 64 != 56 {
-        msg.push(0);
-    }
-    msg.extend_from_slice(&bits.to_be_bytes());
-    for block in msg.chunks(64) {
-        let mut w = [0u32; 80];
-        for (i, word) in block.chunks(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-        for (i, wi) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | (!b & d), 0x5A82_7999),
-                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
-                _ => (b ^ c ^ d, 0xCA62_C1D6),
-            };
-            let t = a.rotate_left(5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(*wi);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = t;
-        }
-        h[0] = h[0].wrapping_add(a);
-        h[1] = h[1].wrapping_add(b);
-        h[2] = h[2].wrapping_add(c);
-        h[3] = h[3].wrapping_add(d);
-        h[4] = h[4].wrapping_add(e);
-    }
-    let mut out = [0u8; 20];
-    for (i, v) in h.iter().enumerate() {
-        out[i * 4..i * 4 + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------------------------------- Base64
-
-const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// Standard Base64 with padding (RFC 4648 section 4).
-pub fn base64(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(B64[(n >> 18) as usize & 63] as char);
-        out.push(B64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
-    }
-    out
-}
+// ---------------------------------------------------------------------------------------------------- HTTP
 
 /// Is this the Base64 of exactly 16 bytes (what Sec-WebSocket-Key must be)?
 fn is_key(key: &str) -> bool {
-    key.len() == 24 && key.ends_with("==") && key[..22].bytes().all(|b| B64.contains(&b))
+    key.len() == 24 && key.ends_with("==") && key[..22].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
 }
-
-/// The Sec-WebSocket-Accept value for a client's Sec-WebSocket-Key.
-pub fn accept_key(key: &str) -> String {
-    base64(&sha1(format!("{}{WS_GUID}", key.trim()).as_bytes()))
-}
-
-// ---------------------------------------------------------------------------------------------------- HTTP
 
 /// The head of an HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,13 +209,6 @@ html[data-turbine-paired="no"] #turbine-pair-no{display:block;color:#F0907A}
 }
 
 // ---------------------------------------------------------------------------------------------------- frames
-
-pub const OP_CONTINUATION: u8 = 0x0;
-pub const OP_TEXT: u8 = 0x1;
-pub const OP_BINARY: u8 = 0x2;
-pub const OP_CLOSE: u8 = 0x8;
-pub const OP_PING: u8 = 0x9;
-pub const OP_PONG: u8 = 0xA;
 
 /// One frame as read from the wire, unmasked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,11 +488,11 @@ const HELPER_VERSION_FILE: &str = "bridge-helper-version";
 /// The first helper version that knows "open" (opens a Nexus page in a new tab).
 pub const OPEN_SINCE: &str = "0.53";
 /// The first helper version that knows "reload" (reloads itself from its folder with chrome.runtime.reload()).
+pub const RELOAD_SINCE: &str = "0.54";
 /// The helper version that knows the sign-in request (0.55).
 pub const SIGNIN_SINCE: &str = "0.55";
 /// The helper version with its own sign-in page (0.59): it opens that page itself when asked for the sign-in.
 pub const SIGNIN_PAGE_SINCE: &str = "0.59";
-pub const RELOAD_SINCE: &str = "0.54";
 /// What the player does once when the helper is too old to reload itself.
 pub const OLD_HELPER_TEXT: &str =
     "Your browser helper is out of date. In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper.";
@@ -942,7 +863,7 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
     loop {
         let frame = match read_frame(&mut stream, MAX_MESSAGE) {
             Ok(f) => f,
-            Err(FrameError::Io(k)) if matches!(k, io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {
+            Err(FrameError::Io(io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut)) => {
                 if !hello {
                     log("Browser helper didn't say hello in time");
                     close(1008, "hello first");
@@ -1385,8 +1306,6 @@ pub fn base64url_decode(s: &str) -> Option<Vec<u8>> {
 /// Turbine's version for the welcome message (set once at start).
 pub static VERSION: OnceLock<String> = OnceLock::new();
 
-// ---------------------------------------------------------------------------------------------------- tests
-
 // ------------------------------------------------------------------------------------------------ the open guard
 
 /// The guard against opening the same page twice while the browser is still coming up (launch.rs): `opened` holds
@@ -1496,33 +1415,6 @@ pub fn copy_helper(from: &Path, to: &Path) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex(b: &[u8]) -> String {
-        b.iter().map(|x| format!("{x:02x}")).collect()
-    }
-
-    #[test]
-    fn sha1_matches_the_standard_vectors() {
-        assert_eq!(hex(&sha1(b"")), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
-        assert_eq!(hex(&sha1(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(
-            hex(&sha1(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")),
-            "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
-        );
-        assert_eq!(hex(&sha1(&vec![b'a'; 1_000_000])), "34aa973cd4c4daa4f61eeb2bdbad27316534016f");
-        // Lengths around the 55/56/64 byte padding edges.
-        assert_eq!(hex(&sha1(&[b'x'; 55])), hex(&sha1(&[b'x'; 55])));
-        assert_ne!(hex(&sha1(&[b'x'; 56])), hex(&sha1(&[b'x'; 57])));
-        assert_eq!(hex(&sha1(b"The quick brown fox jumps over the lazy dog")), "2fd4e1c67a2d28fced849ee1bb76e7391b93eb12");
-    }
-
-    #[test]
-    fn base64_matches_rfc_4648() {
-        for (i, o) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
-            assert_eq!(base64(i.as_bytes()), o);
-        }
-        assert_eq!(base64(&[0xFB, 0xFF]), "+/8=");
-    }
 
     #[test]
     fn handshake_accept_matches_rfc_6455() {
@@ -2090,7 +1982,7 @@ mod tests {
     #[test]
     fn the_account_name_comes_from_a_session_token() {
         let mk = |payload: &str| {
-            let b = base64(payload.as_bytes()).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
+            let b = turbine_engine::thunderstore::base64_encode(payload.as_bytes()).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
             SigninCookie { name: "t".into(), value: format!("eyJhbGciOiJIUzI1NiJ9.{b}.sig"), host: "nexusmods.com".into(), host_only: false, path: "/".into(), secure: true, http_only: true, same_site: 0, expires: 0.0 }
         };
         assert_eq!(signin_name(&[mk(r#"{"user":{"id":1,"username":"Ravenor907"}}"#)]).as_deref(), Some("Ravenor907"));

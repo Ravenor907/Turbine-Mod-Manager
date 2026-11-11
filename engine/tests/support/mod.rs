@@ -1,4 +1,4 @@
-//! Helpers shared by the archive, installer, plugin and profile tests.
+//! Helpers shared by the test files: temp folders, test data, small archives, fake games and plugins.
 #![allow(dead_code)]
 
 use std::fs;
@@ -87,6 +87,36 @@ pub fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
 pub fn write_zip(path: &Path, files: &[(&str, &[u8])]) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, zip_bytes(files)).unwrap();
+}
+
+/// `write_zip` for text entries.
+pub fn write_zip_text(path: &Path, files: &[(&str, &str)]) {
+    let bytes: Vec<(&str, &[u8])> = files.iter().map(|(n, d)| (*n, d.as_bytes())).collect();
+    write_zip(path, &bytes);
+}
+
+/// A fresh empty folder under the system temp folder. Not removed afterwards.
+pub fn scratch(tag: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static N: AtomicUsize = AtomicUsize::new(0);
+    let p = std::env::temp_dir().join(format!("turbine-s-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+    let _ = fs::remove_dir_all(&p);
+    fs::create_dir_all(&p).unwrap();
+    p
+}
+
+/// A file in tests/data.
+pub fn data(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
+}
+
+/// The text of a file in tests/data.
+pub fn data_text(name: &str) -> String {
+    fs::read_to_string(data(name)).unwrap()
+}
+
+pub fn has_bash() -> bool {
+    std::process::Command::new("bash").arg("--version").output().is_ok()
 }
 
 /// The first bytes of a 7z file; the rest doesn't matter to the fake reader.

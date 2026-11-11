@@ -1,8 +1,7 @@
 //! Break tests: the messy situations real SteamOS handhelds produce, thrown at game detection and deploys.
 //!
-//! A test marked `#[ignore = "DEFECT: ..."]` shows a real problem that is not fixed yet; it fails when run with
-//! `--ignored`. Everything else must pass. Tests that rely on file permissions say so when they run as root,
-//! because root ignores permissions and such a test would prove nothing.
+//! Tests that rely on file permissions say so when they run as root, because root ignores permissions and such a
+//! test would prove nothing.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -626,8 +625,7 @@ fn staged_file_gone_then_recover_puts_everything_back() {
 }
 
 /// Turbine stops halfway, then the mod is removed (its staged files move or are deleted) before the next start.
-/// Recovery only recognizes placed files by comparing with the staged file, so the placed mod file is no longer
-/// known and the game's own file stays stranded in backups.
+/// Recovery must still bring back the game's own files.
 #[test]
 fn stop_then_staged_source_gone_strands_game_file() {
     let w = world("strand");
@@ -654,7 +652,8 @@ fn stop_then_staged_source_gone_strands_game_file() {
 fn stop_inside_a_step_is_recovered() {
     // (1) the game file was moved to backups, the mod file not placed yet.
     // (2) the copy was written to its temporary name but not renamed into place.
-    for stage in 1..=2 {
+    // (3) the copy was put in place but not recorded.
+    for stage in 1..=3 {
         let w = world(&format!("midstep{stage}"));
         let before = snapshot(&w.paths.game);
         let wanted = vec![one(&w, "Data/Skyrim.esm", "mod esm"), one(&w, "Data/zzz.esp", "mod zzz")];
@@ -665,20 +664,30 @@ fn stop_inside_a_step_is_recovered() {
         let target = w.paths.game.join("Data/Skyrim.esm");
         fs::create_dir_all(backup.parent().unwrap()).unwrap();
         fs::rename(&target, &backup).unwrap();
+        let src = w.staged.join("single/Data_Skyrim.esm");
         if stage == 2 {
-            fs::copy(w.staged.join("single/Data_Skyrim.esm"), target.with_extension("turbine-tmp")).unwrap();
+            fs::copy(&src, target.with_extension("turbine-tmp")).unwrap();
+        }
+        if stage == 3 {
+            fs::copy(&src, &target).unwrap();
+            let f = fs::File::options().write(true).open(&target).unwrap();
+            f.set_modified(fs::metadata(&src).unwrap().modified().unwrap()).unwrap();
         }
         recover(&w.paths).unwrap();
-        assert_eq!(snapshot(&w.paths.game), before, "stage {stage}");
+        // A copy already in place is kept; anything less is undone.
+        if stage < 3 {
+            assert_eq!(snapshot(&w.paths.game), before, "stage {stage}");
+        }
+        assert!(!target.with_extension("turbine-tmp").exists(), "stage {stage}");
         apply(&w.paths, &wanted, None).unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "mod esm", "stage {stage}");
         apply(&w.paths, &[], None).unwrap();
         assert_eq!(snapshot(&w.paths.game), before, "stage {stage}");
     }
 }
 
-/// The SD card holding the game is pulled, the player turns a mod off, then puts the card back.
-/// Turbine recreates the game's path on internal storage and moves the game's original file there; on SteamOS
-/// /run/media is a RAM disk, so that file is gone at the next reboot. The record also forgets every placed file.
+/// The SD card holding the game is pulled, the player turns a mod off, then puts the card back. The game's path must
+/// not be recreated on internal storage (on SteamOS /run/media is a RAM disk), and the game must come back whole.
 #[test]
 fn sd_card_pulled_between_deploys() {
     let w = world("sdpull");
@@ -750,7 +759,7 @@ fn plan_text(ops: &[String]) -> String {
 }
 
 /// A plan.json that was tampered with (or damaged in just the wrong way) must not delete or move anything outside
-/// the game folder. Recovery trusts every path in it.
+/// the game folder.
 #[test]
 fn tampered_plan_cannot_touch_outside() {
     let w = world("plan-tamper");
@@ -797,7 +806,7 @@ fn tampered_record_cannot_touch_outside() {
     assert_eq!(snapshot(&w.outside), outside_before, "files outside the game folder were deleted or moved");
 }
 
-/// Paths handed to apply() are not checked either; anything with ".." or a leading "/" lands outside the game.
+/// Paths handed to apply() with ".." or a leading "/" are refused.
 #[test]
 fn wanted_paths_cannot_leave_the_game_folder() {
     let w = world("wanted-escape");
@@ -807,12 +816,13 @@ fn wanted_paths_cannot_leave_the_game_folder() {
         one(&w, &format!("{}/abs.txt", w.outside.display()), "escaped"),
     ];
     let outside_before = snapshot(&w.outside);
-    let _ = apply(&w.paths, &wanted, None);
+    let r = apply(&w.paths, &wanted, None);
+    assert!(r.is_err(), "paths outside the game folder must be refused");
     assert_eq!(snapshot(&w.outside), outside_before, "files were written outside the game folder");
 }
 
-/// Backup names are chosen when planning; two in one plan can get the same name. Game files "x" and "x.1" with an
-/// older backup of "x" still there: "x" gets backup "x.1", and so does the game's own "x.1", which then overwrites it.
+/// Backup names are chosen when planning, so two in one plan must not get the same name. Game files "x" and "x.1"
+/// with an older backup of "x" still there: each needs its own backup.
 #[test]
 fn backup_names_never_collide() {
     let w = world("collide");

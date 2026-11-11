@@ -1,16 +1,10 @@
 import QtQuick
 import QtQuick.Shapes
 
-// "Add mods": a side sheet listing the zip files in Downloads (name, size, how old), the focused one with A Add.
-// When there are none it says how to get one, and a plain line says that browsing mods online comes later.
-// It fills its parent; show and hide it with visible.
+// "Add from Downloads" (and "Open a loadout file"): a side sheet listing files (name, size, how old), the focused one
+// with A and its action. When there are none it says how to get one. It fills its parent; show and hide it with visible.
 //
-// ui (required): an object that gives
-//   ui.c          colors: ground, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo,
-//                 onAccent, focusFill, ok, warn, light (bool); stop is optional (a fallback is used without it)
-//   ui.px(n)      design pixels to screen pixels
-//   ui.titleFont  font family for titles
-//   ui.bodyFont   font family for everything else
+// ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
 Overlay {
     id: root
     onOutsideTapped: root.closed()
@@ -34,7 +28,6 @@ Overlay {
     property int focusIndex: 0
     property string actionLabel: "Add"
     property string emptyText: "No mod files in Downloads yet."
-    property string laterText: ""
     // Y's action as a button too (touch has no Y): "Find", the pop-up that chooses which files show (0.61).
     property string otherLabel: ""
     signal otherClicked()
@@ -105,27 +98,12 @@ Overlay {
             Rectangle { width: parent.width; height: Math.max(1, root.ui.px(1)); color: root.ui.c.line }
         }
 
-        // The plain line about what comes later, pinned to the bottom of the sheet.
-        Text {
-            id: laterLine
-            visible: text !== ""
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: root.ui.px(14)
-            x: root.ui.px(18)
-            width: parent.width - root.ui.px(32)
-            text: root.laterText || ""
-            wrapMode: Text.WordWrap
-            color: root.ui.c.muted
-            font.family: root.ui.bodyFont
-            font.pixelSize: root.ui.fpx(14)
-        }
-
         ListView {
             id: fileList
             visible: root.count > 0
             anchors.top: head.bottom
             anchors.topMargin: root.ui.px(8)
-            anchors.bottom: laterLine.visible ? laterLine.top : parent.bottom
+            anchors.bottom: parent.bottom
             anchors.bottomMargin: root.ui.px(10)
             x: root.ui.px(14)
             width: parent.width - root.ui.px(26)
@@ -258,29 +236,6 @@ Overlay {
                 font.family: root.ui.bodyFont
                 font.pixelSize: root.ui.fpx(15)
             }
-        }
-    }
-
-    // A controller button drawn as a small cap.
-    component KeyCap: Rectangle {
-        required property var ui
-        property string k: ""
-        implicitWidth: Math.max(ui.px(24), capLabel.implicitWidth + ui.px(12))
-        implicitHeight: ui.px(24)
-        width: implicitWidth
-        height: implicitHeight
-        radius: k.length > 1 ? ui.px(6) : height / 2
-        color: ui.c.raised
-        border.color: ui.c.accentLo
-        border.width: Math.max(1, ui.px(1))
-        Text {
-            id: capLabel
-            anchors.centerIn: parent
-            text: parent.k.toUpperCase()
-            color: parent.ui.c.text
-            font.family: parent.ui.bodyFont
-            font.pixelSize: parent.ui.fpx(14)
-            font.bold: true
         }
     }
 }

@@ -1,76 +1,16 @@
 //! Basic support: where a mod for a game without rules of its own goes (basic::place), the refused table, and the
 //! store's placement flow (asking, remembering, moving, skipping the game's own files).
 
+mod support;
+
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
+use support::{TempDir, write_zip_text as write_zip};
 use turbine_engine::basic::{self, GameIndex, Placement};
 use turbine_engine::games::{Game, Runtime, Store as Launcher};
 use turbine_engine::rules::{GameRules, Support};
 use turbine_engine::store::{Import, Store};
-use turbine_engine::zip::crc32;
-
-struct TempDir(PathBuf);
-impl TempDir {
-    fn new(tag: &str) -> TempDir {
-        let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let p = std::env::temp_dir().join(format!("turbine-basic-{tag}-{}-{n}", std::process::id()));
-        fs::create_dir_all(&p).unwrap();
-        TempDir(p)
-    }
-}
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn write_zip(path: &Path, files: &[(&str, &str)]) {
-    let mut out = Vec::new();
-    let mut central = Vec::new();
-    for (name, data) in files {
-        let offset = out.len() as u32;
-        let crc = crc32(data.as_bytes());
-        let len = data.len() as u32;
-        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
-        out.extend_from_slice(&20u16.to_le_bytes());
-        out.extend_from_slice(&0x0800u16.to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(&[0; 4]);
-        out.extend_from_slice(&crc.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&len.to_le_bytes());
-        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
-        out.extend_from_slice(name.as_bytes());
-        out.extend_from_slice(data.as_bytes());
-        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&20u16.to_le_bytes());
-        central.extend_from_slice(&0x0800u16.to_le_bytes());
-        central.extend_from_slice(&0u16.to_le_bytes());
-        central.extend_from_slice(&[0; 4]);
-        central.extend_from_slice(&crc.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&len.to_le_bytes());
-        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        central.extend_from_slice(&[0; 8]);
-        central.extend_from_slice(&0u32.to_le_bytes());
-        central.extend_from_slice(&offset.to_le_bytes());
-        central.extend_from_slice(name.as_bytes());
-    }
-    let cd_offset = out.len() as u32;
-    out.extend_from_slice(&central);
-    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
-    out.extend_from_slice(&[0; 4]);
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-    out.extend_from_slice(&cd_offset.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    fs::create_dir_all(path.parent().unwrap()).unwrap();
-    fs::write(path, out).unwrap();
-}
 
 /// A game folder with these folders and files (a path ending in '/' is a folder).
 fn game_at(root: &Path, name: &str, folder: &str, store_id: &str, entries: &[&str]) -> Game {
@@ -330,7 +270,7 @@ fn refused_targets() {
     };
     // steam_api64.dll isn't at the game's top, so this one asks; the page's check lists the refused files.
     assert!(!pending.sure);
-    let (_, refused) = s.pending_conflicts(&pending, "", "").unwrap();
+    let (_, refused) = s.place_conflicts(&pending.files, "", "").unwrap();
     let refused: Vec<&str> = refused.iter().map(|(r, _)| r.as_str()).collect();
     assert!(refused.contains(&"BrassPier.exe") && refused.contains(&"steam_api64.dll") && refused.contains(&"EasyAntiCheat/eac.cfg"), "{refused:?}");
     let done = s.finish_place(*pending, "", "", true).unwrap();

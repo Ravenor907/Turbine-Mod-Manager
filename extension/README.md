@@ -30,8 +30,11 @@ In Turbine, open Settings, then Accounts, and choose **Pair again**. Turbine ope
 
 ## Tests
 
-From the repository folder, with Node 22 or newer (nothing to install):
+With Node 22 or newer (nothing to install), as the build runs them:
 
 ```
-node --test extension/test/test.js
+cd extension
+node test/test.js
 ```
+
+`test/handshake.js` also needs Turbine's stand-in (`tools/signin-standin.rs`, built by the build) in `TURBINE_STANDIN`.

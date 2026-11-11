@@ -92,6 +92,17 @@ pub(crate) fn checks(slot: &Slot, data: &Path) -> Vec<Check> {
 }
 
 /// What the rules JSON says about it (anygame::rules_extra adds these to "antiCheat").
+/// An anti-cheat mode as the interface and Steam's menu name it.
+pub(crate) fn mode_word(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Me3 => "me3",
+        Mode::Official => "official",
+        Mode::Offline => "offline",
+        Mode::Refuse => "refuse",
+        Mode::Warn => "warn",
+    }
+}
+
 pub(crate) fn json_fields(slot: &Slot, a: &AntiCheat) -> String {
     let mode = ac::mode(a);
     let name = title(slot);
@@ -103,13 +114,7 @@ pub(crate) fn json_fields(slot: &Slot, a: &AntiCheat) -> String {
             Some(AcState::LeftoverBackup(f)) => f,
             _ => String::new(),
         }),
-        quote(match mode {
-            Mode::Me3 => "me3",
-            Mode::Official => "official",
-            Mode::Offline => "offline",
-            Mode::Refuse => "refuse",
-            Mode::Warn => "warn",
-        }),
+        quote(mode_word(mode)),
         quote(a.me3_game().unwrap_or("")),
         ac::needs_ask(a),
         quote(&ac::ask_title(&name)),
@@ -151,7 +156,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
         "launch",
         &format!("{} through me3 {} outside Steam (offline, no anti-cheat): {} ({} natives)", slot.game.name, ac::ME3_VERSION, args.join(" "), natives.len()),
     );
-    let (prog, rest) = if Path::new("/.flatpak-info").exists() { (&args[0], &args[1..]) } else { (&args[2], &args[3..]) };
+    let (prog, rest) = if crate::system::in_flatpak() { (&args[0], &args[1..]) } else { (&args[2], &args[3..]) };
     match std::process::Command::new(prog).args(rest).stdin(std::process::Stdio::null()).spawn() {
         Ok(_) => true,
         Err(e) => {
@@ -166,12 +171,10 @@ pub(crate) fn through_steam(slot: &Slot) -> bool {
     slot.game.store == turbine_engine::games::Store::Steam && special(slot).is_some_and(|a| ac::mode(a) == Mode::Me3)
 }
 
-/// Turbine's Flatpak id, when it runs as one (the helper checks it is still installed).
-const FLATPAK_ID: &str = "io.github.ravenor907.TurbineModManager";
-
 /// The helper in Turbine's data folder, written again when it changed. Logged.
 pub(crate) fn ensure_helper(data: &Path) {
-    let id = Path::new("/.flatpak-info").exists().then_some(FLATPAK_ID);
+    // Turbine's Flatpak id, when it runs as one (the helper checks it is still installed).
+    let id = crate::system::in_flatpak().then_some(crate::APP_ID);
     match ac::write_helper(data, id) {
         Ok(true) => crate::log::line("launch", &format!("Steam launch helper written: {}", ac::helper_path(data).display())),
         Ok(false) => {}
@@ -678,14 +681,14 @@ impl qobject::Turbine {
             "Install the Visual C++ runtime",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 use turbine_engine::vcrun;
-                let mut prog = crate::actions::progress_for(qt);
+                let mut prog = crate::actions::progress(qt);
                 let exe = match net.fetch_vc_redist(&mut prog) {
                     Ok(e) => e,
-                    Err(e) => return crate::actions::say_for(qt, format!("Couldn't get the Visual C++ runtime: {e}"), "error"),
+                    Err(e) => return crate::actions::say(qt, format!("Couldn't get the Visual C++ runtime: {e}"), "error"),
                 };
                 let fail = |words: String| {
                     crate::log::line("vcrun", &words);
-                    crate::actions::say_for(qt, words, "error");
+                    crate::actions::say(qt, words, "error");
                 };
                 let Some(root) = steam_root() else { return fail("Steam's folder wasn't found, so Proton can't be started.".into()) };
                 let libs = turbine_engine::compat_tool::library_folders(&root);
@@ -699,7 +702,7 @@ impl qobject::Turbine {
                 if let Err(e) = vcrun::set_overrides(&prefix) {
                     return fail(format!("Couldn't tell Proton to use Microsoft's runtime: {e}"));
                 }
-                crate::actions::say_for(qt, "Installing the Visual C++ runtime into the game's Proton setup (about a minute)...", "work");
+                crate::actions::say(qt, "Installing the Visual C++ runtime into the game's Proton setup (about a minute)...", "work");
                 let compat = prefix.parent().map(Path::to_path_buf).unwrap_or_else(|| prefix.clone());
                 let args = vcrun::install_args(&compat, &root, &runtime, &proton, &exe);
                 crate::log::line("vcrun", &format!("Running: {}", args.join(" ")));
@@ -716,7 +719,7 @@ impl qobject::Turbine {
                 let after = vcrun::state(Some(&prefix));
                 crate::log::line("vcrun", &format!("After the installer: {}", after.words()));
                 if !after.needs_install() {
-                    crate::actions::say_for(qt, format!("The Visual C++ runtime is installed for {}. RED4ext and Cyber Engine Tweaks can load now.", game.name), "ok");
+                    crate::actions::say(qt, format!("The Visual C++ runtime is installed for {}. RED4ext and Cyber Engine Tweaks can load now.", game.name), "ok");
                 } else if !vcrun::installer_ok(code) {
                     fail(vcrun::installer_words(code));
                 } else {
@@ -734,18 +737,18 @@ impl qobject::Turbine {
         self.net_send(
             "Install me3",
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let mut prog = crate::actions::progress_for(qt);
+                let mut prog = crate::actions::progress(qt);
                 match net.fetch_me3(&data, &mut prog) {
                     Ok(_) => {
-                        crate::actions::say_for(qt, "me3 is installed.", "ok");
+                        crate::actions::say(qt, "me3 is installed.", "ok");
                         let id = game.id();
-                        crate::actions::post_for(qt, move |t| {
+                        crate::actions::set(qt, move |t| {
                             if then_play {
                                 t.play(&QString::from(id.as_str()));
                             }
                         });
                     }
-                    Err(e) => crate::actions::say_for(qt, format!("Couldn't get me3: {e}"), "error"),
+                    Err(e) => crate::actions::say(qt, format!("Couldn't get me3: {e}"), "error"),
                 }
             }),
         );
@@ -762,17 +765,17 @@ impl qobject::Turbine {
         self.net_send(
             "Install Seamless Co-op",
             Box::new(move |net: &mut Net, qt: &Qt| {
-                let mut prog = crate::actions::progress_for(qt);
+                let mut prog = crate::actions::progress(qt);
                 match net.fetch_seamless(have.as_deref(), &mut prog) {
                     Ok((Some(f), words)) => {
                         crate::log::line("net", &words);
                         // 0.62: the toast names the version that is coming.
-                        crate::actions::say_for(qt, format!("Getting {}...", f.label), "work");
+                        crate::actions::say(qt, format!("Getting {}...", f.label), "work");
                         let g = game.clone();
-                        crate::actions::post_for(qt, move |t| t.add_fetched(g, f));
+                        crate::actions::set(qt, move |t| t.add_fetched(g, f));
                     }
-                    Ok((None, words)) => crate::actions::say_for(qt, words, "ok"),
-                    Err(e) => crate::actions::say_for(qt, format!("Couldn't get Seamless Co-op: {e}"), "error"),
+                    Ok((None, words)) => crate::actions::say(qt, words, "ok"),
+                    Err(e) => crate::actions::say(qt, format!("Couldn't get Seamless Co-op: {e}"), "error"),
                 }
             }),
         );

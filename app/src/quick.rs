@@ -50,15 +50,8 @@ pub fn run(req: Result<Request, String>) -> i32 {
 
 /// Opens a steam:// link on the host (Steam passes it to the running Steam).
 fn open_steam_link(url: &str) {
-    use std::process::{Command, Stdio};
-    let mut cmd = if std::path::Path::new("/.flatpak-info").exists() {
-        let mut c = Command::new("flatpak-spawn");
-        c.arg("--host").arg("steam");
-        c
-    } else {
-        Command::new("steam")
-    };
-    match cmd.arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+    use std::process::Stdio;
+    match crate::system::host("steam").arg(url).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
         Ok(_) => crate::log::line("quick", &format!("Co-op tile: opened {url}")),
         Err(e) => crate::log::line("quick", &format!("Co-op tile: couldn't open {url}: {e}")),
     }
@@ -74,7 +67,7 @@ fn from_tile(answer: Option<&Json>, ok: bool) {
     let data = backend::data_home();
     let folder = crate::log::folder(&data);
     let game = std::env::args().skip_while(|a| a != "--play-coop").nth(1).unwrap_or_default();
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let now = crate::now_secs();
     let sent = answer.and_then(|v| v.get("sent")).and_then(Json::as_bool) == Some(true);
     let waiting = answer.and_then(|v| v.get("waiting")).and_then(Json::as_bool) == Some(true);
     if !sent && !waiting {
@@ -142,14 +135,7 @@ fn answer(r: &Request) -> String {
 fn ac_word(rules: &GameRules) -> (String, bool) {
     let Some(a) = rules.anti_cheat.as_ref() else { return (String::new(), false) };
     let m = ac::mode(a);
-    let word = match m {
-        Mode::Me3 => "me3",
-        Mode::Official => "official",
-        Mode::Offline => "offline",
-        Mode::Refuse => "refuse",
-        Mode::Warn => "warn",
-    };
-    (word.to_string(), m == Mode::Me3 && a.me3_game() == Some("eldenring"))
+    (crate::anticheat::mode_word(m).to_string(), m == Mode::Me3 && a.me3_game() == Some("eldenring"))
 }
 
 fn status(game: &Game, data: &std::path::Path, open: bool, turbine_url: &str) -> String {
@@ -189,7 +175,7 @@ fn open_turbine(action: Action, game: &Game, open: bool, folder: &std::path::Pat
             Err(e) => q::answer_json(false, &format!("Turbine is open but didn't answer ({e}). Switch to it with the Steam button."), &format!(",\"turbineUrl\":{}", quote(turbine_url))),
         };
     }
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let now = crate::now_secs();
     if let Err(e) = q::write_request(folder, action, &game.id(), now) {
         return q::answer_json(false, &format!("Couldn't ask Turbine to open {}: {e}", game.name), "");
     }
@@ -281,7 +267,7 @@ fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
                 // 0.62: the co-op start waits for Turbine's window, which opens Co-op settings on the password (the
                 // plugin and the tile start Turbine through Steam with `turbineUrl`).
                 let folder = crate::log::folder(&backend::data_home());
-                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let now = crate::now_secs();
                 let waiting = q::write_request(&folder, Action::PlayCoop, &game.id(), now).is_ok();
                 let url = turbine_engine::shortcuts::find_turbine(&turbine_engine::home_dir()).map(|(id, _)| turbine_engine::shortcuts::rungameid_url(id)).unwrap_or_default();
                 return q::answer_json(false, crate::modsettings::NEEDS_PASSWORD, &format!(",\"needsTurbine\":true,\"password\":false,\"waiting\":{waiting},\"turbineUrl\":{}", quote(&url)));

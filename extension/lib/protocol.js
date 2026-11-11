@@ -329,7 +329,6 @@
   };
 
   const api = {
-    PROTOCOL_VERSION,
     PORT_MIN,
     PORT_MAX,
     isNexusHost,
@@ -340,11 +339,8 @@
     isSigninId,
     isNexusCookieDomain,
     nexusCookies,
-    isCloudflareCookie,
     SIGNIN_URL,
-    SIGNIN_COOKIE_NAMES,
     KEY_PAGE_URL,
-    SIGNIN_STEPS,
     signedInJar,
     isSigninPage,
     isKeyPage,

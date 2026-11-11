@@ -10,7 +10,7 @@ p { margin: 0 0 8px; }
 .muted { color: #A08C68; font-size: 15px; }
 .line { display: flex; align-items: center; gap: 10px; }
 .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: #6B5A3E; }
-.dot.ok { background: #7FA35A; } .dot.busy { background: #C99E52; } .dot.warn { background: #E0A33A; } .dot.stop { background: #C8553D; }
+.dot.ok { background: #7FA35A; } .dot.busy { background: #C99E52; } .dot.warn { background: #E0A33A; }
 .bar { height: 10px; border-radius: 6px; background: #2A2216; overflow: hidden; }
 .bar > div { height: 100%; background: #C99E52; width: 0; }
 button { min-height: 44px; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; background: #C99E52; color: #0B0A08; border: 1px solid #EDC87A; }

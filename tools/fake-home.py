@@ -2,7 +2,7 @@
 """Builds a fake SteamOS home folder for the build's screenshot checks: an internal Steam library, an SD card library,
 Heroic (Flatpak) with Epic, GOG and a game added by hand, and a few small test mods as zip files in Downloads. Cover art
 is plain generated pictures, never real art, and the mods are made up (their "code" is a few placeholder bytes).
-Usage: fake-home.py <folder>"""
+Usage: fake-home.py <folder> [--anticheat]"""
 import json
 import os
 import struct

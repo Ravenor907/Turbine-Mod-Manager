@@ -1,7 +1,14 @@
 //! MD5 (for Nexus's md5_search): the test suite of RFC 1321, appendix A.5, plus pieces fed in odd sizes and files.
 
 use std::fs;
-use turbine_engine::md5::{is_md5_hex, md5_file, md5_hex, Md5};
+use turbine_engine::md5::{md5_file, Md5};
+use turbine_engine::sha256::hex;
+
+fn md5_hex(data: &[u8]) -> String {
+    let mut m = Md5::new();
+    m.update(data);
+    hex(&m.finish())
+}
 
 const RFC_VECTORS: &[(&str, &str)] = &[
     ("", "d41d8cd98f00b204e9800998ecf8427e"),
@@ -32,8 +39,7 @@ fn pieces_of_any_size_give_the_same_hash() {
         for chunk in data.chunks(step) {
             m.update(chunk);
         }
-        let hex: String = m.finish().iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(hex, whole, "fed {step} bytes at a time");
+        assert_eq!(hex(&m.finish()), whole, "fed {step} bytes at a time");
     }
     // Lengths around the padding edge (55, 56, 64 bytes) agree with feeding all at once.
     for len in [55usize, 56, 57, 63, 64, 65, 119, 120] {
@@ -41,19 +47,15 @@ fn pieces_of_any_size_give_the_same_hash() {
         let mut m = Md5::new();
         m.update(&d[..len / 2]);
         m.update(&d[len / 2..]);
-        let hex: String = m.finish().iter().map(|b| format!("{b:02x}")).collect();
-        assert_eq!(hex, md5_hex(&d));
+        assert_eq!(hex(&m.finish()), md5_hex(&d));
     }
 }
 
 #[test]
-fn files_and_hex_checks() {
+fn files_are_hashed_in_pieces() {
     let p = std::env::temp_dir().join(format!("turbine-md5-{}", std::process::id()));
     fs::write(&p, b"message digest").unwrap();
     assert_eq!(md5_file(&p).unwrap(), "f96b697d7cb7938d525a2f31aaf161d0");
     let _ = fs::remove_file(&p);
     assert!(md5_file(&p).is_err());
-    assert!(is_md5_hex("D41D8CD98F00B204E9800998ECF8427E"));
-    assert!(!is_md5_hex("d41d8cd98f00b204e9800998ecf8427"));
-    assert!(!is_md5_hex("g41d8cd98f00b204e9800998ecf8427e"));
 }

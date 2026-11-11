@@ -95,8 +95,8 @@ dlcRequirements { notes gameExpansion { id name } } } } } }";
         ("details", nexus::details_body("witcher3", 5)),
         ("requirements", nexus::requirements_body("witcher3", 5)),
         ("files", nexus::files_body(952, 5)),
-        ("search", nexus::search_body("witcher3", "torch", SearchSort::Trending, 0, 30, false)),
-        ("search 100", nexus::search_body("witcher3", "", SearchSort::Endorsements, 0, 100, false)),
+        ("search", nexus::search_body_in("witcher3", "torch", "", SearchSort::Trending, 0, 30, false, turbine_engine::nxm::now())),
+        ("search 100", nexus::search_body_in("witcher3", "", "", SearchSort::Endorsements, 0, 100, false, turbine_engine::nxm::now())),
         ("updates", nexus::by_id_body("witcher3", &(1..=50).collect::<Vec<u64>>())),
         ("games", turbine_engine::nexus_games::games_search_body("skyrim")),
     ];
@@ -122,9 +122,9 @@ fn write_bodies_for_the_live_check() {
     let Ok(dir) = std::env::var("TURBINE_QUERY_OUT") else { return };
     std::fs::create_dir_all(&dir).unwrap();
     let write = |name: &str, body: String| std::fs::write(format!("{dir}/{name}.json"), body).unwrap();
-    write("search-witcher3", nexus::search_body("witcher3", "", SearchSort::Trending, 0, 30, false));
-    write("search-newest-witcher3", nexus::search_body("witcher3", "", SearchSort::Newest, 0, 30, false));
-    write("search-text-skyrimspecialedition", nexus::search_body("skyrimspecialedition", "lantern", SearchSort::Endorsements, 0, 30, false));
+    write("search-witcher3", nexus::search_body_in("witcher3", "", "", SearchSort::Trending, 0, 30, false, turbine_engine::nxm::now()));
+    write("search-newest-witcher3", nexus::search_body_in("witcher3", "", "", SearchSort::Newest, 0, 30, false, turbine_engine::nxm::now()));
+    write("search-text-skyrimspecialedition", nexus::search_body_in("skyrimspecialedition", "lantern", "", SearchSort::Endorsements, 0, 30, false, turbine_engine::nxm::now()));
     write("search-category-skyrimspecialedition", nexus::search_body_in("skyrimspecialedition", "", "Weapons", SearchSort::Endorsements, 0, 30, false, 0));
     write("details-witcher3-1021", nexus::details_body("witcher3", 1021));
     write("requirements-skyrimspecialedition-12604", nexus::requirements_body("skyrimspecialedition", 12604));

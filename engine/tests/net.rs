@@ -2,18 +2,14 @@
 //! whole request path run against a stand-in curl script that serves files from a folder. Also Heroic's cover art,
 //! which is found by the SHA-256 of the image URL.
 
+mod support;
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use support::scratch;
 use turbine_engine::net::{self, Body, Client, Expect, NetError, Request};
 use turbine_engine::sha256::{self, Sha256};
-
-fn scratch(tag: &str) -> PathBuf {
-    let p = std::env::temp_dir().join(format!("turbine-net-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&p);
-    fs::create_dir_all(&p).unwrap();
-    p
-}
 
 /// A stand-in for curl: serves `served/<url as a file name>`, with optional .status, .headers, .effective and .exit
 /// files next to it, and logs every URL it was asked for.
@@ -262,11 +258,7 @@ fn headers_of_the_last_answer_count() {
 }
 
 #[test]
-fn versions_have_one_dot() {
-    assert_eq!(net::short_version("0.3.0"), "0.3");
-    assert_eq!(net::short_version("0.31.0"), "0.31");
-    assert_eq!(net::short_version("1.0.0"), "1.0");
-    assert_eq!(net::short_version("0.3"), "0.3");
+fn user_agent_names_the_version() {
     assert_eq!(Client::new("0.3", Path::new("/tmp")).user_agent, "TurbineModManager/0.3");
 }
 

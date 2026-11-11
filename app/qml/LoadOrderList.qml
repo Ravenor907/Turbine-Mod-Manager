@@ -3,8 +3,8 @@ import QtQuick.Shapes
 
 // The Load order tab (Skyrim): the game's plugins in the order they load, each ON or OFF, with Master and Light
 // marked, the game's own files fixed at the top, and a warning on plugins whose masters are missing. Sort
-// automatically sits above the list (focus index -1). Main.qml handles the keys: A turns a plugin on or off, X Move moves
-// it, X shows a plugin's details, A on Sort automatically sorts (with LOOT's masterlist when it can be had). Plugins
+// automatically sits above the list (focus index -1). Main.qml handles the keys: A turns a plugin on or off, X opens its
+// options (Move, Details, Go to its mod), A on Sort automatically sorts (with LOOT's masterlist when it can be had). Plugins
 // LOOT has notes on carry a badge: "Problem" (red), "Needs cleaning" or "Warning" (amber), "Note".
 Item {
     id: lo
@@ -132,7 +132,7 @@ Item {
                         width: Math.min(implicitWidth, row.width * 0.4)
                         elide: Text.ElideRight
                     }
-                    // Which of your mods put it there.
+                    // The plugin file, after the name of the mod that put it there.
                     Text {
                         readonly property string from: lo.owners[(row.p.name || "").toLowerCase()] || ""
                         visible: from !== ""
@@ -144,7 +144,7 @@ Item {
                         elide: Text.ElideRight
                     }
                     Repeater {
-                        model: row.p.fixed ? [["Base game", ""]] : row.p.master ? [["Master", ""]] : []
+                        model: (row.p.fixed ? [["Base game", ""]] : row.p.master ? [["Master", ""]] : [])
                             .concat(row.p.unreadable ? [["Can't be read", "warn"]] : [])
                             .concat((row.p.missing || []).length > 0 ? [["Needs " + row.p.missing.join(", "), "warn"]] : [])
                             .concat(lo.lootBadge(row.p.name) ? [lo.lootBadge(row.p.name)] : [])

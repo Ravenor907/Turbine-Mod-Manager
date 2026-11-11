@@ -116,17 +116,6 @@ impl Md5 {
     }
 }
 
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// The MD5 of some bytes, as 32 lowercase hex digits.
-pub fn md5_hex(data: &[u8]) -> String {
-    let mut m = Md5::new();
-    m.update(data);
-    hex(&m.finish())
-}
-
 /// The MD5 of a file, read in pieces, as 32 lowercase hex digits.
 pub fn md5_file(path: &Path) -> io::Result<String> {
     let mut f = File::open(path)?;
@@ -139,10 +128,5 @@ pub fn md5_file(path: &Path) -> io::Result<String> {
         }
         m.update(&buf[..n]);
     }
-    Ok(hex(&m.finish()))
-}
-
-/// Does this look like an MD5 in hex?
-pub fn is_md5_hex(s: &str) -> bool {
-    s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit())
+    Ok(crate::sha256::hex(&m.finish()))
 }

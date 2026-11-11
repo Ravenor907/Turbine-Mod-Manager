@@ -12,8 +12,9 @@ use crate::deploy::Report;
 use crate::json::{self, quote, Json};
 use crate::nexus;
 use crate::store::{folder_safe, SourceInfo, Store};
-use std::fs::{self, File};
-use std::io::{self, Write};
+use crate::write_atomic;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_PROFILE: &str = "Default";
@@ -32,19 +33,6 @@ pub struct Profiles {
     path: PathBuf,
     active: String,
     list: Vec<Profile>,
-}
-
-fn write_atomic(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(p) = path.parent() {
-        fs::create_dir_all(p)?;
-    }
-    let tmp = path.with_extension("json.tmp");
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(text.as_bytes())?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, path)
 }
 
 fn clean_profile_name(name: &str) -> Result<String, String> {
@@ -103,7 +91,7 @@ impl Profiles {
                 format!("{{\"name\":{},\"order\":[{}]}}", quote(&p.name), order.join(","))
             })
             .collect();
-        write_atomic(&self.path, &format!("{{\"version\":1,\"active\":{},\"profiles\":[\n{}\n]}}\n", quote(&self.active), items.join(",\n")))
+        write_atomic(&self.path, format!("{{\"version\":1,\"active\":{},\"profiles\":[\n{}\n]}}\n", quote(&self.active), items.join(",\n")).as_bytes())
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -314,7 +302,7 @@ pub fn export(profiles: &Profiles, store: &Store, name: &str, home: &Path) -> Re
         path = dir.join(format!("{base} ({n}).json"));
         n += 1;
     }
-    write_atomic(&path, &share_json(&share)).map_err(|e| format!("The share file couldn't be written ({e})."))?;
+    write_atomic(&path, share_json(&share).as_bytes()).map_err(|e| format!("The share file couldn't be written ({e})."))?;
     Ok(path)
 }
 

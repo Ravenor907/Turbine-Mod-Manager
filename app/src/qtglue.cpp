@@ -96,7 +96,6 @@ extern "C" void turbine_free_text(char *text)
 // and format 32, lines 146 to 157), GAMESCOPE_NO_FOCUS at lines 587 to 591, and the property set back to 0 when the
 // window hides at lines 652 to 657. Only Turbine's own overlay window (objectName "turbineHud") is ever touched.
 // Returns 1 when done, -1 when the window isn't there, -2 when Qt isn't on X11, -3 when this build has no X11.
-#include <QtGui/QWindow>
 #include <QtGui/qtguiglobal.h>
 #if QT_CONFIG(xcb) && __has_include(<X11/Xlib.h>)
 #include <QtGui/qguiapplication_platform.h>

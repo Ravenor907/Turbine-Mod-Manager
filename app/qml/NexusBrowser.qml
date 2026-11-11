@@ -74,7 +74,6 @@ Item {
         loader.active = Qt.binding(() => nb.live)
     }
     function focusPage() { if (view) view.forceActiveFocus() }
-    // Where a point in the page (CSS pixels) is in the window: for the build's scripted presses only.
     // The bar's touch targets and their sizes in design pixels ([name, "WxH"]), for the build's check (44 at least).
     function tapSizes() {
         const out = []

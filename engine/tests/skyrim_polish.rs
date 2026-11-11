@@ -87,9 +87,8 @@ const SKSE: &[&str] = &[
 
 #[test]
 fn skse_from_nexus_uses_the_loader_install_plan() {
-    let plan = loaders::plan_for_nexus(nexus::domain_for_store_id("489830").unwrap(), 30379).unwrap();
-    assert_eq!(plan, loaders::skse_plan());
-    assert!(loaders::plan_for_nexus("skyrimspecialedition", 12604).is_none());
+    assert_eq!(nexus::domain_for_store_id("489830"), Some(loaders::SKSE_NEXUS_DOMAIN));
+    let plan = loaders::skse_plan();
     // map_archive gives what the plan gives, plus the launcher swap the plan's hook asks for (Steam only).
     let mut from_plan: Vec<String> = SKSE.iter().filter_map(|f| plan.map_path(f)).collect();
     assert!(plan.hooks.iter().any(|h| matches!(h, Hook::LauncherSwap { original, .. } if original == "SkyrimSELauncher.exe")));

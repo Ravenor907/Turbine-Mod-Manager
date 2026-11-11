@@ -32,7 +32,6 @@
           ],
           key: false,
         };
-      case "sending":
       case "sent":
         return { cls: "wait", title: "Signing in to Turbine", text: g.text + offline, how: "", buttons: [], key: false };
       case "failed":

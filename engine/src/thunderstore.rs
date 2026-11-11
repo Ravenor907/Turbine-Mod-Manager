@@ -407,7 +407,6 @@ pub fn cache_path(cache_dir: &Path, community: &str) -> PathBuf {
 /// A loaded index and where it came from.
 #[derive(Clone, Debug)]
 pub struct Index {
-    pub community: String,
     pub packages: Vec<Package>,
     /// True when it was read from the saved copy instead of fetched now.
     pub from_cache: bool,
@@ -424,7 +423,7 @@ pub fn fetch_index(client: &Client, community: &str, cache_dir: &Path, force: bo
     let path = cache_path(cache_dir, community);
     if !force && cache_is_fresh(&path, SystemTime::now()) {
         if let Some(packages) = load_cache(&path) {
-            return Ok(Index { community: community.into(), packages, from_cache: true, note: None });
+            return Ok(Index { packages, from_cache: true, note: None });
         }
     }
     let fetched = client
@@ -443,11 +442,10 @@ pub fn fetch_index(client: &Client, community: &str, cache_dir: &Path, force: bo
             if let Err(e) = save_cache(&path, &packages) {
                 note = Some(format!("Couldn't save the Thunderstore list for next time ({e})."));
             }
-            Ok(Index { community: community.into(), packages, from_cache: false, note })
+            Ok(Index { packages, from_cache: false, note })
         }
         Err(e) => match load_cache(&path) {
             Some(packages) => Ok(Index {
-                community: community.into(),
                 packages,
                 from_cache: true,
                 note: Some(format!("{e} Showing the list saved earlier.")),
