@@ -164,7 +164,7 @@ for size in $SIZES; do
   SHOOT_ENV="--env=SteamGamepadUI=1" shoot "accountsgm-$size" "$size" accountsgm "$PWD/home"
   need "accountsgm-$size" "R5: Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, (keyFold|pasteKey, keyPage, nexusKey, keyWhat, signOut)$"
   if grep -Eq "Getting mods rows \(Game Mode true\):.*(, helper|, nxmHandler|, overlay|, browser(,|$))" "$PWD/data/accountsgm-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
-    echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::"; fail=1; fi
+    echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::10: own-browser rows aren't folded in Game Mode ($size)"; fail=1; fi
   # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
   cp2077=steam:1091500
   w3=steam:292030
@@ -444,22 +444,22 @@ need listbar-1280x800 "My mods pop-up legend (0.59: B is Done, X Clear all)" "My
 if ran "getmods-cyberpunk-1280x800"; then
 log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
-else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
+else echo "::error title=Cyberpunk's Get mods didn't show Cyberpunk mods::Cyberpunk's Get mods didn't show Cyberpunk mods"; (grep -h "Get mods\|net" "$log" | tail -n 10 || true); fail=1; fi
 fi
 if ran "getmods-start-1280x800"; then
 log="$PWD/data/getmods-start-1280x800/turbine-mod-manager/activity.log"
 if grep -q "categories" "$log"; then echo "::notice title=Get mods categories::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
-else echo "::error title=No categories in Get mods::"; fail=1; fi
+else echo "::error title=No categories in Get mods::No categories in Get mods"; fail=1; fi
 fi
 if ran "overlaps-1280x800"; then
 log="$PWD/data/overlaps-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Mod menu: .*Loses 1 file to Lantern Colors" "$log"; then echo "::notice title=Who wins::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
-else echo "::error title=The mod menu didn't say which mod wins the shared file::"; (grep -h "Mod menu\|shot" "$log" | tail -n 5 || true); fail=1; fi
+else echo "::error title=The mod menu didn't say which mod wins the shared file::The mod menu didn't say which mod wins the shared file"; (grep -h "Mod menu\|shot" "$log" | tail -n 5 || true); fail=1; fi
 fi
 if ran "quickexit-1280x800"; then
 log="$PWD/data/quickexit-1280x800/turbine-mod-manager/activity.log"
 if grep -q "closed after 12 seconds: offering a way back" "$log"; then echo "::notice title=Closed early::offered"
-else echo "::error title=No closed-early prompt::"; fail=1; fi
+else echo "::error title=No closed-early prompt::No closed-early prompt"; fail=1; fi
 fi
 fi
 for size in $SIZES; do
@@ -467,7 +467,7 @@ for size in $SIZES; do
   log="$PWD/data/check-kcd2-$size/turbine-mod-manager/activity.log"
   if grep -Eq "KCD1.* is made for Kingdom Come: Deliverance(;|$)" "$log"; then
     echo "::notice title=KCD II check $size::$(grep -h 'Check before Play' "$log" | head -n1 | cut -c1-200)"
-  else echo "::error title=KCD II check didn't flag the first game's mod ($size)::"; (grep -h "Check before Play\|Add " "$log" | tail -n 5 || true); fail=1; fi
+  else echo "::error title=KCD II check didn't flag the first game's mod ($size)::KCD II check didn't flag the first game's mod ($size)"; (grep -h "Check before Play\|Add " "$log" | tail -n 5 || true); fail=1; fi
   fi
 done
 if [ "$MODE" = 1280x800 ]; then
@@ -480,7 +480,7 @@ done
 if ran "playoptions-1280x800"; then
 log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Play options open: true" "$log"; then echo "::notice title=Play options::Play options opened"
-else echo "::error title=Play options didn't open::"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
+else echo "::error title=Play options didn't open::Play options didn't open"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
 fi
 # 0.52: A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
 # offer the missing script extender; KCD II rows say a first-game mod may not work; Witcher's clash offers
@@ -493,25 +493,25 @@ if ran "checkfocus-1280x800"; then
 log="$PWD/data/checkfocus-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Check before Play: Not now" "$log" && ! grep -q "Check before Play: Play anyway" "$log" && grep -q 'After A: sheet ""' "$log"; then
   echo "::notice title=Before you play::$(grep -h 'Check focus on\|After A' "$log" | head -n2 | tr '\n' ' ' | cut -c1-200)"
-else echo "::error title=A on Before you play didn't run the highlighted button::"; (grep -h "Check\|shot" "$log" | tail -n 10 || true); fail=1; fi
+else echo "::error title=A on Before you play didn't run the highlighted button::A on Before you play didn't run the highlighted button"; (grep -h "Check\|shot" "$log" | tail -n 10 || true); fail=1; fi
 fi
 if ran "menuskse-1280x800"; then
 log="$PWD/data/menuskse-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Mod menu: Get SKSE" "$log" && grep -Eq "Game menu: .*(Install|Get) SKSE" "$log"; then
   echo "::notice title=SKSE way back::$(grep -h 'Mod menu:' "$log" | head -n1 | cut -c1-200)"
-else echo "::error title=No way back to SKSE in the mod or game menu::"; (grep -h "menu:" "$log" | tail -n 4 || true); fail=1; fi
+else echo "::error title=No way back to SKSE in the mod or game menu::No way back to SKSE in the mod or game menu"; (grep -h "menu:" "$log" | tail -n 4 || true); fail=1; fi
 fi
 fi
 for size in $SIZES; do
   if ran "mods-kcd2-$size"; then
   log="$PWD/data/mods-kcd2-$size/turbine-mod-manager/activity.log"
   if grep -q "Row warnings: .*Fast Travel KCD1: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
-  else echo "::error title=KCD II row has no warning for the first game's mod ($size)::"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
+  else echo "::error title=KCD II row has no warning for the first game's mod ($size)::KCD II row has no warning for the first game's mod ($size)"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
   fi
   if ran "check-witcher-$size"; then
   log="$PWD/data/check-witcher-$size/turbine-mod-manager/activity.log"
   if grep -q "Check before Play buttons: .*Turn off Faster Roach" "$log"; then echo "::notice title=Witcher clash $size::$(grep -h 'Check before Play buttons' "$log" | head -n1 | cut -c1-200)"
-  else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
+  else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::Witcher clash doesn't offer turning off the newer mod ($size)"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
   fi
 done
 # 0.53: Game Mode's browser through Steam: with no shortcuts.vdf the check finds nothing and says so, and
@@ -521,7 +521,7 @@ for size in $SIZES; do
   log="$PWD/data/addbrowser-$size/turbine-mod-manager/activity.log"
   if grep -q "Recheck: no Chrome-family browser among Steam's non-Steam games" "$log" && grep -q "Showing Add Chrome to Steam" "$log"; then
     echo "::notice title=Add Chrome to Steam $size::$(grep -h 'Recheck:' "$log" | head -n1 | cut -c1-200)"
-  else echo "::error title=Add Chrome to Steam didn't show ($size)::"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
+  else echo "::error title=Add Chrome to Steam didn't show ($size)::Add Chrome to Steam didn't show ($size)"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
   fi
 done
 # 0.54: Labs > Activity log shows the log's lines.
@@ -529,13 +529,13 @@ for size in $SIZES; do
   if ran "activity-$size"; then
   log="$PWD/data/activity-$size/turbine-mod-manager/activity.log"
   if grep -Eq "Activity log open: [1-9][0-9]* lines" "$log"; then echo "::notice title=Activity log $size::$(grep -h 'Activity log open' "$log" | head -n1)"
-  else echo "::error title=The activity log sheet showed no lines ($size)::"; (grep -h "labs\|shot" "$log" | tail -n 6 || true); fail=1; fi
+  else echo "::error title=The activity log sheet showed no lines ($size)::The activity log sheet showed no lines ($size)"; (grep -h "labs\|shot" "$log" | tail -n 6 || true); fail=1; fi
   fi
   # Opening a file page on a free account says to press Slow download.
   if ran "slowhint-$size"; then
   log="$PWD/data/slowhint-$size/turbine-mod-manager/activity.log"
   if grep -q "Status: press Slow download on the page" "$log"; then echo "::notice title=Slow download hint $size::shown"
-  else echo "::error title=Opening a Nexus file page didn't say to press Slow download ($size)::"; (grep -h "catch\|browser" "$log" | tail -n 6 || true); fail=1; fi
+  else echo "::error title=Opening a Nexus file page didn't say to press Slow download ($size)::Opening a Nexus file page didn't say to press Slow download ($size)"; (grep -h "catch\|browser" "$log" | tail -n 6 || true); fail=1; fi
   fi
 done
 # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
@@ -620,7 +620,7 @@ for size in $SIZES; do
   if grep -q "Nexus browse without a key failed" "$log"; then
     echo "::notice title=Keyless fallback $size::$(grep -h 'Nexus browse without a key failed' "$log" | head -n1 | cut -c1-200)"
   else
-    echo "::error title=No fallback line in the activity log ($size)::"; (tail -n 20 "$log" || true); fail=1
+    echo "::error title=No fallback line in the activity log ($size)::No fallback line in the activity log ($size)"; (tail -n 20 "$log" || true); fail=1
   fi
   fi
   if ran "getmods-back-$size"; then
@@ -628,7 +628,7 @@ for size in $SIZES; do
   if grep -q 'Back from the mod page: search "lantern", card 5' "$log"; then
     echo "::notice title=Get mods back $size::same search, card 5"
   else
-    echo "::error title=B didn't come back to the same search and card ($size)::"; (grep -h "shot\|action" "$log" | tail -n 20 || true); fail=1
+    echo "::error title=B didn't come back to the same search and card ($size)::B didn't come back to the same search and card ($size)"; (grep -h "shot\|action" "$log" | tail -n 20 || true); fail=1
   fi
   fi
   if ran "newmod-$size"; then
@@ -636,7 +636,7 @@ for size in $SIZES; do
   if grep -q "New mod All Quest Objectives On Map" "$log"; then
     echo "::notice title=New mod $size::$(grep -h 'New mod ' "$log" | head -n1 | cut -c1-160)"
   else
-    echo "::error title=The new mod wasn't named cleanly or focused ($size)::"; (grep -h "New mod\|Add " "$log" | tail -n 10 || true); fail=1
+    echo "::error title=The new mod wasn't named cleanly or focused ($size)::The new mod wasn't named cleanly or focused ($size)"; (grep -h "New mod\|Add " "$log" | tail -n 10 || true); fail=1
   fi
   fi
 done
@@ -646,13 +646,13 @@ for p in $( [ -n "$SIZES" ] && echo "game-$SIZES settings-$SIZES" ); do
   log="$PWD/data/$p/turbine-mod-manager/activity.log"
   a=$(grep -n "nxm scheme registered" "$log" | head -n1 | cut -d: -f1); b=$(grep -n "WebEngine ready" "$log" | head -n1 | cut -d: -f1)
   if [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; then echo "::notice title=WebEngine set up ($p)::nxm scheme line $a, WebEngine ready line $b"
-  else echo "::error title=WebEngine wasn't set up before the app ($p)::"; (grep -h "web\]" "$log" | head -n 10 || true); fail=1; fi
+  else echo "::error title=WebEngine wasn't set up before the app ($p)::WebEngine wasn't set up before the app ($p)"; (grep -h "web\]" "$log" | head -n 10 || true); fail=1; fi
   fi
 done
 if [ "$MODE" = x11 ]; then
 # Words that must never be on screen any more.
 hits=$(grep -n -E "No controller found|Play original|\"Accounts\"|RECENTLY REMOVED" app/qml/*.qml || true)
-if [ -n "$hits" ]; then echo "::error title=Old words still in the interface::"; echo "$hits"; fail=1; fi
+if [ -n "$hits" ]; then echo "::error title=Old words still in the interface::Old words still in the interface"; echo "$hits"; fail=1; fi
 fi
 # The pointer's events really reached Turbine's interface: the click turned the mod off, the wheel scrolled.
 for size in $SIZES; do
@@ -661,7 +661,7 @@ for size in $SIZES; do
   if grep -q "Left click (RT)" "$log" && grep -Eq "Turn (on|off) " "$log"; then
     echo "::notice title=Pointer click $size::$(grep -Eh 'Turn (on|off) ' "$log" | head -n1 | cut -c1-160)"
   else
-    echo "::error title=Pointer click didn't reach the mod ($size)::"; (grep -h "pad\|action" "$log" | tail -n 20 || true); fail=1
+    echo "::error title=Pointer click didn't reach the mod ($size)::Pointer click didn't reach the mod ($size)"; (grep -h "pad\|action" "$log" | tail -n 20 || true); fail=1
   fi
   fi
   if ran "pointerscroll-$size"; then
@@ -670,7 +670,7 @@ for size in $SIZES; do
   if [ -n "$moved" ] && [ "$moved" -gt 0 ]; then
     echo "::notice title=Pointer wheel $size::The list moved $moved px"
   else
-    echo "::error title=Wheel steps didn't scroll the list ($size)::"; (grep -h "pad" "$log" | tail -n 20 || true); fail=1
+    echo "::error title=Wheel steps didn't scroll the list ($size)::Wheel steps didn't scroll the list ($size)"; (grep -h "pad" "$log" | tail -n 20 || true); fail=1
   fi
   fi
 done
@@ -791,7 +791,7 @@ if command -v Xvfb > /dev/null; then
     need $n "Get it: the file page's Slow download is lined up ($size)" "Slow download lined up: scrolled into view"
     need $n "9: legend, no field: Y Keyboard and R stick Pointer, no LT ($size)" "Browser legend \(no field\): A Click · B [^·]* · X Options · Y Keyboard · RS Pointer, 0 problems"
     need $n "9: legend, a field ($size)" "Browser legend \(a field\): .*Y Keyboard.*, 0 problems"
-    if grep -Eq "Browser legend .*LT " "$log"; then echo "::error title=9: LT Menu is still in the legend ($size)::"; fail=1; fi
+    if grep -Eq "Browser legend .*LT " "$log"; then echo "::error title=9: LT Menu is still in the legend ($size)::9: LT Menu is still in the legend ($size)"; fail=1; fi
     need $n "7: A after a click is a click ($size)" "Browser check: A after a click is a click: yes"
     need $n "7: A presses Enter only after the D-pad ($size)" "Browser check: A after the D-pad presses Enter: yes"
     need $n "7: A after the pointer clicked is a click again ($size)" "Browser check: A after the pointer clicked is a click again: yes"
@@ -822,9 +822,9 @@ if command -v Xvfb > /dev/null; then
     need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
     need $n "3: Slow download, added, page closed, focus on Play ($size)" "after the add the page closed by itself; focus on Play; My mods lists it"
     f="$h/Downloads/Game Mods/$sky/TurbineTest-Bigger_Pockets-1.0.3.zip"
-    if [ -s "$f" ]; then echo "::notice title=3: the file is in Game Mods ($size)::$f"; else echo "::error title=3: the file isn't in Game Mods ($size)::"; ls -laR "$h/Downloads/Game Mods" || true; fail=1; fi
+    if [ -s "$f" ]; then echo "::notice title=3: the file is in Game Mods ($size)::$f"; else echo "::error title=3: the file isn't in Game Mods ($size)::3: the file isn't in Game Mods ($size)"; ls -laR "$h/Downloads/Game Mods" || true; fail=1; fi
     adds=$(grep -c "Start: Add TurbineTest-Bigger_Pockets-1.0.3.zip" "$log" || true)
-    if [ "$adds" = "1" ]; then echo "::notice title=3: added once ($size)::no second add from the watcher"; else echo "::error title=3: added $adds times ($size)::"; fail=1; fi
+    if [ "$adds" = "1" ]; then echo "::notice title=3: added once ($size)::no second add from the watcher"; else echo "::error title=3: added $adds times ($size)::3: added $adds times ($size)"; fail=1; fi
     presses=$(grep -c "Browser press [0-9]* (" "$log" || true); clicks=$(grep -c "Browser click [0-9]* (" "$log" || true)
     if [ "$presses" -gt 0 ] && [ "$presses" = "$clicks" ]; then echo "::notice title=5: one click per press ($size)::$presses presses, $clicks clicks"
     else echo "::error title=5: clicks and presses differ ($size)::$presses presses, $clicks clicks"; grep -h "Browser press\|Browser click" "$log" | head -n 40; fail=1; fi
@@ -833,24 +833,24 @@ if command -v Xvfb > /dev/null; then
     need $n "Sign-in: an answer for another request is refused ($size)" "Sign-in from the browser refused: the sign-in answer is for another request"
     need $n "Sign-in: only Nexus's cookie is taken ($size)" "Sign-in from the browser: 1 Nexus cookie\(s\) put into Turbine's browser \(turbine_signin_check\); 3 for other sites or unreadable, dropped"
     need $n "Sign-in: Turbine says it is signed in ($size)" "Signed in to Nexus \(from the player's browser\)"
-    if grep -rq "valueNeverLogged7f3" "$PWD/data/$n/turbine-mod-manager/activity.log" "shots/$n.log"; then echo "::error title=Sign-in: a cookie value was logged ($size)::"; fail=1
+    if grep -rq "valueNeverLogged7f3" "$PWD/data/$n/turbine-mod-manager/activity.log" "shots/$n.log"; then echo "::error title=Sign-in: a cookie value was logged ($size)::Sign-in: a cookie value was logged ($size)"; fail=1
     else echo "::notice title=Sign-in: no cookie value in the logs ($size)::"; fi
     kept=$(grep -rla "turbine_signin_check" "$PWD/data/$n" 2>/dev/null | grep -v "activity.log" | head -n1 || true)
     if [ -n "$kept" ]; then echo "::notice title=Sign-in: the cookie is in the profile on disk ($size)::${kept#$PWD/}"
-    else echo "::error title=Sign-in: the cookie isn't in the profile on disk ($size)::"; find "$PWD/data/$n" -maxdepth 4 | head -n 40; fail=1; fi
-    if grep -rlaE "other_site_check|look_alike_check" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: another site's cookie got in ($size)::"; fail=1; fi
-    if grep -rlaE "cf_turbine_check|cfValueNeverKept9" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: a Cloudflare cookie got in ($size)::"; fail=1
+    else echo "::error title=Sign-in: the cookie isn't in the profile on disk ($size)::Sign-in: the cookie isn't in the profile on disk ($size)"; find "$PWD/data/$n" -maxdepth 4 | head -n 40; fail=1; fi
+    if grep -rlaE "other_site_check|look_alike_check" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: another site's cookie got in ($size)::Sign-in: another site's cookie got in ($size)"; fail=1; fi
+    if grep -rlaE "cf_turbine_check|cfValueNeverKept9" "$PWD/data/$n" 2>/dev/null | grep -qv "activity.log"; then echo "::error title=Sign-in: a Cloudflare cookie got in ($size)::Sign-in: a Cloudflare cookie got in ($size)"; fail=1
     else echo "::notice title=Sign-in: no Cloudflare cookie in Turbine's browser ($size)::"; fi
     # 6: signed links and the account number never go into the log whole.
     leak=$(grep -Eh "user_id=|[?&]key=|[?&]md5=|expires=[0-9]" "$log" 2>/dev/null || true)
-    if [ -n "$leak" ]; then echo "::error title=6: a signed link or user_id is in the log ($size)::"; echo "$leak" | head -n 5 | cut -c1-200; fail=1
+    if [ -n "$leak" ]; then echo "::error title=6: a signed link or user_id is in the log ($size)::6: a signed link or user_id is in the log ($size)"; echo "$leak" | head -n 5 | cut -c1-200; fail=1
     else echo "::notice title=6: no signed links or user_id in the log ($size)::"; fi
     # 6: the profile folder (it holds the sign-in) is the player's alone.
     bdir=$(find "$PWD/data/$n" -maxdepth 3 -type d -name browser | head -n1)
     perm=$( [ -n "$bdir" ] && stat -c %a "$bdir" || echo none)
     if [ "$perm" = 700 ]; then echo "::notice title=6: the profile folder is 0700 ($size)::${bdir#$PWD/}"; else echo "::error title=6: the profile folder is $perm, not 700 ($size)::$bdir"; fail=1; fi
     for tag in page downloads added nokey; do
-      if [ -s "$PWD/shots/$n-$tag.png" ]; then echo "::notice title=11: picture $tag ($size)::$n-$tag.png"; else echo "::error title=11: no picture $tag ($size)::"; fail=1; fi
+      if [ -s "$PWD/shots/$n-$tag.png" ]; then echo "::notice title=11: picture $tag ($size)::$n-$tag.png"; else echo "::error title=11: no picture $tag ($size)::11: no picture $tag ($size)"; fail=1; fi
     done
   done
   # 3: Nexus's wait is the page's: at least 5 seconds between the press and the file.
@@ -863,24 +863,26 @@ files = [float(l[0]) for l in lines if l[2].startswith("/files/TurbineTest") and
 for p in press:
     nxt = [f for f in files if f > p]
     gap = (nxt[0] - p) if nxt else -1
-    print(f"::notice title=3: Slow download wait::{gap:.1f} s from the press to the file request")
-    if gap < 5:
+    print(f"::notice title=3: Slow download wait::{gap:.3f} s from the press to the file request")
+    # 0.65: the press and the file are two requests to the stand-in, a few ms apart either way: 4.9 s still proves
+    # the page's 5 second wait (4.997 s on a fast PC failed the check).
+    if gap < 4.9:
         bad = 1
-        print("::error title=3: the file came sooner than 5 seconds after the press::")
+        print(f"::error title=3: the file came sooner than 5 seconds after the press::{gap:.3f} s")
 if not press:
-    print("::error title=3: the stand-in never saw a Slow download press::")
+    print("::error title=3: the stand-in never saw a Slow download press::3: the stand-in never saw a Slow download press")
     bad = 1
 # 4: the stand-in never gets an nxm request. 5: nothing pressed while nobody pressed anything.
 if any("nxm" in l[2] for l in lines):
-    print("::error title=4: the stand-in got an nxm request::"); bad = 1
+    print("::error title=4: the stand-in got an nxm request::4: the stand-in got an nxm request"); bad = 1
 s = [float(l[0]) for l in lines if "name=idle-start" in l[2]]
 e = [float(l[0]) for l in lines if "name=idle-end" in l[2]]
 if s and e:
     quiet = [l for l in lines if s[0] < float(l[0]) < e[0] and ("-pressed" in l[2] or l[2].startswith("/files/"))]
     print(f"::notice title=5: 30 seconds with no input::{len(quiet)} button requests, {e[0] - s[0]:.0f} s")
-    if quiet: bad = 1; print("::error title=5: a button request came with no input::")
+    if quiet: bad = 1; print("::error title=5: a button request came with no input::5: a button request came with no input")
 else:
-    print("::error title=5: the idle marks are missing::"); bad = 1
+    print("::error title=5: the idle marks are missing::5: the idle marks are missing"); bad = 1
 sys.exit(bad)
 PY
   # 6: a second run with the same profile sends the stand-in's cookie back (signed in stays signed in).
@@ -899,7 +901,7 @@ PY
   pneed "1: a script's nxm link with no press is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/88 came with no press of yours"
   pneed "1: a frame's nxm link is refused (main frame only)" "Mod Manager Download link refused \(nxm://skyrimspecialedition/mods/1/files/77\): it came from a frame"
   before=$(printf '%s\n' "$after" | sed -n '1,/Browser check: no press, nothing downloaded/p')
-  if printf '%s\n' "$before" | grep -q "Page newwindow"; then echo "::error title=1: a pop-up opened with no press::"; fail=1
+  if printf '%s\n' "$before" | grep -q "Page newwindow"; then echo "::error title=1: a pop-up opened with no press::1: a pop-up opened with no press"; fail=1
   elif printf '%s\n' "$before" | grep -q "Page popupblocked"; then echo "::notice title=1: a pop-up with no press is refused::Page popupblocked"
   else echo "::notice title=1: a pop-up with no press didn't open::Chromium stopped it before Turbine saw it"; fi
   pneed "1: a download with no press is refused" "Download refused \(127.0.0.1\): Turbine only takes a download you start yourself"
@@ -913,10 +915,10 @@ PY
   pneed "1c (H1c): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/56"
   pneed "1c: Not now downloads nothing" "Browser check: after Not now, nothing downloaded: yes"
   asked=$(printf '%s\n' "$after" | grep -E "pretending to download nxm://skyrimspecialedition/mods/(1/files/56|2/files/57)" || true)
-  if [ -n "$asked" ]; then echo "::error title=1c: a link that asked downloaded anyway::"; fail=1; fi
+  if [ -n "$asked" ]; then echo "::error title=1c: a link that asked downloaded anyway::1c: a link that asked downloaded anyway"; fail=1; fi
   got=$(printf '%s\n' "$after" | grep -E "from the browser \(scheme handler, from [^)]*\): Turbine asks before it downloads: nxm://.*files/(55|66|77|88)|pretending to download nxm://skyrimspecialedition/mods/1/files/(55|66|77|88)" || true)
   if [ -n "$got" ]; then
-    echo "::error title=1: a link with no press got through::"; fail=1; fi
+    echo "::error title=1: a link with no press got through::1: a link with no press got through"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
   echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
   pneed "10 (I10): closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added by itself."
@@ -1219,7 +1221,7 @@ if [ "$MODE" = 1280x800 ]; then
   if ran "overwriteskip"; then
   if [ "$(cat "$g/Data/pier.txt")" = "the game's own pier" ] && [ ! -s "$g/BrassPier.exe" ] && [ -f "$g/Data/pier2.txt" ]; then
     echo "::notice title=Any game: the game's own files are untouched::pier.txt and BrassPier.exe as they were; pier2.txt added"
-  else echo "::error title=Any game: the game's own files changed::"; ls -la "$g" "$g/Data"; fail=1; fi
+  else echo "::error title=Any game: the game's own files changed::Any game: the game's own files changed"; ls -la "$g" "$g/Data"; fail=1; fi
   fi
 fi
 if [ "$MODE" = 1920x1080 ]; then
