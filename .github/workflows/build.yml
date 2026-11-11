@@ -152,7 +152,7 @@ jobs:
         run: |
           # The tutorial, the next-requirement sheet and the free-account words once taught "Steam button, then
           # Turbine"; the page is Turbine's own now. (The outside-browser ways in Labs and Desktop Mode still say it.)
-          hits=$( { grep -n -E "Steam button" app/qml/Tutorial.qml app/src/online.rs app/src/catch.rs || true; grep -n 'sheet === "chain"' app/qml/Main.qml | grep "Steam button" || true; } )
+          hits=$( { grep -n -E "Steam button" app/qml/Tutorial.qml app/src/online.rs app/src/catch.rs || true; grep -n 'sheet === "chain"' app/qml/Main.qml app/qml/SheetLayer.qml | grep "Steam button" || true; } )
           if [ -n "$hits" ]; then echo "::error title=Stale words::Steam button, then Turbine is still taught"; echo "$hits"; exit 1; fi
           echo "No stale Steam button words"
       - name: QML syntax (seconds here instead of minutes into the Flatpak build)

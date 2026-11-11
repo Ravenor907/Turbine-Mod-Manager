@@ -131,14 +131,14 @@ Window {
     // reach by id.
     Loader { id: selfCheck }
     readonly property var checkIds: !shot.on ? null : ({
-        askView: askView, barLb: barLb, barName: barName, barRb: barRb, confirmHold: confirmHold,
+        askView: askView, barLb: legend.barLb, barName: legend.barName, barRb: legend.barRb, confirmHold: confirmHold,
         confirmSheet: confirmSheet, edgeBack: edgeBack, edgeNext: edgeNext, gameMenuView: gameMenuView,
         getView: getView, ghostTimer: ghostTimer, hudWin: hudWin, infoView: infoView, inputProbe: inputProbe,
-        legend: legend, loadOrderView: loadOrderView, look: look, lookList: lookList, mo: mo, modList: modList,
-        panelEdit: panelEdit, panelWin: panelWin, perfList: perfList, pickMenu: pickMenu, playBtn: playBtn,
-        rail: rail, railList: railList, resetHold: resetHold, seen: seen, settingsView: settingsView,
-        sheetLayer: sheetLayer, shot: shot, splash: splash, splashIcon: splashIcon, startHint: startHint,
-        startHintKey: startHintKey, startRing: startRing, toast: toast, turnLine: turnLine
+        legend: legend, loadOrderView: loadOrderView, look: look, lookList: settingsPage.lookList, mo: mo, modList: modList,
+        panelEdit: modPanel.panelEdit, panelWin: panelWin, perfList: perfList, pickMenu: pickMenu, playBtn: legend.playBtn,
+        rail: rail, railList: rail.railList, resetHold: resetHold, seen: seen, settingsView: settingsView,
+        sheetLayer: sheetLayer, shot: shot, splash: splash, splashIcon: splash.splashIcon, startHint: legend.startHint,
+        startHintKey: legend.startHintKey, startRing: legend.startRing, toast: toast, turnLine: turnLine
     })
 
     // ---------------------------------------------------------------- size
@@ -3886,8 +3886,8 @@ Window {
     property Item focusWas: null
     function focusItemNow() {
         if (sheet !== "" || wheelOpen || page === "browser" || page === "place") return null
-        if (zone === "rail") return railIndex < games.length ? railList.itemAtIndex(railIndex) : railIndex < games.length + railExtra ? hiddenTile : gear
-        if (zone === "play") return playBtn.visible ? playBtn : null
+        if (zone === "rail") return rail.itemAt(railIndex)
+        if (zone === "play") return legend.playBtn.visible ? legend.playBtn : null
         if (page !== "game" || modPage || zone !== "main") return null
         if (tab === 0) return modIndex >= 0 && modList.visible ? modList.itemAtIndex(modIndex) : null
         if (tab === 1 && getArea === "grid" && getView.visible) return getView.gridItem(getIndex)
@@ -3949,8 +3949,8 @@ Window {
         let it = null
         try {
             if (sheet === "" && !wheelOpen) {
-                if (zone === "rail") it = railIndex < games.length ? railList.itemAtIndex(railIndex) : railIndex < games.length + railExtra ? hiddenTile : gear
-                else if (zone === "play") it = playBtn
+                if (zone === "rail") it = rail.itemAt(railIndex)
+                else if (zone === "play") it = legend.playBtn
                 else if (page === "game" && tab === 0 && !modPage && modIndex >= 0) it = modList.itemAtIndex(modIndex)
                 else if (page === "game" && modPage) it = modView.focusItem ? modView.focusItem() : null
             }
@@ -4761,6 +4761,7 @@ Window {
         let i = setRow + d
         while (i >= 0 && i < rows && !settingsFocusable(i)) i += d
         // The words passed over (or above the first row, or below the last) come into view.
+        const labsList = settingsPage.labsList
         if (labsList.visible) {
             if (i < 0) labsList.positionViewAtBeginning()
             else if (i >= rows) labsList.positionViewAtEnd()
@@ -6855,161 +6856,9 @@ Window {
         note("labs", labsSet.on ? "Labs mode on" : "Labs mode off")
         toast.info(labsSet.on ? "Labs mode on. Labs is at the end of Settings." : "Labs mode off")
     }
-    // Things to confirm on the device: what the build server can't check. title, how to try it, what should happen.
-    readonly property var labsItems: [
-        // Modded launches through Steam, Seamless Co-op, Edit settings, the bar.
-        { id: "steam-me3", title: "Elden Ring with mods in Game Mode", how: "Game Mode, Elden Ring with a mod on: press Play. Follow the one step (pick Turbine (mods) for it in Steam), then Check again: Turbine goes on with the Play.",
-          expect: "The game shows in Game Mode (not Steam's blank launching screen) with the mod, offline. Steam's own Play button starts it with mods too; with every mod off it starts normally online." },
-        { id: "steam-plain", title: "Play without mods after the step", how: "With the Launch Options set and mods on, Play options, Play without mods.",
-          expect: "Elden Ring starts normally with its anti-cheat; the next Play starts it with mods again." },
-        { id: "coop-play", title: "Play Seamless Co-op", how: "Elden Ring with Seamless Co-op: press Play and choose Play Seamless Co-op (an empty session password opens its settings first).",
-          expect: "Seamless Co-op starts with your password and its own co-op save; Play with mods starts the solo modded game." },
-        { id: "edit-settings", title: "Edit settings with the controller", how: "X on a mod with an .ini or .cfg file, Edit settings. Change a toggle, a number and a text (Steam keyboard); each saves by itself.",
-          expect: "The game uses the new values; Reset to default puts the mod's own back; a mod update keeps your values." },
-        { id: "launch-check", title: "The didn't start sheet", how: "Press Play on a game that can't start (for example an Elden Ring with mods whose Proton was uninstalled).",
-          expect: "About 20 seconds later a sheet says it didn't start, with what Turbine's Steam tool said, Play without mods, the Activity log and Why won't it start?. If the game shows up late, the sheet goes by itself." },
-        // Anti-cheat games.
-        { id: "ac-me3", title: "Elden Ring with mods through me3", how: "Elden Ring (or Nightreign, Armored Core VI): add a mod, press Play, answer Turn it off for mods. Turbine gets me3 the first time.",
-          expect: "The game starts offline with the mod, without the anti-cheat. The game folder has no new files; your normal save is untouched (a separate save is used)." },
-        { id: "ac-original", title: "Normal launch after mods", how: "After playing with mods, turn every mod off (or Play without mods).",
-          expect: "Steam starts it the normal way, with its anti-cheat, and online play works. Steam's Verify finds nothing to repair." },
-        { id: "ac-seamless", title: "Seamless Co-op through me3", how: "Elden Ring, game menu, Get Seamless Co-op. Then Play.",
-          expect: "Seamless Co-op starts with the game and uses its own co-op saves; turning it off in My mods takes it out." },
-        { id: "ac-halo", title: "Halo MCC guide", how: "Halo MCC: add a mod, press Play.",
-          expect: "Before you play says to pick Anti-Cheat Disabled (Mods and Limited Services) in Steam's Play menu, and the mod works there." },
-        { id: "ac-refuse", title: "Online-only games refuse mods", how: "Open Dead by Daylight, Apex Legends or Destiny 2 and try Add from Downloads.",
-          expect: "Turbine says the game needs its anti-cheat and adds nothing." },
-        { id: "pad-quiet", title: "Controller quiet after a game", how: "Play a game, press buttons as you quit it, then come back to Turbine.",
-          expect: "Nothing happens in Turbine from buttons pressed in the game." },
-        { id: "proton-bepinex", title: "Proton setting on a BepInEx game", how: "Add a BepInEx mod to Valheim, Lethal Company or Risk of Rain 2, then Play.",
-          expect: "The check before Play says BepInEx gets turned on in Proton, and the game starts with the mod working." },
-        { id: "running-check", title: "Running game check", how: "With a BepInEx game running, switch back to Turbine and press Play.",
-          expect: "Turbine says the game is still running and changes nothing until it's closed." },
-        { id: "nexus-keyless", title: "Get mods without a key", how: "Labs, Nexus without a key: Check. Then open Get mods in Skyrim, The Witcher 3 or Cyberpunk 2077.",
-          expect: "The check says Nexus answered, and Get mods shows the game's mods as pictures with no key." },
-        { id: "nexus-inside", title: "Nexus inside Turbine", how: "Game Mode: a mod page, A Get it on Nexus. Sign in, press Slow download with the pointer (right stick, RT).",
-          expect: "The file's page opens full screen in Turbine. After Nexus's wait the pill shows the download, then Added; the page closes by itself and Play has the focus." },
-        { id: "nexus-signed-in", title: "Nexus remembers the sign-in", how: "Sign in on the Nexus page in Turbine, close Turbine, open it and open a mod's Nexus page again.",
-          expect: "Still signed in." },
-        { id: "nexus-google", title: "Sign in with my browser (Google)", how: "Browser helper set up in Chrome. On the Nexus page press Sign in with my browser, sign in with Google in Chrome.",
-          expect: "Turbine comes back to the front and says Signed in to Nexus; the page shows you signed in." },
-        { id: "nexus-pad", title: "The controller on the Nexus page", how: "D-pad between links, A on a link, Y in a text field, B back, LB and RB tabs, View the quick wheel.",
-          expect: "Each does what the legend says; Steam's keyboard opens in a text field; the pointer never hides." },
-        { id: "game-mods-folder", title: "Slow download with no Save box (My browser)", how: "Desktop Mode, Open Nexus in: My browser, browser helper set up in Chrome. Press Slow download on a mod's file page.",
-          expect: "No Save box; the file lands in Downloads, Game Mods, the game's folder, and Turbine adds it to that game." },
-        { id: "desktop-pad", title: "Controller in Desktop Mode", how: "Desktop Mode with Steam running: use Turbine with the controller.",
-          expect: "Buttons work (as Steam's mouse and keyboard if Turbine sees no pad itself), and no line says no controller was found." },
-        { id: "text-size", title: "Interface size in Game Mode", how: "In Game Mode, look at every page at Interface size 50% to 150% (tap - and +, D-pad Left and Right, or A for the list).",
-          expect: "Everything is readable; nothing is cut off or overlapping." },
-        { id: "add-downloads", title: "Add mods from Downloads", how: "Put a mod's zip in Downloads, then View, Add from Downloads.",
-          expect: "The mod shows in the list, turned on, with its name and version." },
-        { id: "auto-apply", title: "Auto-apply, then start from Steam", how: "Turn a mod on or off, wait 5 seconds, close Turbine, start the game from the Steam library.",
-          expect: "The game has the change without pressing Play in Turbine." },
-        { id: "uninstall-undo", title: "Uninstall and put back", how: "Uninstall a mod from its options (X), then press A on its dimmed row.",
-          expect: "The row stays, dimmed, for 8 seconds; A puts the mod back in the same place. After that it is in Removed mods at the bottom of the list." },
-        { id: "play-original", title: "Play without mods", how: "Game menu (View) > Play without mods.",
-          expect: "The game starts with no mods. The mods stay in Turbine and go back in at the next Play." },
-        { id: "restore", title: "Restore last setup played", how: "Play with mods, change some, then Game menu (View) > Go back to a setup that worked.",
-          expect: "The mods go back to how they were the last time the game was played." },
-        { id: "sd-card", title: "Game on the SD card", how: "Add a mod to a game on the SD card and play it; then try with the card out.",
-          expect: "The mod works. With the card out, Turbine says the game is offline, never that mods are gone." },
-        { id: "heroic-play", title: "Heroic game Play", how: "Pick an Epic or GOG game from Heroic and press Play.",
-          expect: "Heroic starts the game with the mods in place. In Game Mode, check it shows (Turbine says how to switch to it)." },
-        { id: "seasonal", title: "Seasonal leaves and snow", how: "Settings > Look > Seasonal: Autumn, then Snow; try Amount and Size.",
-          expect: "They fall smoothly behind the panels and stop while a game runs." },
-        { id: "quick-report", title: "Screenshot and report", how: "Labs on: hold View for 7 seconds.",
-          expect: "A brass ring fills, then a screenshot and report land in Downloads and the report pastes from the clipboard." },
-        { id: "ts-install", title: "Thunderstore install", how: "Valheim, Lethal Company or Risk of Rain 2: Get mods, pick a mod, A Install.",
-          expect: "It downloads with progress on the status line and the rail ring, and shows in My mods with what it needs." },
-        { id: "loader-install", title: "Loader install", how: "Turn on a mod that needs the loader, then A Install in the prompt (SKSE, BepInEx or SMAPI).",
-          expect: "The loader downloads from its official home, shows as a mod, and the Needs badges go away." },
-        { id: "fomod", title: "Installer choices (FOMOD)", how: "Add a Skyrim mod with an installer, from Get mods or Downloads.",
-          expect: "One question per page with pictures; B goes back; the files of the chosen options go in." },
-        { id: "load-order", title: "Load order", how: "Skyrim: Load order tab. Turn a plugin off, move one (X, Move), then Sort automatically.",
-          expect: "The game loads plugins in that order; masters stay first; missing masters are named." },
-        { id: "ts-code", title: "Thunderstore code", how: "Lethal Company or another Thunderstore game, online: game menu (View), Loadouts, Create a Thunderstore code.",
-          expect: "A code shows big and is copied; importing it on another device (or Loadouts, Import a Thunderstore profile code) gets the same mods." },
-        { id: "other-versions", title: "Other versions", how: "Get mods, a mod page, X Other files, then A on an older version.",
-          expect: "That version downloads and takes the installed one's place, same spot and on or off." },
-        { id: "nxm-handler", title: "Mod Manager Download", how: "Settings, Getting mods, Using your own browser: Use Turbine for Mod Manager Download. Then in Desktop Mode press Mod Manager Download on a Nexus mod's Files tab, with Turbine open and with it closed.",
-          expect: "Turbine comes to the front on that game, the download shows on the status line, and the mod is added (with installer choices when it has them)." },
-        { id: "nexus-free", title: "Free Nexus account", how: "With a free account: a Nexus mod's details, A Open on Nexus; also SKSE's Install in Skyrim.",
-          expect: "The page opens in the browser; Mod Manager Download there sends the file to Turbine. In Game Mode the page opens inside Turbine." },
-        { id: "nexus-requirements", title: "Nexus requirements", how: "Skyrim: details of a Nexus mod that needs others (like SkyUI needs SKSE).",
-          expect: "Also needs lists them as Have it, Missing, Game DLC or Outside Nexus; Premium installs the missing ones with the mod, free accounts get their pages." },
-        { id: "profile-nexus", title: "Loadout import with Nexus mods", how: "Open a loadout file that has Nexus mods.",
-          expect: "Premium: Turbine downloads them too. Free: it lists the pages to open, and the loadout is made with what's there." },
-        { id: "loot-sort", title: "Community list sorting", how: "Skyrim with a few plugin mods, online: Load order tab, A on Sort automatically, then X on a plugin with a badge.",
-          expect: "The line at the top says Sorted with the community sort list; the game starts with that order; badges like Needs cleaning show notes, and X lists them." },
-        { id: "nexus-key", title: "Nexus Mods key", how: "Settings, Getting mods, Faster downloads: add your personal API key with Steam's keyboard.",
-          expect: "It says your name and Premium or Free; Nexus Mods browsing works; Sign out removes the key." },
-        { id: "mod-updates", title: "Mod updates", how: "Have an older Thunderstore or Nexus mod, open its game.",
-          expect: "Update ready shows on it; X Update or the game menu's Update all brings the new version, same place and on or off." },
-        { id: "profiles", title: "Loadouts", how: "Game menu (View), Loadouts: make one, switch, save a loadout file, open it or a Thunderstore code.",
-          expect: "Switching changes which mods are on right away; an import gets the mods and makes the loadout." },
-        { id: "self-update", title: "Turbine updates itself", how: "Settings, Updates: Check now, Install, then Restart.",
-          expect: "The new version installs and opens. With Pre-release in Labs, test builds show; Go back to stable returns to stable." },
-        { id: "archives", title: "7z and rar mods", how: "Add a .7z and a .rar mod from Downloads.",
-          expect: "Both unpack and install like zip files." },
-        { id: "heroic-art", title: "Heroic covers", how: "Look at Heroic (Epic and GOG) games in the rail.",
-          expect: "They show their cover art; games without art show their initials." },
-        { id: "launch-option", title: "Valheim Launch Option", how: "Valheim with a BepInEx mod: press Play and read the check, then set the Launch Option in Steam.",
-          expect: "The check explains the one-time setting once; after setting it, mods load when the game starts from Steam." },
-        { id: "no-browser", title: "No browser warning", how: "Desktop Mode, Open Nexus in: My browser, on a system without a browser: open a Nexus page from Turbine (a mod's details, A Open on Nexus).",
-          expect: "A warning says no browser was found, with the Discover and Add to Steam steps; Check again finds one once it's installed." },
-        { id: "slow-download", title: "Slow download from Downloads", how: "With no browser helper and no setup: open Nexus any way you like (Get mods, a bookmark, typing the address), find a mod and press Slow download.",
-          expect: "When the file finishes, Turbine adds it to the right game, or shows Found <file>. Add it to <game>? with A Add, X another game, Y Not a mod, B Not now. The file stays in Downloads." },
-        { id: "catch-closed", title: "Downloads while Turbine is closed", how: "Close Turbine, download a mod with Slow download, then open Turbine.",
-          expect: "Turbine catches up on it at start (adds it, or asks). A file you answered Not a mod is never asked about again." },
-        { id: "nxm-no-key", title: "Mod Manager Download without a key", how: "With no Nexus key in Settings, Getting mods, Faster downloads, press Mod Manager Download on a Nexus mod.",
-          expect: "Turbine says Mod Manager Download needs your Nexus API key and to use Slow download; a Slow download of that mod then goes into its game by itself." },
-        { id: "nexus-no-key", title: "Open on Nexus when browsing fails", how: "If Get mods shows Browse ... mods on Nexus Mods: A Open on Nexus, then X Try again here.",
-          expect: "The game's mods open in the browser and Turbine says: Download with Slow download. Turbine adds it when it lands in Downloads." },
-        { id: "pointer", title: "Controller pointer", how: "Push the right stick, then press RT on a button, a mod's ON pill, a tab and a Settings row; press LT on a mod. Hold RT and move to drag. Try Game Mode and Desktop Mode, built-in controls and an Xbox pad.",
-          expect: "A brass pointer moves smoothly, outlines what it's over, RT clicks it, LT on a mod opens its options. It hides 3 seconds after the stick stops, or at once on any other button; then LT and RT page up and down." },
-        { id: "r3-click", title: "R3 is the left mouse button", how: "Show the pointer and press R3 on a mod's ON pill; hold R3 and move the right stick. Then let the pointer hide and press R3 on a mod.",
-          expect: "With the pointer: R3 clicks like RT and holding it drags. Hidden: the pointer shows on the highlighted mod and R3 does what A does." },
-        { id: "left-stick", title: "Left stick: D-pad and wheel", how: "On My mods push the left stick down and hold it, then let go. Then sweep it round the edge both ways over a long list.",
-          expect: "Pushed and held, it moves like the D-pad (one row, then repeating). Swept round, it scrolls: clockwise down, a few rows every 30 degrees, and the highlight stays on a row you can see." },
-        { id: "bumpers-tabs", title: "LB and RB are tabs", how: "Press LB and RB on a game, in Settings and on a mod page from Get mods.",
-          expect: "Game tabs, Settings sections and the previous or next mod change. The game never changes; the rail does that." },
-        { id: "quick-wheel", title: "Quick wheel", how: "Tap View, press Up then Right, then A. Then hold View, push Left, let go.",
-          expect: "Tap: the wheel stays open and Sort opens. Hold and push: Games opens when you let go. Empty places are dimmed, never moved." },
-        { id: "tutorial", title: "Beginner tutorial", how: "Settings, Help: Beginner tutorial, Show it. Go through the five cards with A; open it again and skip with B.",
-          expect: "Big pictures of the real buttons; it ends on the rail with \"Pick a game to start\" and doesn't come back by itself." },
-        { id: "focus-memory", title: "Focus comes back", how: "Highlight the third mod, open another game from the rail, come back. Open X on a mod and close it. Open Settings from the wheel and press B.",
-          expect: "Each time the highlight is where you left it, on the same tab." },
-        { id: "rail-menu", title: "Pin and hide on the rail", how: "On the rail press X on a game: Pin to the top; on a tool like Lossless Scaling: Hide from the rail. Settings, Help shows it again.",
-          expect: "The pinned game stays at the top; the hidden one is gone from the rail until shown again." },
-        { id: "touch-hold", title: "Touch: hold for options", how: "Touch a mod row, a Get mods card and a plugin and hold half a second; swipe sideways on the tabs.",
-          expect: "Holding opens that item's options; the swipe changes the tab; the legend hides until the next button press." },
-        { id: "fewer-steps", title: "Fewer presses to a mod", how: "A game with no mods, free Nexus account, Game Mode: A on the game in the rail, A on a mod, A Get it on Nexus, Slow download, then Play.",
-          expect: "The game opens on Get mods with the first mod highlighted, Get it on Nexus is highlighted on its page, and Play is highlighted when the mod arrives." },
-        { id: "scroll-stick", title: "Left stick in Steam's keyboard", how: "Open Find (Y) so Steam's keyboard shows, move both sticks and press the triggers.",
-          expect: "While Steam's keyboard is up, the sticks and triggers do nothing in Turbine." },
-        { id: "md5-identify", title: "Files named from Nexus", how: "With a Nexus key, add a mod you downloaded from Nexus by hand (Add from Downloads).",
-          expect: "It shows with its Nexus name and version, and gets Update ready badges like mods installed from Get mods." },
-        { id: "overlay-desktop", title: "Status over the browser (Desktop Mode)", how: "Desktop Mode: start a Nexus download from Turbine, then stay in the browser.",
-          expect: "A small Turbine card stays above the browser with progress, then Added to the game, and goes 6 seconds later. Its buttons work with a tap or click." },
-        { id: "overlay-gamemode", title: "Status over the browser (Game Mode)", how: "Game Mode: Labs, Open Nexus in Steam's browser, download a mod, watch the bottom left corner.",
-          expect: "The brass card shows over the browser and never takes the controller; it goes when idle, and the Performance Overlay still works after." },
-        { id: "gamemode-window", title: "Turbine's window in Game Mode", how: "Open Turbine in Game Mode and use it for a minute (Turbine draws through X11 on SteamOS).",
-          expect: "Turbine fills the screen, looks sharp, and the controller works as before." },
-        { id: "browser-helper", title: "Browser helper (optional)", how: "Settings, Getting mods, Using your own browser: Browser helper, Set up, follow the steps, then Pair. Download a mod on Nexus.",
-          expect: "The pairing page says Paired; Settings says Connected; the Nexus page shows Turbine's progress, Added, and installer choices that work from either side." },
-        { id: "steam-browser", title: "Steam's built-in browser", how: "Game Mode: Labs, Open Nexus in Steam's browser, sign in, then Slow download a mod for the game on screen.",
-          expect: "The file arrives in Downloads and Turbine asks to add it. If it doesn't, say in the report where the file went (or that Steam didn't download it)." },
-        { id: "cyberpunk", title: "Cyberpunk 2077 mods", how: "Cyberpunk 2077: add Cyber Engine Tweaks, RED4ext and a mod that needs them, plus a REDmod mod; press Play.",
-          expect: "The check names missing frameworks and explains REDmod once; Proton settings get winmm and version; the mods load in the game." },
-        { id: "kcd-mods", title: "KCD mods load", how: "Kingdom Come: Deliverance: add a mod from Nexus (a folder with mod.manifest and Data), reorder two mods, press Play.",
-          expect: "Mods go in Mods/<name>; Mods/mod_order.txt lists them in Turbine's order; the mods work in the game." },
-        { id: "kcd2-mods", title: "KCD II mods load", how: "Kingdom Come: Deliverance II: add two mods from Nexus, turn one off, press Play.",
-          expect: "Mods go in the game's mods folder; mod_order.txt lists only the one that is on; it works in the game." },
-        { id: "witcher3", title: "The Witcher 3 mods", how: "The Witcher 3: add two mods, reorder them, press Play (start the game once first if it never ran).",
-          expect: "Mods go in mods/modName; their order is written to mods.settings; scripts that clash show in the check; settings notes show after adding." },
-        { id: "skyrim-nexus", title: "Skyrim from Nexus", how: "Skyrim Special Edition: get SKSE, Address Library and an SKSE plugin mod from Nexus (Mod Manager Download or Slow download).",
-          expect: "SKSE goes in as the loader; without Address Library the check says it's missing; with it, the plugin loads." }
-    ]
+    // Things to confirm on the device: what the build server can't check (LabsChecklist.qml).
+    LabsChecklist { id: labsChecklist }
+    readonly property var labsItems: labsChecklist.items
     readonly property var labsRows: [
         { kind: "action", key: "report", title: "Report a bug", how: "Screenshot, what went wrong, details Turbine adds by itself", action: "Report" },
         { kind: "action", key: "perf", title: "Performance check", how: "Frame times, processor, startup, controller", action: "Open" },
@@ -7244,39 +7093,7 @@ Window {
         note("action", "Look: " + key + " " + look[key])
     }
 
-    // ---------------------------------------------------------------- shared pieces
-    component Label: Text {
-        color: c.text
-        font.family: app.bodyFont
-        font.pixelSize: app.fpx(15)
-        elide: Text.ElideRight
-        verticalAlignment: Text.AlignVCenter
-    }
-    component Key: Rectangle {
-        property string k: ""
-        property bool square: k.length > 1
-        // No caps after the mouse (and `off`: this cap has nothing to say here). Without a size a row
-        // leaves it out, so the words beside it close up.
-        property bool off: false
-        readonly property bool gone: app.mouseLegend || off
-        implicitWidth: gone ? 0 : Math.max(app.px(24), keyText.implicitWidth + app.px(12))
-        implicitHeight: gone ? 0 : app.px(24)
-        clip: true
-        radius: square ? app.px(5) : height / 2
-        color: c.raised
-        border.color: c.accentLo
-        border.width: Math.max(1, app.px(1))
-        Text {
-            id: keyText
-            anchors.centerIn: parent
-            text: app.glyph(parent.k)
-            visible: !parent.gone
-            color: c.text
-            font.family: app.bodyFont
-            font.pixelSize: app.fpx(14)
-            font.bold: true
-        }
-    }
+    // ---------------------------------------------------------------- glyphs (what Key.qml and Hint.qml show)
     // Glyphs follow the pad: an Xbox 360 pad says Back and Start; Series, Steam Deck and Ally pads say View and
     // Menu. With no pad seen (or one Turbine can't tell), View and Start, the words Steam's layouts use.
     readonly property string padKind: {
@@ -7305,92 +7122,6 @@ Window {
         if (k === "view" && padKind === "360") return "BACK"
         if (k === "start" && padKind === "menu") return "MENU"
         return k.toUpperCase()
-    }
-    // One or more keys ("lb+rb") and what they do.
-    component Hint: Row {
-        id: hint
-        property string k: ""
-        property string label: ""
-        property string pre: ""           // "hold": the legend reads "hold A Delete"
-        property string k2: ""            // a second key and its words in one hint ("RT Click, LT Menu")
-        property string label2: ""
-        // In the legend, a hint for one button is also a button: a tap or click does what the button does.
-        readonly property bool clickable: (parent === legendRow || parent === hintMeasure) && ["a", "b", "x", "y", "r3"].indexOf(k) >= 0
-        // After the mouse the hint is a button with its name on it and no key cap.
-        readonly property bool named: app.mouseLegend && clickable && label !== "" && k2 === ""
-        // A finger-sized target in the bar (the key caps alone are 24 px).
-        height: clickable ? Math.max(app.tpx(44), implicitHeight) : implicitHeight
-        spacing: app.px(6)
-        TapHandler { enabled: hint.clickable; onTapped: { if (!app.gate(3, "hint " + hint.k)) return; app.note("action", "Legend " + hint.k + " (" + hint.label + ")"); if (hint.k === "r3") app.r3Click(); else app.act(hint.k) } }
-        HoverHandler { enabled: hint.clickable; onHoveredChanged: app.hover(hint, hovered) }
-        Label { visible: hint.pre !== "" && !hint.named; text: hint.pre; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
-        Repeater {
-            model: hint.k.split("+")
-            Key { required property string modelData; k: modelData; visible: modelData !== ""; anchors.verticalCenter: parent.verticalCenter }
-        }
-        Rectangle {
-            visible: hint.named
-            width: namedText.implicitWidth + app.px(22); height: Math.max(app.px(32), app.tpx(26)); radius: app.px(6)
-            anchors.verticalCenter: parent.verticalCenter
-            color: c.raised; border.color: c.accentLo; border.width: Math.max(1, app.px(1))
-            Text { id: namedText; anchors.centerIn: parent; text: (hint.pre !== "" ? hint.pre + " " : "") + hint.label; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(14) }
-        }
-        Label { visible: hint.label !== "" && !hint.named; text: hint.label + (hint.k2 !== "" ? "," : ""); font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
-        Key { visible: hint.k2 !== ""; k: hint.k2; anchors.verticalCenter: parent.verticalCenter }
-        Label { visible: hint.label2 !== ""; text: hint.label2; font.pixelSize: app.fpx(15); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
-    }
-    // The page edges on Get mods: the page to the left and the page to the right, each a button for a
-    // click or a finger (at least 44 px wide).
-    component PageEdge: Rectangle {
-        id: edge
-        property string label: ""
-        property int dir: -1
-        width: app.tpx(34); height: parent.height
-        z: app.turnTo === 1 ? 3 : 0
-        transform: Translate { x: app.turnTo === 1 ? app.turnX : 0 }
-        color: edgeHover.hovered ? c.focusFill : c.panel
-        Rectangle { x: edge.dir < 0 ? parent.width - width : 0; width: Math.max(1, app.px(1)); height: parent.height; color: c.line }
-        Text {
-            anchors.centerIn: parent
-            rotation: edge.dir < 0 ? -90 : 90
-            text: edge.label
-            color: edge.dir < 0 ? c.accentText : c.soft
-            font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.weight: Font.DemiBold
-        }
-        // The arrow, pointing off the page.
-        Shape {
-            width: app.px(14); height: app.px(18)
-            anchors.horizontalCenter: parent.horizontalCenter
-            y: parent.height * 0.76
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeWidth: 0; strokeColor: "transparent"
-                fillColor: edge.dir < 0 ? c.accentText : c.soft
-                startX: edge.dir < 0 ? app.px(14) : 0; startY: 0
-                PathLine { x: edge.dir < 0 ? 0 : app.px(14); y: app.px(9) }
-                PathLine { x: edge.dir < 0 ? app.px(14) : 0; y: app.px(18) }
-                PathLine { x: edge.dir < 0 ? app.px(14) : 0; y: 0 }
-            }
-        }
-        Accessible.role: Accessible.Button
-        Accessible.name: edge.label + (edge.dir < 0 ? ", the page to the left" : ", the page to the right")
-        HoverHandler { id: edgeHover }
-        TapHandler { onTapped: { if (!app.gate(0, "page edge")) return; app.note("touch", "Page edge: " + edge.label); app.turnPage(edge.dir) } }
-    }
-    component Icon: Shape {
-        property string d: ""
-        property color tint: c.muted
-        width: app.px(22); height: app.px(22)
-        preferredRendererType: Shape.CurveRenderer
-        ShapePath {
-            strokeColor: tint
-            strokeWidth: 2
-            fillColor: "transparent"
-            capStyle: ShapePath.RoundCap
-            joinStyle: ShapePath.RoundJoin
-            scale: Qt.size(app.px(22) / 24, app.px(22) / 24)
-            PathSvg { path: d }
-        }
     }
     function fileUrl(p) { return p ? "file://" + p.split("/").map(encodeURIComponent).join("/") : "" }
     function initials(name) {
@@ -7423,216 +7154,11 @@ Window {
         // Off while anything covers it (see topLayer).
         enabled: app.topLayer === 0
 
-        // ===== Rail: the logo, the games (last played first, portrait art), Settings pinned at the bottom.
-        Rectangle {
+        // ===== Rail (GameRail.qml): the games (last played first, portrait art), Settings pinned at the bottom.
+        GameRail {
             id: rail
-            // Full screen while scrolling down (the bottom bar goes too).
-            // And on Get mods (a page of the book: no game list).
-            width: app.railAway ? 0 : app.px(72)
-            Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
-            visible: width > 0
-            clip: true
-            height: parent.height
-            color: c.rail
-            z: 5
-            Column {
-                id: railTop
-                anchors.top: parent.top
-                anchors.topMargin: app.px(10)
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: app.px(10)
-                // No app icon here (the owner's room for the games); Turbine shows itself once, at start (splash),
-                // and in Settings, About.
-                Rectangle { width: app.px(28); height: app.px(2); radius: 1; color: c.line; anchors.horizontalCenter: parent.horizontalCenter }
-            }
-            // A tile scrolled half under the divider fades out instead of showing a cut edge.
-            Rectangle {
-                z: 2
-                anchors.top: railList.top
-                width: parent.width; height: app.px(12)
-                visible: !railList.atYBeginning
-                gradient: Gradient {
-                    GradientStop { position: 0; color: c.rail }
-                    GradientStop { position: 1; color: Qt.rgba(c.rail.r, c.rail.g, c.rail.b, 0) }
-                }
-            }
-            ListView {
-                id: railList
-                anchors.top: railTop.bottom
-                anchors.topMargin: app.px(10)
-                // The hidden-games tile sits after the last game, just above the gear, where its focus is.
-                anchors.bottom: hiddenTile.visible ? hiddenTile.top : gear.top
-                anchors.bottomMargin: app.px(10)
-                width: parent.width
-                clip: true
-                spacing: app.px(8)
-                model: app.games.length
-                currentIndex: app.zone === "rail" ? Math.min(app.railIndex, app.games.length - 1) : app.current
-                highlightFollowsCurrentItem: false
-                onCurrentIndexChanged: app.glide(railList, () => railList.positionViewAtIndex(railList.currentIndex, ListView.Contain))
-                delegate: Item {
-                    id: tileItem
-                    required property int index
-                    readonly property var g: app.games[index]
-                    readonly property bool here: index === app.current && app.page === "game"
-                    readonly property bool focused: app.zone === "rail" && app.railIndex === index
-                    width: railList.width
-                    height: app.px(66)
-                    Rectangle {
-                        visible: tileItem.here
-                        x: app.px(1); width: app.px(4); height: app.px(36); radius: app.px(2)
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: c.accent
-                    }
-                    Rectangle {
-                        id: tile
-                        width: app.px(44); height: app.px(66)
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        radius: app.px(6)
-                        color: c.raised
-                        // Only the focus ring outlines a tile; the game on screen has the brass bar on its left.
-                        border.width: tileItem.focused ? app.px(2) : 0
-                        border.color: c.text
-                        clip: true
-                        Image {
-                            id: art
-                            anchors.fill: parent
-                            anchors.margins: tile.border.width
-                            visible: status === Image.Ready
-                            opacity: status === Image.Ready ? 1 : 0
-                            Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.base; easing.type: mo.enter } }
-                            source: tileItem.g ? app.fileUrl(tileItem.g.cover || tileItem.g.header) : ""
-                            fillMode: Image.PreserveAspectCrop
-                            sourceSize.height: app.px(132)
-                            asynchronous: true
-                        }
-                        // The game's name on its art, so the rail reads without the label beside it.
-                        Rectangle {
-                            visible: art.visible
-                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                            anchors.margins: tile.border.width
-                            height: artName.implicitHeight + app.px(4)
-                            color: "#C8000000"
-                            Text {
-                                id: artName
-                                anchors.centerIn: parent
-                                width: parent.width - app.px(4)
-                                horizontalAlignment: Text.AlignHCenter
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: 2
-                                elide: Text.ElideRight
-                                text: tileItem.g ? app.shortGame(tileItem.g.name) : ""
-                                color: "#FFFFFF"
-                                font.family: app.bodyFont
-                                font.pixelSize: Math.max(7, app.px(8))
-                                font.bold: true
-                            }
-                        }
-                        // No art: the whole name (shrunk to fit, never cut, so "Deliverance II" keeps its II) and
-                        // the store under it, so two copies or two games with long names still look different.
-                        Text {
-                            visible: !art.visible
-                            x: app.px(3); y: app.px(4)
-                            width: parent.width - app.px(6)
-                            height: parent.height - app.px(8) - tileStore.height
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 6
-                            elide: Text.ElideNone
-                            // Long words ("Cyberpunk", "Deliverance") shrink to fit the tile instead of being cut.
-                            fontSizeMode: Text.Fit
-                            minimumPixelSize: Math.max(5, app.px(5))
-                            text: tileItem.g ? tileItem.g.name : ""
-                            color: c.soft
-                            font.family: app.bodyFont
-                            font.pixelSize: app.fpx(10)
-                            font.bold: true
-                        }
-                        Text {
-                            id: tileStore
-                            visible: !art.visible
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: app.px(3)
-                            width: parent.width
-                            horizontalAlignment: Text.AlignHCenter
-                            text: tileItem.g ? (tileItem.g.launcher === "Steam" ? "Steam" : (tileItem.g.storeLabel || tileItem.g.launcher || "")) : ""
-                            color: c.muted
-                            font.family: app.bodyFont
-                            font.pixelSize: app.fpx(8)
-                            fontSizeMode: Text.HorizontalFit
-                            minimumPixelSize: Math.max(5, app.px(5))
-                        }
-                    }
-                    // A mod waiting or an update ready.
-                    Rectangle {
-                        visible: tileItem.here && app.updateCount > 0
-                        anchors.right: tile.right; anchors.top: tile.top
-                        anchors.margins: -app.px(3)
-                        width: app.px(10); height: width; radius: width / 2
-                        color: c.accentHi
-                        border.color: c.rail; border.width: app.px(2)
-                    }
-                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                    TapHandler { onTapped: { if (!app.gate(0, "railIndex")) return; { app.railIndex = tileItem.index; app.railSelect(tileItem.index) } } }
-                    // Right-click (LT with the pointer): the game's options, like X.
-                    TapHandler { acceptedButtons: Qt.RightButton; onTapped: { if (!app.gate(0, "sheet (right)")) return; if (app.sheet === "") { app.zone = "rail"; app.railIndex = tileItem.index; app.openRailMenu() } } }
-                }
-            }
-            // Every game hidden from the rail: one way back, right here.
-            Rectangle {
-                id: hiddenTile
-                visible: app.railExtra > 0
-                anchors.bottom: gear.top
-                anchors.bottomMargin: app.px(10)
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: app.px(60); height: app.px(66); radius: app.px(6)
-                readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length
-                color: c.raised
-                border.width: focused ? app.px(2) : Math.max(1, app.px(1))
-                border.color: focused ? c.text : c.line
-                Text {
-                    anchors.fill: parent
-                    anchors.margins: app.px(4)
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    wrapMode: Text.WordWrap
-                    text: "Show hidden games"
-                    color: c.text
-                    font.family: app.bodyFont
-                    font.pixelSize: app.fpx(11)
-                    font.bold: true
-                }
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: { if (!app.gate(0, "showHiddenGames")) return; app.showHiddenGames() } }
-            }
-            Rectangle {
-                id: gear
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: app.px(10)
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: app.px(44); height: app.px(44); radius: app.px(8)
-                readonly property bool focused: app.zone === "rail" && app.railIndex === app.games.length + app.railExtra
-                color: app.page === "settings" || app.page === "perf" ? c.raised : "transparent"
-                border.width: focused ? app.px(2) : 0
-                border.color: c.text
-                Icon {
-                    anchors.centerIn: parent
-                    tint: app.page === "settings" ? c.accent : c.muted
-                    d: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-                }
-                // A newer Turbine is ready to install.
-                Rectangle {
-                    visible: app.selfUpd.state === "available"
-                    anchors.right: parent.right; anchors.top: parent.top
-                    anchors.margins: -app.px(2)
-                    width: app.px(10); height: width; radius: width / 2
-                    color: c.accentHi
-                    border.color: c.rail; border.width: app.px(2)
-                }
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: { if (!app.gate(0, "openSettings")) return; app.openSettings() } }
-            }
+            app: app
+            kit: kit
         }
 
         // ===== Main
@@ -7674,9 +7200,9 @@ Window {
                         width: Math.max(2, app.px(3)); height: parent.height
                         color: c.accentHi
                     }
-                    // The page edges on Get mods (PageEdge, with the shared pieces).
-                    PageEdge { id: edgeBack; visible: app.bookPage; x: 0; label: "My mods"; dir: -1 }
-                    PageEdge { id: edgeNext; visible: app.bookPage && app.bookHasNext; x: parent.width - width; label: (app.tabs[2] || "Load order").replace(/ \(\d+\)$/, ""); dir: 1 }
+                    // The page edges on Get mods (PageEdge.qml).
+                    PageEdge { id: edgeBack; win: app; visible: app.bookPage; x: 0; label: "My mods"; dir: -1 }
+                    PageEdge { id: edgeNext; win: app; visible: app.bookPage && app.bookHasNext; x: parent.width - width; label: (app.tabs[2] || "Load order").replace(/ \(\d+\)$/, ""); dir: 1 }
 
                     // No games, mods being read.
                     EmptyState {
@@ -7698,6 +7224,7 @@ Window {
                     // the Y pop-up).
                     Label {
                         id: moveLine
+                        win: app
                         z: app.turnTo === 0 ? 3 : 0
                         transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
                         visible: app.page === "game" && app.tab === 0 && (app.moving || app.selecting || app.listFiltered)
@@ -7709,225 +7236,25 @@ Window {
                         color: c.soft
                         font.pixelSize: app.fpx(14)
                     }
-                    // The highlighted mod, on the right of My mods when there is room: its picture, name,
-                    // version and maker, what it does, what it wins or loses, and what X offers.
-                    Rectangle {
+                    // The details panel (ModPanel.qml): the highlighted mod, on the right of My mods when there is room.
+                    ModPanel {
                         id: modPanel
-                        readonly property var m: app.menuMod
-                        visible: app.showModPanel
-                        z: app.turnTo === 0 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
+                        app: app
+                        kit: kit
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         anchors.topMargin: moveLine.height + app.px(4)
-                        width: visible ? Math.round(parent.width * 0.36) : 0
-                        radius: app.px(8)
-                        color: c.panel
-                        border.color: c.line; border.width: Math.max(1, app.px(1))
-                        Accessible.role: Accessible.Pane
-                        Accessible.name: m ? "Details: " + m.name : "No mod highlighted"
-                        Column {
-                            x: app.px(14); y: app.px(14)
-                            width: parent.width - app.px(28)
-                            spacing: app.px(8)
-                            Rectangle {
-                                width: parent.width; height: Math.min(width * 9 / 16, modPanel.height * 0.38); radius: app.px(6)
-                                color: c.raised
-                                clip: true
-                                Image {
-                                    id: panelPic
-                                    anchors.fill: parent
-                                    source: modPanel.m && modPanel.m.picture ? modPanel.m.picture : ""
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    visible: status === Image.Ready
-                                    opacity: status === Image.Ready ? 1 : 0
-                                    Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.base; easing.type: mo.enter } }
-                                }
-                                Text {
-                                    visible: !panelPic.visible
-                                    anchors.centerIn: parent
-                                    text: modPanel.m ? (modPanel.m.name || "?").substring(0, 1).toUpperCase() : ""
-                                    color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(40); font.bold: true
-                                }
-                            }
-                            Text {
-                                width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                                text: modPanel.m ? modPanel.m.name : ""
-                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(19); font.bold: true
-                            }
-                            Text {
-                                width: parent.width; elide: Text.ElideRight
-                                text: app.panelLine(modPanel.m)
-                                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
-                            }
-                            Text {
-                                visible: text !== ""
-                                width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 4; elide: Text.ElideRight
-                                text: modPanel.m ? (modPanel.m.summary || "") : ""
-                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
-                            }
-                            Repeater {
-                                model: app.modPanelFacts
-                                Text {
-                                    required property var modelData
-                                    width: parent.width; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                                    text: modelData.text
-                                    color: modelData.level === "warn" ? c.warn : c.accentText
-                                    font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.weight: Font.DemiBold
-                                }
-                            }
-                            // Edit settings right on the mod, for a mod with a settings file
-                            // (Seamless Co-op: its settings, password first). Right from the list, or a tap; nothing when
-                            // the mod has none.
-                            Rectangle {
-                                id: panelEdit
-                                objectName: "panelEdit"
-                                readonly property bool foc: app.zone === "panel" && app.sheet === ""
-                                visible: app.panelHasSettings
-                                width: Math.min(parent.width, panelEditText.implicitWidth + app.px(28)); height: app.tpx(44); radius: app.px(6)
-                                color: foc ? c.focusFill : c.raised
-                                border.color: foc ? c.accentHi : c.accent; border.width: foc ? app.px(2) : Math.max(1, app.px(1.5))
-                                Text { id: panelEditText; anchors.centerIn: parent; text: app.panelSettingsLabel; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { if (!app.gate(0, "panel Edit settings")) return; app.zone = "panel"; app.panelEditOpen() } }
-                            }
-                        }
-                        Text {
-                            anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-                            anchors.margins: app.px(14)
-                            wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-                            text: modPanel.m ? app.glyph("x") + " Options: " + app.optionsLine() : ""
-                            color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(13)
-                            // A tap opens the options too (touch has every action).
-                            TapHandler { onTapped: { if (!app.gate(0, "panel options")) return; if (app.menuMod) { app.menuIndex = 0; app.sheet = "modmenu" } } }
-                        }
                     }
-                    ListView {
+                    // The list itself (ModList.qml).
+                    ModList {
                         id: modList
-                        visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage
-                        z: app.turnTo === 0 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
+                        app: app
+                        kit: kit
+                        look: look
                         anchors.fill: parent
                         anchors.rightMargin: modPanel.visible ? modPanel.width + app.px(10) : 0
                         anchors.topMargin: moveLine.height
-                        // The bars sliding away or back change the list's height: the focused row stays fully in view.
-                        onHeightChanged: if (app.modIndex >= 0) positionViewAtIndex(app.modIndex, ListView.Contain)
-                        // A touch or wheel scroll hides the bars going down and brings them back going up or at the top.
-                        property real lastY: 0
-                        onContentYChanged: { if (moving) app.scrollFollow(contentY + topMargin, lastY + topMargin, contentHeight > height + app.px(40)); lastY = contentY }
-                        topMargin: app.px(4)
-                        bottomMargin: app.px(4)
-                        clip: true
-                        spacing: app.px(app.desktopLayout ? 3 : 6)
-                        model: app.listItems
-                        currentIndex: Math.max(0, app.modIndex)
-                        highlightFollowsCurrentItem: false
-                        onCurrentIndexChanged: app.glide(modList, () => modList.positionViewAtIndex(modList.currentIndex, ListView.Contain))
-                        // After the left stick scrolls, focus the nearest row still in view.
-                        onMovementEnded: {
-                            const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
-                            if (top >= 0 && app.modIndex < top) app.modIndex = top
-                            else if (bottom >= 0 && app.modIndex > bottom) app.modIndex = bottom
-                        }
-                        delegate: Item {
-                            id: entry
-                            required property int index
-                            required property var modelData
-                            readonly property string kind: modelData.kind
-                            readonly property var m: modelData.m
-                            readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex === index
-                            readonly property Item pill: row.pillItem
-                            width: modList.width
-                            // Just moved (it slides in from where it was) or put back (it fades in).
-                            transform: Translate { id: entryShift; y: 0 }
-                            NumberAnimation { id: entrySlide; target: entryShift; properties: "y"; to: 0; duration: mo.moveFast; easing.type: mo.enter }
-                            NumberAnimation { id: entryFade; target: entry; properties: "opacity"; from: 0; to: 1; duration: mo.base; easing.type: mo.enter }
-                            Component.onCompleted: {
-                                const n = app.rowNudge
-                                if (!n || !entry.m || n.id !== entry.m.id || Date.now() - n.at > 400) return
-                                if (n.dir === 0) entryFade.start()
-                                else if (mo.moves) { entryShift.y = n.dir * (entry.height + modList.spacing); entrySlide.start() }
-                            }
-                            height: kind === "mod" ? row.implicitHeight : kind === "held" ? Math.max(app.touchFloor + app.px(8), app.px(52)) : app.px(app.desktopLayout ? 38 : 46)
-                            ModRow {
-                                id: row
-                                visible: entry.kind === "mod"
-                                ui: kit
-                                // Rows inside the open Dependencies group sit a little in.
-                                x: app.px(entry.modelData.dep ? 24 : 4)
-                                width: parent.width - app.px(entry.modelData.dep ? 28 : 8)
-                                name: entry.m.name || ""
-                                detail: entry.kind === "mod" ? app.rowLine(entry.m).text : ""
-                                detailLevel: entry.kind === "mod" ? app.rowLine(entry.m).level : ""
-                                isOn: entry.m.enabled === true
-                                ordered: app.ordered && app.listSort === "order"
-                                compact: app.desktopLayout || look.compactList
-                                order: entry.kind === "mod" ? app.mods.findIndex(x => x.id === entry.m.id) + 1 : 0
-                                position: entry.index + 1
-                                count: app.shownMods.length
-                                ticked: app.selecting && entry.kind === "mod" ? (app.ticked[entry.m.id] ? 1 : 0) : -1
-                                focused: entry.foc
-                                // Problems are the row's second line (rowLine); the badge is for Moving, an update and New.
-                                badge: app.moving && entry.foc ? "Moving" : app.updateMap[entry.m.id] && !app.updateMap[entry.m.id].deprecated ? "Update ready"
-                                       : entry.kind === "mod" && app.statusOf(entry.m) !== "" ? app.statusOf(entry.m)
-                                       : entry.kind === "mod" && app.isNew(entry.m) ? "New" : ""
-                                badgeLevel: entry.kind === "mod" && !app.moving && app.statusOf(entry.m) !== "" && !(app.updateMap[entry.m.id] && !app.updateMap[entry.m.id].deprecated) ? "warn" : "info"
-                                // A click or tap anywhere on the row is A on it (turns it on or off; ticks it in Select several).
-                                onClicked: { if (!app.gate(0, "onClicked")) return; if (app.moving && entry.kind === "mod") { app.moveByTap(entry.index); return } if (entry.kind === "mod" && !app.selecting && app.rowClickSeen(entry.index, entry.m)) return; app.rowA(() => { if (!app.moving) app.modIndex = entry.index }) }
-                                // A right-click (LT with the pointer) opens the mod's menu, like X.
-                                onMenuClicked: { if (!app.gate(0, "onMenuClicked")) return; if (app.sheet === "" && !app.moving) { app.modIndex = entry.index; app.zone = "main"; app.sheet = "modmenu" } }
-                            }
-                            Rectangle {
-                                visible: entry.kind !== "mod"
-                                x: app.px(4)
-                                width: parent.width - app.px(8)
-                                height: parent.height
-                                radius: app.px(6)
-                                // Removed (n) at the bottom; a mod just uninstalled stays dimmed in its place for 8 seconds.
-                                color: entry.foc ? c.focusFill : "transparent"
-                                border.color: entry.foc ? c.accent : c.line
-                                border.width: entry.foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
-                                opacity: entry.kind === "ghost" && !entry.foc ? 0.6 : 1
-                                Label {
-                                    x: app.px(14)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - app.px(28) - (heldButton.visible ? heldButton.width + app.px(12) : 0)
-                                    elide: Text.ElideRight
-                                    text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
-                                          : entry.kind === "held" ? app.heldWords
-                                          : entry.kind === "deps" ? "Dependencies (" + app.depMods.length + ") · what your mods need" + (app.depsOpen ? "" : " · A opens it")
-                                          : entry.kind === "needsq" && app.reqQ ? app.reqQ.forName + " still needs " + app.plural(app.reqQ.items.length - app.reqQ.index, "mod", "mods") + " · A goes on where you left off"
-                                          : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
-                                    color: entry.kind === "ghost" ? c.soft : entry.kind === "held" || entry.kind === "needsq" ? c.warn : entry.kind === "deps" ? c.soft : c.muted
-                                    font.pixelSize: app.fpx(15)
-                                    font.italic: entry.kind === "ghost"
-                                }
-                                // The held note's way back, on the row itself (a tap anywhere on the row does it too).
-                                Rectangle {
-                                    id: heldButton
-                                    visible: entry.kind === "held"
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: app.px(6)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    height: parent.height - app.px(8)
-                                    width: heldButtonText.implicitWidth + app.px(24)
-                                    radius: app.px(6)
-                                    color: c.accent
-                                    Label {
-                                        id: heldButtonText
-                                        anchors.centerIn: parent
-                                        text: "Turn them back on"
-                                        color: c.onAccent
-                                        font.pixelSize: app.fpx(15)
-                                        font.bold: true
-                                    }
-                                }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { if (!app.gate(0, "rowA")) return; app.rowA(() => { app.modIndex = entry.index }) } }
-                            }
-                        }
                     }
 
                     // Get mods: a game with no source can still add a file.
@@ -7953,63 +7280,11 @@ Window {
                         buttonKey: ""
                         buttonLabel: ""
                     }
-                    // An empty My mods (any game): a centered card with a big Get mods (A) and Add a file (X).
-                    Rectangle {
-                        visible: app.emptyMods
-                        z: app.turnTo === 0 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
-                        anchors.centerIn: parent
-                        width: Math.min(parent.width - app.px(32), app.px(520))
-                        height: emptyCol.implicitHeight + app.px(48)
-                        radius: app.px(12)
-                        color: c.card
-                        border.color: c.line
-                        Column {
-                            id: emptyCol
-                            anchors.centerIn: parent
-                            width: parent.width - app.px(48)
-                            spacing: app.px(14)
-                            Text {
-                                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                                text: "No mods for " + app.gameTitle + " yet"
-                                color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(22); font.bold: true
-                            }
-                            Text {
-                                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap
-                                text: app.canGetMods ? "Get mods finds them for you, or add a mod file you downloaded." : "Add a mod file you downloaded: zip, 7z or rar."
-                                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(15)
-                            }
-                            Flow {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                width: Math.min(parent.width, emptyGet.width + emptyAdd.width + spacing + 1)
-                                spacing: app.px(14)
-                                Rectangle {
-                                    id: emptyGet
-                                    visible: app.canGetMods
-                                    width: emptyGetRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
-                                    color: app.zone === "main" ? c.focusFill : c.raised
-                                    border.color: c.accent; border.width: app.px(app.zone === "main" ? 2 : 1)
-                                    Row { id: emptyGetRow; anchors.centerIn: parent; spacing: app.px(10)
-                                        Key { k: "a"; anchors.verticalCenter: parent.verticalCenter }
-                                        Text { text: "Get mods"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
-                                    Accessible.role: Accessible.Button; Accessible.name: "Get mods"
-                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } } }
-                                }
-                                Rectangle {
-                                    id: emptyAdd
-                                    width: emptyAddRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
-                                    color: !app.canGetMods && app.zone === "main" ? c.focusFill : c.raised
-                                    border.color: c.line; border.width: Math.max(1, app.px(1))
-                                    Row { id: emptyAddRow; anchors.centerIn: parent; spacing: app.px(10)
-                                        Key { k: app.canGetMods ? "x" : "a"; anchors.verticalCenter: parent.verticalCenter }
-                                        Text { text: "Add from Downloads"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
-                                    Accessible.role: Accessible.Button; Accessible.name: "Add from Downloads"
-                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } } }
-                                }
-                            }
-                        }
+                    // An empty My mods (any game): a centered card with a big Get mods (A) and Add a file (X)
+                    // (NoModsCard.qml).
+                    NoModsCard {
+                        app: app
+                        kit: kit
                     }
                     // A Basic game's first visit with no mods: what Basic support means.
                     EmptyState {
@@ -8140,380 +7415,19 @@ Window {
                         }
                     }
 
-                    // Settings
-                    Row {
-                        visible: app.page === "settings"
-                        anchors.fill: parent
-                        spacing: app.px(14)
-                        Column {
-                            width: app.px(170)
-                            spacing: app.px(4)
-                            // LB and RB move between the sections (caps at both ends of the list).
-                            Key { k: "lb"; anchors.horizontalCenter: parent.horizontalCenter }
-                            Repeater {
-                                model: app.settingsSections
-                                Rectangle {
-                                    required property int index
-                                    required property string modelData
-                                    width: parent.width; height: app.px(40); radius: app.px(6)
-                                    color: app.setSection === index ? c.raised : "transparent"
-                                    Rectangle { visible: app.setSection === parent.index; width: app.px(3); height: parent.height; color: c.accent; radius: app.px(2) }
-                                    Label { x: app.px(14); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; font.pixelSize: app.fpx(16); font.bold: app.setSection === parent.index; color: app.setSection === parent.index ? c.text : c.muted }
-                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (!app.gate(0, "setSection")) return; { app.setSection = parent.index; app.setRow = 0 } } }
-                                }
-                            }
-                            Key { k: "rb"; anchors.horizontalCenter: parent.horizontalCenter }
-                        }
-                        // Look
-                        ListView {
-                            id: lookList
-                            width: parent.width - app.px(184)
-                            height: parent.height
-                            visible: app.sec === "Look"
-                            clip: true
-                            spacing: app.px(4)
-                            model: app.lookRows
-                            currentIndex: app.sec === "Look" ? app.setRow : 0
-                            highlightFollowsCurrentItem: false
-                            onCurrentIndexChanged: app.glide(lookList, () => lookList.positionViewAtIndex(lookList.currentIndex, ListView.Contain))
-                            delegate: Rectangle {
-                                id: srow
-                                required property int index
-                                required property var modelData
-                                readonly property bool foc: app.zone === "settings" && app.setRow === index
-                                readonly property var now: srow.modelData.now !== undefined ? srow.modelData.now : look[srow.modelData.key]
-                                // For the build's size check.
-                                readonly property Item minus: minusBtn
-                                readonly property Item plus: plusBtn
-                                width: lookList.width
-                                height: srow.modelData.slider ? Math.max(app.px(62), app.tpx(36) + app.fpx(13) + app.px(16)) : app.px(50)
-                                radius: app.px(6)
-                                color: foc ? c.focusFill : c.card
-                                border.color: c.accent
-                                border.width: foc ? app.px(2) : 0
-                                opacity: srow.modelData.dim ? 0.6 : 1
-                                Label { x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.fpx(16); font.bold: true }
-                                Item {
-                                    x: app.px(160); width: parent.width - app.px(174); height: parent.height
-                                    // Choices
-                                    Row {
-                                        visible: !srow.modelData.swatch && !srow.modelData.slider
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width
-                                        spacing: app.px(4)
-                                        Repeater {
-                                            model: srow.modelData.names || []
-                                            Rectangle {
-                                                required property int index
-                                                required property string modelData
-                                                readonly property bool on: srow.now === srow.modelData.options[index]
-                                                width: (parent.width - app.px(4) * ((srow.modelData.names || []).length - 1)) / (srow.modelData.names || [1]).length
-                                                height: app.px(32); radius: app.px(5)
-                                                color: on ? c.raised : c.ground
-                                                Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.fast; easing.type: mo.enter } }
-                                                Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
-                                                Label { anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
-                                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                                TapHandler {
-                                                    onTapped: {
-                                                        if (!app.gate(0, "look choice " + srow.modelData.key) || !app.tapOnce()) return
-                                                        app.setRow = srow.index
-                                                        const v = srow.modelData.options[parent.index]
-                                                        if (srow.modelData.key === "layout") app.layoutPreview(v)
-                                                        else if (srow.modelData.key === "season") { look.season = v; app.note("action", "Look: season " + v) }
-                                                        else { look[srow.modelData.key] = v; app.note("action", "Look: " + srow.modelData.key + " " + v) }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // Accent swatches
-                                    Row {
-                                        visible: srow.modelData.swatch === true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: app.px(10)
-                                        Repeater {
-                                            model: ["brass", "iron", "copper", "jade", "fjord", "heather", "ember"]
-                                            Rectangle {
-                                                required property string modelData
-                                                width: app.px(24); height: width; radius: width / 2
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                color: c.swatches[modelData]
-                                                border.color: c.text
-                                                border.width: look.accent === modelData ? app.px(2) : 0
-                                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                                TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; look.accent = parent.modelData; app.note("action", "Look: accent " + look.accent) } } }
-                                            }
-                                        }
-                                        Label { text: look.accent.charAt(0).toUpperCase() + look.accent.substring(1); color: c.soft; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
-                                    }
-                                    // Sliders: Interface size, Seasonal amount and size. Minus and plus at the ends, and a line
-                                    // under it saying Left and Right change it (A steps up, then wraps back down).
-                                    Row {
-                                        id: sliderRow
-                                        visible: srow.modelData.slider === true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.verticalCenterOffset: -app.px(8)
-                                        width: parent.width
-                                        spacing: app.px(8)
-                                        // Real buttons, at least 44 pixels, for a tap, a click or the pointer.
-                                        Rectangle {
-                                            id: minusBtn
-                                            objectName: "sizeMinus"
-                                            width: app.tpx(36); height: width; radius: app.px(6)
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            color: c.raised; border.color: c.line; border.width: Math.max(1, app.px(1))
-                                            Label { anchors.centerIn: parent; text: "\u2212"; color: c.text; font.pixelSize: app.fpx(22); font.bold: true }
-                                            Accessible.role: Accessible.Button
-                                            Accessible.name: srow.modelData.label + ": smaller"
-                                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                            TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": - tapped"); srow.modelData.step(-1) } } }
-                                        }
-                                        Rectangle {
-                                            id: track
-                                            readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
-                                            width: Math.max(app.px(40), parent.width - app.tpx(36) * 2 - app.px(90)); height: app.px(6); radius: height / 2
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            color: c.line
-                                            // The slider's fill and knob glide to the new value.
-                                            Rectangle {
-                                                width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent
-                                                Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
-                                            }
-                                            Rectangle {
-                                                x: parent.width * track.part - width / 2
-                                                Behavior on x { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                width: app.px(18); height: width; radius: width / 2; color: c.accentHi
-                                            }
-                                        }
-                                        Rectangle {
-                                            id: plusBtn
-                                            objectName: "sizePlus"
-                                            width: app.tpx(36); height: width; radius: app.px(6)
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            color: c.raised; border.color: c.line; border.width: Math.max(1, app.px(1))
-                                            Label { anchors.centerIn: parent; text: "+"; color: c.text; font.pixelSize: app.fpx(22); font.bold: true }
-                                            Accessible.role: Accessible.Button
-                                            Accessible.name: srow.modelData.label + ": bigger"
-                                            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                            TapHandler { onTapped: { if (!app.gate(0, "tapOnce")) return; { if (!app.tapOnce()) return; app.setRow = srow.index; app.zone = "settings"; app.note("action", srow.modelData.label + ": + tapped"); srow.modelData.step(1) } } }
-                                        }
-                                        Label { text: srow.now + (srow.modelData.unit || ""); color: c.accentText; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                                    }
-                                    Label {
-                                        visible: srow.modelData.slider === true
-                                        anchors.top: sliderRow.bottom
-                                        anchors.topMargin: app.px(2)
-                                        text: "Left smaller · Right bigger"
-                                        color: c.muted
-                                        font.pixelSize: app.fpx(13)
-                                    }
-                                }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { if (!app.gate(0, "rowA")) return; app.rowA(() => { app.setRow = srow.index; app.zone = "settings" }, true) } }
-                            }
-                        }
-                        // About: the app icon (ten presses turn Labs mode on or off), version, the scrolling test.
-                        Column {
-                            width: parent.width - app.px(184)
-                            spacing: app.px(8)
-                            visible: app.sec === "About"
-                            Row {
-                                spacing: app.px(14)
-                                Rectangle {
-                                    readonly property bool foc: app.zone === "settings" && app.setRow === 0
-                                    width: app.px(76); height: width; radius: app.px(10)
-                                    color: foc ? c.focusFill : "transparent"
-                                    border.color: c.accent
-                                    border.width: foc ? app.px(2) : 0
-                                    Image {
-                                        anchors.centerIn: parent
-                                        width: app.px(64); height: width
-                                        source: app.iconFull
-                                        sourceSize.width: app.px(128)
-                                        smooth: true
-                                        mipmap: true
-                                    }
-                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (!app.gate(0, "setRow")) return; { app.setRow = 0; app.labsTap() } } }
-                                }
-                                Column {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: app.px(4)
-                                    Label { text: "Turbine Mod Manager " + Turbine.version; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
-                                    Label { visible: app.labsOn; text: "Labs mode on"; color: c.accentText; font.pixelSize: app.fpx(15); font.bold: true }
-                                }
-                            }
-                            // Only in Game Mode; in Desktop Mode no controller is normal and nothing is said.
-                            Label { visible: !Turbine.pads && Turbine.gamemode; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
-                            Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
-                            // A test for the build's makers, so only with Labs on.
-                            Rectangle {
-                                visible: app.labsOn
-                                readonly property bool foc: app.zone === "settings" && app.setRow === 1
-                                width: perfRow.implicitWidth + app.px(28); height: app.px(40); radius: app.px(8)
-                                color: foc ? c.focusFill : c.card
-                                border.color: c.accent
-                                border.width: foc ? app.px(2) : 0
-                                Hint { id: perfRow; anchors.centerIn: parent; k: "a"; label: "Scrolling test (2,000 rows)" }
-                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                TapHandler { onTapped: { if (!app.gate(0, "page")) return; { app.page = "perf"; app.zone = "perf" } } }
-                            }
-                        }
-                        // Labs: Report a bug, Performance check, and the checklist of things to confirm on the device.
-                        ListView {
-                            id: labsList
-                            width: parent.width - app.px(184)
-                            height: parent.height
-                            visible: app.sec === "Getting mods" || app.sec === "Updates" || app.sec === "Labs" || app.sec === "Help"
-                            clip: true
-                            spacing: app.px(4)
-                            model: app.rowsNow
-                            currentIndex: visible ? app.setRow : 0
-                            highlightFollowsCurrentItem: false
-                            onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-                            // After the left stick's wheel: the focus comes into view (a row with only words is passed).
-                            onMovementEnded: {
-                                const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
-                                if (top >= 0 && app.setRow < top) app.setRow = app.settingsLand(top, 1, app.rowsNow.length)
-                                else if (bottom >= 0 && app.setRow > bottom) app.setRow = app.settingsLand(bottom, -1, app.rowsNow.length)
-                            }
-                            onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); positionViewAtIndex(currentIndex, ListView.Contain) })
-                            delegate: Item {
-                                id: lrow
-                                required property int index
-                                required property var modelData
-                                readonly property bool foc: app.zone === "settings" && app.setRow === index
-                                readonly property bool isItem: modelData.kind === "item"
-                                readonly property bool hasChips: isItem || modelData.kind === "choice" || modelData.kind === "toggle"
-                                readonly property string answer: isItem ? app.labsState(modelData.id) : ""
-                                width: labsList.width
-                                height: (modelData.head ? labsHead.height : 0) + box.height
-                                Label {
-                                    id: labsHead
-                                    visible: !!lrow.modelData.head
-                                    height: visible ? app.px(34) : 0
-                                    x: app.px(6)
-                                    verticalAlignment: Text.AlignBottom
-                                    bottomPadding: app.px(6)
-                                    text: (lrow.modelData.head || "") + (lrow.modelData.head && lrow.isItem ? " · " + app.labsDone : "")
-                                    color: c.muted
-                                    font.pixelSize: app.fpx(14)
-                                    font.bold: true
-                                    font.letterSpacing: app.px(1)
-                                }
-                                Rectangle {
-                                    id: box
-                                    y: labsHead.height
-                                    width: parent.width
-                                    height: Math.max(lrow.isItem ? app.px(66) : app.px(50), labsWords.implicitHeight + app.px(18))
-                                    radius: app.px(6)
-                                    color: lrow.foc ? c.focusFill : c.card
-                                    border.color: c.accent
-                                    border.width: lrow.foc ? app.px(2) : 0
-                                    Column {
-                                        id: labsWords
-                                        x: app.px(14)
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - app.px(28) - (lrow.hasChips ? chips.width + app.px(10) : actionHint.width + app.px(10))
-                                        spacing: app.px(2)
-                                        Label { width: parent.width; text: lrow.modelData.title; font.pixelSize: app.fpx(16); font.bold: true }
-                                        Label { width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.fpx(14); wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
-                                    }
-                                    Hint {
-                                        id: actionHint
-                                        visible: lrow.modelData.kind === "action"
-                                        anchors.right: parent.right; anchors.rightMargin: app.px(12)
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        k: lrow.foc ? "a" : ""
-                                        label: lrow.modelData.action || ""
-                                    }
-                                    Row {
-                                        id: chips
-                                        visible: lrow.hasChips
-                                        anchors.right: parent.right; anchors.rightMargin: app.px(10)
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        spacing: app.px(4)
-                                        Repeater {
-                                            model: lrow.isItem ? [["works", "Works"], ["problem", "Problem"], ["", "Not tested"]]
-                                                   : lrow.hasChips ? lrow.modelData.options.map((o, i) => [o, lrow.modelData.names[i]]) : []
-                                            Rectangle {
-                                                required property int index
-                                                required property var modelData
-                                                readonly property bool on: lrow.isItem ? lrow.answer === modelData[0] : lrow.modelData.value === modelData[0]
-                                                readonly property bool cursor: lrow.isItem && lrow.foc && app.labsChip === index
-                                                width: chipText.implicitWidth + app.px(18); height: app.px(32); radius: app.px(5)
-                                                color: on ? c.raised : c.ground
-                                                border.color: cursor ? c.text : on ? c.accent : c.line
-                                                border.width: cursor ? app.px(2) : Math.max(1, app.px(1))
-                                                Label {
-                                                    id: chipText
-                                                    anchors.centerIn: parent
-                                                    text: parent.modelData[1]
-                                                    font.pixelSize: app.fpx(14)
-                                                    font.bold: parent.on
-                                                    color: !parent.on ? c.muted : !lrow.isItem ? c.text : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
-                                                }
-                                                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                                TapHandler {
-                                                    onTapped: {
-                                                        if (!app.gate(0, "labs choice") || !app.tapOnce()) return
-                                                        app.setRow = lrow.index
-                                                        if (lrow.isItem) { app.labsChip = parent.index; app.labsChoose(lrow.modelData, parent.modelData[0]) }
-                                                        else if (!parent.on) app.rowStep(lrow.modelData, lrow.modelData.key === "zoom" && parent.index === 0 ? -1 : 1)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                                    TapHandler { onTapped: { if (!app.gate(0, "settingsFocusable")) return; { if (app.settingsFocusable(lrow.index)) app.rowA(() => { app.setRow = lrow.index; app.zone = "settings" }, true) } } }
-                                }
-                            }
-                        }
+                    // Settings (SettingsPage.qml)
+                    SettingsPage {
+                        id: settingsPage
+                        app: app
+                        kit: kit
+                        look: look
                     }
 
-                    // Scrolling test: 2,000 mod rows.
-                    ListView {
+                    // Scrolling test: 2,000 mod rows (ScrollTest.qml).
+                    ScrollTest {
                         id: perfList
-                        visible: app.page === "perf"
-                        anchors.fill: parent
-                        clip: true
-                        spacing: app.px(4)
-                        model: 2000
-                        currentIndex: app.perfIndex
-                        highlightMoveDuration: mo.moveFast
-                        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
-                        delegate: Rectangle {
-                            id: prow
-                            required property int index
-                            readonly property bool foc: app.perfIndex === index
-                            readonly property bool off: index % 7 === 3
-                            width: perfList.width
-                            height: app.px(52)
-                            radius: app.px(6)
-                            color: foc ? c.focusFill : c.card
-                            border.color: c.accent
-                            border.width: foc ? app.px(2) : 0
-                            Row {
-                                anchors.verticalCenter: parent.verticalCenter
-                                x: app.px(12)
-                                spacing: app.px(12)
-                                Rectangle {
-                                    width: app.px(38); height: app.px(22); radius: app.px(5)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: prow.off ? c.ground : c.raised
-                                    Label { anchors.centerIn: parent; text: prow.off ? "OFF" : "ON"; font.pixelSize: app.fpx(14); font.bold: true; color: prow.off ? c.muted : c.accentText }
-                                }
-                                Column {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    Label { text: "Test mod " + (prow.index + 1); font.pixelSize: app.fpx(16); font.bold: true; color: prow.off ? c.muted : c.text }
-                                    Label { text: "Row " + (prow.index + 1) + " of 2,000"; font.pixelSize: app.fpx(14); color: c.muted }
-                                }
-                            }
-                        }
+                        app: app
+                        kit: kit
                     }
                 }
             }
@@ -8584,507 +7498,44 @@ Window {
         fomod: app.fomod
     }
     // ---------------------------------------------------------------- sheets
-    // Every sheet, menu and prompt in one layer: off under the quick wheel and the tutorial (see topLayer).
-    Item {
+    // Every sheet, menu and prompt in one layer (SheetLayer.qml): off under the quick wheel and the tutorial (see
+    // topLayer).
+    SheetLayer {
         id: sheetLayer
+        app: app
+        kit: kit
+        toast: toast
+        seen: seen
+        shot: shot
+        rail: rail
+        resetHold: resetHold
+        confirmHold: confirmHold
+        nxmRingMove: nxmRingMove
         // Every sheet and menu ends above the bottom bar, so its last row is never under it (150%, 1024 wide).
         anchors.fill: parent
         anchors.bottomMargin: legend.visible ? legend.height : 0
-        enabled: app.topLayer <= 2
-        Overlay {
-            visible: app.sheet === "details" || app.sheet === "notice"
-            onOutsideTapped: { if (!app.gate(2, "sheet onOutsideTapped")) return; app.act("b") }
-            Rectangle { anchors.fill: parent; color: "#B0000000" }
-
-            // Game details: what Turbine found, so the owner can check detection on the device.
-            Rectangle {
-                visible: app.sheet === "details" && app.game !== null
-                anchors.centerIn: parent
-                width: Math.min(parent.width - app.px(40), app.px(600))
-                height: detailCol.implicitHeight + app.px(32)
-                radius: app.px(10)
-                color: c.panel
-                border.color: c.line
-                CardGuard {}
-                Column {
-                    id: detailCol
-                    x: app.px(18); y: app.px(16)
-                    width: parent.width - app.px(36)
-                    spacing: app.px(8)
-                    Label { text: app.game ? app.game.name : ""; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold; width: parent.width }
-                    Repeater {
-                        model: app.game ? [
-                            ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
-                            ["Runs as", app.runtimeWords(app.game)],
-                            ["Stored on", (app.game.launcher === "Steam" ? "Steam library, " : "") + app.game.drive],
-                            ["Folder", String(app.game.installDir || "").split("/").filter(x => x !== "").slice(-1)[0] || ""],
-                            // A Steam build number means nothing to people; the number stays for reports, in Labs.
-                            // "Reported by Steam" said nothing: a Steam game's build is for reports (Labs), so no row.
-                            ["Game version", app.game.launcher === "Steam" ? "" : (app.game.build || "Not reported")],
-                        ].concat(app.labsOn ? [["Store ID", app.game.storeId], ["Build", app.game.build || "none"], ["Full folder", app.game.installDir]] : []).concat([
-
-                            ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
-                            ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
-                                        : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
-                        ]).concat(app.rules && app.rules.supportLevel !== "full" ? [
-                            ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
-                        ] : []).concat(app.rules && app.rules.antiCheat ? [
-                            ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
-                        ] : []).concat(app.checkPaths.length > 0 ? [
-                            ["Also checks", app.checkPaths.join("; ")]
-                        ] : []).concat(app.rules && app.rules.launchOption ? [
-                            ["Loader setup", app.rules.launchHelp || ""],
-                            ["Launch Option", app.rules.launchOption]
-                        ] : []) : []
-                        Row {
-                            required property var modelData
-                            visible: modelData[1] !== ""
-                            width: detailCol.width
-                            spacing: app.px(12)
-                            Label { width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
-                            Label { width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
-                        }
-                    }
-                    Hint { k: "b"; label: "Close" }
-                }
-            }
-
-            // Not SteamOS: said once, then Turbine runs as it is.
-            Rectangle {
-                visible: app.sheet === "notice"
-                anchors.centerIn: parent
-                width: Math.min(parent.width - app.px(40), app.px(520))
-                height: noticeCol.implicitHeight + app.px(36)
-                radius: app.px(10)
-                color: c.panel
-                border.color: c.line
-                CardGuard {}
-                Column {
-                    id: noticeCol
-                    x: app.px(20); y: app.px(18)
-                    width: parent.width - app.px(40)
-                    spacing: app.px(10)
-                    Label { text: "Made for SteamOS"; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
-                    Label { width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
-                    Hint { k: "a"; label: "OK" }
-                }
-            }
-        }
-
-        // ---------------------------------------------------------------- menus and prompts (they cover the window)
-        ModMenu {
-            ui: kit
-            visible: app.sheet === "modmenu"
-            title: app.menuMod ? app.menuMod.name : ""
-            subtitle: !app.menuMod ? ""
-                      : [app.modWords(app.menuMod), (app.menuMod.enabled ? "On" : "Off") + (app.ordered ? ", " + app.ordinal(app.mods.indexOf(app.menuMod) + 1) + " in load order" : "")].filter(s => s !== "").join(" · ")
-            items: app.modMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true }))
-            focusIndex: app.menuIndex
-            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; app.modMenuRun(index) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        GameMenu {
-            id: gameMenuView
-            ui: kit
-            visible: app.sheet === "gamemenu"
-            gameName: app.gameTitle
-            items: app.gameMenuItems.map(m => ({ key: m.act || "", label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true, enabled: m.ok !== false, group: m.group, more: m.act === "restore" && app.setups.length > 1 }))
-            focusIndex: app.menuIndex
-            // Reset runs only while a finger or the pointer stays down on it (a tap says to hold).
-            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; if (key !== "reset" || !resetHold.running) app.gameMenuRun(index) }
-            onHeld: (index, down) => {
-                const it = app.gameMenuItems[index]
-                if (!it || it.act !== "reset") return
-                app.menuIndex = index
-                app.clickHeld = down
-                if (down && !resetHold.running && !app.pressTwice) { app.resetHeld = 0; resetHold.start() }
-                else if (!down) app.stopReset()
-            }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        AddMods {
-            ui: kit
-            visible: app.sheet === "add"
-            subtitle: app.addAll ? "Every mod file in Downloads and its Game Mods folders, newest first"
-                                 : "Mod files in Downloads and Game Mods/" + app.gameTitle + ", newest first"
-            files: app.addList.map(d => ({ name: d.name, size: app.sizeWords(d.size), age: (d.modified > 0 ? app.age(d.modified) : "") + (app.addAll && d.folder ? " · " + d.folder : "") }))
-            focusIndex: app.addIndex
-            emptyText: app.addAll || app.downloads.length === 0 ? "No mod files in Downloads yet. Get one with Get mods, or download a mod's zip file in Desktop Mode." : "None for " + app.gameTitle + ". Find, All files lists the rest."
-            otherLabel: app.downloads.length === 0 ? "" : "Find"
-            onOtherClicked: { if (!app.gate(2, "sheet onOtherClicked")) return; app.act("y") }
-            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.addIndex = index; app.addChosen() }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        PrePlayCheck {
-            id: checkView
-            ui: kit
-            visible: app.sheet === "check"
-            checks: app.checks
-            buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
-            focusIndex: app.checkIndex
-            note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
-            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.checkIndex = index; app.checkChoose(index) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        LoaderPrompt {
-            ui: kit
-            visible: app.sheet === "loader"
-            title: (app.loaderShort || "Mod loader") + " needed"
-            loaderName: app.loaderShort
-            loaderFullName: app.rules && app.rules.loader && app.rules.loader.name.indexOf(" (") > 0 ? app.rules.loader.name.split(" (")[1].replace(")", "") : ""
-            explain: app.rules && app.rules.loader ? app.rules.loader.explain : ""
-            neededBy: app.loaderFor
-            sourceUrl: app.rules && app.rules.loader ? app.rules.loader.source : ""
-            sourceShown: app.loaderSourceShown
-            canDownload: app.loaderCanGet
-            buttons: app.loaderLabels.map(l => ({ key: "", label: l }))
-            focusIndex: app.loaderIndex
-            onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.loaderIndex = index; app.act(key || "a") }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-
-        // Installer choices: over the main area, the rail stays in view.
-        FomodSheet {
-            id: fomodView
-            ui: kit
-            visible: app.sheet === "fomod" && app.fomod !== null
-            x: rail.width
-            width: parent.width - rail.width
-            height: parent.height - app.px(8)
-            info: app.fomod
-            onChoose: (g, o) => { if (!app.gate(2, "sheet onChoose")) return; app.note("action", "Installer: question " + (g + 1) + ", option " + (o + 1)); Turbine.fomodChoose(g, o) }
-            onNext: { if (!app.gate(2, "sheet onNext")) return; app.note("action", "Installer: next step"); Turbine.fomodNext() }
-            onBack: { if (!app.gate(2, "sheet onBack")) return; app.note("action", "Installer: back a step"); Turbine.fomodBack() }
-            onStop: { if (!app.gate(2, "sheet onStop")) return; app.note("action", "Installer: stopped"); Turbine.fomodCancel() }
-        }
-        VersionsSheet {
-            ui: kit
-            visible: app.sheet === "versions"
-            modName: app.detailsData && app.detailsData.name ? app.detailsData.name : ""
-            versions: app.otherVersions
-            focusIndex: app.versionIndex
-            note: app.detailsData && app.detailsData.versionsNote ? app.detailsData.versionsNote : ""
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.versionIndex = i; app.installVersion(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        PagesSheet {
-            ui: kit
-            visible: app.sheet === "pages"
-            title: app.pagesTitle
-            pages: app.pagesList
-            focusIndex: app.pagesIndex
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.pagesIndex = i; app.openPage(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        CodeSheet {
-            ui: kit
-            visible: app.sheet === "code"
-            info: app.codeData
-            onCopyClicked: { if (!app.gate(2, "sheet onCopyClicked")) return; app.act("a") }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        PluginSheet {
-            ui: kit
-            visible: app.sheet === "plugin" && app.orderPlugin !== null
-            plugin: app.orderPlugin
-            position: app.orderIndex + 1
-            notes: app.orderPlugin ? (app.orderMessages[app.orderPlugin.name.toLowerCase()] || []) : []
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        ProfilesSheet {
-            id: profilesView
-            ui: kit
-            visible: app.sheet === "profiles"
-            gameName: app.gameTitle
-            profiles: app.profileList
-            active: app.profileData ? app.profileData.active : ""
-            actions: app.profileActions
-            plan: app.importData
-            premium: app.account.premium === true
-            focusIndex: app.profIndex
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.profIndex = i; app.profileRun(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        AddMods {
-            ui: kit
-            visible: app.sheet === "shares"
-            title: "Open a loadout file"
-            subtitle: "Shared loadout files in your Downloads folder, newest first"
-            files: app.shares.map(x => ({ name: x.name, size: "", age: "" }))
-            focusIndex: app.shareIndex
-            actionLabel: "Read"
-            emptyText: "No loadout files in Downloads. Someone makes one with Loadouts, Save to a loadout file."
-            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.shareIndex = index; app.act("a") }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        // The no-browser warning, the browser helper's steps, install notes, "Add this file?" and Add Chrome to Steam.
-        InfoSheet {
-            id: infoView
-            ui: kit
-            visible: ["nobrowser", "helper", "notes", "found", "quick", "chain", "addbrowser", "msg"].indexOf(app.sheet) >= 0
-            title: app.sheet === "quick" && app.quick ? app.quick.name + " closed after " + app.plural(app.quick.seconds, "second", "seconds")
-                   : app.sheet === "chain" ? "Next: " + (app.chainQueue[0] ? app.chainQueue[0].name : "")
-                   : app.sheet === "nobrowser" ? (app.browser.title || "No web browser found")
-                   : app.sheet === "helper" ? "Set up the browser helper"
-                   : app.sheet === "addbrowser" && app.addMode === "helper" ? "Set up the browser helper too"
-                   : app.sheet === "addbrowser" ? "Add Chrome to Steam so it opens in Game Mode"
-                   : app.sheet === "found" ? "Found a download"
-                   : app.sheet === "msg" && app.msgData ? app.msgData.title
-                   : "Added " + app.notesName
-            text: app.sheet === "quick" ? app.quickText
-                  : app.sheet === "chain" ? (app.chainAfter ? app.chainAfter + " is in. " : "") + "It also needs " + (app.chainQueue[0] ? app.chainQueue[0].name : "") + ". " + (app.chainQueue[0] && app.chainQueue[0].modId > 0 ? "A opens its file in Turbine. Press Slow download; it's added too."
-                                        : "A opens its files on Nexus. Pick the top file under Main files, press Manual download, then Slow download. It's added too.")
-                  : app.sheet === "nobrowser" ? (app.browser.text || "")
-                  : app.sheet === "addbrowser" && app.addMode === "helper" ? "Turbine started " + app.openName + " through Steam. Without the browser helper it opens on its start page, not on the mod. The helper opens the mod's page for you and saves the download in the right game's folder."
-                  : app.sheet === "addbrowser" ? "Game Mode only shows apps Steam starts. Add your browser to Steam once, and Turbine opens Nexus in it right over Turbine. Once:"
-                  : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
-                  : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
-                        + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
-                  : app.sheet === "notes" ? "Something to know about this mod:"
-                  : app.sheet === "msg" && app.msgData ? (app.msgData.text || "")
-                  : ""
-            steps: app.sheet === "nobrowser" ? (app.browser.steps || [])
-                   : app.sheet === "helper" ? ["In Desktop Mode, open chrome://extensions in the browser.",
-                                               "Turn on Developer mode (top right).",
-                                               "Press Load unpacked.",
-                                               "Choose Downloads, then the folder Turbine browser helper."]
-                   : app.sheet === "addbrowser" && app.addMode !== "helper" ? ["Switch to Desktop Mode: press the Steam button, open Power, and pick Switch to Desktop.",
-                                               "In Desktop Mode, open Steam, then Games, then Add a Non-Steam Game to My Library.",
-                                               "Tick Google Chrome and press Add Selected Programs.",
-                                               "Switch back to Game Mode, open Turbine and press Recheck."]
-                   : app.sheet === "msg" && app.msgData ? (app.msgData.steps || [])
-                   : []
-            notes: app.sheet === "notes" ? app.notesList : app.sheet === "msg" && app.msgData ? (app.msgData.notes || []) : []
-            footnote: app.sheet === "msg" && app.msgData ? (app.msgData.footnote || "")
-                      : app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
-                      : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
-                      : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
-                      : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.found.gameName + ": " + app.found.why + ". " : "")
-                        + "The file stays in Downloads either way." + (app.found.more > 0 ? " " + app.plural(app.found.more, "more file waits", "more files wait") + " after this one." : "")
-                      : ""
-            buttons: app.infoButtons
-            focusIndex: app.infoIndex
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.infoIndex = i; app.infoRun(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        // Removed mods (A Put back, X Delete now) and the hold-to-confirm sheet for deleting for good.
-        RemovedSheet {
-            ui: kit
-            visible: app.sheet === "removed"
-            mods: app.removedMods
-            focusIndex: app.removedIndex
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.removedIndex = i; app.removedRun(i) }
-            onDeleteClicked: (i) => { if (!app.gate(2, "sheet onDeleteClicked")) return; app.removedIndex = i; app.removedDelete(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        InfoSheet {
-            id: confirmSheet
-            ui: kit
-            visible: app.sheet === "confirm"
-            title: app.confirmVerb === "delete" ? "Delete for good?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
-            text: app.confirmText
-            buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
-                                     : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
-                      { key: "", label: "Keep" }]
-            focusIndex: app.confirmIndex
-            // Hold mode: a tap on Delete only moves the highlight; holding a finger or the pointer on it counts like
-            // holding A. Press twice mode: a tap counts like a press of A.
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return
-                if (i !== 0) { app.confirmIndex = i; app.act("b"); return }
-                if (app.pressTwice) { app.confirmIndex = 0; app.startConfirm(); return }
-                app.confirmIndex = i
-                if (!confirmHold.running) app.holdHint(app.holdNeeded + " seconds to " + app.confirmWords())
-            }
-            onHeld: (i, down) => {
-                if (i !== 0 || app.pressTwice) return
-                app.confirmIndex = 0
-                app.clickHeld = down
-                if (down) app.startConfirm(); else app.stopConfirm()
-            }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        // X on a Get mods card.
-        ModMenu {
-            ui: kit
-            visible: app.sheet === "cardmenu"
-            title: app.cardItem ? app.cardItem.name : ""
-            subtitle: app.cardItem ? (app.cardItem.owner || "") : ""
-            items: app.cardMenuItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: false }))
-            focusIndex: app.menuIndex
-            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return; app.menuIndex = index; app.cardMenuRun(index) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        // Y's pop-up: Search, Sort and Category on Get mods; Find, Show, Sort and Select several on My mods.
-        FindSheet {
-            id: findView
-            ui: kit
-            visible: app.sheet === "findpop"
-            title: app.findPop.kind === "get" ? "Find mods for " + app.gameTitle : "Find in my mods"
-            subtitle: app.findPop.kind === "get" ? app.nexusLine : ""
-            fieldLabel: app.findPop.kind === "get" ? "Search" : "Find"
-            text: app.findPop.text
-            placeholder: app.findPop.kind === "get" ? "Search " + app.gameTitle + " mods" : "Part of a mod's name"
-            result: app.findResult
-            sections: app.findSections
-            focusRow: app.findRow
-            focusCol: app.findCol
-            onFieldClicked: { if (!app.gate(2, "sheet onFieldClicked")) return; app.findPopField() }
-            onTyped: (text) => app.findPopTyping(text)
-            onEntered: (text) => app.findPopEntered(text)
-            onDoneClicked: { if (!app.gate(2, "sheet onDoneClicked")) return; app.findPopDone() }
-            onClearClicked: { if (!app.gate(2, "sheet onClearClicked")) return; app.findPopClear() }
-            onOptionClicked: (r, c) => { if (!app.gate(2, "sheet onOptionClicked")) return; app.findRow = r; app.findCol = c; app.findPopChoose(r, c) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.findPopDone() }
-        }
-        // A small menu made on the spot: Play options (hold Start), a profile's Rename and Delete, Select several's actions.
-        ModMenu {
-            id: pickMenu
-            ui: kit
-            visible: app.sheet === "pick"
-            title: app.pickTitle
-            subtitle: app.pickSub
-            items: app.pickItems.map(m => ({ label: m.title, detail: m.detail, icon: m.icon, danger: m.danger === true, enabled: m.dim !== true }))
-            focusIndex: app.menuIndex
-            onActivated: (index) => { if (!app.gate(2, "sheet onActivated")) return
-                if (app.nxmAsking) nxmRingMove.stop()   // a tap is the player's choice: the ring stays
-                // The Mod Manager Download question: nothing for its first second, and a tap (or two, or a click) on Get
-                // it only picks it: only A gets it, so a page can't get a mod by asking for taps where the row appears.
-                if (app.nxmAsking && (app.nxmAskQuiet() || index === 0)) {
-                    if (!app.nxmAskQuiet()) app.menuIndex = 0
-                    app.note("nxm", "Tap on the question: " + (app.nxmAskQuiet() ? "ignored (it just opened)" : "Get it picked; only A gets it"))
-                    // Said on screen too (newbie M3): touch alone can't get it, on purpose.
-                    if (!app.nxmAskQuiet()) toast.info("Get it is picked. Press A to get it: a tap only picks it, so a page can never get a mod by itself.")
-                    return
-                }
-                app.menuIndex = index; app.pickRun(index)
-            }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; if (app.nxmAskQuiet()) return; app.act("b") }
-        }
-        // The focused game's name beside the rail, up in the header (never over the tabs), and until a game has been
-        // opened from the rail once, how to pick one.
-        Rectangle {
-            id: railLabel
-            readonly property bool on: app.zone === "rail" && app.railIndex < app.games.length
-            readonly property bool hint: !seen.railHintDone || shot.page === "rail"
-            visible: on && app.sheet === ""
-            z: 20
-            x: rail.width + app.px(4)
-            y: app.px(6)
-            width: Math.max(railLabelText.implicitWidth, railHintText.visible ? railHintText.implicitWidth : 0) + app.px(24)
-            height: railLabelText.implicitHeight + (railHintText.visible ? railHintText.implicitHeight + app.px(2) : 0) + app.px(12)
-            radius: app.px(6)
-            color: c.raised
-            border.color: c.accent
-            border.width: Math.max(1, app.px(1))
-            Column {
-                anchors.centerIn: parent
-                spacing: app.px(2)
-                Text { id: railLabelText; anchors.horizontalCenter: parent.horizontalCenter; text: app.railName(app.railIndex); color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.weight: Font.DemiBold }
-                Text { id: railHintText; visible: railLabel.hint; anchors.horizontalCenter: parent.horizontalCenter; text: "Up and Down pick a game, A opens it"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
-            }
-        }
-        // X on "Found <file>": which game it goes into.
-        GamePicker {
-            ui: kit
-            visible: app.sheet === "pickgame"
-            fileName: app.found ? app.found.name : ""
-            games: app.games
-            focusIndex: app.pickIndex
-            onActivated: (i) => { if (!app.gate(2, "sheet onActivated")) return; app.pickIndex = i; app.pickGame(i) }
-            onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
-        }
-        AskText {
-            id: askView
-            ui: kit
-            // Drawn only while it is the sheet, so another sheet can never open under it.
-            visible: shown && app.sheet === "ask"
-            focusIndex: app.askIndex
-            onAccepted: (text) => app.askDone(text)
-            onEdited: (text) => { if (app.askPurpose === "find") { app.findText = text; app.modIndex = 0 } }
-            onCancelled: app.askCancelled()
-            onFieldTapped: { app.askIndex = -1; app.askKeyboard() }
-        }
-
-        // Edit settings (a mod's config files, the game's own, and Seamless Co-op's).
-        SettingsEditor {
-            id: settingsView
-            ui: kit
-            visible: app.sheet === "settingsedit"
-            onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return; app.settingsSaveNow() }
-            onOptionsClicked: { if (!app.gate(2, "sheet onOptionsClicked")) return; app.openSettingsOptions() }
-            onCloseClicked: {
-                if (!app.gate(2, "sheet onCloseClicked")) return
-                // Anything still waiting to save goes in first: B never loses a change.
-                app.settingsLeaving = true
-                if (changes > 0) app.settingsSaveNow(true)
-                app.settingsLeaving = false
-                if (app.coopAfterSettings) { app.coopAfterSettings = false; toast.info("Co-op waits for a session password.") }
-                app.note("action", "Edit settings closed"); app.sheet = app.settingsReturn
-            }
-            // The Co-op tile's row, on Seamless Co-op's own settings page.
-            extraRows: app.sheet === "settingsedit" && app.seamlessMod && app.settingsMod === app.seamlessMod.id && app.coopTileOffered ? [{
-                key: "cooptile", title: "Co-op tile in Steam",
-                detail: app.coopTileThere ? "In your Steam library: it starts " + app.gameTitle + " with Seamless Co-op in one press."
-                                          : "A tile in your Steam library that starts " + app.gameTitle + " with Seamless Co-op in one press" + (app.coopTileHow !== "" ? " (" + app.coopTileHow + ")." : "."),
-                label: app.coopTileThere ? "Remove" : "Add" }] : []
-            onActionClicked: (key) => { if (!app.gate(2, "sheet onActionClicked")) return
-                if (key !== "cooptile") return
-                // Anything still waiting to save goes in first, then the tile's own question.
-                app.settingsLeaving = true
-                if (changes > 0) app.settingsSaveNow(true)
-                app.settingsLeaving = false
-                app.coopAfterSettings = false
-                app.note("action", "Co-op settings: the Co-op tile row")
-                app.openCoopTile()
-            }
-            onTypeAsked: (row, value, label) => { if (!app.gate(2, "sheet onTypeAsked")) return
-                app.settingsTypeRow = row
-                const help = row.kind === "line" ? "The whole line, as it is in the file." : (row.f.help || "") + (row.f.kind === "number" ? " A number." : "")
-                app.openAsk("settingvalue", label, help.trim(), value, label, 2000, false, "Done")
-            }
-        }
-        ActivityLog {
-            id: activityView
-            ui: kit
-            visible: app.sheet === "activity"
-            lines: app.activityLines
-            onCopyClicked: { if (!app.gate(2, "sheet onCopyClicked")) return
-                Turbine.copyText(app.activityLines.slice(-500).join("\n") + "\n")
-                toast.info("Copied the last " + Math.min(500, app.activityLines.length) + " lines of the activity log.")
-            }
-            onSaveClicked: { if (!app.gate(2, "sheet onSaveClicked")) return
-                const r = app.parse(Turbine.saveActivityLog(), { error: "Couldn't save it." })
-                toast.info(r.error ? r.error : "Saved to Downloads as " + r.file + ".")
-            }
-            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.sheet = "" }
-        }
-        PerfCheck {
-            id: perfView
-            ui: kit
-            win: app
-            onCopyClicked: (text) => { if (!app.gate(2, "sheet onCopyClicked")) return; Turbine.copyText(text); toast.info("Performance check copied.") }
-            onReportClicked: (text) => { if (!app.gate(2, "sheet onReportClicked")) return; app.openReport(null, "Performance check", text) }
-            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; perfView.close(); app.sheet = "" }
-            Component.onCompleted: if (shot.page === "perfcheck") reportText = "Turbine performance check\nTurbine: 0.2 (build sample)\nVerdict: Smooth\n"
-                + "Still: 60 fps, median 16.7 ms, worst 18.9 ms, spikes 0.0%, CPU 9%\nScrolling: 59 fps, median 16.7 ms, worst 24.0 ms, spikes 0.4%, CPU 31%\n"
-                + "Idle: 0 frames in 4.0 s, CPU 0.2%\n\nStartup: first frame 640 ms after start\nDrawing: Vulkan, software drawing no"
-        }
-        LabsReport {
-            id: reportView
-            ui: kit
-            onSendClicked: { if (!app.gate(2, "sheet onSendClicked")) return; app.sendReport() }
-            onCloseClicked: { if (!app.gate(2, "sheet onCloseClicked")) return; app.dismissReport() }
-            onEditStarted: app.reportEditing(true)
-            onEditEnded: app.reportEditing(false)
-        }
     }
+    // The sheets the logic here drives by id.
+    property alias askView: sheetLayer.askView
+    property alias activityView: sheetLayer.activityView
+    property alias checkView: sheetLayer.checkView
+    property alias confirmSheet: sheetLayer.confirmSheet
+    property alias findView: sheetLayer.findView
+    property alias fomodView: sheetLayer.fomodView
+    property alias gameMenuView: sheetLayer.gameMenuView
+    property alias infoView: sheetLayer.infoView
+    property alias perfView: sheetLayer.perfView
+    property alias pickMenu: sheetLayer.pickMenu
+    property alias profilesView: sheetLayer.profilesView
+    property alias reportView: sheetLayer.reportView
+    property alias settingsView: sheetLayer.settingsView
 
-    // The bottom bar (the only bar on the game screen). Left to right: the game's name with the tab and its
-    // status under it (a warning there is tappable), LB RB and the tabs, then the legend: what binds() says A, B, X
-    // and Y do here and one more (the pointer's buttons, or Start when a sheet covers Play), at most five, then View
-    // Wheel, and Start Play on the right. Elsewhere it is the legend and View alone. After a touch the button hints
-    // hide until the next press (the game's name, the tabs and Play stay). Scrolling down hides it with the rail.
-    // Declared after the menus so their backdrop never dims it.
+    // The bottom bar (BottomBar.qml, the only bar on the game screen). Left to right: the game's name with the tab
+    // and its status under it (a warning there is tappable), LB RB and the tabs, then the legend: what binds() says A,
+    // B, X and Y do here and one more (the pointer's buttons, or Start when a sheet covers Play), at most five, then
+    // View Wheel, and Start Play on the right. Elsewhere it is the legend and View alone. After a touch the button
+    // hints hide until the next press (the game's name, the tabs and Play stay). Scrolling down hides it with the
+    // rail. Declared after the menus so their backdrop never dims it.
     readonly property var legendHints: legendFor(binds())
     // The bar keeps one shape on every game page, the mod page included (Play bottom right).
     readonly property bool barGame: page === "game" && game !== null
@@ -9114,359 +7565,11 @@ Window {
         else if (pillWords.indexOf("Loadout: ") === 0 && statusNow.level === "ok") openProfiles()
         else if (statusNow.level === "warn" || statusNow.level === "stop") openWhy()
     }
-    Rectangle {
+    BottomBar {
         id: legend
-        // Shown unless the content went full screen (a sheet or the wheel always brings it back).
-        readonly property bool shown: visible && !(app.barsHidden && app.sheet === "" && !app.wheelOpen)
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: shown ? 0 : -height - app.px(2)
-        Behavior on anchors.bottomMargin { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
-        anchors.left: parent.left
-        anchors.right: parent.right
+        app: app
+        kit: kit
         anchors.leftMargin: rail.width
-        // A taller bar with room between its groups.
-        height: Math.max(app.px(60), app.tpx(30) + app.px(10), barGameCol.implicitHeight + app.px(12))
-        color: c.panel
-        // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
-        z: app.wheelOpen ? 80 : 40
-        // The Nexus page has its legend in its own bar.
-        // The bar stays for touch too: its hints are the touch buttons.
-        visible: app.sheet !== "tutorial" && (app.barGame || app.page !== "browser" || app.wheelOpen || app.sheet !== "")
-        // On up to the quick wheel (its Close is here); the tutorial covers it.
-        enabled: app.topLayer <= 3
-        // The bar takes every press on it, so a tap on the bar never reaches a sheet's backdrop or a button beneath
-        // (one tap on a hint is one press of that button, like the controller).
-        MouseArea {
-            anchors.fill: parent
-            z: -1
-            acceptedButtons: Qt.AllButtons
-            preventStealing: true
-            onWheel: (w) => { w.accepted = true }
-            onPressed: app.coverPress(3)
-            onReleased: app.coverEnd()
-            onCanceled: app.coverEnd()
-        }
-        Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
-        readonly property real gap: app.px(18)
-        readonly property real edge: app.px(16)
-        // Touch: a sideways swipe on the bar is LB or RB.
-        DragHandler {
-            enabled: app.barGame && app.sheet === "" && !app.wheelOpen
-            target: null
-            xAxis.enabled: true; yAxis.enabled: false
-            acceptedDevices: PointerDevice.TouchScreen
-            onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the bottom bar"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
-        }
-        // ---- Left: the game (its whole name, wrapping to two lines before it is ever cut) and the tabs.
-        Row {
-            id: barRow
-            x: legend.edge
-            height: parent.height
-            spacing: legend.gap
-            Column {
-                id: barGameCol
-                visible: app.barGame || app.barPlace !== ""
-                // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
-                TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
-                TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
-                // The name gets up to 34% of the bar; past that it wraps onto a second line.
-                readonly property real most: Math.max(app.px(150), legend.width * 0.34)
-                readonly property real want: Math.min(most, Math.ceil(Math.max(barNameMetrics.advanceWidth, Math.min(barSubMetrics.advanceWidth, most))) + app.px(2))
-                width: visible ? want : 0
-                anchors.verticalCenter: parent.verticalCenter
-                Text {
-                    id: barName
-                    width: barGameCol.want
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                    text: app.barPlace !== "" ? app.barPlace : app.game ? app.shortGame(app.game.name) : ""
-                    color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true
-                }
-                Text {
-                    id: barSub
-                    width: barGameCol.want; elide: Text.ElideRight
-                    // On a mod page: where it is ("Get mods > SkyUI", "Mod 3 of 30"); Settings: the section.
-                    text: app.page === "settings" ? app.sec : app.page === "place" ? (app.placeData && app.placeData.pending ? app.placeData.pending.name : "")
-                          : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "") + app.pageResultWords : app.barStatus
-                    color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
-                    font.family: app.bodyFont; font.pixelSize: app.fpx(12)
-                    font.underline: app.barTappable && (app.statusNow.level === "warn" || app.statusNow.level === "stop")
-                }
-                Accessible.role: app.barTappable ? Accessible.Button : Accessible.StaticText
-                Accessible.name: barName.text + ", " + app.barStatus
-                HoverHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onTapped: app.statusTap() }
-            }
-            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
-            // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
-            Row {
-                id: barTabs
-                // On a mod page LB and RB step through the results (the line on the left says which).
-                visible: app.barGame && !app.modPage
-                anchors.verticalCenter: parent.verticalCenter
-                // After the mouse the pages are buttons by name (My mods, Get mods, Load order), no caps.
-                spacing: app.mouseLegend ? app.px(22) : app.px(6)
-                leftPadding: app.mouseLegend ? app.px(10) : 0
-                rightPadding: leftPadding
-                // Dimmed where they do nothing (one tab, or a sheet open).
-                Key { id: barLb; k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-                Key { id: barRb; k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-                // No room for every name: only the tab LB or RB goes to (and nothing when even that doesn't fit).
-                Text {
-                    visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0 && !app.mouseLegend
-                    text: app.barTarget >= 0 ? (app.barTarget < app.tab ? "back to " : "") + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : ""
-                    color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
-                    anchors.verticalCenter: parent.verticalCenter
-                    TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { app.note("touch", "Tab tapped: " + app.tabs[app.barTarget]); app.modPage = false; app.tab = app.barTarget } }
-                }
-                Repeater {
-                    model: legend.tabWordsFit || app.mouseLegend ? app.tabs : []
-                    Row {
-                        required property int index
-                        required property string modelData
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: app.px(6)
-                        Text { visible: parent.index > 0 && !app.mouseLegend; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
-                        Text {
-                            Rectangle {
-                                visible: app.mouseLegend
-                                z: -1
-                                anchors.centerIn: parent
-                                width: parent.width + app.px(20); height: Math.max(app.px(32), app.tpx(26)); radius: app.px(6)
-                                color: app.tab === parent.parent.index ? c.focusFill : c.raised
-                                border.color: app.tab === parent.parent.index ? c.accent : c.accentLo; border.width: Math.max(1, app.px(1))
-                            }
-                            text: parent.modelData.replace(/ \(\d+\)$/, "")
-                            color: app.tab === parent.index ? c.text : c.muted
-                            font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: app.tab === parent.index
-                            anchors.verticalCenter: parent.verticalCenter
-                            Accessible.role: Accessible.PageTab
-                            Accessible.name: text + (app.tab === parent.index ? ", selected" : "") + ", " + (parent.index + 1) + " of " + app.tabs.length
-                            HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                            TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { const i = parent.parent.index; app.note("touch", "Tab tapped: " + app.tabs[i]); app.modPage = false; app.tab = i } }
-                        }
-                    }
-                }
-            }
-            Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
-        }
-        // ---- Right: Play (and Seamless Co-op where it is on), always whole; the wheel's button just before them.
-        Row {
-            id: playGroup
-            anchors.right: parent.right
-            anchors.rightMargin: legend.edge
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: app.px(10)
-            // What Start does: a tap is Settings, a 3 second hold plays (or shows the Play choice). A tap on
-            // it is a tap of Start. The words go when the bar has no room for them; the cap stays.
-            Rectangle {
-                id: startHint
-                visible: app.barGame && app.sheet === "" && !app.wheelOpen
-                anchors.verticalCenter: parent.verticalCenter
-                width: startHintRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
-                color: c.raised
-                Row {
-                    id: startHintRow
-                    anchors.centerIn: parent
-                    spacing: app.px(6)
-                    // With the keyboard Settings is Esc, on a game's first page (elsewhere Esc goes back, so no cap).
-                    Key { id: startHintKey; k: app.keysLegend ? "b" : "start"; off: app.keysLegend && !app.escTop; anchors.verticalCenter: parent.verticalCenter }
-                    Column {
-                        visible: legend.startWords || startHintKey.gone
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { text: "Settings"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
-                        Text { visible: !app.mouseLegend; text: app.startHoldWords; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(12) }
-                    }
-                }
-                Accessible.role: Accessible.Button
-                Accessible.name: "Settings. Hold Start for 3 seconds: " + (app.startHoldPlays ? "Play" : "Play choice")
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: { if (!app.gate(3, "Start hint")) return; app.note("touch", "Start hint tapped"); app.startTap() } }
-            }
-            Rectangle {
-                id: playBtn
-                // A sheet whose own Start button is in the legend ("START Save"): Play steps aside.
-                visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
-                width: playRow.implicitWidth + app.px(28); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
-                // Dimmed while a sheet or the wheel is open.
-                opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
-                // The focus ring when Play has the focus (a mod just arrived).
-                border.color: c.text
-                border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
-                gradient: Gradient {
-                    GradientStop { position: 0; color: c.accentHi }
-                    GradientStop { position: 1; color: c.accent }
-                }
-                Row {
-                    id: playRow
-                    anchors.centerIn: parent
-                    spacing: app.px(8)
-                    // Play waits for changes being saved: it says so.
-                    Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                }
-                // Start held: a brass ring fills here over 3 seconds (shown once the press is clearly a hold).
-                Rectangle {
-                    id: startRing
-                    readonly property bool shown: app.startHeld > 0.1
-                    visible: shown
-                    anchors.centerIn: parent
-                    width: parent.height - app.px(6); height: width; radius: width / 2
-                    color: c.ground
-                    Shape {
-                        anchors.fill: parent
-                        preferredRendererType: Shape.CurveRenderer
-                        ShapePath {
-                            strokeColor: c.accentHi
-                            strokeWidth: Math.max(2, app.px(4))
-                            fillColor: "transparent"
-                            capStyle: ShapePath.RoundCap
-                            PathAngleArc {
-                                centerX: startRing.width / 2; centerY: startRing.height / 2
-                                radiusX: startRing.width / 2 - app.px(5); radiusY: radiusX
-                                startAngle: -90
-                                sweepAngle: 360 * app.startRingPart
-                            }
-                        }
-                    }
-                }
-                Accessible.role: Accessible.Button
-                Accessible.name: "Play"
-                HoverHandler { enabled: app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
-                // A long press is Play options (the wheel's Play options slot shows it too).
-                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { if (!app.gate(3, "Play")) return; app.playPressed() }
-                             onLongPressed: { if (!app.gate(3, "Play")) return; app.note("touch", "Play held: Play options"); app.openPlayOptions() } }
-            }
-        }
-        // The quick wheel's button: View's cap (a tap opens it too).
-        Rectangle {
-            id: wheelBtn
-            anchors.right: playGroup.left
-            anchors.rightMargin: playGroup.width > 0 ? legend.gap : 0
-            anchors.verticalCenter: parent.verticalCenter
-            width: wheelRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
-            color: app.wheelOpen ? c.focusFill : c.raised
-            visible: app.sheet === "" || app.wheelOpen
-            Row {
-                id: wheelRow
-                anchors.centerIn: parent
-                spacing: app.px(6)
-                Key { k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                Label { visible: legend.wheelWord || app.wheelOpen || app.mouseLegend; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
-            }
-            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { onTapped: app.wheelPress() }
-        }
-        // ---- Middle: the hints, at most 4 (3 beside the wheel's button), in priority order (A, B, X, Y, then the
-        // rest); the ones that don't fit are left out, never squeezed under Play or past the edge.
-        Item {
-            id: hintsBox
-            readonly property real rightEdge: wheelBtn.visible ? wheelBtn.x - legend.gap : playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
-            x: barRow.x + barRow.width
-            width: Math.max(0, rightEdge - x)
-            height: parent.height
-            clip: true
-            Row {
-                id: legendRow
-                visible: true
-                // The hints fade over when they change (another screen, another row, the pad, keys or the mouse).
-                readonly property string said: app.legendHints.slice(0, legend.hintsFit).map(h => app.glyph(h[0]) + " " + h[1] + (h[3] ? app.glyph(h[3]) + h[4] : "")).join("|")
-                onSaidChanged: if (mo.on && legend.visible) hintsFade.restart()
-                NumberAnimation { id: hintsFade; target: legendRow; properties: "opacity"; from: 0.25; to: 1; duration: mo.base; easing.type: mo.enter }
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: app.px(16)
-                Repeater {
-                    model: app.legendHints.slice(0, legend.hintsFit)
-                    Hint {
-                        required property var modelData
-                        k: modelData[0]
-                        label: modelData[1]
-                        pre: modelData[2] || ""
-                        k2: modelData[3] || ""
-                        label2: modelData[4] || ""
-                    }
-                }
-            }
-        }
-        // Every hint measured where nobody sees it, so the bar knows how many fit before showing them.
-        Row {
-            id: hintMeasure
-            x: -100000; y: 0
-            opacity: 0
-            enabled: false
-            spacing: legendRow.spacing
-            Repeater {
-                id: measureRep
-                model: app.legendHints
-                onItemAdded: legend.measureTick++
-                onItemRemoved: legend.measureTick++
-                Hint {
-                    required property var modelData
-                    k: modelData[0]
-                    label: modelData[1]
-                    pre: modelData[2] || ""
-                    k2: modelData[3] || ""
-                    label2: modelData[4] || ""
-                }
-            }
-        }
-        readonly property int hintsMost: wheelBtn.visible ? 3 : 4
-        property int measureTick: 0
-        function hintsWidth(n) {
-            let w = measureTick * 0
-            for (let i = 0; i < Math.min(n, measureRep.count); i++) { const it = measureRep.itemAt(i); if (it) w += it.implicitWidth + (i > 0 ? legendRow.spacing : 0) }
-            return w
-        }
-        readonly property int hintsFit: {
-            const most = Math.min(app.legendHints.length, hintsMost, measureRep.count)
-            let n = 0
-            for (let i = 1; i <= most; i++) if (hintsWidth(i) <= hintsBox.width) n = i
-            return n
-        }
-        // The tab names show when they fit beside two hints; otherwise LB and RB with the tab they go to; otherwise
-        // LB and RB alone (the status line names the tab).
-        TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
-        TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: "Wheel" }
-        TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
-        // (The keyboard's names for LB and RB are wider than the controller's.)
-        readonly property real capsW: Math.max(app.px(70), barLb.implicitWidth + barRb.implicitWidth + app.px(12))
-        // The Start hint's words ("Settings", "hold: Play choice") show when they fit beside the game, the
-        // caps, the wheel's cap, Play and two hints. Measured from the words, never from the hint's own size.
-        TextMetrics { id: startWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(13); text: app.startHoldWords + "  " }
-        readonly property bool startWords: width - edge * 2 - barGameCol.width - capsW - playBtn.width - startHintKey.implicitWidth - app.px(16 + 50) - gap * 6
-                                           - hintsWidth(Math.min(2, app.legendHints.length)) >= startWordsMetrics.advanceWidth + app.px(6)
-        // Room for the tab words: the bar less the game, the caps, Play, the wheel's cap and two hints.
-        readonly property real barFree: width - edge * 2 - barGameCol.width - capsW - playGroup.width - app.px(50) - gap * 5 - hintsWidth(Math.min(2, app.legendHints.length))
-        readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
-        readonly property real wheelWordNeed: wheelMetrics.advanceWidth + app.px(6)
-        readonly property real tabShortNeed: tabShortMetrics.advanceWidth + app.px(6)
-        readonly property bool tabWordsFit: barFree >= tabWordsNeed
-        readonly property bool tabShortFits: barFree >= tabShortNeed
-        // The tab LB or RB goes to comes before the word Wheel.
-        readonly property bool wheelWord: !app.barGame ? barFreeNoGame >= wheelWordNeed : barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
-        readonly property real barFreeNoGame: width - edge * 2 - app.px(50) - gap * 2 - hintsWidth(Math.min(hintsMost, app.legendHints.length))
-        // The build's check: nothing in the bar overlaps anything else, Play, or the edge, and the game's name is
-        // whole. Logged as "Bar check (<size>): <n> items, <p> problems".
-        function check(tag) {
-            if (!visible || !shown) return
-            let items = []
-            const add = (name, it) => { if (it && it.visible && it.width > 0) { const p = it.mapToItem(legend, 0, 0); items.push({ name: name, x: p.x, y: p.y, w: it.width, h: it.height }) } }
-            add("game", barGameCol); add("tabs", barTabs)
-            for (let i = 0; i < legendRow.children.length; i++) { const h = legendRow.children[i]; if (h.k !== undefined && h.visible) add("hint " + h.k.toUpperCase(), h) }
-            add("start", startHint); add("wheel", wheelBtn); add("Play", playBtn)
-            let bad = []
-            for (const a of items) {
-                if (a.x < -0.5 || a.x + a.w > legend.width + 0.5) bad.push(a.name + " past the edge (" + Math.round(a.x) + " to " + Math.round(a.x + a.w) + " of " + Math.round(legend.width) + ")")
-                if (a.y < -0.5 || a.y + a.h > legend.height + 0.5) bad.push(a.name + " taller than the bar")
-            }
-            for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
-                const a = items[i], b = items[j]
-                if (a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5) bad.push(a.name + " overlaps " + b.name)
-            }
-            if (barGameCol.visible && barName.truncated) bad.push("the game's name is cut")
-            app.note("check", "Bar check (" + tag + ", " + app.width + "x" + app.height + ", size " + app.sizeNow + "%): " + items.length + " items, " + bad.length + " problems"
-                     + (bad.length ? ": " + bad.join("; ") : "") + " | " + items.map(a => a.name).join(", ") + " | hints " + hintsFit + " of " + app.legendHints.length)
-        }
     }
     QuickWheel {
         ui: kit
@@ -9544,38 +7647,10 @@ Window {
 
     // ---------------------------------------------------------------- requirements
     // "Getting 2 of 3: <name>" while requirements are got one after another, with Skip and Stop (also in X
-    // options on the Nexus page).
-    Rectangle {
-        visible: app.reqStripWords !== ""
-        z: 95
-        anchors.horizontalCenter: parent.horizontalCenter
-        y: app.px(8)
-        width: reqStripRow.implicitWidth + app.px(20)
-        height: Math.max(app.px(40), app.tpx(34))
-        radius: app.px(8)
-        color: c.panel
-        border.color: c.accent
-        border.width: Math.max(1, app.px(1.5))
-        Row {
-            id: reqStripRow
-            anchors.centerIn: parent
-            spacing: app.px(12)
-            Label { text: app.reqStripWords; font.pixelSize: app.fpx(15); color: c.text; anchors.verticalCenter: parent.verticalCenter }
-            Repeater {
-                model: [["Skip", () => app.reqSkip()], ["Stop", () => app.reqStop()]]
-                Rectangle {
-                    required property var modelData
-                    width: reqBtnText.implicitWidth + app.px(20); height: Math.max(app.px(30), app.tpx(30)); radius: app.px(6)
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: c.raised; border.color: c.accentLo; border.width: Math.max(1, app.px(1))
-                    Label { id: reqBtnText; anchors.centerIn: parent; text: parent.modelData[0]; font.pixelSize: app.fpx(14); color: c.text }
-                    Accessible.role: Accessible.Button
-                    Accessible.name: modelData[0]
-                    HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                    TapHandler { onTapped: { app.note("touch", "Requirements strip: " + parent.modelData[0]); parent.modelData[1]() } }
-                }
-            }
-        }
+    // options on the Nexus page): RequirementsStrip.qml.
+    RequirementsStrip {
+        app: app
+        kit: kit
     }
     Toast {
         id: toast
@@ -9609,61 +7684,13 @@ Window {
         timeout: shot.page === "newmod" ? 0 : 4000
     }
     // ---------------------------------------------------------------- The start-up splash
-    // The only branding: Turbine's icon in the middle, zooming in as it fades in, then out as it fades out, about
-    // 1.2 s in all (it follows Animations: a plain short fade at Reduced, nothing at Off). Once per launch, never when coming back from a game or the
-    // background; any press, tap or click skips it. Everything loads underneath while it plays.
-    Item {
+    // The only branding (Splash.qml): Turbine's icon zooming in and out, about 1.2 s. Once per launch, never when
+    // coming back from a game or the background; any press, tap or click skips it.
+    Splash {
         id: splash
-        objectName: "splash"
-        anchors.fill: parent
-        z: 90000
-        property bool shown: (!shot.on || shot.page.indexOf("splash") === 0) && !app.splashDone
-        visible: shown
-        readonly property int inMs: mo.splashIn
-        readonly property int holdMs: mo.splashHold
-        readonly property int outMs: mo.splashOut
-        property real started: 0
-        function finish(why) {
-            if (!shown) return
-            app.splashDone = true
-            app.note("app", "Splash done (" + why + ") after " + Math.round(Date.now() - started) + " ms")
-        }
-        // Animations off: no splash at all.
-        Component.onCompleted: { started = Date.now(); if (shown && !mo.on) finish("animations off"); else if (shown) { splashAnim.start(); app.note("app", "Splash: start") } }
-        Rectangle { anchors.fill: parent; color: c.ground; opacity: splashIcon.opacity }
-        Image {
-            id: splashIcon
-            anchors.centerIn: parent
-            width: Math.min(parent.width, parent.height) * 0.28; height: width
-            source: app.iconBig
-            sourceSize.width: 512
-            smooth: true; mipmap: true
-            opacity: 0
-            scale: mo.splashFrom
-        }
-        SequentialAnimation {
-            id: splashAnim
-            ParallelAnimation {
-                NumberAnimation { target: splashIcon; properties: "opacity"; from: 0; to: 1; duration: splash.inMs; easing.type: mo.enter }
-                NumberAnimation { target: splashIcon; properties: "scale"; from: mo.splashFrom; to: 1; duration: splash.inMs; easing.type: mo.enter }
-            }
-            PauseAnimation { duration: splash.holdMs }
-            ParallelAnimation {
-                NumberAnimation { target: splashIcon; properties: "opacity"; to: 0; duration: splash.outMs; easing.type: mo.leave }
-                NumberAnimation { target: splashIcon; properties: "scale"; to: mo.splashTo; duration: splash.outMs; easing.type: mo.leave }
-            }
-            ScriptAction { script: splash.finish("played") }
-        }
-        // A tap or click skips it and goes nowhere else.
-        MouseArea {  // overlay-check: the splash takes every press while it plays
-            anchors.fill: parent
-            acceptedButtons: Qt.AllButtons
-            preventStealing: true
-            onWheel: (w) => { w.accepted = true; splash.finish("wheel") }
-            onPressed: { app.coverPress(100000); splash.finish("tap") }
-            onReleased: app.coverEnd()
-            onCanceled: app.coverEnd()
-        }
+        app: app
+        kit: kit
+        shot: shot
     }
     property bool splashDone: false
 
@@ -9672,9 +7699,9 @@ Window {
     // ---------------------------------------------------------------- the controller pointer
     // Steam's desktop layout: the right stick moves this pointer, RT clicks (held, it drags), LT right-clicks, the
     // left stick turned in a circle is a scroll wheel. Turbine sends real mouse and wheel events into this window
-    // (backend.rs, qtglue.cpp), so everything that takes a tap or a mouse also takes the pointer; this draws it, over
-    // everything (sheets included), and outlines the button or row under it. It hides 3 seconds after the right
-    // stick stops; A and the D-pad work as always.
+    // (backend.rs, qtglue.cpp), so everything that takes a tap or a mouse also takes the pointer; PointerLayer.qml
+    // draws it, over everything (sheets included), and outlines the button or row under it. It hides 3 seconds after
+    // the right stick stops; A and the D-pad work as always.
     property Item hoverItem: null
     property rect hoverBox: Qt.rect(0, 0, 0, 0)
     // Everything under the pointer that takes a tap; the outline goes on the innermost one (a row's ON pill
@@ -9717,36 +7744,8 @@ Window {
     }
     property bool pointerStill: false
     Timer { id: pointerStillTimer; interval: 3000; onTriggered: app.pointerStill = true }
-    Item {
-        anchors.fill: parent
-        z: 10000
-        visible: Turbine.pointerShown
-        // On the Nexus page the pointer never hides: still for 3 seconds, it dims.
-        opacity: app.page === "browser" && app.pointerStill ? 0.45 : 1
-        enabled: false
-        Rectangle {
-            visible: app.hoverItem !== null && app.hoverBox.width > 0
-            x: app.hoverBox.x - app.px(2); y: app.hoverBox.y - app.px(2)
-            width: app.hoverBox.width + app.px(4); height: app.hoverBox.height + app.px(4)
-            radius: app.px(7)
-            color: Qt.rgba(c.accent.r, c.accent.g, c.accent.b, 0.10)
-            border.width: Math.max(1, app.px(1.5))
-            border.color: c.accentHi
-        }
-        // The arrow: brass with a dark edge, its tip on the spot that gets clicked, about 24 design pixels tall.
-        Shape {
-            x: Turbine.pointerX
-            y: Turbine.pointerY
-            width: app.px(24); height: app.px(24)
-            preferredRendererType: Shape.CurveRenderer
-            ShapePath {
-                strokeColor: "#0B0A08"
-                strokeWidth: Math.max(1.5, app.px(1.6))
-                joinStyle: ShapePath.RoundJoin
-                fillColor: "#D8AE5E"
-                scale: Qt.size(app.px(24) / 24, app.px(24) / 24)
-                PathSvg { path: "M1 1 L1 20 L6 15.5 L9.6 23 L13 21.4 L9.5 14 L16 14 Z" }
-            }
-        }
+    PointerLayer {
+        app: app
+        kit: kit
     }
 }

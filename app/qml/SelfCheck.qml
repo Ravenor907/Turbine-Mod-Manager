@@ -1769,6 +1769,17 @@ Item {
     }
     property int pointerTries: 0
     function pointerCheck() {
+        // A game whose store was still empty when it opened lands on Get mods (the test mods go in a moment later):
+        // the click is meant for My mods, so it goes back there first, the way B does, and clicks once the list is
+        // on screen (the hidden list's rows still answer itemAtIndex, at the place of the Get mods cards).
+        if (!modList.visible || app.turnTo >= 0) {
+            if (app.tab !== 0 && app.sheet === "" && !app.modPage) {
+                app.note("pad", "Pointer check: My mods first (the game opened on " + (app.tabs[app.tab] || app.tab) + ")")
+                app.tab = 0; app.zone = "main"
+            }
+            if (++pointerTries < 6) pointerRetry.start(); else app.note("pad", "Pointer check: My mods isn't on screen")
+            return
+        }
         const second = modList.itemAtIndex(1), first = modList.itemAtIndex(0)
         const it = second && second.kind === "mod" ? second : first && first.kind === "mod" ? first : null
         if (!it || !it.pill) {

@@ -22,6 +22,32 @@ Most components take `required property var ui`, and Main.qml always passes `kit
 | `readable(col, bg)`, `lum(col)` | a color made readable on a background (4.5:1) |
 | `fileSize(b)`, `niceDate(t)`, `shortCount(n)` | "24.0 MB", "Mar 4, 2025", "3.1M" |
 
+## Main.qml's own parts
+
+Main.qml keeps the state and the logic; these files are its screen, cut into parts. Unlike the components below they
+know Main.qml: each takes `required property var app` (Main.qml's window) and `kit`, reads Main.qml's properties and
+calls its functions directly (taps ask `app.gate()` first). Inside, `c` and `mo` are `kit.c` and `kit.motion`.
+
+- **GameRail**: the game rail. `itemAt(i)` (a tile, Show hidden games or the gear); `railList`.
+- **ModList**: My mods' list and its rows (ModRow, and the removed, held, Dependencies and Removed rows). `look`.
+- **ModPanel**: the details panel beside My mods. `panelEdit`.
+- **NoModsCard**: the empty My mods card.
+- **SettingsPage**: the Settings page. `look`; `lookList`, `labsList`.
+- **ScrollTest**: the 2,000 row scrolling test.
+- **SheetLayer**: every sheet, menu and prompt, wired to Main.qml. `toast`, `seen`, `shot`, `rail`, `resetHold`,
+  `confirmHold`, `nxmRingMove`; the sheets Main.qml drives (`settingsView`, `askView` and the rest) as aliases.
+- **BottomBar**: the bottom bar and its legend. `check(tag)` (the build's bar check); `playBtn`, `startHint` and the
+  other items the checks reach.
+- **RequirementsStrip**: "Getting 2 of 3" with Skip and Stop.
+- **Splash**: the start-up splash. `shot`; `finish(why)`, `shown`, `splashIcon`.
+- **PointerLayer**: the controller pointer and its hover outline.
+- **LabsChecklist**: Labs' checklist items (data only; Main.qml's `labsItems`).
+
+Main.qml's small pieces take `required property var win` (Main.qml's window; a name of its own so `app` in bindings
+written on them keeps its meaning): **Label** (words in the body font), **Key** (a button's cap; the glyph follows the
+pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label`, `pre`, `k2`, `label2`, `inBar`),
+**PageEdge** (Get mods' page edges; `label`, `dir`) and **Icon** (a line icon; `d`, `tint`).
+
 ## Building blocks
 
 - **Overlay**: the root of everything that covers the window (sheets, menus, the wheel, the tutorial); a tap outside
