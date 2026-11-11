@@ -1,4 +1,4 @@
-//! 0.59: Turbine sets the game's Launch Options in Steam's localconfig.vdf itself (only while Steam is closed), so
+//! Turbine sets the game's Launch Options in Steam's localconfig.vdf itself (only while Steam is closed), so
 //! the player never pastes the line. Only that value changes; the rest of the file stays byte for byte.
 
 use std::fs;
@@ -114,7 +114,7 @@ fn changes_are_checked_after_steam_starts_again() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.62 (N1's edge): two changes to the same Steam file while Steam is running. The second write must not make the
+/// Two changes to the same Steam file while Steam is running. The second write must not make the
 /// first look as if Steam had written the file again and kept it.
 #[test]
 fn a_second_write_to_the_same_file_is_not_taken_for_steams() {

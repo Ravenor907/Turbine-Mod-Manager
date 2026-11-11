@@ -11,7 +11,7 @@ Overlay {
 
     required property var ui
     motion: ui.motion
-    // 0.56: a download's name as people say it: no .zip, no Nexus numbers, spaces for underscores (the file's own
+    // A download's name as people say it: no .zip, no Nexus numbers, spaces for underscores (the file's own
     // name is the small line under it).
     function niceName(f) {
         let n = String(f).replace(/\.(zip|7z|rar)$/i, "")
@@ -28,7 +28,7 @@ Overlay {
     property int focusIndex: 0
     property string actionLabel: "Add"
     property string emptyText: "No mod files in Downloads yet."
-    // Y's action as a button too (touch has no Y): "Find", the pop-up that chooses which files show (0.61).
+    // Y's action as a button too (touch has no Y): "Find", the pop-up that chooses which files show.
     property string otherLabel: ""
     signal otherClicked()
     property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar

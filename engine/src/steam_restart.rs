@@ -1,4 +1,4 @@
-//! 0.6: changes to Steam's own files (a game's Launch Options in localconfig.vdf, the co-op tile in shortcuts.vdf)
+//! Changes to Steam's own files (a game's Launch Options in localconfig.vdf, the co-op tile in shortcuts.vdf)
 //! with one Steam restart the player agreed to. Steam keeps those files in memory and writes them back when it
 //! closes, so they can only be changed while Steam is closed. In Game Mode Turbine itself is a game Steam started:
 //! closing Steam closes Turbine too. So the change is made by a small script on the host, started through
@@ -183,10 +183,8 @@ pub fn finish(data: &Path) {
 /// Steam's registry file (~/.steam/registry.vdf, the client's own state while it runs).
 fn registry(home: &Path) -> Option<crate::vdf::Vdf> {
     for f in [home.join(".steam/registry.vdf"), home.join(".steam/steam/registry.vdf")] {
-        if let Ok(t) = fs::read_to_string(&f) {
-            if let Ok(v) = crate::vdf::parse(&t) {
-                return Some(v);
-            }
+        if let Ok(t) = fs::read_to_string(&f) && let Ok(v) = crate::vdf::parse(&t) {
+            return Some(v);
         }
     }
     None
@@ -203,10 +201,8 @@ pub fn busy(home: &Path, games: &[crate::Game], own_appid: Option<u32>) -> Optio
     let ours = |id: &str| own_appid.is_some_and(|o| id == o.to_string()) || id == "0" || id.is_empty();
     if let Some(reg) = registry(home) {
         let steam = reg.path(&["Registry", "HKCU", "Software", "Valve", "Steam"]);
-        if let Some(id) = steam.and_then(|s| s.str_at(&["RunningAppID"])) {
-            if !ours(id) {
-                return Some(format!("{} is running. Close it first (save your game), then try again.", name(id)));
-            }
+        if let Some(id) = steam.and_then(|s| s.str_at(&["RunningAppID"])) && !ours(id) {
+            return Some(format!("{} is running. Close it first (save your game), then try again.", name(id)));
         }
         for (id, app) in steam.and_then(|s| s.get("apps")).map(crate::vdf::Vdf::entries).unwrap_or(&[]) {
             if app.str_at(&["Running"]) == Some("1") && !ours(id) {

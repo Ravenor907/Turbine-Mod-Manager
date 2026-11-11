@@ -1,4 +1,4 @@
-//! 0.59: the optional co-op tile in Steam's library. shortcuts.vdf is written back byte for byte apart from Turbine's
+//! The optional co-op tile in Steam's library. shortcuts.vdf is written back byte for byte apart from Turbine's
 //! own tile, with a backup first, only while Steam is closed, and never with a second copy of the tile.
 
 mod support;
@@ -78,7 +78,7 @@ fn binary_vdf_round_trip() {
 
 #[test]
 fn appid_like_steam() {
-    assert_eq!(shortcuts::crc32(b"123456789"), 0xCBF4_3926, "the standard CRC-32 check value");
+    assert_eq!(turbine_engine::zip::crc32(b"123456789"), 0xCBF4_3926, "the standard CRC-32 check value");
     // Worked out separately (Python's zlib.crc32 of exe + name, top bit set).
     assert_eq!(shortcuts::legacy_appid("\"C:\\Games\\game.exe\"", "Game"), 3_806_792_068);
     let tile = shortcuts::coop_tile("ELDEN RING", "steam:1245620", "io.github.ravenor907.TurbineModManager");
@@ -231,7 +231,7 @@ fn the_signed_in_account_comes_first() {
     let files = turbine_engine::shortcuts::shortcut_files(&home);
     assert!(files[0].to_string_lossy().contains("/userdata/111/"), "{files:?}");
     assert!(turbine_engine::shortcuts::tile_file(&home).unwrap().to_string_lossy().contains("/userdata/111/"));
-    // 0.61: the signed-in account has no non-Steam games yet: its file is where the tile goes, not 222's.
+    // The signed-in account has no non-Steam games yet: its file is where the tile goes, not 222's.
     fs::remove_file(root.join("userdata/111/config/shortcuts.vdf")).unwrap();
     let t = turbine_engine::shortcuts::tile_file(&home).unwrap();
     assert!(t.to_string_lossy().contains("/userdata/111/config/shortcuts.vdf"), "{t:?}");

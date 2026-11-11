@@ -131,3 +131,28 @@ impl Scan {
         format!("[{}]", items.join(","))
     }
 }
+
+/// The rail's order, as places in `ids`: pinned games first (in pin order), then the last played (most recent
+/// first), then the rest as found. Hidden games are left off, except `always` (a game asked for by name, shown even
+/// when hidden; "" for none).
+pub fn rail_order(ids: &[String], played: &[String], pinned: &[String], hidden: &[String], always: &str) -> Vec<usize> {
+    let mut list: Vec<usize> = (0..ids.len()).filter(|&i| !hidden.contains(&ids[i]) || (!always.is_empty() && ids[i] == always)).collect();
+    let rank = |i: usize| -> usize {
+        let id = &ids[i];
+        match (pinned.iter().position(|x| x == id), played.iter().position(|x| x == id)) {
+            (Some(p), _) => p,
+            (None, Some(o)) => 1000 + o,
+            (None, None) => 1000 + 1_000_000 + i,
+        }
+    };
+    list.sort_by_key(|&i| rank(i));
+    list
+}
+
+/// `rail_order` for the interface's {"ids","played","pinned","hidden","always"}: a JSON list of places.
+pub fn rail_order_json(input: &crate::json::Json) -> String {
+    use crate::json::Json;
+    let texts = |k: &str| -> Vec<String> { input.get(k).map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(str::to_string)).collect() };
+    let order = rail_order(&texts("ids"), &texts("played"), &texts("pinned"), &texts("hidden"), input.str_at("always").unwrap_or_default());
+    format!("[{}]", order.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","))
+}

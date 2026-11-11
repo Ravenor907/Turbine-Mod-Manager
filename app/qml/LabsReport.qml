@@ -3,7 +3,7 @@ import QtQuick
 // Labs > Report a bug: the screenshot of Turbine taken just before this opened, Include screenshot (on unless switched
 // off), what went wrong (up to 2000 characters, typed with Steam's on-screen keyboard), Include performance check
 // (when Labs > Performance check opened it; on unless switched off), Include crash log (off unless ticked; only when
-// there is one), then Not now and Save report side by side. The D-pad moves between them, A uses one. B (0.59) closes
+// there is one), then Not now and Save report side by side. The D-pad moves between them, A uses one. B closes
 // and keeps the words as a draft (Report a bug brings them back); nothing typed is ever lost by B.
 // Save report saves the report (Turbine writes the details itself: version, device, the game, its mods, the activity log)
 // and the screenshot to Downloads and copies the report to the clipboard, ready to paste.

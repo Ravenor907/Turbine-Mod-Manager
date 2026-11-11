@@ -458,12 +458,11 @@ fn store_goes_on_the_game_drive() {
     let sd = Path::new("/run/media/deck/SD/SteamLibrary");
     let key = "steam-489830";
     // Every library gets the hidden folder at its top (same device or not: separate mounts can't link).
-    assert_eq!(choose_root(key, sd, Some(2), Some(1), true, home), sd.join(DRIVE_FOLDER).join(key));
+    assert_eq!(choose_root(key, sd, true, home), sd.join(DRIVE_FOLDER).join(key));
     let internal = Path::new("/home/deck/.local/share/Steam");
-    assert_eq!(choose_root(key, internal, Some(1), Some(1), true, home), internal.join(DRIVE_FOLDER).join(key));
-    assert_eq!(choose_root(key, internal, None, None, true, home), internal.join(DRIVE_FOLDER).join(key));
+    assert_eq!(choose_root(key, internal, true, home), internal.join(DRIVE_FOLDER).join(key));
     // Not writable: back to the data folder.
-    assert_eq!(choose_root(key, sd, Some(2), Some(1), false, home), home.join("turbine-mod-manager").join(key));
+    assert_eq!(choose_root(key, sd, false, home), home.join("turbine-mod-manager").join(key));
 
     // A real game: its library is writable here.
     let w = world("root");
@@ -484,7 +483,7 @@ fn downloads_lists_zips_newest_first() {
     fs::create_dir_all(dl.join("folder.zip")).unwrap();
     write(&dl.join("sub/deep.zip"), "x");
     let names: Vec<String> = downloads(&w.root).iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
-    // 7z and rar are offered too (0.3).
+    // 7z and rar are offered too.
     assert_eq!(names, ["archive.7z", "new.ZIP", "mid.zip", "old.zip"]);
     assert!(downloads(&w.root.join("nobody")).is_empty());
 }
@@ -539,7 +538,7 @@ fn removed_mods_can_be_deleted_for_good() {
     assert!(w.root.join("Downloads/one.zip").exists(), "the player's archive is never touched");
 }
 
-/// 0.58, Edit settings: the player's copy of a mod's config file goes into the game in place of the mod's own, a mod
+/// Edit settings: the player's copy of a mod's config file goes into the game in place of the mod's own, a mod
 /// update keeps the player's values, and Reset to default puts the mod's file back.
 #[test]
 fn edited_settings_reach_the_game_and_survive_updates() {
@@ -571,7 +570,7 @@ fn edited_settings_reach_the_game_and_survive_updates() {
     assert_eq!(w.read("Data/lanterns.ini").as_deref(), Some("[a]\nbright = 1\nradius = 2\ncolor = warm\n"));
 }
 
-/// 0.62: Add from Downloads looks in the desktop's Downloads folder (the player moved it, or the desktop names it in
+/// Add from Downloads looks in the desktop's Downloads folder (the player moved it, or the desktop names it in
 /// another language) as well as ~/Downloads, and in each one's Game Mods folders.
 #[test]
 fn downloads_follow_the_desktops_downloads_folder() {

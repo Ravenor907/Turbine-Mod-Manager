@@ -1,4 +1,4 @@
-//! 0.6: Turbine from Steam's Quick Access menu, without its window. The optional Decky plugin (decky/) runs
+//! Turbine from Steam's Quick Access menu, without its window. The optional Decky plugin (decky/) runs
 //! `flatpak run io.github.ravenor907.TurbineModManager --status <game> --json` (and --mods on|off, --play,
 //! --play-coop, --play-plain, --open, --report) and reads one JSON line back. The requests and the answer's shape
 //! are the engine's (turbine_engine::quick, tested there); this runs them with the same jobs Turbine's own buttons
@@ -30,7 +30,7 @@ pub fn run(req: Result<Request, String>) -> i32 {
     };
     let parsed = json::parse(&answer).ok();
     let ok = parsed.as_ref().and_then(|v| v.get("ok")).and_then(Json::as_bool).unwrap_or(false);
-    // 0.6: the co-op tile in Steam's library (--from-tile): no plugin reads the answer, so Turbine opens the game's
+    // The co-op tile in Steam's library (--from-tile): no plugin reads the answer, so Turbine opens the game's
     // link itself, or its own window on the game when something needs the player first.
     if std::env::args().any(|a| a == "--from-tile") {
         from_tile(parsed.as_ref(), ok);
@@ -99,7 +99,7 @@ fn answer(r: &Request) -> String {
     let quick_mark = crate::browse::lock_instance(&folder.join(crate::browse::QUICK_MARK));
     // Turbine's window holds this lock while it is open (browse.rs).
     let lock = crate::browse::lock_instance(&folder.join(crate::browse::LOCK_FILE));
-    // 0.61 (break L3): both taken by someone else is another request from the menu, not Turbine's window.
+    // Both taken by someone else is another request from the menu, not Turbine's window.
     let busy = crate::browse::another_request_holds(&quick_mark, &lock);
     let open = matches!(lock, crate::browse::Lock::Taken) && !busy;
     if busy && r.action != Action::Status {
@@ -250,21 +250,19 @@ fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
         }
         // Seamless Co-op: turned on first when it is off (Turbine's own Play Seamless Co-op does the same).
         if how == "coop" {
-            // 0.62: Seamless Co-op from anywhere (known by its files), the copy the game loads.
+            // Seamless Co-op from anywhere (known by its files), the copy the game loads.
             let id = slot.store.seamless().map(|m| m.id);
             let Some(id) = id else {
                 return q::answer_json(false, "Seamless Co-op isn't installed. Open Turbine to get it (game menu).", ",\"needsTurbine\":true");
             };
-            if !slot.store.mods().iter().any(|m| m.id == id && m.enabled) {
-                if let Err(e) = slot.store.set_enabled(&id, true) {
-                    return q::answer_json(false, &format!("Couldn't turn Seamless Co-op on: {e}"), "");
-                }
+            if !slot.store.mods().iter().any(|m| m.id == id && m.enabled) && let Err(e) = slot.store.set_enabled(&id, true) {
+                return q::answer_json(false, &format!("Couldn't turn Seamless Co-op on: {e}"), "");
             }
             // The session password: every co-op player needs the same one, so an empty one needs the player first.
-            // (0.62: in Turbine's copy and in the copy the mod loads; the Play job checks that copy again.)
+            // (In Turbine's copy and in the copy the mod loads; the Play job checks that copy again.)
             if crate::modsettings::coop_password(&slot.game, slot.store.root(), &id).is_some_and(|p| !p.set()) {
                 crate::log::line("quick", &format!("{}: Seamless Co-op's session password isn't set: Turbine opens its settings first", game.name));
-                // 0.62: the co-op start waits for Turbine's window, which opens Co-op settings on the password (the
+                // The co-op start waits for Turbine's window, which opens Co-op settings on the password (the
                 // plugin and the tile start Turbine through Steam with `turbineUrl`).
                 let folder = crate::log::folder(&backend::data_home());
                 let now = crate::now_secs();

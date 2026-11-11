@@ -134,7 +134,7 @@ fn reverse_lookup_domain_to_installed_game() {
     assert!(nexus_games::answer_json(&Answer::Unknown).contains("\"state\":\"unknown\""));
 }
 
-/// 0.62: the owner's six games that ended as "ask (4 candidates)" and were never asked about. Names that differ
+/// Six real games that must not end as "ask (4 candidates)" without ever being asked about. Names that differ
 /// from Nexus's only by an edition or by punctuation are matched for sure; the rest get candidates that really
 /// share the name's words (or none), never four games that only share "The".
 #[test]

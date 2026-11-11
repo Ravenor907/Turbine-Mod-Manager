@@ -4,7 +4,7 @@
 // (here: it must equal the key the test's mocked API Keys page shows, given in TURBINE_STANDIN_KEY).
 // Prints "READY <port> <token>" when listening; "signin" on stdin presses Sign in with my browser (Game Mode).
 // Every line it prints is checked by the test: no cookie value or key may ever appear in them.
-// Build: rustc --edition 2021 tools/signin-standin.rs --extern turbine_engine=<the engine's rlib>
+// Build: rustc --edition 2024 tools/signin-standin.rs --extern turbine_engine=<the engine's rlib>
 #![allow(dead_code)]
 
 #[path = "../app/src/bridge.rs"]

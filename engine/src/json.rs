@@ -50,6 +50,73 @@ impl Json {
             _ => None,
         }
     }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Json::Num(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    /// True for what JavaScript counts as true: anything but null, false, 0, NaN and "".
+    pub fn truthy(&self) -> bool {
+        match self {
+            Json::Null => false,
+            Json::Bool(b) => *b,
+            Json::Num(n) => *n != 0.0 && !n.is_nan(),
+            Json::Str(s) => !s.is_empty(),
+            Json::Arr(_) | Json::Obj(_) => true,
+        }
+    }
+
+    /// The value written back as JSON text. Whole numbers are written without a fraction.
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        self.write(&mut out);
+        out
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            Json::Null => out.push_str("null"),
+            Json::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Json::Num(n) => out.push_str(&number_text(*n)),
+            Json::Str(s) => out.push_str(&quote(s)),
+            Json::Arr(items) => {
+                out.push('[');
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    v.write(out);
+                }
+                out.push(']');
+            }
+            Json::Obj(items) => {
+                out.push('{');
+                for (i, (k, v)) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&quote(k));
+                    out.push(':');
+                    v.write(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// A number as JSON writes it: whole numbers without a fraction, and null for what JSON can't hold.
+fn number_text(n: f64) -> String {
+    if !n.is_finite() {
+        "null".into()
+    } else if n.fract() == 0.0 && n.abs() < 1e15 {
+        format!("{}", n as i64)
+    } else {
+        format!("{n}")
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -358,5 +425,21 @@ mod quote_tests {
     fn round_trips() {
         let s = "a\"b\\c\nd\u{1}é";
         assert_eq!(super::parse(&super::quote(s)).unwrap().as_str(), Some(s));
+    }
+
+    #[test]
+    fn writes_values_back() {
+        let text = r#"{"a":[1,2.5,-3,true,null],"b":{"c":"d\"e"},"f":[]}"#;
+        assert_eq!(super::parse(text).unwrap().to_text(), text);
+        assert_eq!(super::Json::Num(1e20).to_text(), "100000000000000000000");
+        assert_eq!(super::Json::Num(f64::NAN).to_text(), "null");
+    }
+
+    #[test]
+    fn truthy_follows_javascript() {
+        use super::Json;
+        for (v, t) in [(Json::Null, false), (Json::Bool(false), false), (Json::Num(0.0), false), (Json::Str(String::new()), false), (Json::Num(2.0), true), (Json::Str("x".into()), true), (Json::Arr(vec![]), true)] {
+            assert_eq!(v.truthy(), t, "{v:?}");
+        }
     }
 }

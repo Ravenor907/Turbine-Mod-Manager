@@ -86,7 +86,7 @@ Item {
         walk(bar)
         return out
     }
-    // 0.64: the file page's Slow download button brought into view (scrolled to the middle, never pressed). `done`
+    // The file page's Slow download button brought into view (scrolled to the middle, never pressed). `done`
     // gets its middle in window pixels, or null when the page has none.
     function lineUpSlow(done) {
         if (!view) { done(null); return }
@@ -104,7 +104,7 @@ Item {
     MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (w) => { w.accepted = true } }  // overlay-check: the page itself (layer 0), not an overlay
 
     // ---------------------------------------------------------------- the bar (40 design pixels)
-    // 0.6 (intent I20): at the bottom, like every other screen's bar (no top bar anywhere); the page fills the rest.
+    // At the bottom, like every other screen's bar (no top bar anywhere); the page fills the rest.
     Rectangle {
         id: bar
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -123,7 +123,7 @@ Item {
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
         // over the bar when they don't fit (pillFull).
         readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
-        // The page's title keeps a little room too (a long hint in the pill used to take it all).
+        // The page's title keeps a little room too, so a long hint in the pill can't take it all.
         readonly property real titleMin: nb.width * 0.09
         readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd - signinNeed - titleMin
         readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)

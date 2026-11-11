@@ -1,4 +1,4 @@
-//! 0.58: Edit settings. A mod's (or the game's) config files as a page of plain controls: toggles, numbers (a slider
+//! Edit settings. A mod's (or the game's) config files as a page of plain controls: toggles, numbers (a slider
 //! where the file says the range, otherwise steps), lists, and text typed with Steam's keyboard, with the file's own
 //! comments as the help. Anything the reader can't make sense of still has the plain text fallback (line by line).
 //!
@@ -1052,10 +1052,8 @@ pub fn merge_report(fmt: Format, new_default: &str, old_default: &str, edited: &
                 continue;
             }
         };
-        if let Some(n) = new.iter().find(|n| n.section == section && n.key == key && n.occ == occ) {
-            if n.value != m.value {
-                edits.push((n.id, m.value.clone()));
-            }
+        if let Some(n) = new.iter().find(|n| n.section == section && n.key == key && n.occ == occ) && n.value != m.value {
+            edits.push((n.id, m.value.clone()));
         }
     }
     report.text = set(new_default, fmt, &edits).unwrap_or_else(|_| new_default.to_string());
@@ -1068,7 +1066,7 @@ fn settings_root(store_root: &Path) -> PathBuf {
     store_root.join("settings")
 }
 
-/// 0.62: Turbine's copies of one mod's settings files (with what belongs to them) carried over to another mod's
+/// Turbine's copies of one mod's settings files (with what belongs to them) carried over to another mod's
 /// entry, when that one has none yet: a new copy of the same mod under a new entry keeps the player's settings.
 /// The new mod's own files then count as an update of the old ones (`effective` merges). Answers whether it copied.
 pub fn carry_edits(store_root: &Path, from_id: &str, to_id: &str) -> io::Result<bool> {
@@ -1114,19 +1112,19 @@ pub fn backup_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     with_ext(&edited_path(store_root, mod_id, rel), ".backup")
 }
 
-/// 0.62: the file as the game or the mod itself last changed it in the game's folder, kept when its changes were
+/// The file as the game or the mod itself last changed it in the game's folder, kept when its changes were
 /// merged into Turbine's copy (so nothing is lost without a trace).
 pub fn in_place_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     with_ext(&edited_path(store_root, mod_id, rel), ".in-place")
 }
 
-/// 0.62: Turbine's copy as it was right after in-place changes were taken into it: the baseline for the player's
+/// Turbine's copy as it was right after in-place changes were taken into it: the baseline for the player's
 /// changes in Turbine until the next apply.
 pub fn synced_path(store_root: &Path, mod_id: &str, rel: &str) -> PathBuf {
     with_ext(&edited_path(store_root, mod_id, rel), ".synced")
 }
 
-/// 0.62: a settings file that was changed where it is deployed (by the game, the mod or by hand) merged with
+/// A settings file that was changed where it is deployed (by the game, the mod or by hand) merged with
 /// Turbine's own copy. `placed` is the file as Turbine last put it there. A setting the player changed in Turbine
 /// since then keeps Turbine's value (also when it was changed in place too); every other change made in place is
 /// taken over. Answers the text Turbine's copy should have now. When one of Turbine's changes has no place in the
@@ -1152,7 +1150,7 @@ pub fn merge_in_place(fmt: Format, in_place: &str, placed: &str, turbine_copy: &
     set(in_place, fmt, &edits).unwrap_or_else(|_| turbine_copy.to_string())
 }
 
-/// 0.62: is the file in the game's folder damaged rather than changed? Empty, or with no settings at all, or with
+/// Is the file in the game's folder damaged rather than changed? Empty, or with no settings at all, or with
 /// fewer than half the settings Turbine placed (a crash while the game wrote it, a full disk). Such a file is
 /// never taken over: Turbine's copy stays and goes back in.
 pub fn in_place_is_damaged(fmt: Format, in_place: &str, placed: &str) -> bool {
@@ -1173,26 +1171,22 @@ pub fn effective(store_root: &Path, mod_id: &str, rel: &str, default_src: &Path)
         return default_src.to_path_buf();
     }
     let base = base_path(store_root, mod_id, rel);
-    if let (Ok(new_default), Ok(old_default)) = (fs::read_to_string(default_src), fs::read_to_string(&base)) {
-        if new_default != old_default {
-            if let (Some(fmt), Ok(mine)) = (format_of(rel), fs::read_to_string(&edited)) {
-                let report = merge_report(fmt, &new_default, &old_default, &mine);
-                let _ = fs::copy(&edited, backup_path(store_root, mod_id, rel));
-                // Anything not carried over for sure: the player's whole file before the update is kept, and the
-                // settings to look at again are listed for the page.
-                let review = review_path(store_root, mod_id, rel);
-                if report.unsure.is_empty() && report.gone.is_empty() {
-                    let _ = fs::remove_file(&review);
-                } else {
-                    let _ = fs::copy(&edited, before_update_path(store_root, mod_id, rel));
-                    let lines: Vec<String> = report.unsure.iter().map(|n| format!("look\t{n}")).chain(report.gone.iter().map(|n| format!("gone\t{n}"))).collect();
-                    let _ = fs::write(&review, lines.join("\n") + "\n");
-                }
-                let tmp = with_ext(&edited, ".tmp");
-                if fs::write(&tmp, report.text).and_then(|_| fs::rename(&tmp, &edited)).is_ok() {
-                    let _ = fs::write(&base, new_default);
-                }
-            }
+    if let (Ok(new_default), Ok(old_default)) = (fs::read_to_string(default_src), fs::read_to_string(&base)) && new_default != old_default && let (Some(fmt), Ok(mine)) = (format_of(rel), fs::read_to_string(&edited)) {
+        let report = merge_report(fmt, &new_default, &old_default, &mine);
+        let _ = fs::copy(&edited, backup_path(store_root, mod_id, rel));
+        // Anything not carried over for sure: the player's whole file before the update is kept, and the
+        // settings to look at again are listed for the page.
+        let review = review_path(store_root, mod_id, rel);
+        if report.unsure.is_empty() && report.gone.is_empty() {
+            let _ = fs::remove_file(&review);
+        } else {
+            let _ = fs::copy(&edited, before_update_path(store_root, mod_id, rel));
+            let lines: Vec<String> = report.unsure.iter().map(|n| format!("look\t{n}")).chain(report.gone.iter().map(|n| format!("gone\t{n}"))).collect();
+            let _ = fs::write(&review, lines.join("\n") + "\n");
+        }
+        let tmp = with_ext(&edited, ".tmp");
+        if fs::write(&tmp, report.text).and_then(|_| fs::rename(&tmp, &edited)).is_ok() {
+            let _ = fs::write(&base, new_default);
         }
     }
     edited
@@ -1289,11 +1283,9 @@ pub fn config_files(dir: &Path, max_depth: usize, limit: usize) -> Vec<String> {
                 walk(base, &p, depth + 1, max, limit, out);
             } else if m.is_file() && m.len() <= MAX_BYTES {
                 let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                if format_of(&name).is_some() {
-                    if let Ok(rel) = p.strip_prefix(base) {
-                        let rel: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
-                        out.push(rel.join("/"));
-                    }
+                if format_of(&name).is_some() && let Ok(rel) = p.strip_prefix(base) {
+                    let rel: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                    out.push(rel.join("/"));
                 }
             }
             if out.len() >= limit {
@@ -1354,12 +1346,10 @@ pub fn save_game_file_at(store_root: &Path, game_dir: &Path, rel: &str, text: &s
 /// `reset_game_file`, refused when the game updated since the original was kept (it would put an old file back):
 /// Steam's Verify integrity is the way then.
 pub fn reset_game_file_at(store_root: &Path, game_dir: &Path, rel: &str, build: Option<&str>) -> io::Result<bool> {
-    if let (Ok(then), Some(now)) = (fs::read_to_string(build_file(store_root, rel)), build) {
-        if !then.is_empty() && then != now {
-            return Err(io::Error::other(format!(
-                "the game updated since Turbine kept its original {rel}, so putting that back could break it. Use Steam's Verify integrity of game files instead"
-            )));
-        }
+    if let (Ok(then), Some(now)) = (fs::read_to_string(build_file(store_root, rel)), build) && !then.is_empty() && then != now {
+        return Err(io::Error::other(format!(
+            "the game updated since Turbine kept its original {rel}, so putting that back could break it. Use Steam's Verify integrity of game files instead"
+        )));
     }
     reset_game_file(store_root, game_dir, rel)
 }

@@ -2,7 +2,7 @@ import QtQuick
 
 // The row of buttons every sheet with buttons uses (Before you play, the loader prompt, the plain sheets, text
 // entry, Delete for good). One rule everywhere, kept in Main.qml (buttonSheet): the D-pad moves the highlight, A
-// presses the highlighted button, B is the cancel button (0.62: Start does nothing here). No key caps on the buttons:
+// presses the highlighted button, B is the cancel button (Start does nothing here). No key caps on the buttons:
 // the legend says what A and B do. A tap presses a button too.
 Flow {
     id: sb

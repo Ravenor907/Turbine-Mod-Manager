@@ -52,25 +52,23 @@ impl Profiles {
     pub fn open(store: &Store) -> io::Result<Profiles> {
         let path = store.root().join("profiles.json");
         let mut p = Profiles { path, active: DEFAULT_PROFILE.into(), list: Vec::new() };
-        if let Ok(text) = fs::read_to_string(&p.path) {
-            if let Ok(v) = json::parse(&text) {
-                for item in v.get("profiles").map(Json::as_array).unwrap_or(&[]) {
-                    let Some(name) = item.str_at("name") else { continue };
-                    if p.list.iter().any(|x| x.name.eq_ignore_ascii_case(name)) {
-                        continue;
-                    }
-                    let order = item
-                        .get("order")
-                        .map(Json::as_array)
-                        .unwrap_or(&[])
-                        .iter()
-                        .filter_map(|o| Some((o.str_at("id")?.to_string(), o.get("enabled").and_then(Json::as_bool).unwrap_or(false))))
-                        .collect();
-                    p.list.push(Profile { name: name.to_string(), order });
+        if let Ok(text) = fs::read_to_string(&p.path) && let Ok(v) = json::parse(&text) {
+            for item in v.get("profiles").map(Json::as_array).unwrap_or(&[]) {
+                let Some(name) = item.str_at("name") else { continue };
+                if p.list.iter().any(|x| x.name.eq_ignore_ascii_case(name)) {
+                    continue;
                 }
-                if let Some(a) = v.str_at("active") {
-                    p.active = a.to_string();
-                }
+                let order = item
+                    .get("order")
+                    .map(Json::as_array)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|o| Some((o.str_at("id")?.to_string(), o.get("enabled").and_then(Json::as_bool).unwrap_or(false))))
+                    .collect();
+                p.list.push(Profile { name: name.to_string(), order });
+            }
+            if let Some(a) = v.str_at("active") {
+                p.active = a.to_string();
             }
         }
         if p.list.is_empty() {
@@ -292,7 +290,7 @@ pub fn export(profiles: &Profiles, store: &Store, name: &str, home: &Path) -> Re
         profile: name.to_string(),
         mods: share_mods(store, &order),
     };
-    // 0.62: the desktop's Downloads folder (the one the player's file manager and browser show).
+    // The desktop's Downloads folder (the one the player's file manager and browser show).
     let dir = crate::watch::downloads_folder(home);
     fs::create_dir_all(&dir).map_err(|e| format!("The Downloads folder couldn't be made ({e})."))?;
     let base = folder_safe(&format!("Turbine profile - {} - {}", game.name, name));
@@ -360,10 +358,8 @@ fn same_source(m: &ShareMod, src: &SourceInfo, game_domain: Option<&str>) -> boo
     if src.id.eq_ignore_ascii_case(&m.id) {
         return true;
     }
-    if m.kind == "nexus" {
-        if let (Some((d, mid, _)), Some((sd, smid))) = (nexus_ids(m, game_domain), nexus::source_mod(src)) {
-            return mid == smid && (sd.is_empty() || sd == d);
-        }
+    if m.kind == "nexus" && let (Some((d, mid, _)), Some((sd, smid))) = (nexus_ids(m, game_domain), nexus::source_mod(src)) {
+        return mid == smid && (sd.is_empty() || sd == d);
     }
     false
 }

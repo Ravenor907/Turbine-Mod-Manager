@@ -26,8 +26,8 @@
 
 use crate::games::{Game, Runtime};
 use crate::rules::{Family, GameRules, Kind};
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// The key under HKEY_CURRENT_USER that holds DLL overrides, as Wine reads it (single backslashes).
@@ -183,32 +183,9 @@ fn write_reg(prefix: &Path, old: &[u8], new: &[u8]) -> Result<(), String> {
     let backup = prefix.join(BACKUP_NAME);
     let fail = |e: io::Error| format!("Couldn't save this game's Proton settings: {e}");
     if !backup.exists() {
-        write_atomic(&backup, old, &path).map_err(fail)?;
+        crate::write_atomic_with(&backup, old, Some(&path)).map_err(fail)?;
     }
-    write_atomic(&path, new, &path).map_err(fail)
-}
-
-fn write_atomic(path: &Path, bytes: &[u8], perms_from: &Path) -> io::Result<()> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.turbine-new"));
-    {
-        let mut f = File::create(&tmp)?;
-        f.write_all(bytes)?;
-        if let Ok(meta) = fs::metadata(perms_from) {
-            let _ = f.set_permissions(meta.permissions());
-        }
-        f.sync_all()?;
-    }
-    if let Err(e) = fs::rename(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
-        return Err(e);
-    }
-    if let Some(dir) = path.parent() {
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
-        }
-    }
-    Ok(())
+    crate::write_atomic_with(&path, new, Some(&path)).map_err(fail)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -292,10 +269,8 @@ impl<'a> RegFile<'a> {
                 continue;
             }
             let (t, _) = self.text(i);
-            if let Some((name, _)) = parse_str(&t[1..], b']') {
-                if fold(&name) == want {
-                    header = Some(i);
-                }
+            if let Some((name, _)) = parse_str(&t[1..], b']') && fold(&name) == want {
+                header = Some(i);
             }
         }
         let header = header?;

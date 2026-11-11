@@ -44,7 +44,6 @@ pub fn start(dir: PathBuf) {
     let unclean = mark.exists();
     let _ = fs::write(&mark, b"");
     trim_crash_log();
-    clean_old_exits();
     if unclean {
         crash("The last run ended without closing (a crash, or it was stopped).");
     }
@@ -54,7 +53,7 @@ pub fn start(dir: PathBuf) {
     install_panic_hook();
 }
 
-/// 0.6: a run from Steam's menu (no window): its lines go into the same activity.log, and it leaves the window's
+/// A run from Steam's menu (no window): its lines go into the same activity.log, and it leaves the window's
 /// crash mark alone (that run's own start and close keep it).
 pub fn start_quiet(dir: PathBuf) {
     let _ = fs::create_dir_all(&dir);
@@ -107,10 +106,8 @@ pub fn line(kind: &str, text: &str) {
     if s.size + bytes > FILE_CAP {
         rotate(&mut s);
     }
-    if let Some(f) = s.file.as_mut() {
-        if writeln!(f, "{entry}").is_ok() {
-            s.size += bytes;
-        }
+    if let Some(f) = s.file.as_mut() && writeln!(f, "{entry}").is_ok() {
+        s.size += bytes;
     }
 }
 
@@ -170,23 +167,6 @@ pub fn crash(text: &str) {
     }
 }
 
-/// 0.62, once: entries from before 0.6 that were Game Mode ending (the display going away), not crashes, leave
-/// crash.log (turbine_engine::report::clean_crash_log). A mark file beside it says it was done.
-fn clean_old_exits() {
-    let Some(path) = crash_path() else { return };
-    let mark = path.with_file_name("crash-cleaned-0.62");
-    if mark.exists() {
-        return;
-    }
-    if let Ok(text) = fs::read_to_string(&path) {
-        let (clean, gone) = turbine_engine::report::clean_crash_log(&text);
-        if gone > 0 && fs::write(&path, clean).is_ok() {
-            line("app", &format!("Crash log: {gone} old entries that were Game Mode ending, not crashes, removed"));
-        }
-    }
-    let _ = fs::write(&mark, b"");
-}
-
 fn trim_crash_log() {
     let Some(path) = crash_path() else { return };
     let Ok(meta) = fs::metadata(&path) else { return };
@@ -211,11 +191,7 @@ pub fn crash_tail(max: usize) -> String {
     if text.len() <= max {
         return text;
     }
-    let mut start = text.len() - max;
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    let cut = &text[start..];
+    let cut = &text[text.ceil_char_boundary(text.len() - max)..];
     cut.find('\n').map(|i| cut[i + 1..].to_string()).unwrap_or_else(|| cut.to_string())
 }
 
@@ -257,7 +233,7 @@ pub extern "C" fn qt_message(kind: i32, place: *const std::os::raw::c_char, text
         _ => return, // Qt's own chatter stays out of the log
     };
     let msg = if place.is_empty() { format!("{label}: {text}") } else { format!("{label}: {text} ({place})") };
-    // 0.6 (integration I10): leaving Game Mode takes the display away and Qt ends the run right after this message. It
+    // Leaving Game Mode takes the display away and Qt ends the run right after this message. It
     // isn't a crash: the next start says so plainly (changes not yet in the game go in at the next Play).
     if kind == 1 && text.contains("X11 connection broke") {
         line("app", "The display went away (Game Mode ended or Steam restarted): Turbine closes with it");
@@ -291,7 +267,7 @@ struct Tm {
     zone: *const std::os::raw::c_char,
 }
 
-extern "C" {
+unsafe extern "C" {
     fn localtime_r(t: *const i64, out: *mut Tm) -> *mut Tm;
 }
 
@@ -324,7 +300,7 @@ pub fn folder(data_home: &Path) -> PathBuf {
     data_home.join("turbine-mod-manager")
 }
 
-/// 0.59: a system error in words a player can act on. "Permission denied (os error 13)" says what happened, not what
+/// A system error in words a player can act on. "Permission denied (os error 13)" says what happened, not what
 /// to do; the raw text still goes into the activity log.
 pub fn plain(raw: &str) -> String {
     if !raw.contains("os error ") {

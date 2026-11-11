@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn a_held_push_is_one_direction() {
-        // Acceptance check 1: pushed to 0.6 and held 80 ms is one press, let go is one release.
+        // Pushed to 0.6 and held 80 ms is one press, let go is one release.
         let mut p = Pointer::default();
         let mut path = vec![(0.0, -0.6); 6]; // 0, 16, ... 80 ms
         path.extend(vec![(0.0, -0.6); 20]); // held longer: still one press (Main.qml repeats it like the D-pad)
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn a_quarter_turn_clockwise_is_three_notches_down() {
-        // Acceptance check 1: a 90 degree clockwise sweep (up to right, as seen) is 3 down notches and no direction.
+        // A 90 degree clockwise sweep (up to right, as seen) is 3 down notches and no direction.
         let mut p = Pointer::default();
         let mut path = sweep(-90.0, 0.0, 8);
         path.push((0.0, 0.0));

@@ -1,7 +1,7 @@
 import QtQuick
 
 // Y's pop-up: one place to find. Get mods: a Search field, Sort and Category buttons (a long category list ends in
-// More...). My mods: a Find field, Show and Sort buttons. 0.59: every choice takes effect the moment it is made (the
+// More...). My mods: a Find field, Show and Sort buttons. Every choice takes effect the moment it is made (the
 // result line on the right says what it found), and the pop-up only closes: Done (A on it, B, Start, a tap outside)
 // keeps everything; Clear all (X) puts everything back. The field is typed right here (A or a tap opens Steam's
 // keyboard); Enter shows the results. Main.qml moves the focus (focusRow 0 is the field, then one row per section,

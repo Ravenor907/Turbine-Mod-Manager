@@ -98,16 +98,16 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selftestPad"]
         fn selftest_pad(self: Pin<&mut Self>, button: &QString, pressed: bool);
-        /// 0.62, for the build's checks: a keyboard key with its modifiers (Qt's codes), delivered like a real one.
+        /// For the build's checks: a keyboard key with its modifiers (Qt's codes), delivered like a real one.
         #[qinvokable]
         #[cxx_name = "selftestKey"]
         fn selftest_key(self: Pin<&mut Self>, key: i32, mods: i32, pressed: bool);
-        /// 0.62, for the build's checks: a real mouse's move (kind 0), press (1), release (2) or wheel (3) at (x, y),
+        /// For the build's checks: a real mouse's move (kind 0), press (1), release (2) or wheel (3) at (x, y),
         /// with Qt's button and modifiers.
         #[qinvokable]
         #[cxx_name = "selftestMouse"]
         fn selftest_mouse(self: Pin<&mut Self>, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32);
-        /// 0.6: a check's press (down and up) made `age_ms` before it is handled.
+        /// A check's press (down and up) made `age_ms` before it is handled.
         #[qinvokable]
         #[cxx_name = "selftestPadAged"]
         fn selftest_pad_aged(self: Pin<&mut Self>, button: &QString, age_ms: i32);
@@ -136,7 +136,7 @@ pub mod qobject {
         #[qinvokable]
         fn select(self: Pin<&mut Self>, game_id: &QString);
 
-        // ------------------------------------------------ 0.56: mods for any game (anygame.rs)
+        // ------------------------------------------------ Mods for any game (anygame.rs)
 
         /// The game's folders right in `rel` ("" for the game folder): [{"name","path","turbine"}].
         #[qinvokable]
@@ -203,20 +203,20 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "modFolder"]
         fn mod_folder(self: &Self, id: &QString) -> QString;
-        /// 0.56: the current game's save backups (health.rs).
+        /// The current game's save backups (health.rs).
         #[qinvokable]
         #[cxx_name = "savesJson"]
         fn saves_json(self: &Self) -> QString;
-        /// 0.56: puts a save backup back (the saves as they are now are kept first).
+        /// Puts a save backup back (the saves as they are now are kept first).
         #[qinvokable]
         #[cxx_name = "restoreSaves"]
         fn restore_saves(self: Pin<&mut Self>, id: &QString);
-        /// 0.57: puts a save backup back without keeping the saves as they are now (after `savesKeepFailed` and the
+        /// Puts a save backup back without keeping the saves as they are now (after `savesKeepFailed` and the
         /// player's confirm).
         #[qinvokable]
         #[cxx_name = "restoreSavesAnyway"]
         fn restore_saves_anyway(self: Pin<&mut Self>, id: &QString);
-        /// 0.56: Why won't it start? and Check game folder (read only).
+        /// Why won't it start? and Check game folder (read only).
         #[qinvokable]
         #[cxx_name = "gameHealth"]
         fn game_health(self: &Self) -> QString;
@@ -253,25 +253,100 @@ pub mod qobject {
         #[cxx_name = "kcdRestore"]
         fn kcd_restore(self: Pin<&mut Self>);
 
-        /// The check before Play for the current game. The answer arrives as `checked`.
+        /// The check before Play for the current game, shaped with `ctx` (precheck::PlayCtx: {"game","mods",
+        /// "links","domain","launchSet","update","hold"}) and what was seen before. The answer arrives as `checked`:
+        /// {"checks","trouble","stops","known","key"}.
         #[qinvokable]
-        fn check(self: Pin<&mut Self>);
+        fn check(self: Pin<&mut Self>, ctx: &QString);
+
+        // ------------------------------------------------ What was seen and answered (seen.rs)
+
+        /// Reads in the values the interface kept itself before ({"launchDone", ...}, each as it saved it), once.
+        /// True when they were read in now (the interface then clears its own).
+        #[qinvokable]
+        #[cxx_name = "adoptSeen"]
+        fn adopt_seen(self: &Self, old: &QString) -> bool;
+        /// The loader's one-time Steam Launch Options line was seen for this game.
+        #[qinvokable]
+        #[cxx_name = "markLaunchSeen"]
+        fn mark_launch_seen(self: &Self, game_id: &QString);
+        /// These read-once check lines (a JSON list of titles) were read for this game.
+        #[qinvokable]
+        #[cxx_name = "markOnceSeen"]
+        fn mark_once_seen(self: &Self, game_id: &QString, titles: &QString);
+        /// Play anyway with these warnings (the check's `key`): the same warnings with the same mods play next time.
+        #[qinvokable]
+        #[cxx_name = "markPlayed"]
+        fn mark_played(self: &Self, warn_key: &QString);
+        /// Whether the game update warning `key` ("<game>|<build>", "|waiting" while it waits) was shown.
+        #[qinvokable]
+        #[cxx_name = "updateWarned"]
+        fn update_warned(self: &Self, key: &QString) -> bool;
+        #[qinvokable]
+        #[cxx_name = "markUpdateWarned"]
+        fn mark_update_warned(self: &Self, key: &QString);
+        /// The mods the player moved into or out of Dependencies for a game: {"<mod id>": "in" | "out"}.
+        #[qinvokable]
+        #[cxx_name = "depMovesJson"]
+        fn dep_moves_json(self: &Self, game_id: &QString) -> QString;
+        #[qinvokable]
+        #[cxx_name = "moveDep"]
+        fn move_dep(self: &Self, game_id: &QString, mod_id: &QString, into: bool);
+        /// Forgets every move into or out of Dependencies.
+        #[qinvokable]
+        #[cxx_name = "clearDepMoves"]
+        fn clear_dep_moves(self: &Self);
+        /// The requirements being got: {"game","forName","items":[{"name","modId","domain"}],"index"}, or "null".
+        #[qinvokable]
+        #[cxx_name = "reqQueueJson"]
+        fn req_queue_json(self: &Self) -> QString;
+        /// Starts a new list of requirements to get (a JSON list of items) for `for_name`.
+        #[qinvokable]
+        #[cxx_name = "reqQueueStart"]
+        fn req_queue_start(self: &Self, game_id: &QString, for_name: &QString, items: &QString);
+        /// What a mod got along the way needs goes right after the current place; answers the items added.
+        #[qinvokable]
+        #[cxx_name = "reqQueueInsertNext"]
+        fn req_queue_insert_next(self: &Self, items: &QString) -> QString;
+        /// Moves on to the next requirement; answers the one that was current ("null" for none).
+        #[qinvokable]
+        #[cxx_name = "reqQueueAdvance"]
+        fn req_queue_advance(self: &Self) -> QString;
+        #[qinvokable]
+        #[cxx_name = "reqQueueClear"]
+        fn req_queue_clear(self: &Self);
+        /// Requirements as the interface shows them (needs::view_json) from {"mods","links","domain"}.
+        #[qinvokable]
+        #[cxx_name = "needsJson"]
+        fn needs_json(self: &Self, input: &QString) -> QString;
+        /// My mods' list (modlist::list_json).
+        #[qinvokable]
+        #[cxx_name = "modListJson"]
+        fn mod_list_json(self: &Self, filter: &QString) -> QString;
+        /// The game closed right after Play (store::quick_exit_json): {"worked","added"}.
+        #[qinvokable]
+        #[cxx_name = "quickExitJson"]
+        fn quick_exit_json(self: &Self, input: &QString) -> QString;
+        /// The rail's order (games::rail_order_json): a JSON list of places.
+        #[qinvokable]
+        #[cxx_name = "railOrderJson"]
+        fn rail_order_json(self: &Self, input: &QString) -> QString;
 
         /// Applies, then asks QML to open the game's launch link (`launch`).
         #[qinvokable]
         fn play(self: Pin<&mut Self>, game_id: &QString);
 
-        /// 0.58: Play Seamless Co-op for the current game (through Steam and me3).
+        /// Play Seamless Co-op for the current game (through Steam and me3).
         #[qinvokable]
         #[cxx_name = "playCoop"]
         fn play_coop(self: Pin<&mut Self>);
 
-        /// 0.6: Mods off or Mods on for a game, asked from Steam's menu while Turbine is open.
+        /// Mods off or Mods on for a game, asked from Steam's menu while Turbine is open.
         #[qinvokable]
         #[cxx_name = "quickMods"]
         fn quick_mods(self: Pin<&mut Self>, game_id: &QString, on: bool);
 
-        /// 0.58: a me3 game started outside Steam (Desktop Mode only).
+        /// A me3 game started outside Steam (Desktop Mode only).
         #[qinvokable]
         #[cxx_name = "playOutsideSteam"]
         fn play_outside_steam(self: Pin<&mut Self>, coop: bool);
@@ -290,7 +365,7 @@ pub mod qobject {
         #[cxx_name = "copyText"]
         fn copy_text(self: &Self, text: &QString);
 
-        /// 0.6: a steady clock in ms (never jumps with the wall clock), for when things were shown and pressed.
+        /// A steady clock in ms (never jumps with the wall clock), for when things were shown and pressed.
         #[qinvokable]
         #[cxx_name = "monoMs"]
         fn mono_ms_now(self: &Self) -> f64;
@@ -299,7 +374,7 @@ pub mod qobject {
         #[cxx_name = "pressAt"]
         fn press_at_ms(self: &Self) -> f64;
 
-        /// 0.6: Decky Loader and Turbine's Steam menu plugin on this device: {"checked","decky","plugin","url"}.
+        /// Decky Loader and Turbine's Steam menu plugin on this device: {"checked","decky","plugin","url"}.
         #[qinvokable]
         #[cxx_name = "deckyJson"]
         fn decky_json(self: &Self) -> QString;
@@ -314,19 +389,19 @@ pub mod qobject {
         #[cxx_name = "saveActivityLog"]
         fn save_activity_log(self: &Self) -> QString;
 
-        /// 0.58, Settings > Report a problem: saves Turbine-report-<stamp>.txt into Downloads with the recent log,
+        /// Settings > Report a problem: saves Turbine-report-<stamp>.txt into Downloads with the recent log,
         /// the version, the settings QML sends (one "name: value" per line), the screen and every game with how
         /// Turbine plays it. Keys, tokens and cookies are hidden. Answers {"file","folder","error"}.
         #[qinvokable]
         #[cxx_name = "saveProblemReport"]
         fn save_problem_report(self: &Self, screen: &QString, settings: &QString) -> QString;
 
-        /// 0.58, Edit settings: a mod's settings files ("" for the game's own): [{"rel","edited"}].
+        /// Edit settings: a mod's settings files ("" for the game's own): [{"rel","edited"}].
         #[qinvokable]
         #[cxx_name = "settingsFiles"]
         fn settings_files(self: &Self, mod_id: &QString) -> QString;
 
-        /// 0.62: Seamless Co-op's session password for the game on screen: 1 set, 0 empty, -1 no settings file.
+        /// Seamless Co-op's session password for the game on screen: 1 set, 0 empty, -1 no settings file.
         #[qinvokable]
         #[cxx_name = "coopPasswordState"]
         fn coop_password_state(self: &Self, mod_id: &QString) -> i32;
@@ -347,7 +422,7 @@ pub mod qobject {
         #[cxx_name = "settingsReset"]
         fn settings_reset(self: &Self, mod_id: &QString, rel: &QString) -> QString;
 
-        /// 0.58: Elden Ring's saves, normal, modded and co-op apart, each with its backups.
+        /// Elden Ring's saves, normal, modded and co-op apart, each with its backups.
         #[qinvokable]
         #[cxx_name = "erSavesJson"]
         fn er_saves_json(self: &Self) -> QString;
@@ -402,7 +477,7 @@ pub mod qobject {
         #[cxx_name = "markShown"]
         fn mark_shown(self: Pin<&mut Self>);
 
-        // ------------------------------------------------ 0.3: online sources and everything after (actions.rs)
+        // ------------------------------------------------ Online sources and the rest (actions.rs)
 
         /// Recorded samples instead of the internet (the build's screenshot checks).
         #[qinvokable]
@@ -496,12 +571,12 @@ pub mod qobject {
         #[cxx_name = "installLoader"]
         fn install_loader(self: Pin<&mut Self>);
 
-        /// 0.57, anti-cheat games: the ask-once answer (true: off while mods are on, me3 starts it offline).
+        /// Anti-cheat games: the ask-once answer (true: off while mods are on, me3 starts it offline).
         #[qinvokable]
         #[cxx_name = "antiCheatOff"]
         fn anti_cheat_off(self: Pin<&mut Self>, on: bool);
 
-        /// 0.64: Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk, error 998).
+        /// Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk, error 998).
         #[qinvokable]
         #[cxx_name = "installVcRuntime"]
         fn install_vc_runtime(self: Pin<&mut Self>);
@@ -617,7 +692,7 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "selfCheck"]
         fn self_check(self: Pin<&mut Self>, labs: bool, back: bool);
-        /// 0.63: the same check as Turbine starts: GitHub is asked at most once every six hours.
+        /// The same check as Turbine starts: GitHub is asked at most once every six hours.
         #[qinvokable]
         #[cxx_name = "selfCheckAtStart"]
         fn self_check_at_start(self: Pin<&mut Self>, labs: bool);
@@ -627,7 +702,7 @@ pub mod qobject {
         /// Starts the newly installed Turbine; QML quits right after.
         #[qinvokable]
         fn restart(self: Pin<&mut Self>);
-        /// 0.6 (integration I5): lets Turbine's Flatpak read a folder (a Steam library it can't see), on the player's
+        /// Lets Turbine's Flatpak read a folder (a Steam library it can't see), on the player's
         /// press: `flatpak override --user --filesystem=<folder>` on the host, fixed arguments. "" when it worked, else
         /// the plain reason.
         #[qinvokable]
@@ -833,7 +908,7 @@ pub mod qobject {
         #[qsignal]
         fn message(self: Pin<&mut Self>, text: QString, level: QString);
 
-        /// 0.57: putting a save backup back stopped because the saves as they are now couldn't be kept first: the
+        /// Putting a save backup back stopped because the saves as they are now couldn't be kept first: the
         /// backup's id and why (the interface asks whether to put it back anyway).
         #[qsignal]
         #[cxx_name = "savesKeepFailed"]
@@ -863,135 +938,135 @@ pub mod qobject {
         #[qsignal]
         fn launch(self: Pin<&mut Self>, url: QString);
 
-        /// 0.58: a me3 game's Steam Launch Options don't run Turbine's helper yet, so Play didn't start it:
+        /// A me3 game's Steam Launch Options don't run Turbine's helper yet, so Play didn't start it:
         /// {"game","name","option","set","listed","coop"} for the one-time step.
         #[qsignal]
         #[cxx_name = "launchSetup"]
         fn launch_setup(self: Pin<&mut Self>, game: QString, json: QString);
 
-        /// 0.62: a Seamless Co-op file older than the one installed was not added: the question for the player
+        /// A Seamless Co-op file older than the one installed was not added: the question for the player
         /// ("You have <have>. This file is <this>, which is older.").
         #[qsignal]
         #[cxx_name = "olderSeamless"]
         fn older_seamless(self: Pin<&mut Self>, game: QString, have: QString, this_one: QString);
-        /// 0.62: the answer to that question. true: use the older file (it is added again, allowed this once);
+        /// The answer to that question. true: use the older file (it is added again, allowed this once);
         /// false: keep the one installed (the file is left alone).
         #[qinvokable]
         #[cxx_name = "olderSeamlessAnswer"]
         fn older_seamless_answer(self: Pin<&mut Self>, use_it: bool);
 
-        /// 0.62: looks at the Seamless Co-op copies in the list of the game on screen (on the worker); the answer
+        /// Looks at the Seamless Co-op copies in the list of the game on screen (on the worker); the answer
         /// comes as `coopChecked`.
         #[qinvokable]
         #[cxx_name = "coopCheck"]
         fn coop_check(self: Pin<&mut Self>);
-        /// 0.62: keeps the Seamless Co-op the game loads and moves every other copy to Removed mods (a session
+        /// Keeps the Seamless Co-op the game loads and moves every other copy to Removed mods (a session
         /// password in a copy that goes is carried over); then `coopChecked` again.
         #[qinvokable]
         #[cxx_name = "seamlessTidy"]
         fn seamless_tidy(self: Pin<&mut Self>);
-        /// 0.62: what the look at Seamless Co-op found: {"installed","name","listVersion","fileVersion",
+        /// What the look at Seamless Co-op found: {"installed","name","listVersion","fileVersion",
         /// "others":[names of the copies not used],"versionWarning","tidied":[names just moved out]}.
         #[qsignal]
         #[cxx_name = "coopChecked"]
         fn coop_checked(self: Pin<&mut Self>, game: QString, json: QString);
 
-        /// 0.62: a Seamless Co-op start stopped because the session password is empty: Co-op settings open on it.
+        /// A Seamless Co-op start stopped because the session password is empty: Co-op settings open on it.
         #[qsignal]
         #[cxx_name = "coopPasswordNeeded"]
         fn coop_password_needed(self: Pin<&mut Self>, game: QString);
 
-        /// 0.58: one settings file read for the Edit settings page (see settingsLoad).
+        /// One settings file read for the Edit settings page (see settingsLoad).
         #[qsignal]
         #[cxx_name = "settingsLoaded"]
         fn settings_loaded(self: Pin<&mut Self>, json: QString);
 
-        /// 0.58: Play without mods until they update (the game update warning), for Turbine's and Steam's Play.
+        /// Play without mods until they update (the game update warning), for Turbine's and Steam's Play.
         #[qinvokable]
         #[cxx_name = "setModHold"]
         fn set_mod_hold(self: Pin<&mut Self>, on: bool);
 
-        /// 0.58: the me3 games whose Steam Launch Options run Turbine's helper, with what to paste back:
+        /// The me3 games whose Steam Launch Options run Turbine's helper, with what to paste back:
         /// [{"game","name","uses","set","original","line"}] (only the current game when `current`).
         #[qinvokable]
         #[cxx_name = "launchUndoJson"]
         fn launch_undo_json(self: &Self, current: bool) -> QString;
 
-        /// 0.58: after Undo, "Use the line again": the helper may start me3 for this game again.
+        /// After Undo, "Use the line again": the helper may start me3 for this game again.
         #[qinvokable]
         #[cxx_name = "launchRedo"]
         fn launch_redo(self: Pin<&mut Self>, game: &QString);
 
-        /// 0.58: Undo the launch options change: the helper stops starting me3 for this game (logged).
+        /// Undo the launch options change: the helper stops starting me3 for this game (logged).
         #[qinvokable]
         #[cxx_name = "launchUndo"]
         fn launch_undo(self: Pin<&mut Self>, game: &QString);
 
-        /// 0.6: one Steam restart for a change to Steam's own settings ("options", "undo", "tile", "untile");
+        /// One Steam restart for a change to Steam's own settings ("options", "undo", "tile", "untile");
         /// `resume` "play", "coop" or "". Answers {"ok","state","words"} (steamsetup.rs).
         #[qinvokable]
         #[cxx_name = "steamSetupStart"]
         fn steam_setup_start(self: &Self, game_id: &QString, kind: &QString, resume: &QString) -> QString;
 
-        /// 0.62: Turbine's Steam tool ("Turbine (mods)") for a game: {"installed","listed","chosen","route",
+        /// Turbine's Steam tool ("Turbine (mods)") for a game: {"installed","listed","chosen","route",
         /// "steps","restartFirst","proton","protonName","lastProton","nothingStarted","using","toolName","tile",
         /// "tileWords"} (steamsetup.rs, turbine_engine::compat_tool::state_json).
         #[qinvokable]
         #[cxx_name = "steamToolJson"]
         fn steam_tool_json(self: &Self, game_id: &QString) -> QString;
 
-        /// 0.6: the Steam restart's state: {"state","words","resume","what","age"}.
+        /// The Steam restart's state: {"state","words","resume","what","age"}.
         #[qinvokable]
         #[cxx_name = "steamSetupState"]
         fn steam_setup_state(self: &Self) -> QString;
 
-        /// 0.6: the Steam restart is over: its files go (its log lines go to the activity log).
+        /// The Steam restart is over: its files go (its log lines go to the activity log).
         #[qinvokable]
         #[cxx_name = "steamSetupFinish"]
         fn steam_setup_finish(self: &Self);
 
-        /// 0.6: at start, changes to Steam's settings that Steam wrote over: {"lost":[names]}.
+        /// At start, changes to Steam's settings that Steam wrote over: {"lost":[names]}.
         #[qinvokable]
         #[cxx_name = "steamChangesCheck"]
         fn steam_changes_check(self: &Self) -> QString;
 
-        /// 0.6: the co-op tile for a game: {"there"}.
+        /// The co-op tile for a game: {"there"}.
         #[qinvokable]
         #[cxx_name = "coopTileJson"]
         fn coop_tile_json(self: &Self, game_id: &QString) -> QString;
 
-        /// 0.62: the Proton Turbine's Steam tool runs a game with: {"name","dir","how","words","auto","list"}.
+        /// The Proton Turbine's Steam tool runs a game with: {"name","dir","how","words","auto","list"}.
         #[qinvokable]
         #[cxx_name = "protonJson"]
         fn proton_json(self: &Self, game_id: &QString) -> QString;
 
-        /// 0.62: the player's pick of that Proton (one of the list's "dir", or "" for Automatic): {"ok","words"}.
+        /// The player's pick of that Proton (one of the list's "dir", or "" for Automatic): {"ok","words"}.
         #[qinvokable]
         #[cxx_name = "protonSet"]
         fn proton_set(self: &Self, game_id: &QString, dir: &QString) -> QString;
 
-        /// 0.62: how the Co-op tile can be added or taken out here and now: {"how","words","label"} with how
+        /// How the Co-op tile can be added or taken out here and now: {"how","words","label"} with how
         /// "direct", "restart", "later" or "none" (steamsetup.rs).
         #[qinvokable]
         #[cxx_name = "coopTileOfferJson"]
         fn coop_tile_offer_json(self: &Self, game_id: &QString) -> QString;
 
-        /// 0.62: adds (or takes out) the Co-op tile at once, with Steam closed: {"ok","words"}.
+        /// Adds (or takes out) the Co-op tile at once, with Steam closed: {"ok","words"}.
         #[qinvokable]
         #[cxx_name = "coopTileSet"]
         fn coop_tile_set(self: &Self, game_id: &QString, add: bool) -> QString;
 
-        /// 0.6, Settings: Turbine's Steam library art: {"found","on"}.
+        /// Settings: Turbine's Steam library art: {"found","on"}.
         #[qinvokable]
         #[cxx_name = "steamArtJson"]
         fn steam_art_json(self: &Self) -> QString;
 
-        /// 0.6, Settings: Steam library art Add (true) or Remove (false). Answers the words.
+        /// Settings: Steam library art Add (true) or Remove (false). Answers the words.
         #[qinvokable]
         #[cxx_name = "steamArtSet"]
         fn steam_art_set(self: &Self, on: bool) -> QString;
 
-        /// 0.6, Labs: Proton's log for Steam launches of me3 games, in the helper's folder.
+        /// Labs: Proton's log for Steam launches of me3 games, in the helper's folder.
         #[qinvokable]
         #[cxx_name = "protonLogOn"]
         fn proton_log_on(self: &Self) -> bool;
@@ -1000,13 +1075,13 @@ pub mod qobject {
         #[cxx_name = "setProtonLog"]
         fn set_proton_log(self: &Self, on: bool);
 
-        /// 0.62: the game showed up after the launch check had already said it didn't start (a slow start):
+        /// The game showed up after the launch check had already said it didn't start (a slow start):
         /// `seconds` after Play. The sheet goes; what happens next (still running, or closed) is said as usual.
         #[qsignal]
         #[cxx_name = "gameSeen"]
         fn game_seen(self: Pin<&mut Self>, game: QString, seconds: i32);
 
-        /// 0.58: the game wasn't seen running about 20 seconds after Play.
+        /// The game wasn't seen running about 20 seconds after Play.
         #[qsignal]
         #[cxx_name = "notStarted"]
         fn not_started(self: Pin<&mut Self>, game: QString);
@@ -1024,14 +1099,14 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
-use turbine_engine::json::quote;
+use turbine_engine::json::{self, quote, Json};
 use turbine_engine::proton;
 use turbine_engine::rules::{self, GameRules, Kind};
 use turbine_engine::store::{self, Store};
 use turbine_engine::Game;
 
 /// The check before Play's line about a game's one-time Steam Launch Option (QML hides it once it's been seen).
-const LAUNCH_OPTION_TITLE: &str = "One-time Steam setting for the mod loader";
+const LAUNCH_OPTION_TITLE: &str = turbine_engine::precheck::LAUNCH_TITLE;
 
 /// Said when a part of the engine isn't finished in this build (it panics instead of answering).
 const NOT_READY: &str = "Not ready yet: this part of Turbine isn't finished in this build.";
@@ -1054,7 +1129,7 @@ pub struct TurbineRust {
     pub(crate) update_waits: Vec<(u64, String)>,
     pub(crate) reset_for: QString,
     pub(crate) reader: Option<Pads>,
-    /// 0.6: how long ago the presses being handled now were made (SDL's own time stamps), in ms.
+    /// How long ago the presses being handled now were made (SDL's own time stamps), in ms.
     pub(crate) press_wait: u32,
     /// When the last press was made, on `mono_ms`'s clock.
     pub(crate) press_at: f64,
@@ -1075,7 +1150,7 @@ pub struct TurbineRust {
     pub(crate) recent: std::collections::VecDeque<String>,
     /// Milliseconds from start to the first frame drawn.
     pub(crate) startup_ms: f64,
-    // 0.3
+    // Online sources.
     pub(crate) browse_json: QString,
     pub(crate) details_json: QString,
     pub(crate) download_json: QString,
@@ -1241,7 +1316,7 @@ pub(crate) struct Worker {
     pub(crate) slots: HashMap<String, Slot>,
     /// The window's thread queue. None without a window (Steam's menu, quick.rs): `headless` gets what it would.
     pub(crate) qt: Option<CxxQtThread<qobject::Turbine>>,
-    /// 0.6: run from Steam's menu without a window: what Turbine said and the launch link, for the answer.
+    /// Run from Steam's menu without a window: what Turbine said and the launch link, for the answer.
     pub(crate) headless: Option<Headless>,
     /// Installers waiting for the player's choices (game id, installer), oldest first.
     pub(crate) pending: std::collections::VecDeque<(String, store::Pending, u64)>,
@@ -1256,14 +1331,14 @@ pub(crate) struct Worker {
     pub(crate) loot: HashMap<String, (String, HashMap<String, Vec<crate::loot::Msg>>)>,
     /// Basic games' mods waiting for where their files go (game id, mod), oldest first.
     pub(crate) place_pending: std::collections::VecDeque<(String, store::PendingPlace)>,
-    /// 0.62: the older Seamless Co-op file waiting for the player's answer: (game id, file, where it came from, its
+    /// The older Seamless Co-op file waiting for the player's answer: (game id, file, where it came from, its
     /// label).
     pub(crate) older_seamless: Option<(String, PathBuf, turbine_engine::net::SourceInfo, String)>,
 }
 
 pub(crate) type Job = Box<dyn FnOnce(&mut Worker) + Send>;
 
-/// 0.6: what a run without a window collects in place of the interface (quick.rs answers with it).
+/// What a run without a window collects in place of the interface (quick.rs answers with it).
 #[derive(Default)]
 pub(crate) struct Headless {
     /// Every sentence for the status line, with its level ("ok", "warn", "error", "work").
@@ -1299,7 +1374,7 @@ impl Worker {
         });
     }
 
-    /// 0.6: a worker with no window, for one request from Steam's menu (quick.rs). Same jobs, same stores.
+    /// A worker with no window, for one request from Steam's menu (quick.rs). Same jobs, same stores.
     pub(crate) fn headless(data_home: PathBuf) -> Worker {
         Worker::new(data_home, None)
     }
@@ -1328,7 +1403,7 @@ impl Worker {
         let needs = needs_reset(report);
         let words = format!("{} at {}: {report:?}", game.name, crate::log::file_stamp());
         crate::log::line("engine", &format!("Report for {key}: {report:?}"));
-        // 0.56: Basic games' mods leave the game's own files alone (unless the player said so) and never place the
+        // Basic games' mods leave the game's own files alone (unless the player said so) and never place the
         // refused files.
         if !report.skipped_existing.is_empty() {
             crate::log::line("engine", &format!("Skipped existing (the game's own files): {}", report.skipped_existing.join(", ")));
@@ -1368,7 +1443,7 @@ impl Worker {
             let rules = GameRules::for_game(game);
             let store = Store::open(game, &self.data_home).map_err(|e| format!("Couldn't open {}'s mods: {e}", game.name))?;
             let slot = Slot { game: game.clone(), rules, store };
-            // 0.57: an online-only anti-cheat game: mod files from an earlier version come out at once.
+            // An online-only anti-cheat game: mod files already in its folder come out at once (Turbine refuses mods for it).
             crate::anticheat::refused_cleanup(self, &slot);
             self.slots.insert(key.clone(), slot);
         }
@@ -1379,7 +1454,7 @@ impl Worker {
     pub(crate) fn show(&mut self, game: &Game, with_rules: bool) {
         let key = game.id();
         let Some(slot) = self.slots.get(&key) else { return };
-        // 0.58: after anything that changed this game (mods on or off, the anti-cheat answer, Reset, a loadout, a
+        // After anything that changed this game (mods on or off, the anti-cheat answer, Reset, a loadout, a
         // removed mod), the Steam launch helper carries exactly Turbine's state now.
         crate::anticheat::sync_helper(self, slot);
         let mods = slot.store.to_json();
@@ -1388,10 +1463,10 @@ impl Worker {
         let links = turbine_engine::needs::links_json(&turbine_engine::needs::links(&slot.store.installed_sources()));
         let warns = mod_warns_json(slot);
         let restore = matches!(slot.rules.family, rules::Family::Kcd | rules::Family::Kcd2) && turbine_engine::kcd::can_restore(slot.store.root());
-        // 0.58, the game update warning: the build changed since mods were last played, and which mods may break.
+        // The game update warning: the build changed since mods were last played, and which mods may break.
         // The build last played with mods (an apply alone doesn't count, so the warning isn't lost to one).
         let played = std::fs::read_to_string(slot.store.root().join("played-build")).ok().map(|b| b.trim().to_string()).filter(|b| !b.is_empty());
-        // 0.6: an update still waiting in Steam (queued, downloading, or a failed one) warns too ("pending": the words).
+        // An update still waiting in Steam (queued, downloading, or a failed one) warns too ("pending": the words).
         let pending = turbine_engine::steam::pending_update(&slot.game).map(|p| turbine_engine::steam::pending_update_words(&slot.game.name, &p));
         let risky = || -> String {
             let r: Vec<String> = slot
@@ -1414,13 +1489,13 @@ impl Worker {
             }
             _ => "null".into(),
         };
-        // 0.6: the mods Mods off (Steam's menu) turned off and that are still off: My mods says so, with Turn them back on.
+        // The mods Mods off (Steam's menu) turned off and that are still off: My mods says so, with Turn them back on.
         let held: Vec<String> = {
             let ids = slot.store.held_off();
             slot.store.mods().iter().filter(|m| !m.enabled && ids.contains(&m.id)).map(|m| quote(&m.id)).collect()
         };
         let held = held.join(",");
-        // 0.64: mods that are frameworks or loaders (My mods puts them under Dependencies with what other mods need).
+        // Mods that are frameworks or loaders (My mods puts them under Dependencies with what other mods need).
         let core: Vec<String> = {
             let mut ids = slot.store.loader_mods(&slot.rules);
             if slot.rules.family == rules::Family::Cyberpunk {
@@ -1431,7 +1506,9 @@ impl Worker {
             ids.iter().map(|i| quote(i)).collect()
         };
         let core = core.join(",");
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}],\"core\":[{core}]}}", &mods[..mods.len() - 1]);
+        // The setup "Go back to a setup that worked" restores.
+        let last_good = slot.store.restore_target().map(|s| quote(&s.id)).unwrap_or_else(|| "null".into());
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}],\"core\":[{core}],\"lastGood\":{last_good}}}", &mods[..mods.len() - 1]);
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);
@@ -1506,7 +1583,7 @@ fn rules_json(slot: &Slot) -> String {
         crate::actions::community(&slot.game).map(quote).unwrap_or_else(|| "null".to_string()),
         turbine_engine::nexus::domain_for(slot.game.store, &slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string()),
     );
-    // 0.56: support, anti-cheat, the Nexus game and starter mods (anygame.rs).
+    // Support, anti-cheat, the Nexus game and starter mods (anygame.rs).
     format!("{}{}}}", &base[..base.len() - 1], crate::anygame::rules_extra(slot))
 }
 
@@ -1514,7 +1591,7 @@ fn rules_json(slot: &Slot) -> String {
 
 /// The Proton DLL overrides this game needs for what is turned on (proton::wanted_overrides): winhttp for BepInEx
 /// once its loader is in place, winmm and version for Cyberpunk's RED4ext and Cyber Engine Tweaks. For Steam games
-/// run through Proton and Heroic games run through Wine or Proton (0.6: the prefix from Heroic's own game settings,
+/// run through Proton and Heroic games run through Wine or Proton (the prefix from Heroic's own game settings,
 /// heroic::prefix_for). Some(prefix) with the list when there is something to set.
 fn wanted_overrides(slot: &Slot) -> Option<(Option<PathBuf>, Vec<(&'static str, &'static str)>)> {
     let g = &slot.game;
@@ -1769,7 +1846,7 @@ fn applied_words(report: &turbine_engine::deploy::Report, game: &Game) -> String
     if kept > 0 {
         add(format!("Kept your changes to {}", count(kept, "settings file", "settings files")));
     }
-    // 0.62: a settings file found damaged in the game's folder (Turbine's copy went back in).
+    // A settings file found damaged in the game's folder (Turbine's copy went back in).
     for n in &report.settings_notes {
         add(n.clone());
     }
@@ -1801,7 +1878,7 @@ impl qobject::Turbine {
             "scan",
             &format!("Found {} games in {} ms; {} problems", scan.games.len(), at.elapsed().as_millis(), scan.problems.len()),
         );
-        // 0.62: one line in the activity log; the list itself is kept for the reports.
+        // One line in the activity log; the list itself is kept for the reports.
         crate::labs::set_games(scan.games.iter().map(|g| format!("{} ({}), {:?}, {}, build {}", g.name, g.id(), g.runtime, g.drive_label(), g.build.as_deref().unwrap_or("?"))).collect());
         for p in &scan.problems {
             crate::log::line("scan", &format!("Problem: {p}"));
@@ -1859,7 +1936,7 @@ impl qobject::Turbine {
         crate::log::line("window", "Back in front; controller quiet for 250 ms");
         let ups = match self.as_mut().rust_mut().reader.as_mut() {
             Some(r) => {
-                // 0.61 (integration I9): no controller yet: ask SDL again (after leaving Game Mode).
+                // No controller yet: ask SDL again (after leaving Game Mode).
                 if r.rescan(Duration::from_secs(2)) {
                     crate::log::line("pad", "A controller showed after asking again");
                 }
@@ -1893,7 +1970,7 @@ impl qobject::Turbine {
         }
         let (events, connected, sticks, quiet, lost) = match self.as_mut().rust_mut().reader.as_mut() {
             Some(r) => {
-                // 0.61 (integration I9): while none is seen, SDL is asked again every 10 seconds.
+                // While none is seen, SDL is asked again every 10 seconds.
                 if r.rescan(Duration::from_secs(10)) {
                     crate::log::line("pad", "A controller showed after asking again");
                 }
@@ -2015,7 +2092,7 @@ impl qobject::Turbine {
         }
     }
 
-    /// 0.62: a check's keyboard key, through the window like a real keyboard's.
+    /// A check's keyboard key, through the window like a real keyboard's.
     pub fn selftest_key(self: Pin<&mut Self>, key: i32, mods: i32, pressed: bool) {
         // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to Turbine's own window.
         let r = unsafe { turbine_selftest_key(key, mods, i32::from(pressed)) };
@@ -2024,7 +2101,7 @@ impl qobject::Turbine {
         }
     }
 
-    /// 0.62: a check's mouse event (a real mouse, not the controller pointer), through the window.
+    /// A check's mouse event (a real mouse, not the controller pointer), through the window.
     pub fn selftest_mouse(self: Pin<&mut Self>, kind: i32, x: f64, y: f64, button: i32, mods: i32, wheel: i32) {
         // SAFETY: a plain call into qtglue.cpp on the interface thread; it only sends an event to Turbine's own window.
         let r = unsafe { turbine_selftest_mouse(kind, x, y, button, mods, wheel) };
@@ -2033,7 +2110,7 @@ impl qobject::Turbine {
         }
     }
 
-    /// 0.6 (break M2): a check's press that was made `age_ms` before it is handled (a stalled window).
+    /// A check's press that was made `age_ms` before it is handled (a stalled window).
     pub fn selftest_pad_aged(mut self: Pin<&mut Self>, button: &QString, age_ms: i32) {
         let b = button.to_string();
         const ALL: [&str; 5] = ["a", "b", "left", "right", "start"];
@@ -2423,10 +2500,8 @@ impl qobject::Turbine {
                 let p = e.path();
                 if ft.is_dir() {
                     todo.push(p);
-                } else if ft.is_file() {
-                    if let Ok(rel) = p.strip_prefix(&root) {
-                        out.push(rel.to_string_lossy().replace('\\', "/"));
-                    }
+                } else if ft.is_file() && let Ok(rel) = p.strip_prefix(&root) {
+                    out.push(rel.to_string_lossy().replace('\\', "/"));
                 }
                 if out.len() >= 2000 {
                     break;
@@ -2492,7 +2567,7 @@ impl qobject::Turbine {
     }
 
     pub fn finish(mut self: Pin<&mut Self>) {
-        // 0.63: closing with "This Seamless Co-op is older" still up: the answer is its default (keep the one
+        // Closing with "This Seamless Co-op is older" still up: the answer is its default (keep the one
         // installed), so the file is settled and Turbine's own download doesn't stay behind. Waited for briefly.
         if self.rust().jobs.is_some() {
             let (older_tx, older_rx) = mpsc::channel::<()>();
@@ -2607,13 +2682,15 @@ impl qobject::Turbine {
         );
     }
 
-    pub fn check(self: Pin<&mut Self>) {
+    pub fn check(self: Pin<&mut Self>, ctx: &QString) {
         let Some(game) = self.current_game() else { return };
+        let ctx = crate::seen::play_ctx(&ctx.to_string());
         self.send(
             Some(game.id()), "Check before Play",
             false,
             Box::new(move |w: &mut Worker| {
-                let json = check_json(w, &game);
+                let raw = json::parse(&check_json(w, &game)).unwrap_or(Json::Arr(Vec::new()));
+                let json = turbine_engine::precheck::shape(&raw, &ctx).to_json();
                 w.post(move |t| t.checked(QString::from(json.as_str())));
             }),
         );
@@ -2623,14 +2700,14 @@ impl qobject::Turbine {
         self.play_how(game_id, turbine_engine::anticheat::Coop::Solo, false);
     }
 
-    /// 0.58: Play Seamless Co-op (Elden Ring through me3 with Seamless Co-op's own .co2 saves).
+    /// Play Seamless Co-op (Elden Ring through me3 with Seamless Co-op's own .co2 saves).
     pub fn play_coop(self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         crate::log::line("action", &format!("Play Seamless Co-op: {}", game.name));
         self.play_how(&QString::from(game.id().as_str()), turbine_engine::anticheat::Coop::Seamless, false);
     }
 
-    /// 0.6: Mods off or Mods on from Steam's menu while Turbine is open (waiting changes go in first).
+    /// Mods off or Mods on from Steam's menu while Turbine is open (waiting changes go in first).
     pub fn quick_mods(mut self: Pin<&mut Self>, game_id: &QString, on: bool) {
         let Some(game) = self.find(&game_id.to_string()) else { return };
         self.as_mut().apply_now();
@@ -2638,7 +2715,7 @@ impl qobject::Turbine {
         self.send(Some(game.id()), &format!("Mods {} for {}", if on { "on" } else { "off" }, game.name), true, mods_job(game, on));
     }
 
-    /// 0.58: a me3 game started outside Steam (Desktop Mode only; Game Mode won't show it).
+    /// A me3 game started outside Steam (Desktop Mode only; Game Mode won't show it).
     pub fn play_outside_steam(self: Pin<&mut Self>, coop: bool) {
         let Some(game) = self.current_game() else { return };
         crate::log::line("action", &format!("Play outside Steam (Desktop Mode): {}", game.name));
@@ -2656,7 +2733,7 @@ impl qobject::Turbine {
     pub fn play_without_loader(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         let (_, n) = self.as_mut().take_pending();
-        // 0.59 (T8): the game's own loader by name (SKSE, BepInEx, SMAPI), never "the script extender" for all.
+        // The game's own loader by name (SKSE, BepInEx, SMAPI), never "the script extender" for all.
         let loader = self.as_ref().loader_short();
         self.as_mut().say(&format!("Getting the game ready without {loader}..."), "work");
         self.send(
@@ -2673,7 +2750,7 @@ impl qobject::Turbine {
                     Ok((r, left)) => {
                         w.note(&game, &r);
                         crate::log::line("launch", &format!("{} without the loader: {left} mods left out this time", game.name));
-                        // 0.57: the same anti-cheat checks as Play.
+                        // The same anti-cheat checks as Play.
                         let blocked = w.slot(&game).ok().and_then(|s| {
                             crate::anticheat::keep_record(s);
                             crate::anticheat::normal_launch_blocked(s)
@@ -2950,7 +3027,7 @@ impl qobject::Turbine {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     // qtglue.cpp
     fn turbine_copy_text(text: *const std::os::raw::c_char);
     fn turbine_clipboard_text() -> *mut std::os::raw::c_char;
@@ -2970,7 +3047,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
             w.say(format!("{} is still running. Close it, then press Play again.", game.name), "error");
             return;
         }
-        // 0.62: Seamless Co-op never starts with an empty session password (the mod stops with an error). Checked
+        // Seamless Co-op never starts with an empty session password (the mod stops with an error). Checked
         // here for every way a co-op start comes (Turbine's buttons, the Co-op tile, Steam's menu), before anything
         // else is done, and again below for the copy of its settings the game loads, once the mods are in.
         if coop == turbine_engine::anticheat::Coop::Seamless {
@@ -2987,7 +3064,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                 return;
             }
         }
-        // 0.57: a game me3 starts with mods: the player's answer first, and me3 itself (fetched, then Play
+        // A game me3 starts with mods: the player's answer first, and me3 itself (fetched, then Play
         // again).
         let me3_play = w.slot(&game).ok().and_then(|s| {
             let on = s.store.mods().iter().any(|m| m.enabled);
@@ -3005,7 +3082,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
             w.post(move |t| t.install_me3(true));
             return;
         }
-        // 0.56: a copy of the saves first, so a mod that breaks them can't take them with it. (0.57: for a game
+        // A copy of the saves first, so a mod that breaks them can't take them with it. (For a game
         // me3 starts this is also the copy before its first modded launch.)
         crate::health::backup_before_play(w, &game);
         let result = w.slot(&game).and_then(|s| s.store.apply().map_err(|e| e.to_string()));
@@ -3013,7 +3090,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
         if result.is_ok() {
             witcher_sync(w, &game, true);
         }
-        // 0.62: Seamless Co-op never starts with an empty session password (the mod stops with an error): the copy
+        // Seamless Co-op never starts with an empty session password (the mod stops with an error): the copy
         // of its settings the game loads is checked here, after the mods went in, whichever way the start came.
         if coop == turbine_engine::anticheat::Coop::Seamless && result.is_ok() {
             let ready = w.slot(&game).ok().and_then(|s| {
@@ -3053,10 +3130,8 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                 // and this game build no longer counts as "updated since".
                 if let Ok(s) = w.slot(&game) {
                     let marked = s.store.mark_played().and_then(|_| s.store.acknowledge_build());
-                    if s.store.mods().iter().any(|m| m.enabled) {
-                        if let Some(b) = &s.game.build {
-                            let _ = std::fs::write(s.store.root().join("played-build"), b);
-                        }
+                    if s.store.mods().iter().any(|m| m.enabled) && let Some(b) = &s.game.build {
+                        let _ = std::fs::write(s.store.root().join("played-build"), b);
                     }
                     if let Err(e) = marked {
                         w.say(format!("Couldn't note this setup as played: {e}"), "warn");
@@ -3066,7 +3141,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                     Some(e) => w.say(format!("Started without {what} this time. {e}"), "warn"),
                     None => w.say(applied_words(&r, &game), "ok"),
                 }
-                // 0.57: anti-cheat games. With mods on, me3 starts it offline from its profile; with none on,
+                // Anti-cheat games. With mods on, me3 starts it offline from its profile; with none on,
                 // Steam starts it normally, only when the game folder is original.
                 let blocked = w.slot(&game).ok().and_then(|s| {
                     crate::anticheat::keep_record(s);
@@ -3079,7 +3154,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                 if let Some(why) = blocked {
                     w.say(why, "error");
                 } else if me3_play.is_some() {
-                    // 0.58: through Steam (Game Mode shows a game only when Steam started it): Turbine's
+                    // Through Steam (Game Mode shows a game only when Steam started it): Turbine's
                     // launch helper runs me3 from the game's Launch Options; outside Steam only when asked.
                     let wr: &Worker = w;
                     let Some(s) = wr.slots.get(&game.id()) else { return };
@@ -3117,7 +3192,7 @@ pub(crate) fn play_job(game: Game, coop: turbine_engine::anticheat::Coop, direct
                     // A me3 game with no mods on: Steam's own command through the helper.
                     let wr: &Worker = w;
                     if wr.slots.get(&game.id()).is_none_or(|s| crate::anticheat::arm_plain(wr, s, false)) {
-                        // 0.6: a Heroic game with a script loader on starts the loader through Heroic's link.
+                        // A Heroic game with a script loader on starts the loader through Heroic's link.
                         launch_with_loader(w, &game, if wr.slots.get(&game.id()).is_some_and(|s| s.store.mods().iter().any(|m| m.enabled)) { "mods" } else { "plain" });
                         watch_game(w, &game);
                     } else {
@@ -3145,7 +3220,7 @@ pub(crate) fn play_original_job(game: Game, n: i32) -> Job {
         match result {
             Ok(r) => {
                 w.note(&game, &r);
-                // 0.57: an anti-cheat game starts normally only when its folder is original.
+                // An anti-cheat game starts normally only when its folder is original.
                 let blocked = w.slot(&game).ok().and_then(|s| {
                     crate::anticheat::keep_record(s);
                     crate::anticheat::normal_launch_blocked(s)
@@ -3185,14 +3260,12 @@ pub(crate) fn check_json(w: &mut Worker, game: &Game) -> String {
             rules::add_checks(&mut list, rules::mod_checks(&s.game, &s.rules, &s.store.mod_files()));
             let mut extra = proton_checks(s);
             // Native games whose loader starts through a Steam Launch Option: the one-time setting.
-            if let (Some(help), Some(option)) = (&s.rules.launch_help, &s.rules.launch_option) {
-                if needs && s.rules.loader_installed(&s.game) {
-                    extra.push(rules::Check {
-                        level: "warn".into(),
-                        title: LAUNCH_OPTION_TITLE.into(),
-                        detail: format!("{help}\n{option}"),
-                    });
-                }
+            if let (Some(help), Some(option)) = (&s.rules.launch_help, &s.rules.launch_option) && needs && s.rules.loader_installed(&s.game) {
+                extra.push(rules::Check {
+                    level: "warn".into(),
+                    title: LAUNCH_OPTION_TITLE.into(),
+                    detail: format!("{help}\n{option}"),
+                });
             }
             // Kingdom Come: the first game's one-time note on developer mode (a few mods need it), and
             // mods that came from the other game's Nexus pages.
@@ -3213,14 +3286,14 @@ pub(crate) fn check_json(w: &mut Worker, game: &Game) -> String {
                     .collect();
                 extra.extend(turbine_engine::kcd::checks(&[], second, &named));
             }
-            // 0.56: anti-cheat while any mod is on.
+            // Anti-cheat while any mod is on.
             if let Some(c) = crate::anygame::anti_cheat_check(s) {
                 extra.push(c);
             }
-            // 0.57: games whose data file says how to play them with mods (me3, Halo's switch, offline,
+            // Games whose data file says how to play them with mods (me3, Halo's switch, offline,
             // refused), and whether the game folder is original for the normal launch.
             extra.extend(crate::anticheat::checks(s, &data));
-            // 0.64: Cyberpunk's RED4ext and Cyber Engine Tweaks stop with error 998 without Microsoft's Visual C++
+            // Cyberpunk's RED4ext and Cyber Engine Tweaks stop with error 998 without Microsoft's Visual C++
             // 2022 runtime in the game's Proton setup.
             if let Some(c) = vc_runtime_check(s) {
                 extra.push(c);
@@ -3235,7 +3308,7 @@ pub(crate) fn check_json(w: &mut Worker, game: &Game) -> String {
     }
 }
 
-/// 0.64: RED4ext or Cyber Engine Tweaks is in the game folder or in a mod that is on, and the game's Proton prefix has
+/// RED4ext or Cyber Engine Tweaks is in the game folder or in a mod that is on, and the game's Proton prefix has
 /// no Visual C++ 2022 runtime that Wine uses (turbine_engine::vcrun).
 pub(crate) fn vc_runtime_needed(s: &Slot) -> Option<turbine_engine::vcrun::State> {
     if s.rules.family != rules::Family::Cyberpunk || s.game.runtime != turbine_engine::Runtime::Windows {
@@ -3284,7 +3357,7 @@ fn apply_job_saying(game: Game, n: i32, words: Option<String>) -> Job {
         match result {
             Ok(r) => {
                 w.note(&game, &r);
-                // 0.58: the last apply worked (show() below keeps the launch helper to the state).
+                // The last apply worked (show() below keeps the launch helper to the state).
                 if let Some(s) = w.slots.get(&game.id()) {
                     crate::anticheat::set_doubt(s, false);
                 }
@@ -3295,7 +3368,7 @@ fn apply_job_saying(game: Game, n: i32, words: Option<String>) -> Job {
             }
             Err(e) => {
                 w.put_back(n);
-                // 0.58: on any doubt, Steam's Play never starts me3 until an apply works again.
+                // On any doubt, Steam's Play never starts me3 until an apply works again.
                 if let Some(s) = w.slots.get(&game.id()) {
                     crate::anticheat::set_doubt(s, true);
                     crate::anticheat::sync_helper(w, s);
@@ -3307,7 +3380,7 @@ fn apply_job_saying(game: Game, n: i32, words: Option<String>) -> Job {
     })
 }
 
-/// 0.6, Mods off / Mods on (Steam's menu): every mod that is on goes off and the list is kept, or exactly those come
+/// Mods off / Mods on (Steam's menu): every mod that is on goes off and the list is kept, or exactly those come
 /// back on; then the same apply as any change. Not while the game runs (its files are in use).
 pub(crate) fn mods_job(game: Game, on: bool) -> Job {
     Box::new(move |w: &mut Worker| {
@@ -3344,7 +3417,7 @@ fn watch_game(w: &Worker, game: &Game) {
     watch_game_as(w, game, true)
 }
 
-/// 0.58: how long Play waits for the game to show before the "didn't start" sheet.
+/// How long Play waits for the game to show before the "didn't start" sheet.
 const START_WAIT_SECS: u64 = 20;
 
 /// `modded`: a modded Play (a quick close offers a way back). Every Play also gets the launch check: when the game
@@ -3356,7 +3429,7 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
     }
     let Some(qt) = w.qt.clone() else { return };
     let (id, name, dir) = (game.id(), game.name.clone(), game.install_dir.clone());
-    // 0.6: how it went, for Steam's menu (the last launch in the game's store folder).
+    // How it went, for Steam's menu (the last launch in the game's store folder).
     let root = w.slots.get(&game.id()).map(|s| s.store.root().to_path_buf());
     let record = move |result: &str, secs: Option<u64>| {
         if let Some(r) = &root {
@@ -3394,7 +3467,7 @@ fn watch_game_as(w: &Worker, game: &Game, modded: bool) {
                         seen = Some(std::time::Instant::now());
                         crate::log::line("launch", &format!("{name} is running ({} seconds after Play)", started.elapsed().as_secs()));
                         record("running", None);
-                        // 0.62: it started after all (a slow start): the "didn't start" sheet is wrong now.
+                        // It started after all (a slow start): the "didn't start" sheet is wrong now.
                         if said_not_started {
                             let (gid, secs) = (id.clone(), started.elapsed().as_secs() as i32);
                             let _ = qt.queue(move |t| t.game_seen(QString::from(gid.as_str()), secs));
@@ -3461,7 +3534,7 @@ fn launch(w: &Worker, game: &Game, how: &str) {
 }
 
 fn launch_at(w: &Worker, game: &Game, how: &str, url: String) {
-    // 0.6: the last launch, for Steam's menu (the watch after Play adds how it went).
+    // The last launch, for Steam's menu (the watch after Play adds how it went).
     if let Some(s) = w.slots.get(&game.id()) {
         let at = crate::now_secs();
         let l = turbine_engine::quick::Launch { at, how: how.to_string(), result: "started".into(), seconds: None, words: String::new() };
@@ -3477,7 +3550,7 @@ fn launch_at(w: &Worker, game: &Game, how: &str, url: String) {
     w.post(move |t| t.launch(QString::from(url.as_str())))
 }
 
-/// 0.6: ms since Turbine started, on a steady clock (the interface's times for the question's quiet second).
+/// Time in ms since Turbine started, on a steady clock (the interface's times for the question's quiet second).
 pub(crate) fn mono_ms() -> f64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     START.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0

@@ -75,7 +75,7 @@ fn webengine() -> WebEngine {
             WebEngine { lib, includes }
         }
         _ => panic!(
-            "Qt WebEngine wasn't found under {}. Turbine is built as a Flatpak on io.qt.qtwebengine.BaseApp 6.10 \
+            "Qt WebEngine wasn't found under {}. Turbine is built as a Flatpak on io.qt.qtwebengine.BaseApp 6.11 \
              (packaging/io.github.ravenor907.TurbineModManager.json), which puts it there.",
             prefix.display()
         ),

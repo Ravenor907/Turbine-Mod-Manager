@@ -3,7 +3,7 @@ import QtQuick
 // The beginner tutorial: five cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
 // X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, sign in to Nexus right in
 // Turbine with a free account, Slow download, Added, what it needs lined up after it). 4: START: a tap is Settings, a
-// 3 second hold is Play options (Play Seamless Co-op there too). 5 (0.64): good to know: Steam's own Play through
+// 3 second hold is Play options (Play Seamless Co-op there too). 5: good to know: Steam's own Play through
 // Turbine (mods), games on an SD card or a second drive, Cyberpunk's Visual C++ runtime, updates. Then "Pick a game to
 // start". Main.qml moves between the cards (A or Right next, Left back, B skips, Start finishes) and remembers it was
 // seen; Settings, Help shows it again.
@@ -17,7 +17,7 @@ Overlay {
     // The pad's names for View and Start ("VIEW", "MENU", "BACK", "START"), from Main.qml's glyphs.
     property string viewGlyph: "VIEW"
     property string startGlyph: "START"
-    property bool keys: false             // 0.63: the keyboard or the mouse was used last: the cards name the keys
+    property bool keys: false             // the keyboard or the mouse was used last: the cards name the keys
     property bool thunderstore: false     // the game gets its mods from Thunderstore (Install, not Nexus)
     signal next()
     signal skip()
@@ -98,7 +98,7 @@ Overlay {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            // 0.59 (T16): short, touch included, the game's own way to get mods, and the real Start glyph.
+            // Short, touch included, the game's own way to get mods, and the real Start glyph.
             text: [tut.keys ? "Enter or Space picks, Esc goes back. Move with W A S D or the arrows. R: options for the highlighted thing. F: find and sort. Q and E: the pages. The mouse works too: click, double-click a mod to open it, right-click for options."
                             : "A picks, B goes back. X: options for the highlighted thing. Y: find and sort. LB and RB: tabs (on a mod page, the next result). Touch works too: tap, or hold for options.",
                    tut.keys ? "Hold Tab for the quick wheel from anywhere, pick with the mouse or W A S D, and let go: Find, Add from Downloads, Settings, your games and more."
@@ -169,7 +169,7 @@ Overlay {
         }
     }
 
-    // 5 (0.64): what happens once, by itself or with one press.
+    // 5: what happens once, by itself or with one press.
     Column {
         visible: tut.card === 4
         anchors.top: body.bottom
@@ -218,7 +218,7 @@ Overlay {
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(28)
-            // Back a card by touch (0.59; Left does it with the controller).
+            // Back a card by touch (Left does it with the controller).
             Row {
                 spacing: tut.ui.px(10)
                 height: tut.ui.tpx(44)

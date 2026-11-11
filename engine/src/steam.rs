@@ -82,7 +82,7 @@ pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
                         out.push(real);
                     }
                 } else if outside_allowed(&p) {
-                    // 0.6 (integration I5): a library in a folder the Flatpak may not read is never silent.
+                    // A library in a folder the Flatpak may not read is never silent.
                     scan.problems.push(format!("{UNSEEN_LIBRARY}{} ({UNSEEN_WHY})", p.display()));
                 }
             }
@@ -390,7 +390,7 @@ pub fn launch_options_in(text: &str, app_id: &str) -> Option<String> {
     Some(app.str_at(&["LaunchOptions"]).unwrap_or("").to_string())
 }
 
-// ---- An update waiting in Steam (0.6) ----
+// ---- An update waiting in Steam ----
 
 /// Steam's app state bits (appmanifest StateFlags) that mean an update is waiting or under way: update required,
 /// running, paused, started, downloading, staging, committing.
@@ -451,7 +451,7 @@ pub fn pending_update_words(name: &str, p: &PendingUpdate) -> String {
     t
 }
 
-/// 0.6 (break L7): the Steam account signed in most recently (its userdata folder name, the 32-bit account id), from
+/// The Steam account signed in most recently (its userdata folder name, the 32-bit account id), from
 /// config/loginusers.vdf ("MostRecent" "1"). None when it can't be told.
 pub fn signed_in_account(home: &Path) -> Option<String> {
     for root in steam_roots(home).into_iter().chain([home.join(".local/share/Steam"), home.join(".steam/steam")]) {
@@ -468,7 +468,7 @@ pub fn signed_in_account(home: &Path) -> Option<String> {
     None
 }
 
-/// 0.61: the signed-in account's file among userdata/<account>/... files, when that account is known and has one.
+/// The signed-in account's file among userdata/<account>/... files, when that account is known and has one.
 pub fn signed_in_file(home: &Path, files: &[std::path::PathBuf]) -> Option<std::path::PathBuf> {
     let acc = signed_in_account(home)?;
     files.iter().find(|p| p.components().any(|c| c.as_os_str() == acc.as_str())).cloned()

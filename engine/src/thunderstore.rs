@@ -421,10 +421,8 @@ pub const MAX_INDEX_BYTES: u64 = 2 << 30;
 /// download that replaces it. When the download fails and a saved copy exists, the saved copy is used with a note.
 pub fn fetch_index(client: &Client, community: &str, cache_dir: &Path, force: bool) -> Result<Index, NetError> {
     let path = cache_path(cache_dir, community);
-    if !force && cache_is_fresh(&path, SystemTime::now()) {
-        if let Some(packages) = load_cache(&path) {
-            return Ok(Index { packages, from_cache: true, note: None });
-        }
+    if !force && cache_is_fresh(&path, SystemTime::now()) && let Some(packages) = load_cache(&path) {
+        return Ok(Index { packages, from_cache: true, note: None });
     }
     let fetched = client
         .send(&Request::get(&index_url(community)).max_bytes(MAX_INDEX_BYTES).max_time(0), None)
@@ -628,12 +626,10 @@ impl<'a> Resolver<'a> {
             // Already planned; a later pin may ask for a newer version than planned.
             if let (Some(&i), Some(want)) = (self.chosen.get(&key), &dep.version) {
                 let have = &self.plan.install[i].version;
-                if compare_versions(want, have) == Ordering::Greater {
-                    if let Some(v) = self.by_name.get(&key).and_then(|p| p.version(want)) {
-                        self.plan.install[i].version = v.number.clone();
-                        self.plan.install[i].download_url = v.download_url.clone();
-                        self.plan.install[i].file_size = v.file_size;
-                    }
+                if compare_versions(want, have) == Ordering::Greater && let Some(v) = self.by_name.get(&key).and_then(|p| p.version(want)) {
+                    self.plan.install[i].version = v.number.clone();
+                    self.plan.install[i].download_url = v.download_url.clone();
+                    self.plan.install[i].file_size = v.file_size;
                 }
             }
             return;

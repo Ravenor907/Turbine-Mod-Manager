@@ -4,7 +4,7 @@
 //! with an nxm:// link (the browser opens one when "Mod Manager Download" is pressed) sends the link to the running
 //! Turbine and exits; with no Turbine running, it starts normally and handles the link itself. Only nxm:// lines that
 //! read as a Nexus download link are accepted from the socket (and "turbine:show", from a second launch with no link:
-//! the running Turbine comes to the front, and 0.6's "turbine:quick" requests from Steam's menu); anything else is
+//! the running Turbine comes to the front, and "turbine:quick" requests from Steam's menu); anything else is
 //! dropped.
 //!
 //! In the Flatpak the folder is $XDG_RUNTIME_DIR/app/<app id>/, which Flatpak shares between every copy of the same
@@ -86,7 +86,7 @@ fn send(path: &Path, link: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// 0.6: hands one request from Steam's menu to the Turbine that is open (Err when none answers).
+/// Hands one request from Steam's menu to the Turbine that is open (Err when none answers).
 pub fn send_request(line: &str) -> std::io::Result<()> {
     let path = socket_path().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "there is no runtime folder"))?;
     send(&path, line)
@@ -141,8 +141,8 @@ fn read_link(stream: UnixStream) -> Option<String> {
     let mut r = BufReader::new(stream.take(MAX_LINE + 1));
     r.read_line(&mut line).ok()?;
     let line = line.trim().to_string();
-    // 0.6: a request from Steam's menu (quick.rs) for the game Turbine has open. The answer says whether the line
-    // was taken, after it is checked (break L2): "ok" or "no".
+    // A request from Steam's menu (quick.rs) for the game Turbine has open. The answer says whether the line
+    // was taken, after it is checked: "ok" or "no".
     let taken = accepted(&line);
     if let Some(w) = writer.as_mut() {
         let _ = w.write_all(if taken { b"ok" } else { b"no" });

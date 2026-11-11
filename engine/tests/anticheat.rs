@@ -1,4 +1,4 @@
-//! 0.57 anti-cheat games: the data files, the store deploying a me3 game's mods into its Turbine-owned me3 profile
+//! Anti-cheat games: the data files, the store deploying a me3 game's mods into its Turbine-owned me3 profile
 //! (never the game folder), the game folder made original again for the normal launch, and online-only games
 //! refusing mods.
 
@@ -112,7 +112,7 @@ fn files_placed_before_come_out_of_the_game_folder() {
     let w = world("leftover");
     let before = files_under(&w.game.install_dir);
     let store_root = w.root.join("store");
-    // Before 0.57 the game was a Basic game: the mod went into the game folder.
+    // Files placed while the game was a Basic game: the mod went into the game folder.
     {
         let mut old = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(None, false))).unwrap();
         let zip = w.root.join("dl/Old Mod 1.0.zip");
@@ -238,7 +238,7 @@ fn data_file_checks() {
     assert!(gamedata::builtin().problems.is_empty(), "{:?}", gamedata::builtin().problems);
 }
 
-// ---- 0.57 break test fixes
+// ---- Leftovers and other edge cases
 
 #[test]
 fn halo_mods_in_its_folder_never_block_play() {
@@ -280,7 +280,7 @@ fn online_only_games_never_get_files_by_any_path() {
     let before = files_under(&w.game.install_dir);
     let store_root = w.root.join("store");
     {
-        // An earlier version placed two mods (one later removed).
+        // Placed while the game was a Basic game: two mods (one later removed).
         let mut old = Store::open_at(&w.game, &store_root, Box::new(Me3Rules(None, false))).unwrap();
         let zip = w.root.join("dl/Skin 1.0.zip");
         write_zip(&zip, &[("Game/skin.txt", "skin")]);
@@ -336,7 +336,7 @@ fn a_first_deploy_cut_short_is_cleaned_for_a_me3_game() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// 0.58: an online-only game owned on Epic or GOG (through Heroic) is refused like its Steam copy: by its store id
+/// An online-only game owned on Epic or GOG (through Heroic) is refused like its Steam copy: by its store id
 /// where the data file has it, else by its name.
 #[test]
 fn heroic_copies_of_online_only_games_are_refused() {
@@ -372,7 +372,7 @@ fn heroic_copies_of_online_only_games_are_refused() {
     assert!(r.anti_cheat.is_none());
 }
 
-/// 0.58: a me3 game's own files (regulation.bin) never make the "game already has this file" question: the mod goes
+/// A me3 game's own files (regulation.bin) never make the "game already has this file" question: the mod goes
 /// into Turbine's me3 profile, not the game folder.
 #[test]
 fn me3_games_ask_nothing_about_their_own_files() {
@@ -386,7 +386,7 @@ fn me3_games_ask_nothing_about_their_own_files() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// 0.62: every me3 game's profile turns the game's code protection off (me3's top-level `disable_arxan`). Without
+/// Every me3 game's profile turns the game's code protection off (me3's top-level `disable_arxan`). Without
 /// it Elden Ring 1.17.2 started with mods and closed by itself after 20 to 28 seconds on the owner's device. The
 /// key has to sit above the first table, or TOML reads it as part of that table and me3 never sees it.
 #[test]
@@ -417,9 +417,9 @@ fn every_me3_profile_turns_the_code_protection_off() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.62 (the owner's device): Play Seamless Co-op started with an empty session password and the mod stopped the
-/// game. The password is read from the file the mod itself loads under me3 (next to its ersc.dll in Turbine's me3
-/// profile), and no co-op profile or once file is written while it is empty.
+/// Play Seamless Co-op with an empty session password: the mod stops the game. The password is read from the file
+/// the mod itself loads under me3 (next to its ersc.dll in Turbine's me3 profile), and no co-op profile or once file is
+/// written while it is empty.
 #[test]
 fn coop_needs_a_session_password_in_the_file_the_mod_loads() {
     use anticheat::{Coop, CoopPassword};
@@ -491,10 +491,9 @@ fn added(r: Result<turbine_engine::store::Import, String>) -> turbine_engine::st
 const INI_201: &str = "[GAMEPLAY]\r\nallow_invaders = 1\r\n\r\n[PASSWORD]\r\n; Session password\r\ncooppassword = \r\n";
 const INI_202: &str = "[GAMEPLAY]\r\nallow_invaders = 1\r\nnew_in_202 = 5\r\n\r\n[PASSWORD]\r\n; Session password\r\ncooppassword = \r\n";
 
-/// 0.62 (the owner's device): the list showed Seamless Co-op 2.0.2 from Nexus, but the game loaded 2.0.1 and the mod
-/// stopped ("out of date"). Turbine only knew its own pinned download as Seamless Co-op, so that older copy was
-/// added as a second mod and its files won. Now there is one Seamless Co-op per game, known by its files: a new
-/// download takes the place of the old one and keeps the session password.
+/// One Seamless Co-op per game, known by its files: a new download takes the place of the old one and keeps the
+/// session password. With two copies in the list the older one's files can win, the game loads 2.0.1 while the list
+/// shows 2.0.2, and the mod stops ("out of date").
 #[test]
 fn a_newer_seamless_coop_replaces_the_older_copy_and_keeps_the_password() {
     let w = world("seamless-update");
@@ -552,7 +551,7 @@ fn a_newer_seamless_coop_replaces_the_older_copy_and_keeps_the_password() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// The state the owner's device is in now: two copies in the list, the older one later in the order. Only the
+/// Two copies in the list, the older one later in the order. Only the
 /// newer one's files go into the game's mod folder, the check names both, and tidying keeps one.
 #[test]
 fn with_two_copies_in_the_list_the_newer_one_is_loaded() {
@@ -642,7 +641,7 @@ fn seamless_coop_is_the_newest_release_never_a_fixed_one() {
     assert!(loaders::parse_seamless_release(r#"{"tag_name":"v2.0.3","assets":[]}"#).is_err());
     assert!(loaders::parse_seamless_release(r#"{"tag_name":"latest build!","assets":[]}"#).is_err());
     assert!(loaders::parse_seamless_release("{}").is_err());
-    // 0.62 break test: GitHub's newest (2.0.1 today) can be older than the copy from Nexus (2.0.2). "Get Seamless
+    // GitHub's newest (2.0.1 today) can be older than the copy from Nexus (2.0.2). "Get Seamless
     // Co-op" then does nothing and says so; with no copy, or an older one, it downloads and says which version.
     let github = loaders::SeamlessRelease { version: "2.0.1".into(), url: r.url.clone(), size: 1, sha256: None };
     assert_eq!(loaders::seamless_get(Some("2.0.2"), &github), loaders::SeamlessGet::HaveIt("You have Seamless Co-op 2.0.2, which is newer than the 2.0.1 Turbine can download itself. Nothing to do.".into()));
@@ -658,9 +657,9 @@ fn touch_later(p: &Path, secs: u64) {
     f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(secs)).unwrap();
 }
 
-/// 0.62: a settings file changed where it is deployed (by the game, the mod, or by hand) used to be kept over
-/// Turbine's newer copy, so a password or any other setting changed in Turbine afterwards never reached the game.
-/// Now the in-place changes are merged into Turbine's copy: what the player changed in Turbine since the last apply
+/// A settings file changed where it is deployed (by the game, the mod, or by hand) never hides Turbine's newer copy,
+/// so a password or any other setting changed in Turbine afterwards reaches the game. The in-place changes are
+/// merged into Turbine's copy: what the player changed in Turbine since the last apply
 /// wins for those settings, everything else changed in place is kept and shows in Edit settings, and nothing is
 /// lost without a trace.
 #[test]
@@ -731,9 +730,9 @@ fn settings_changed_in_place_are_merged_and_turbines_edits_reach_the_game() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// 0.62 break test M1: a setting changed in the game's folder, then the FIRST Edit settings save in Turbine. The
-/// deploy record still names the mod's own file while the file to deploy is Turbine's new copy; the merge was
-/// skipped and the in-place change was dropped without a trace.
+/// A setting changed in the game's folder, then the FIRST Edit settings save in Turbine. The deploy record still
+/// names the mod's own file while the file to deploy is Turbine's new copy; the merge still runs and the in-place
+/// change is kept.
 #[test]
 fn the_first_edit_in_turbine_keeps_changes_made_in_the_games_folder() {
     use turbine_engine::settings;
@@ -749,8 +748,8 @@ fn the_first_edit_in_turbine_keeps_changes_made_in_the_games_folder() {
     // The game (or the player, by hand) changes a setting in place.
     fs::write(&deployed, INI_202.replace("allow_invaders = 1", "allow_invaders = 0")).unwrap();
     touch_later(&deployed, 10);
-    // The first Edit settings save, made from the mod's defaults as the page showed them before 0.62 (no apply
-    // in between): only the password is set.
+    // The first Edit settings save, made from the mod's defaults as they were placed (no apply in
+    // between): only the password is set.
     settings::save_edit(store.root(), &m.id, &rel, &staged.join(&rel), &anticheat::coop_password_put(INI_202, "dragon").unwrap()).unwrap();
     store.apply().unwrap();
     let got = fs::read_to_string(&deployed).unwrap();
@@ -776,12 +775,12 @@ fn the_first_edit_in_turbine_keeps_changes_made_in_the_games_folder() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// 0.62 break test M4: a settings file emptied or cut short in the game's folder (a crash while the game wrote it,
+/// A settings file emptied or cut short in the game's folder (a crash while the game wrote it,
 /// a full disk) never empties Turbine's copy: Turbine's values stay and go back in, and the report says so.
 #[test]
 fn a_damaged_settings_file_never_empties_turbines_copy() {
     use turbine_engine::settings::{self, Format};
-    // The unit case from the break test.
+    // The unit case.
     let placed = "[A]\nz = 0\npw = a\n";
     assert_eq!(settings::merge_in_place(Format::Ini, "", placed, placed), placed);
     assert_eq!(settings::merge_in_place(Format::Ini, "\n\n", placed, placed), placed);
@@ -823,12 +822,12 @@ fn coop_zip(w: &World, file: &str, version: &str, ini: &str) -> PathBuf {
     p
 }
 
-/// The owner's two copies (0.62 break test M2): Turbine's own 2.0.1 and Nexus's 2.0.2, made here the way they came
-/// to be (the second added in place of a placeholder entry, so both are in the list).
+/// Two copies: Turbine's own 2.0.1 and Nexus's 2.0.2, made the way two copies come to be (the second added in
+/// place of a placeholder entry, so both are in the list).
 fn two_copies(w: &World) -> (Store, String, String) {
     let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(Me3Rules(Some("eldenring"), false))).unwrap();
     let b = added(store.import_archive(&coop_zip(w, "Seamless Co-op 2.0.1.zip", "2.0.1", &INI_201.replace("cooppassword = ", "cooppassword = dragon")), own_download("2.0.1")));
-    // The second copy as 0.61 left it beside the first (today a second copy takes the first one's place): added
+    // A second copy beside the first (a normal add takes the first one's place, so it is made this way): added
     // without its settings file, which is then put into its folder in Turbine's store by hand.
     let zip = w.root.join("dl/Seamless Co-op 2.0.2.zip");
     write_zip(&zip, &[("SeamlessCoop/ersc.dll", "dll 2.0.2"), ("ersc_launcher.exe", "exe")]);
@@ -845,8 +844,8 @@ fn two_copies(w: &World) -> (Store, String, String) {
     (store, a.id, b.id)
 }
 
-/// 0.62 break test M2: with the 2.0.2 copy off and 2.0.1 on, Tidy up moved 2.0.2 to Removed mods and said it kept
-/// the newest. The highest version is kept whichever is on or off, turned on, and named.
+/// With the 2.0.2 copy off and 2.0.1 on, Tidy up must not move 2.0.2 to Removed mods. The highest version is kept
+/// whichever is on or off, turned on, and named.
 #[test]
 fn tidy_up_keeps_the_highest_version_whichever_is_on() {
     let w = world("tidy-newest");
@@ -876,8 +875,8 @@ fn tidy_up_keeps_the_highest_version_whichever_is_on() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// 0.62 break test M3: any archive holding an ersc.dll took Seamless Co-op's place in the list with nothing to put
-/// back, and an older download replaced a newer copy without a word.
+/// Only Seamless Co-op itself takes Seamless Co-op's place in the list (not any archive holding an ersc.dll), and an
+/// older download never replaces a newer copy without a word.
 #[test]
 fn only_seamless_coop_itself_replaces_it_and_never_an_older_one_unasked() {
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
@@ -939,9 +938,9 @@ fn only_seamless_coop_itself_replaces_it_and_never_an_older_one_unasked() {
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// The 0.62 re-check, N2 (the owner's own case: several files on one Nexus page): an older Seamless Co-op from the
+/// Several files on one Nexus page: an older Seamless Co-op from the
 /// SAME source as the installed copy is asked about too, and with the player's word the newer copy goes to Removed
-/// mods. L-a: that word is for one file; it never covers another file added later. L-b: a pack that holds a whole
+/// mods. That word is for one file; it never covers another file added later. A pack that holds a whole
 /// SeamlessCoop folder among other things is a mod of its own.
 #[test]
 fn an_older_file_from_the_same_page_is_asked_about_and_the_word_is_for_one_file() {
@@ -970,7 +969,7 @@ fn an_older_file_from_the_same_page_is_asked_about_and_the_word_is_for_one_file(
     assert_eq!(fs::read_to_string(anticheat::profile_mods(store.root()).join("SeamlessCoop/ersc.dll")).unwrap(), "dll 2.0.1");
     assert_eq!(anticheat::coop_password(store.root()), anticheat::CoopPassword::Set, "the settings came along");
 
-    // L-a: the word was for that one file. Another file in between, then a still older Seamless Co-op: asked again.
+    // The word was for that one file. Another file in between, then a still older Seamless Co-op: asked again.
     let other = w.root.join("dl/Other 1.0.zip");
     write_zip(&other, &[("Game/other.bin", "x")]);
     store.import_zip(&other).unwrap();
@@ -982,7 +981,7 @@ fn an_older_file_from_the_same_page_is_asked_about_and_the_word_is_for_one_file(
     assert!(store.import_archive(&other_old, nexus("1.8.0")).is_err(), "the word ended with its own file");
     assert_eq!(store.seamless().unwrap().version.as_deref(), Some("2.0.1"));
 
-    // L-b: a pack with a whole SeamlessCoop folder among other folders is not Seamless Co-op itself.
+    // A pack with a whole SeamlessCoop folder among other folders is not Seamless Co-op itself.
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
     assert!(!anticheat::is_seamless_package(&s(&["Pack/SeamlessCoop/ersc.dll", "Pack/SeamlessCoop/ersc_settings.ini", "Pack/overhaul/regulation.bin"])));
     assert!(!anticheat::is_seamless_package(&s(&["SeamlessCoop/ersc.dll", "SeamlessCoop/ersc_settings.ini", "mod/regulation.bin"])));
@@ -997,7 +996,7 @@ fn an_older_file_from_the_same_page_is_asked_about_and_the_word_is_for_one_file(
     let _ = fs::remove_dir_all(&w.root);
 }
 
-/// The 0.62 re-check, N1: Edit settings takes the game's change in before it shows the page. A setting the player
+/// Edit settings takes the game's change in before it shows the page. A setting the player
 /// then puts back to what it was is the player's change, not "unchanged since it was placed".
 #[test]
 fn a_setting_put_back_in_edit_settings_holds() {

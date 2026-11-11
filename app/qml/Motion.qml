@@ -1,6 +1,6 @@
 import QtQuick
 
-// How Turbine moves, in one place (0.62). Every animation in app/qml takes its time and its curve from here: no
+// How Turbine moves, in one place. Every animation in app/qml takes its time and its curve from here: no
 // other file writes a duration in milliseconds or names an easing curve (tools/qml-check.js fails the build on one).
 //
 // The level is the player's (Settings, Look, Animations):

@@ -1,6 +1,6 @@
 import QtQuick
 
-// The game menu that View opens (0.59): every row from Main.qml's gameMenuItems, in sections (Play, Mods, Fix a
+// The game menu that View opens: every row from Main.qml's gameMenuItems, in sections (Play, Mods, Fix a
 // problem, This game) with a small head over the first row of each. Rows that can't be used now are dimmed (A on
 // one says why). A centered card over a dimmed backdrop. It fills its parent; show and hide it with visible.
 //

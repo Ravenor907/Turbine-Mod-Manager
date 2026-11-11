@@ -1,4 +1,4 @@
-//! 0.58: modded launches go through Steam. 0.59: the helper keeps Steam's whole command in Steam's own order (the
+//! Modded launches go through Steam. The helper keeps Steam's whole command in Steam's own order (the
 //! launch wrapper with its options, the reaper with the app id, the runtime, Proton) and swaps only the game's program
 //! for me3's Windows build. These tests run the helper behind a stub of Steam's chain: each stub is a real program that
 //! writes its arguments to a trace file and passes control on the way Steam's own do.
@@ -224,7 +224,7 @@ fn accepted_lines_run_in_the_shell() {
     ] {
         assert_eq!(anticheat::launch_option_ok(&form, &c.data), ok, "{form}");
         let _ = fs::remove_file(&c.trace);
-        // The broken form is broken on purpose: its shell error stays out of the test output (break L10).
+        // The broken form is broken on purpose: its shell error stays out of the test output.
         let err = if ok { std::process::Stdio::inherit() } else { std::process::Stdio::null() };
         let st = Command::new("sh").arg("-c").arg(form.replace("%command%", &cmd.join(" "))).env("SteamAppId", APP).stderr(err).status().unwrap();
         let t = fs::read_to_string(&c.trace).unwrap_or_default();
@@ -458,7 +458,8 @@ fn me3_failure_is_logged_and_reported() {
     let _ = fs::remove_dir_all(&c.d);
 }
 
-/// The Linux me3 (an armed file from before 0.59): everything in front of Steam's runtime stays, reaper included.
+/// The Linux me3 (an armed file without the game's program, used when that isn't known): everything in front of
+/// Steam's runtime stays, reaper included.
 #[test]
 fn linux_me3_keeps_the_prefix() {
     if !has_bash() {
@@ -540,7 +541,7 @@ fn once_files_and_plain_play() {
     let _ = fs::remove_dir_all(&c.d);
 }
 
-/// 0.58 break test H1: every way of turning mods off clears what Steam's Play starts.
+/// Every way of turning mods off clears what Steam's Play starts.
 #[test]
 fn every_off_path_clears_the_helper() {
     let helper_state = |a, b, c, d, e| anticheat::helper_state_undone(a, b, c, d, e, false);
@@ -592,7 +593,7 @@ fn solo_and_coop_profiles() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.58 second break test N1: the older line (the helper alone) is outdated, so Play asks again for the line that
+/// The older line (the helper alone) is outdated, so Play asks again for the line that
 /// falls back to Steam's own command.
 #[test]
 fn the_older_line_is_outdated() {
@@ -608,7 +609,7 @@ fn the_older_line_is_outdated() {
     assert!(anticheat::launch_option_uses_helper(&format!("{h} %command%"), data));
 }
 
-/// 0.58 second break test N2: Undo sticks. Nothing arms again (Steam's Play stays normal) until the line is set
+/// Undo sticks. Nothing arms again (Steam's Play stays normal) until the line is set
 /// again or the player says to use it again; the first original is never replaced.
 #[test]
 fn undo_sticks_until_the_line_is_set_again() {
@@ -629,7 +630,7 @@ fn undo_sticks_until_the_line_is_set_again() {
     // Or the player says so in Turbine.
     anticheat::mark_undone(&data, "1245620", &line).unwrap();
     assert!(!anticheat::still_undone(&data, "1245620", Some(&line), true));
-    // The newest options without Turbine's line are the ones Undo puts back (break M4: "A", Undo, the player sets
+    // The newest options without Turbine's line are the ones Undo puts back ("A", Undo, the player sets
     // "B", Turbine's line again, Undo: "B" comes back), and Turbine's own line never counts as the player's.
     anticheat::remember_original(&data, "1245620", "A %command%").unwrap();
     anticheat::remember_original(&data, "1245620", "B %command%").unwrap();

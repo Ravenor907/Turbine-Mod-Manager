@@ -14,7 +14,7 @@ macro_rules! repo {
         "Ravenor907/Turbine-Mod-Manager"
     };
 }
-/// 0.63: the newest full release's own page. GitHub redirects it to ".../releases/tag/<tag>", so the tag is read
+/// The newest full release's own page. GitHub redirects it to ".../releases/tag/<tag>", so the tag is read
 /// from where the request ends up and GitHub's API (60 requests an hour for a connection that isn't signed in,
 /// which Check for updates ran into as a 403) isn't asked.
 pub const LATEST_PAGE: &str = concat!("https://github.com/", repo!(), "/releases/latest");
@@ -90,10 +90,8 @@ pub fn sha256_from_notes(notes: &str) -> Option<String> {
     };
     for line in notes.lines() {
         let l = line.to_ascii_lowercase();
-        if l.contains("sha256") || l.contains("sha-256") || l.contains(&ASSET.to_ascii_lowercase()) {
-            if let Some(h) = runs(line).into_iter().next() {
-                return Some(h);
-            }
+        if (l.contains("sha256") || l.contains("sha-256") || l.contains(&ASSET.to_ascii_lowercase())) && let Some(h) = runs(line).into_iter().next() {
+            return Some(h);
         }
     }
     let all: Vec<String> = notes.lines().flat_map(runs).collect();
@@ -190,10 +188,8 @@ pub fn tag_from_url(url: &str) -> Option<String> {
 pub fn tags_from_feed(feed: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for (at, _) in feed.match_indices(TAG_MARK) {
-        if let Some(tag) = tag_from_url(&feed[at..]) {
-            if !out.contains(&tag) {
-                out.push(tag);
-            }
+        if let Some(tag) = tag_from_url(&feed[at..]) && !out.contains(&tag) {
+            out.push(tag);
         }
     }
     out
@@ -267,7 +263,7 @@ pub fn check(client: &Client, current: &str, labs: bool) -> Result<Check, NetErr
     })
 }
 
-/// 0.63: the last answer of an update check, kept so a start within `CHECK_EVERY_SECS` of it doesn't ask GitHub
+/// The last answer of an update check, kept so a start within `CHECK_EVERY_SECS` of it doesn't ask GitHub
 /// again. Check for updates (the button) always asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Remembered {
@@ -323,24 +319,20 @@ impl Remembered {
 pub fn download(client: &Client, release: &Release, progress: Option<Progress>) -> Result<Download, NetError> {
     let mut sha = release.sha256.clone();
     let mut size = release.asset_size;
-    if sha.is_none() {
-        if let Some(url) = &release.sha256_asset_url {
-            match client.send(&Request::get(url).max_bytes(4096).max_time(30), None) {
-                Ok(r) => sha = parse_sha256_file(&r.take_text()?),
-                Err(NetError::NotFound) => {}
-                Err(e) => return Err(limit_words(e)),
-            }
+    if sha.is_none() && let Some(url) = &release.sha256_asset_url {
+        match client.send(&Request::get(url).max_bytes(4096).max_time(30), None) {
+            Ok(r) => sha = parse_sha256_file(&r.take_text()?),
+            Err(NetError::NotFound) => {}
+            Err(e) => return Err(limit_words(e)),
         }
     }
     if sha.is_none() && !release.tag.is_empty() {
         let req = Request::get(&format!("{TAG_API}{}", release.tag)).header("Accept", "application/vnd.github+json").max_bytes(8 << 20).max_time(30);
         match client.send(&req, None) {
             Ok(r) => {
-                if let Ok(Some(listed)) = pick_release(&r.take_text()?, true) {
-                    if listed.tag == release.tag && listed.asset_url == release.asset_url {
-                        sha = listed.sha256;
-                        size = listed.asset_size;
-                    }
+                if let Ok(Some(listed)) = pick_release(&r.take_text()?, true) && listed.tag == release.tag && listed.asset_url == release.asset_url {
+                    sha = listed.sha256;
+                    size = listed.asset_size;
                 }
             }
             Err(NetError::NotFound) => {}
@@ -364,7 +356,7 @@ pub fn install_args(bundle: &Path) -> Vec<String> {
     install_args_to(bundle, "--user")
 }
 
-/// 0.61 (integration I12): where the running Turbine is installed, from the sandbox's /.flatpak-info
+/// Where the running Turbine is installed, from the sandbox's /.flatpak-info
 /// (`[Instance] app-path`): "--system" for the system installation (/var/lib/flatpak), "--user" otherwise.
 pub fn install_scope(flatpak_info: &str) -> &'static str {
     let mut in_instance = false;

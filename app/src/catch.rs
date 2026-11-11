@@ -38,7 +38,7 @@ pub const SLOW_DOWNLOAD: &str =
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 /// How long a browser's report of a download holds the Downloads watcher back once the file is ready: past this,
-/// the watcher adds it itself (0.54 left it waiting for a finish that never came).
+/// the watcher adds it itself (otherwise it could wait for a finish that never comes).
 pub const DEFER: Duration = Duration::from_secs(20);
 
 /// The folders Turbine watches and accepts helper downloads from: ~/Downloads and the desktop's Downloads folder.
@@ -184,7 +184,7 @@ pub struct Catching {
     pub deferred: Vec<(Arrival, std::time::Instant)>,
     /// The status text last written to the log (each new one is logged once).
     pub said: String,
-    /// 0.6 (integration I4): the browser saved a download outside Downloads, and the player was told (once a run).
+    /// The browser saved a download outside Downloads, and the player was told (once a run).
     pub told_outside: bool,
 }
 
@@ -366,7 +366,7 @@ impl qobject::Turbine {
     /// very first run, the last 24 hours count and Turbine asks before adding any of those.
     pub(crate) fn start_downloads_watch(mut self: Pin<&mut Self>) {
         let path = crate::log::folder(&crate::backend::data_home()).join("catch.json");
-        // 0.62: Game Mods folders named with a long dash by an older Turbine get their plain name, before the
+        // Game Mods folders named with a long dash get their plain name, before the
         // watcher looks at them.
         for l in watch::rename_dash_folders(&watch::default_folders(&turbine_engine::home_dir()), Some(&path)) {
             crate::log::line("catch", &l);
@@ -541,7 +541,7 @@ impl qobject::Turbine {
             if let Some(g) = game {
                 let d = watch::decide_all(Some(&g.id()), None, None, None, None, false);
                 crate::log::line("catch", &format!("{name}: {}, because {}; adding it", g.name, d.basis.words()));
-                // 0.6 (integration I2): the Nexus page the helper reported for this file comes first (Nexus's newer file
+                // The Nexus page the helper reported for this file comes first (Nexus's newer file
                 // names carry no ids); then the mod ID and version from the older file name pattern, when it has one.
                 let domain = nexus::domain_for(g.store, &g.store_id).unwrap_or("").to_string();
                 let reported = self.rust().catching.helper_games.iter().rev().find(|(l, _, _)| *l == name).and_then(|(_, _, r)| r.clone());
@@ -574,11 +574,9 @@ impl qobject::Turbine {
                 continue;
             }
             let Some((file, confidence)) = e.match_file(&name, a.size) else { continue };
-            if page.as_ref().map(|p| confidence > p.confidence || (confidence == p.confidence && e.started_at > p.started)).unwrap_or(true) {
-                if let Some(game) = self.find(&e.game_id) {
-                    let r = bridge::NexusRef { domain: e.domain.clone(), mod_id: e.mod_id, file_id: file.as_ref().map(|f| f.file_id).filter(|x| *x > 0) };
-                    page = Some(PageMatch { game, confidence, r, version: file.map(|f| f.version), started: e.started_at });
-                }
+            if page.as_ref().map(|p| confidence > p.confidence || (confidence == p.confidence && e.started_at > p.started)).unwrap_or(true) && let Some(game) = self.find(&e.game_id) {
+                let r = bridge::NexusRef { domain: e.domain.clone(), mod_id: e.mod_id, file_id: file.as_ref().map(|f| f.file_id).filter(|x| *x > 0) };
+                page = Some(PageMatch { game, confidence, r, version: file.map(|f| f.version), started: e.started_at });
             }
         }
         if helper.is_some() || crate::online::nexus_key().is_none() {
@@ -587,10 +585,8 @@ impl qobject::Turbine {
         // 2. Nexus Mods by the file's MD5, for each of the installed games it has (the likeliest first).
         let mut domains: Vec<(String, Game)> = Vec::new();
         let mut add = |g: &Game| {
-            if let Some(d) = nexus::domain_for(g.store, &g.store_id) {
-                if !domains.iter().any(|(x, _)| x == d) {
-                    domains.push((d.to_string(), g.clone()));
-                }
+            if let Some(d) = nexus::domain_for(g.store, &g.store_id) && !domains.iter().any(|(x, _)| x == d) {
+                domains.push((d.to_string(), g.clone()));
             }
         };
         if let Some(p) = &page {
@@ -800,7 +796,7 @@ impl qobject::Turbine {
         // in Turbine, over the browser and in the helper's panel says so until the download starts.
         let premium = turbine_engine::json::parse(&self.account_json().to_string()).ok().and_then(|a| a.get("premium").and_then(Json::as_bool)).unwrap_or(false);
         if mod_page && !premium {
-            // A hint, not a wait: it never holds back the watcher's own "Downloading" (0.54 kept it up instead).
+            // A hint, not a wait: it never holds back the watcher's own "Downloading".
             crate::log::line("catch", "Status: press Slow download on the page (a free account downloads there)");
             self.as_mut().set_status(SLOW_DOWNLOAD, "hint", None, &name, "", false, "");
         }
@@ -939,10 +935,8 @@ impl qobject::Turbine {
                 .or_else(|| hint.as_ref().map(|(r, v)| hint_source(r, v.clone())))
                 .unwrap_or_else(|| SourceInfo { kind: "zip".into(), ..Default::default() });
             // What it needs, from its Nexus page (no key needed), for "Needs" and "Needed by" in the mod menu.
-            if source.needs.is_empty() {
-                if let Some((d, m)) = nexus::source_mod(&source).filter(|(d, _)| !d.is_empty()) {
-                    source.needs = crate::online::nexus_needs(&d, m);
-                }
+            if source.needs.is_empty() && let Some((d, m)) = nexus::source_mod(&source).filter(|(d, _)| !d.is_empty()) {
+                source.needs = crate::online::nexus_needs(&d, m);
             }
             set(&qt, move |mut t| {
                 let name = format!("Add {label} (caught download)");
@@ -1003,14 +997,12 @@ impl qobject::Turbine {
                 bridge::set_games(games_json(&self.rust().found));
                 self.as_mut().bridge_refresh();
                 // The status now, if there is one, then any installer choices already waiting.
-                if let Ok(s) = turbine_engine::json::parse(&self.status_json().to_string()) {
-                    if s.get("active").and_then(Json::as_bool) == Some(true) {
-                        let p = match s.get("progress") {
-                            Some(Json::Num(n)) if *n >= 0.0 => Some(*n),
-                            _ => None,
-                        };
-                        bridge::broadcast(&status_message(s.str_at("text").unwrap_or(""), s.str_at("level").unwrap_or("ok"), p, s.str_at("game").unwrap_or("")));
-                    }
+                if let Ok(s) = turbine_engine::json::parse(&self.status_json().to_string()) && s.get("active").and_then(Json::as_bool) == Some(true) {
+                    let p = match s.get("progress") {
+                        Some(Json::Num(n)) if *n >= 0.0 => Some(*n),
+                        _ => None,
+                    };
+                    bridge::broadcast(&status_message(s.str_at("text").unwrap_or(""), s.str_at("level").unwrap_or("ok"), p, s.str_at("game").unwrap_or("")));
                 }
                 self.send(None, "Send installer choices to the browser helper", false, Box::new(|w: &mut Worker| crate::actions::resend_fomod(w)));
             }
@@ -1216,7 +1208,7 @@ pub(crate) fn report(w: &Worker, game: &Game, path: &Path, out: crate::actions::
     }
 }
 
-/// 0.62: a caught download that needed the player and was answered without being added (an older Seamless Co-op the
+/// A caught download that needed the player and was answered without being added (an older Seamless Co-op the
 /// player chose not to use): its row and the status say it is done, so nothing waits on it or offers it again.
 pub(crate) fn settled(w: &Worker, game: &Game, path: &Path, words: &str) {
     let (g, p, words) = (game.name.clone(), path.to_path_buf(), words.to_string());
@@ -1280,7 +1272,7 @@ pub fn refresh_helper_copy() -> bool {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     // qtglue.cpp
     fn turbine_overlay_mark(on: i32) -> i32;
 }

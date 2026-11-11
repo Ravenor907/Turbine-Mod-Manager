@@ -5,9 +5,7 @@ import QtQuick
 // under it ("Get it on Nexus", "Install", "Installed · On"), then "Also needs" (each requirement with Installed, Will
 // be added or Not yet; A on one opens its page). Other files are in X Options. On a narrow window the right column
 // goes under the picture. Main.qml moves the focus (focusIndex: 0 main button, 2 and on the requirements) and scrolls
-// with the D-pad (scroll()). After 8 seconds with Turbine still in front, two buttons show under the main one
-// ("Open in Steam's browser", "Always use Steam's browser": helpLabels, helpFocus, helpClicked). No key caps on the
-// page: the legend says what A and X do.
+// with the D-pad (scroll()). No key caps on the page: the legend says what A and X do.
 Item {
     id: md
     required property var ui
@@ -18,13 +16,10 @@ Item {
     property string mainLine: ""
     property real mainProgress: -1
     property int focusIndex: 0
-    property var helpLabels: []           // the two browser buttons, when they show
-    property int helpFocus: -1
 
     signal installClicked()
-    signal helpClicked(int index)
     signal needClicked(int index)
-    // 0.6: the installed mod's settings, under the description ("" when it has none: no button at all).
+    // The installed mod's settings, under the description ("" when it has none: no button at all).
     property string settingsLabel: ""
     property bool settingsFocused: false
     signal settingsClicked()
@@ -48,10 +43,8 @@ Item {
         view.contentY = Math.max(0, Math.min(Math.max(0, view.contentHeight - view.height), view.contentY + d * ui.px(70)))
     }
     function focusItem() {
-        if (helpFocus >= 0) return helpRep.itemAt(helpFocus)
         return focusIndex === 0 ? mainBtn : focusIndex === 1 ? null : needRep.itemAt(focusIndex - 2)
     }
-    onHelpFocusChanged: follow()
     onFocusIndexChanged: follow()
     function follow() { Qt.callLater(md.followNow) }
     function followNow() {
@@ -200,32 +193,6 @@ Item {
                 font.family: md.ui.bodyFont
                 font.pixelSize: md.ui.fpx(14)
             }
-            Text {
-                visible: md.helpLabels.length > 0
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: "Didn't see Nexus open?"
-                color: md.ui.c.text
-                font.family: md.ui.bodyFont
-                font.pixelSize: md.ui.fpx(14)
-                font.weight: Font.DemiBold
-            }
-            Repeater {
-                id: helpRep
-                model: md.helpLabels
-                Rectangle {
-                    required property int index
-                    required property string modelData
-                    readonly property bool foc: md.focused && md.helpFocus === index
-                    width: rightCol.width; height: md.ui.px(44); radius: md.ui.px(6)
-                    color: foc ? md.ui.c.focusFill : md.ui.c.card
-                    border.color: foc ? md.ui.c.accent : md.ui.c.line
-                    border.width: foc ? md.ui.px(2) : Math.max(1, md.ui.px(1))
-                    Text { x: md.ui.px(12); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold }
-                    HoverHandler { onHoveredChanged: md.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: md.helpClicked(parent.index) }
-                }
-            }
             // Which file and its size, and Other files: under X Options (a first look shouldn't ask for a choice).
             Text {
                 visible: !!md.info && !!md.info.filesNote
@@ -291,7 +258,7 @@ Item {
         }
     }
 
-    // More below: a fade at the bottom and how to scroll (0.56).
+    // More below: a fade at the bottom and how to scroll.
     Rectangle {
         visible: view.visible && view.contentHeight > view.height + 2 && !view.atYEnd
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom

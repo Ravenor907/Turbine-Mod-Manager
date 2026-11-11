@@ -1,4 +1,4 @@
-//! 0.59: Turbine sets a game's Steam Launch Options itself, so the player never pastes Turbine's line into Steam's
+//! Turbine sets a game's Steam Launch Options itself, so the player never pastes Turbine's line into Steam's
 //! Properties. They live in userdata/<account>/config/localconfig.vdf (text VDF), under
 //! UserLocalConfigStore/Software/Valve/Steam/apps/<app id>/LaunchOptions. Steam keeps that file in memory while it
 //! runs, writes it back when it closes and reads it when it starts, so Turbine changes it only while Steam is closed
@@ -225,10 +225,8 @@ pub fn localconfig_files(home: &Path) -> Vec<PathBuf> {
         let Ok(rd) = fs::read_dir(root.join("userdata")) else { continue };
         for e in rd.flatten() {
             let f = e.path().join("config").join("localconfig.vdf");
-            if let Ok(m) = fs::metadata(&f) {
-                if m.is_file() && !files.iter().any(|(_, p)| *p == f) {
-                    files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), f));
-                }
+            if let Ok(m) = fs::metadata(&f) && m.is_file() && !files.iter().any(|(_, p)| *p == f) {
+                files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), f));
             }
         }
     }
@@ -363,7 +361,7 @@ pub fn pending(data: &Path) -> Vec<SteamChange> {
     pending_written(data).into_iter().map(|(c, _)| c).collect()
 }
 
-/// 0.61 (N1): a file's change time as text (nanoseconds since 1970), to tell a later write from Turbine's own.
+/// A file's change time as text (nanoseconds since 1970), to tell a later write from Turbine's own.
 fn stamp(file: &Path) -> String {
     fs::metadata(file)
         .and_then(|m| m.modified())
@@ -421,7 +419,7 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
     let mut list = pending_written(data);
     list.retain(|(c, _)| !same(c, &change));
     let written = stamp(change.file());
-    // 0.62 (N1's edge): this write also changed the file's time for every earlier change still waiting on the same
+    // This write also changed the file's time for every earlier change still waiting on the same
     // file. Their noted time moves along, or the check would take Turbine's own second write for Steam's ("written
     // again, so Steam kept it") and call a change held that Steam is about to write over.
     for (c, w) in list.iter_mut() {
@@ -436,11 +434,11 @@ pub fn note_change(data: &Path, change: SteamChange) -> std::io::Result<()> {
 /// After Steam started again: the changes that held are done and leave the list; the ones that didn't are answered
 /// so the app makes them again the next time Steam is closed (and tells the player). Answers (held, lost).
 ///
-/// 0.6 (break M3): `steam_started` is when the running Steam started (None: not known). A change only counts as held when its file was
+/// `steam_started` is when the running Steam started (None: not known). A change only counts as held when its file was
 /// written before Steam started (Steam then read it); written after, Steam is running on the old copy and writes
 /// it back when it closes, so it is lost even though the file has it now.
 ///
-/// 0.61 (N1): a file written again after Turbine's own write (its change time differs from the one noted then) was
+/// A file written again after Turbine's own write (its change time differs from the one noted then) was
 /// written by Steam; if it still holds the change, Steam kept it, so it is held too.
 pub fn check_after_restart_since(data: &Path, steam_started: Option<std::time::SystemTime>) -> (Vec<SteamChange>, Vec<SteamChange>) {
     let (held, lost): (Vec<Written>, Vec<Written>) = pending_written(data).into_iter().partition(|(c, w)| {

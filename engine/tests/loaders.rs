@@ -190,7 +190,7 @@ fn bepinex_and_smapi_download() {
     // A file that doesn't match GitHub's digest is refused.
     serve(&dir, "https://github.com/Pathoschild/SMAPI/releases/download/4.5.2/SMAPI-4.5.2-installer.zip", &vec![8u8; 1000]);
     assert!(matches!(loaders::fetch_smapi(&client, true, None), Err(NetError::Mismatch(_))));
-    // 0.63: when GitHub limits its API, the release page's address names the version and its installer.
+    // When GitHub limits its API, the release page's address names the version and its installer.
     let r = loaders::smapi_release_from_page("https://github.com/Pathoschild/SMAPI/releases/tag/4.5.2").unwrap();
     assert_eq!(r.url, "https://github.com/Pathoschild/SMAPI/releases/download/4.5.2/SMAPI-4.5.2-installer.zip");
     assert_eq!(r.installer_folder, "SMAPI 4.5.2 installer");

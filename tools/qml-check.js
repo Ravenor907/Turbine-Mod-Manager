@@ -151,7 +151,7 @@ function checkFile(file) {
     const open = i;
     if (src[i] !== "{") { fail(i, "expected { after " + type); return; }
     i++;
-    // 0.59: a property or handler set twice in one object stops the file loading ("Property value set multiple times").
+    // A property or handler set twice in one object stops the file loading ("Property value set multiple times").
     const assigned = new Set();
     for (;;) {
       skipSpace(false);
@@ -238,8 +238,8 @@ function checkFile(file) {
   return errors;
 }
 
-// 0.58: every Settings action row (kind: "action", key: "x") must have its handler in Main.qml's rowActions, so a
-// row can never do nothing when pressed (Labs > Activity log did in 0.57).
+// Every Settings action row (kind: "action", key: "x") must have its handler in Main.qml's rowActions, so a
+// row can never do nothing when pressed.
 function settingsRows(file) {
   const src = require("fs").readFileSync(file, "utf8");
   const start = src.indexOf("readonly property var rowActions: ({");
@@ -253,7 +253,7 @@ function settingsRows(file) {
   return missing.map(k => file + ": the Settings row \"" + k + "\" has no handler in rowActions");
 }
 
-// 0.58: a property declared with the name of one of Item's own FINAL properties stops the whole file loading ("Cannot
+// A property declared with the name of one of Item's own FINAL properties stops the whole file loading ("Cannot
 // override FINAL property"), which this reader can't know from types: check the names.
 // (Only the anchor lines: other Item names such as x or states are fine on a QtObject or a Settings.)
 const FINAL = new Set(["left", "right", "top", "bottom", "horizontalCenter", "verticalCenter", "baseline"]);
@@ -275,7 +275,7 @@ function finalNames(file) {
   return out;
 }
 
-// 0.59: every overlay uses Overlay.qml. In Qt 6 a backdrop MouseArea stops the items under it but never their
+// Every overlay uses Overlay.qml. In Qt 6 a backdrop MouseArea stops the items under it but never their
 // pointer handlers, so a full-window backdrop of a file's own lets taps through to the page beneath: the only
 // backdrop allowed is Overlay's (which also never closes while another layer is on top; Main.qml turns the layers
 // beneath off). In Main.qml every overlay sits in the sheet layer (the quick wheel and the tutorial above it), and
@@ -340,7 +340,7 @@ function overlays(files) {
   return out;
 }
 
-// 0.62: one motion system. Every duration and curve comes from Motion.qml (ui.motion, or mo in Main.qml): a
+// One motion system. Every duration and curve comes from Motion.qml (ui.motion, or mo in Main.qml): a
 // duration written as a number, or an easing curve named, anywhere else is a problem. (Timers' intervals and the
 // time a hold takes are not animations and are not looked at.)
 function motionRule(files) {

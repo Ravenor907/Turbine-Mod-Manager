@@ -72,11 +72,11 @@ fn deploy_paths_for(game: &Game, store_root: &Path) -> Paths {
     }
 }
 
-/// 0.62: merges a mod's settings file as it was changed where it is deployed into Turbine's copy (see
+/// Merges a mod's settings file as it was changed where it is deployed into Turbine's copy (see
 /// `Store::take_in_place_changes`). The record entry is found by the file it was placed from: the file to deploy
 /// now (`source`) or the mod's own file (`default_src`). Before the first Edit settings save the record names the
-/// mod's own file while the file to deploy is already Turbine's copy, and matching on `source` alone skipped the
-/// merge and dropped the in-place change. None: nothing was changed in place (or it can't be read).
+/// mod's own file while the file to deploy is already Turbine's copy, and matching on `source` alone would skip the
+/// merge and drop the in-place change. None: nothing was changed in place (or it can't be read).
 fn merge_in_place_file(paths: &Paths, root: &Path, record: &Record, mod_id: &str, rel: &str, default_src: &Path, source: &Path) -> Option<MergedInPlace> {
     let fmt = crate::settings::format_of(rel)?;
     let p = record.files.iter().find(|p| p.source == source).or_else(|| record.files.iter().find(|p| p.source == default_src))?;
@@ -89,7 +89,7 @@ fn merge_in_place_file(paths: &Paths, root: &Path, record: &Record, mod_id: &str
         // Nothing to merge, but the kept copy under the older source must still go after the apply.
         return (p.source != source).then(|| MergedInPlace { now: source.to_path_buf(), placed_from: p.source.clone(), note: None, fresh: false });
     }
-    // The re-check's N1: this very in-place text may have been taken in already (Edit settings does that before it
+    // This very in-place text may have been taken in already (Edit settings does that before it
     // shows the file) with no apply since. What Turbine's copy held right after that is then the baseline: anything
     // the player changed in Turbine since, a setting put back to what it was before included, is the player's and
     // stands. The note of it counts only while it is newer than what the last apply placed.
@@ -105,7 +105,7 @@ fn merge_in_place_file(paths: &Paths, root: &Path, record: &Record, mod_id: &str
     if synced.is_some() && read(&in_place_file).as_deref() == Some(in_place.as_str()) {
         return Some(MergedInPlace { now: source.to_path_buf(), placed_from: p.source.clone(), note: None, fresh: false });
     }
-    // What Turbine last put there: deploy's own copy from that moment; without one (placed by an older Turbine),
+    // What Turbine last put there: deploy's own copy from that moment; without one (deploy kept none),
     // the file it was placed from when that hasn't changed since, else the mod's own file.
     let unchanged_since = fs::metadata(&p.source).is_ok_and(|m| (p.src_ino, p.src_size, p.src_mtime) == (m.ino(), m.len(), m.mtime() * 1_000_000_000 + m.mtime_nsec()));
     let placed = synced.or_else(|| read(&placed_file)).or_else(|| if unchanged_since { read(&p.source) } else { None }).unwrap_or_else(|| default.clone());
@@ -121,7 +121,7 @@ fn merge_in_place_file(paths: &Paths, root: &Path, record: &Record, mod_id: &str
     Some(MergedInPlace { now, placed_from: p.source.clone(), note, fresh: true })
 }
 
-/// 0.62: brings Turbine's copy of one mod's settings file up to date with changes made where it is deployed, with
+/// Brings Turbine's copy of one mod's settings file up to date with changes made where it is deployed, with
 /// no store open (Edit settings calls it before it shows or saves the file, so the page shows what the game has and
 /// a first save can't drop an in-place change). The next apply places the merged copy. True when it took new
 /// in-place text in now (opening the page again before an apply answers false).
@@ -139,7 +139,7 @@ pub fn sync_in_place(game: &Game, store_root: &Path, mod_id: &str, rel: &str) ->
     merge_in_place_file(&paths, store_root, &record, mod_id, rel, &default_src, &source).is_some_and(|m| m.fresh)
 }
 
-/// An installed mod that is Seamless Co-op (0.62: known by its files, not by where it came from).
+/// An installed mod that is Seamless Co-op (known by its files, not by where it came from).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeamlessMod {
     pub id: String,
@@ -259,6 +259,60 @@ pub struct Setup {
     pub played: bool,
 }
 
+/// Of saved setups with their turned-on mods, the newest played one (by when it was saved; the first of equals)
+/// whose turned-on mods, in any order, aren't `on`. Its place in `setups`.
+pub fn last_working_except(setups: &[(&Setup, Vec<String>)], on: &[String]) -> Option<usize> {
+    let key = |ids: &[String]| {
+        let mut v = ids.to_vec();
+        v.sort();
+        v.join("|")
+    };
+    let now = key(on);
+    let mut best: Option<usize> = None;
+    for (i, (s, ids)) in setups.iter().enumerate() {
+        if !s.played || key(ids) == now {
+            continue;
+        }
+        if best.is_none_or(|b| s.saved_at > setups[b].0.saved_at) {
+            best = Some(i);
+        }
+    }
+    best
+}
+
+/// The game closed right after Play, for the interface's {"setups": [{"id","savedAt","played","on", ...}], "mods":
+/// [{"id","enabled"}]}: the setup that worked (as given, or null) and the ids of the mods on now that it didn't
+/// have on: {"worked", "added"}.
+pub fn quick_exit_json(input: &Json) -> String {
+    let texts = |j: Option<&Json>| -> Vec<String> { j.map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(str::to_string)).collect() };
+    let given = input.get("setups").map(Json::as_array).unwrap_or(&[]);
+    let setups: Vec<Setup> = given
+        .iter()
+        .map(|s| Setup {
+            id: s.str_at("id").unwrap_or_default().into(),
+            saved_at: s.get("savedAt").and_then(Json::as_f64).unwrap_or(0.0).max(0.0) as u64,
+            mods_on: 0,
+            played: s.get("played").and_then(Json::as_bool) == Some(true),
+        })
+        .collect();
+    let list: Vec<(&Setup, Vec<String>)> = setups.iter().zip(given).map(|(s, g)| (s, texts(g.get("on")))).collect();
+    let on: Vec<String> = input
+        .get("mods")
+        .map(Json::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter(|m| m.get("enabled").is_some_and(Json::truthy))
+        .filter_map(|m| m.str_at("id").map(str::to_string))
+        .collect();
+    match last_working_except(&list, &on) {
+        Some(i) => {
+            let added: Vec<String> = on.iter().filter(|id| !list[i].1.contains(id)).map(|id| quote(id)).collect();
+            format!("{{\"worked\":{},\"added\":[{}]}}", given[i].to_text(), added.join(","))
+        }
+        None => "{\"worked\":null,\"added\":[]}".into(),
+    }
+}
+
 /// Where an installed mod came from (kind "thunderstore", "nexus", "zip" or "loader", its ID there, version, the
 /// download's address and SHA-256 when known, and the IDs of what it needs).
 pub use crate::net::SourceInfo;
@@ -307,12 +361,12 @@ pub trait ModRules: Send {
     fn guarded(&self) -> bool {
         false
     }
-    /// 0.57: me3's name for the game when me3 starts it with mods (anticheat.rs). Its mods then go into a
+    /// me3's name for the game when me3 starts it with mods (anticheat.rs). Its mods then go into a
     /// Turbine-owned me3 profile folder, never the game folder.
     fn me3_game(&self) -> Option<String> {
         None
     }
-    /// 0.57: an online-only anti-cheat game: no mods are added at all (the words why).
+    /// An online-only anti-cheat game: no mods are added at all (the words why).
     fn refuses_mods(&self) -> Option<String> {
         None
     }
@@ -544,7 +598,7 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
     let ours: HashSet<String> = record.files.iter().filter(|p| p.backup.is_none()).map(|p| p.rel.to_lowercase()).collect();
     let mut conflicts = Vec::new();
     let mut refused = Vec::new();
-    // 0.58: a game me3 starts never gets files in its folder (they go into Turbine's me3 profile, which overrides the
+    // A game me3 starts never gets files in its folder (they go into Turbine's me3 profile, which overrides the
     // game's own at run time), so a file the game has too (regulation.bin) is no question.
     let me3 = rules::GameRules::for_game(game).anti_cheat.as_ref().and_then(|a| a.me3_game()).is_some();
     for (_, dest) in map {
@@ -561,7 +615,7 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
     Ok((conflicts, refused))
 }
 
-/// 0.58: where a mod's files wait in a store (its id's folder under mods/).
+/// Where a mod's files wait in a store (its id's folder under mods/).
 pub fn staged_dir(store_root: &Path, id: &str) -> PathBuf {
     store_root.join("mods").join(id)
 }
@@ -627,12 +681,12 @@ pub struct Store {
     /// Each staged folder's files (game-relative), by folder, with the folder's inode and time when read: a mod's
     /// folder is made anew when its files change, so the list is read again only then.
     files_cache: std::sync::Mutex<FilesCache>,
-    /// 0.62: settings files whose in-place changes were merged into Turbine's copy and that the next apply must
+    /// Settings files whose in-place changes were merged into Turbine's copy and that the next apply must
     /// place afresh (their sources, old and new).
     merged_in_place: std::sync::Mutex<Vec<PathBuf>>,
-    /// 0.62: what the merge of in-place settings changes has to tell the player (for the next apply's report).
+    /// What the merge of in-place settings changes has to tell the player (for the next apply's report).
     settings_notes: std::sync::Mutex<Vec<String>>,
-    /// 0.62: the one file the player allowed as an older Seamless Co-op over a newer one, while it is being added
+    /// The one file the player allowed as an older Seamless Co-op over a newer one, while it is being added
     /// (`import_archive_allowing_older`).
     older_seamless_ok: Option<PathBuf>,
 }
@@ -688,7 +742,7 @@ fn looks_like_version(s: &str) -> bool {
 
 /// A readable name and version from a download's file name: "SkyUI_5_2_SE-12604-5-2SE-1573517013.zip" becomes
 /// ("SkyUI 5 2 SE", Some("5.2SE")), "Author-Cool_Mod-1.2.3.zip" becomes ("Author-Cool Mod", Some("1.2.3")).
-/// 0.6: Nexus's newer download names too (since June 2026): "Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z
+/// Nexus's newer download names too (since June 2026): "Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z
 /// gn8dtBhTy (2).zip" and "SeamlessCoop_2.0.2_trg5df.zip" become "Seamless Co-op" and "SeamlessCoop" with the
 /// version apart. Copy markers ("(2)"), Nexus ids, dates and times and random tails go; underscores and a name
 /// made of hyphenated words become spaces; an all-lowercase name gets capitals. A mod matched to Nexus is named by
@@ -762,27 +816,19 @@ fn split_name(stem: &str) -> (String, Option<String>) {
     // Nexus's old shape: name-<mod id>-<version parts>-<upload time>.
     let parts: Vec<&str> = stem.split('-').collect();
     let last = parts.len().saturating_sub(1);
-    if parts.len() >= 3 && all_digits(parts[last]) && parts[last].len() >= 9 {
-        if let Some(i) = (1..last).find(|&i| all_digits(parts[i])) {
-            let v = parts[i + 1..last].join(".");
-            return (parts[..i].join("-"), (!v.is_empty()).then_some(v));
-        }
+    if parts.len() >= 3 && all_digits(parts[last]) && parts[last].len() >= 9 && let Some(i) = (1..last).find(|&i| all_digits(parts[i])) {
+        let v = parts[i + 1..last].join(".");
+        return (parts[..i].join("-"), (!v.is_empty()).then_some(v));
     }
     // Words with a version, then only Nexus's tail: "Seamless Co-op v2.0.2 510 2.0.2 2026-10-27T14-30Z gn8dtBhTy".
     let words: Vec<&str> = stem.split_whitespace().collect();
-    if let Some(i) = (1..words.len()).find(|&i| version_token(words[i]).is_some()) {
-        if junk_tail(&words[i + 1..]) {
-            return (words[..i].join(" "), version_token(words[i]));
-        }
+    if let Some(i) = (1..words.len()).find(|&i| version_token(words[i]).is_some()) && junk_tail(&words[i + 1..]) {
+        return (words[..i].join(" "), version_token(words[i]));
     }
     // "{FileName}_{Version}_{UniqueSlug}" (and without the slug).
     let under: Vec<&str> = stem.split('_').collect();
-    if under.len() >= 2 {
-        if let Some(i) = (1..under.len()).find(|&i| version_token(under[i]).is_some()) {
-            if junk_tail(&under[i + 1..]) {
-                return (under[..i].join(" "), version_token(under[i]));
-            }
-        }
+    if under.len() >= 2 && let Some(i) = (1..under.len()).find(|&i| version_token(under[i]).is_some()) && junk_tail(&under[i + 1..]) {
+        return (under[..i].join(" "), version_token(under[i]));
     }
     // A version at the end after a hyphen or a space: "Author-Cool_Mod-1.2.3", "Brighter Lanterns 1.2".
     if parts.len() >= 2 && looks_like_version(parts[last]) {
@@ -828,8 +874,8 @@ pub fn nexus_ids_from_name(file_name: &str) -> Option<(u64, String)> {
 
 /// Where a game's store goes: a hidden folder at the top of the game's library, for every library (internal storage
 /// too: device numbers can match while the folders are still separate mounts, and links between mounts fail). Only
-/// when the library can't be written does it go in the data folder. The device numbers are no longer used.
-pub fn choose_root(game_key: &str, library: &Path, _library_dev: Option<u64>, _home_dev: Option<u64>, library_writable: bool, data_home: &Path) -> PathBuf {
+/// when the library can't be written does it go in the data folder.
+pub fn choose_root(game_key: &str, library: &Path, library_writable: bool, data_home: &Path) -> PathBuf {
     if library_writable {
         library.join(DRIVE_FOLDER).join(game_key)
     } else {
@@ -858,11 +904,9 @@ fn walk_files(base: &Path) -> Vec<(String, PathBuf)> {
             let Ok(m) = fs::symlink_metadata(&p) else { continue };
             if m.is_dir() {
                 walk(base, &p, out);
-            } else if m.is_file() {
-                if let Ok(rel) = p.strip_prefix(base) {
-                    let rel: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
-                    out.push((rel.join("/"), p));
-                }
+            } else if m.is_file() && let Ok(rel) = p.strip_prefix(base) {
+                let rel: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+                out.push((rel.join("/"), p));
             }
         }
     }
@@ -997,8 +1041,8 @@ impl Store {
     /// Where `open` puts this game's store.
     pub fn root_for(game: &Game, data_home: &Path) -> PathBuf {
         let key = folder_safe(&game.id().replace(':', "-"));
-        let on_library = choose_root(&key, &game.library, None, None, true, data_home);
-        let in_data = choose_root(&key, &game.library, None, None, false, data_home);
+        let on_library = choose_root(&key, &game.library, true, data_home);
+        let in_data = choose_root(&key, &game.library, false, data_home);
         // A store already in the data folder stays there: its record lists the files it placed in the game.
         if in_data.join("state.json").exists() && !on_library.join("state.json").exists() {
             return in_data;
@@ -1107,7 +1151,7 @@ impl Store {
         self.root.join("removed").join(id)
     }
 
-    /// The deploy bookkeeping for this game. 0.57: a game me3 starts deploys into its Turbine-owned me3 profile
+    /// The deploy bookkeeping for this game. A game me3 starts deploys into its Turbine-owned me3 profile
     /// folder (with a record of its own), never the game folder.
     pub fn deploy_paths(&self) -> Paths {
         if self.rules.me3_game().is_some() {
@@ -1122,8 +1166,8 @@ impl Store {
         self.game_folder_paths()
     }
 
-    /// The deploy bookkeeping for the game folder itself (for a game me3 starts: what Turbine placed there before
-    /// 0.57, which must all come out before the normal anti-cheat launch).
+    /// The deploy bookkeeping for the game folder itself (for a game me3 starts: anything Turbine placed there
+    /// directly, which must all come out before the normal anti-cheat launch).
     pub fn game_folder_paths(&self) -> Paths {
         let d = self.root.join("deploy");
         Paths { game: self.game.install_dir.clone(), backups: d.join("backups"), record: d.join("record.json"), plan: d.join("plan.json") }
@@ -1134,7 +1178,7 @@ impl Store {
         self.rules.me3_game()
     }
 
-    /// An online-only anti-cheat game with mod files from an earlier version still in its folder: takes them all
+    /// An online-only anti-cheat game with mod files Turbine placed still in its folder: takes them all
     /// out (mods stay listed). Returns how many files came out; 0 when there was nothing to do.
     pub fn refused_cleanup(&self) -> io::Result<usize> {
         if self.rules.refuses_mods().is_none() {
@@ -1259,10 +1303,8 @@ impl Store {
         Ok(false)
     }
 
-    /// Purges old Recently removed items and picks up mod folders the state doesn't know (a stop right after
-    /// unpacking). Returns true when something changed.
-    /// 0.6: mods added before clean names (or before Nexus's new download names) get them once: the page's title
-    /// when Turbine knows it, else the cleaned file name. The player's own Rename is the app's and stays.
+    /// Every mod shows a clean name: the page's title when Turbine knows it, else the cleaned file name (and the
+    /// version from it when none is set). The player's own Rename is the app's and stays. True when something changed.
     fn clean_names(&mut self) -> bool {
         let mut changed = false;
         for i in 0..self.mods.len() {
@@ -1284,6 +1326,8 @@ impl Store {
         changed
     }
 
+    /// Purges old Recently removed items and picks up mod folders the state doesn't know (a stop right after
+    /// unpacking). Returns true when something changed.
     fn tidy(&mut self) -> io::Result<bool> {
         let mut changed = false;
         let now = self.now();
@@ -1434,10 +1478,8 @@ impl Store {
         let Ok(meta) = fs::metadata(dir) else { return Vec::new() };
         let stamp = (meta.ino(), meta.mtime() * 1_000_000_000 + meta.mtime_nsec());
         let mut cache = self.files_cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((ino, mtime, list)) = cache.get(dir) {
-            if (*ino, *mtime) == stamp {
-                return list.clone();
-            }
+        if let Some((ino, mtime, list)) = cache.get(dir) && (*ino, *mtime) == stamp {
+            return list.clone();
         }
         let list: Vec<String> = walk_files(dir).into_iter().map(|(rel, _)| rel).collect();
         cache.insert(dir.to_path_buf(), (stamp.0, stamp.1, list.clone()));
@@ -1502,7 +1544,7 @@ impl Store {
         }
         let target = self.target_for(archive, source, None)?;
         let done = self.begin(archive, target)?;
-        // 0.62: one Seamless Co-op per game. A new copy of it (from anywhere) takes the place of the copies
+        // One Seamless Co-op per game. A new copy of it (from anywhere) takes the place of the copies
         // installed, with their settings; they go to Removed mods, so the change can be put back.
         self.after_import(&done)?;
         Ok(done)
@@ -1817,7 +1859,7 @@ impl Store {
         if source.version.is_some() {
             version = source.version.clone();
         }
-        // 0.6: a mod matched to its page is named by the page's title (Nexus's "Seamless Co-op").
+        // A mod matched to its page is named by the page's title (Nexus's "Seamless Co-op").
         if let Some(t) = source.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
             name = t.to_string();
         } else if source.kind == "thunderstore" && !source.id.is_empty() {
@@ -1893,7 +1935,7 @@ impl Store {
             if files.is_empty() {
                 return Err(fail(format!("the {} file is empty", target.format_label)));
             }
-            // 0.62: an older Seamless Co-op is never put over a newer installed copy without the player's word.
+            // An older Seamless Co-op is never put over a newer installed copy without the player's word.
             let target = self.older_seamless_gate(&target, &files, archive)?;
             let mut work = unpacked.clone();
             let mut notes = Vec::new();
@@ -1925,13 +1967,11 @@ impl Store {
                         session.apply_choices(prev);
                     }
                     let mut target = target.clone();
-                    if target.existing.is_none() {
-                        if let Some(n) = info.name.clone().filter(|n| !n.trim().is_empty()).or_else(|| {
-                            Some(session.module_name().to_string()).filter(|n| !n.trim().is_empty())
-                        }) {
+                    if target.existing.is_none() && let Some(n) = info.name.clone().filter(|n| !n.trim().is_empty()).or_else(|| {
+                        Some(session.module_name().to_string()).filter(|n| !n.trim().is_empty())
+                    }) {
                             target.name = n.trim().to_string();
                         }
-                    }
                     if target.version.is_none() {
                         target.version = info.version.clone();
                     }
@@ -2186,20 +2226,20 @@ impl Store {
             self.mods[i].enabled = on;
             self.save()?;
         }
-        // 0.6: a mod turned on by hand ends Mods off (the player chose again; the old list would undo that).
+        // A mod turned on by hand ends Mods off (the player chose again; the old list would undo that).
         if on {
             self.drop_held();
         }
         Ok(())
     }
 
-    /// 0.6, Mods off (Steam's menu): the mods it turned off, still in the list, in their order. Empty when off isn't held.
+    /// Mods off (Steam's menu): the mods it turned off, still in the list, in their order. Empty when off isn't held.
     pub fn held_off(&self) -> Vec<String> {
         let held = crate::quick::read_held(&self.root);
         self.mods.iter().filter(|m| held.contains(&m.id)).map(|m| m.id.clone()).collect()
     }
 
-    /// 0.6, Mods off: every mod that is on goes off, and they are kept so Mods on brings back exactly those (any held
+    /// Mods off: every mod that is on goes off, and they are kept so Mods on brings back exactly those (any held
     /// already stay held). Answers how many went off now. Apply afterwards.
     pub fn hold_all_off(&mut self) -> io::Result<usize> {
         let now_on: Vec<String> = self.mods.iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect();
@@ -2220,7 +2260,7 @@ impl Store {
         Ok(now_on.len())
     }
 
-    /// 0.6, Mods on: the mods Mods off turned off come back on (those still here). Answers how many. Apply afterwards.
+    /// Mods on: the mods Mods off turned off come back on (those still here). Answers how many. Apply afterwards.
     pub fn release_held(&mut self) -> io::Result<usize> {
         let held = self.held_off();
         let mut n = 0;
@@ -2318,7 +2358,7 @@ impl Store {
         Ok(done)
     }
 
-    // ---- Seamless Co-op (0.62): one copy, whatever its source ----
+    // ---- Seamless Co-op: one copy, whatever its source ----
 
     /// The installed mods that hold Seamless Co-op's ersc.dll, in list order. Only for a game me3 starts. Turbine's
     /// own download and one from Nexus count the same; `package` tells Seamless Co-op itself from a bigger mod that
@@ -2344,8 +2384,8 @@ impl Store {
     }
 
     /// The Seamless Co-op for this game: its own package before a bigger mod that carries the DLL, then the newest
-    /// version, whether it is on or off (0.62 break test M2: with the newest copy off, the older one that was on
-    /// was called "the one the game loads" and Tidy up kept it); with the same version, the one later in the list.
+    /// version, whether it is on or off (with the newest copy off, an older one that is on is not "the one the
+    /// game loads" and Tidy up doesn't keep it); with the same version, the one later in the list.
     /// Its files are the only Seamless Co-op files that go into the game's mod folder, and only while it is on.
     pub fn seamless(&self) -> Option<SeamlessMod> {
         let mut best: Option<SeamlessMod> = None;
@@ -2372,9 +2412,9 @@ impl Store {
         (others.iter().filter(|m| m.package).map(|m| m.id.clone()).collect(), others.iter().filter(|m| !m.package).map(|m| m.id.clone()).collect())
     }
 
-    /// 0.62: before a download that is Seamless Co-op's own package goes in: an older one is never put over a
+    /// Before a download that is Seamless Co-op's own package goes in: an older one is never put over a
     /// newer installed copy without the player's word. Every installed copy counts, the entry the download would
-    /// replace included (the re-check's N2: an older file from the same Nexus page went over the newer one with no
+    /// replace included (so an older file from the same Nexus page can't go over the newer one with no
     /// question). The word is good for one file only (`import_archive_allowing_older`, by the file's path). With
     /// it, an older file that would have replaced its own newer entry in place becomes a new entry instead, so the
     /// newer copy goes to Removed mods (`supersede_seamless`) and can be put back. Answers the target to use.
@@ -2412,16 +2452,14 @@ impl Store {
     /// One Seamless Co-op per game: after a mod was added or updated (`id`), when it is Seamless Co-op's own
     /// package, the other copies go to Removed mods with their settings carried over.
     fn after_import(&mut self, done: &Import) -> Result<(), String> {
-        if let Import::Added(d) = done {
-            if self.rules.me3_game().is_some() {
-                let id = d.item.id.clone();
-                self.supersede_seamless(&id).map_err(|e| format!("Seamless Co-op was added, but the copy it replaces couldn't be moved to Removed mods ({e})."))?;
-            }
+        if let Import::Added(d) = done && self.rules.me3_game().is_some() {
+            let id = d.item.id.clone();
+            self.supersede_seamless(&id).map_err(|e| format!("Seamless Co-op was added, but the copy it replaces couldn't be moved to Removed mods ({e})."))?;
         }
         Ok(())
     }
 
-    /// 0.62: a Seamless Co-op package just added (`new_id`) takes the place of the other copies of Seamless Co-op:
+    /// A Seamless Co-op package just added (`new_id`) takes the place of the other copies of Seamless Co-op:
     /// the player's settings come along (Turbine's copies of the newest other copy's settings files, the session
     /// password among them), and the other copies go to Removed mods, where each can be put back for 7 days. A
     /// bigger mod that carries the DLL is left alone. Answers the names moved.
@@ -2449,14 +2487,10 @@ impl Store {
             Some((rel, src, now))
         };
         let password_of = |f: &Path| fs::read(f).ok().and_then(|b| crate::anticheat::coop_password_in(&String::from_utf8_lossy(&b))).filter(|p| !p.is_empty());
-        if let Some((rel, src, now)) = ini_of(self, keep) {
-            if password_of(&now).is_none() {
-                let carried = others.iter().filter_map(|o| ini_of(self, &o.id)).find_map(|(_, _, f)| password_of(&f));
-                if let (Some(pw), Ok(text)) = (carried, fs::read(&now).map(|b| String::from_utf8_lossy(&b).into_owned())) {
-                    if let Some(new_text) = crate::anticheat::coop_password_put(&text, &pw) {
-                        crate::settings::save_edit(&self.root, keep, &rel, &src, &new_text)?;
-                    }
-                }
+        if let Some((rel, src, now)) = ini_of(self, keep) && password_of(&now).is_none() {
+            let carried = others.iter().filter_map(|o| ini_of(self, &o.id)).find_map(|(_, _, f)| password_of(&f));
+            if let (Some(pw), Ok(text)) = (carried, fs::read(&now).map(|b| String::from_utf8_lossy(&b).into_owned())) && let Some(new_text) = crate::anticheat::coop_password_put(&text, &pw) {
+                crate::settings::save_edit(&self.root, keep, &rel, &src, &new_text)?;
             }
         }
         let mut gone = Vec::new();
@@ -2526,13 +2560,12 @@ impl Store {
         }
     }
 
-    /// 0.62 (the owner's device: a co-op password set in Turbine never reached the game). Deploy keeps a settings
-    /// file that was changed where it is deployed, and used to keep it even over a newer copy of Turbine's, so
-    /// later Edit settings changes could stay out of the game for good. Now such a file is merged into Turbine's
-    /// copy before the apply: settings the player changed in Turbine since the file was last placed keep Turbine's
-    /// value, every other change made in place is taken over (settings::merge_in_place) and shows in Edit settings
-    /// from then on, the in-place file is kept beside Turbine's copy
-    /// (settings::in_place_path), and the merged copy is what goes into the game. Answers the file to deploy.
+    /// Deploy keeps a settings file that was changed where it is deployed. Kept as is, even over a newer copy of
+    /// Turbine's, later Edit settings changes (a co-op password set in Turbine) could stay out of the game for good.
+    /// So such a file is merged into Turbine's copy before the apply: settings the player changed in Turbine since
+    /// the file was last placed keep Turbine's value, every other change made in place is taken over
+    /// (settings::merge_in_place) and shows in Edit settings from then on, the in-place file is kept beside Turbine's
+    /// copy (settings::in_place_path), and the merged copy is what goes into the game. Answers the file to deploy.
     fn take_in_place_changes(&self, record: &Record, mod_id: &str, rel: &str, default_src: &Path, source: PathBuf) -> PathBuf {
         let mut merged = self.merged_in_place.lock().unwrap_or_else(|e| e.into_inner());
         if merged.contains(&source) {
@@ -2592,10 +2625,10 @@ impl Store {
                 if no_seamless_files && (crate::anticheat::is_seamless_file(&rel) || rel.to_ascii_lowercase().ends_with("ersc_settings.ini")) {
                     continue;
                 }
-                // 0.58: the player's edited copy of a config file (Edit settings) goes in place of the mod's own.
+                // The player's edited copy of a config file (Edit settings) goes in place of the mod's own.
                 let default_src = source;
                 let source = crate::settings::effective(&self.root, &m.id, &rel, &default_src);
-                // 0.62: a settings file changed where it is deployed is merged into Turbine's copy first, so
+                // A settings file changed where it is deployed is merged into Turbine's copy first, so
                 // neither side's change is lost and Turbine's later edits always reach the game.
                 let source = self.take_in_place_changes(&record, &m.id, &rel, &default_src, source);
                 // A guarded game's mod with no placement (laid out by a player file's rules) may not replace.
@@ -2665,11 +2698,9 @@ impl Store {
         let ids: Vec<String> = self.mods.iter().filter(|m| m.enabled && self.placements.contains_key(&m.id)).map(|m| m.id.clone()).collect();
         for id in ids {
             let files: Vec<String> = self.staged_files(&self.mod_dir(&id)).into_iter().filter(|f| skipped.contains(&f.to_lowercase())).collect();
-            if let Some(p) = self.placements.get_mut(&id) {
-                if p.skipped != files {
-                    p.skipped = files;
-                    changed = true;
-                }
+            if let Some(p) = self.placements.get_mut(&id) && p.skipped != files {
+                p.skipped = files;
+                changed = true;
             }
         }
         changed
@@ -2830,6 +2861,13 @@ impl Store {
         self.setup_list.iter().find(|s| s.played)
     }
 
+    /// The setup that worked before the mods `on` now (the game closed right after starting with them): the newest
+    /// played setup whose turned-on mods aren't the same as `on`.
+    pub fn last_working_except(&self, on: &[String]) -> Option<&Setup> {
+        let list: Vec<(&Setup, Vec<String>)> = self.setup_list.iter().map(|s| (s, self.setup_on(&s.id))).collect();
+        last_working_except(&list, on).map(|i| list[i].0)
+    }
+
     /// Takes every mod file out of the game (nothing is deleted; mods stay on/off as they were).
     pub fn play_original(&mut self) -> io::Result<Report> {
         // A game me3 starts: the mods stay in its profile (Steam's normal launch never reads it); the game folder
@@ -2926,7 +2964,7 @@ impl Store {
 
     /// Everything the interface shows, as one JSON object: {"mods":[...],"removed":[...],"setups":[...]}.
     pub fn to_json(&self) -> String {
-        // 0.62: "seamless" marks the one Seamless Co-op the game loads, whatever its source.
+        // "seamless" marks the one Seamless Co-op the game loads, whatever its source.
         let seamless = self.seamless().map(|m| m.id);
         let mods: Vec<String> = self
             .mods
@@ -2975,7 +3013,7 @@ impl Store {
 /// downloads), newest first, each with its Game Mods folder name ("" for Downloads itself and Game Mods itself).
 /// Links are not followed.
 ///
-/// 0.62: "Downloads" is the desktop's Downloads folder (watch::downloads_folder: where browsers really save when
+/// "Downloads" is the desktop's Downloads folder (watch::downloads_folder: where browsers really save when
 /// the player moved it), and ~/Downloads as well when that is another folder.
 pub fn downloads_all(home: &Path) -> Vec<(PathBuf, String)> {
     downloads_all_in(&crate::watch::default_folders(home))
@@ -3014,7 +3052,7 @@ pub fn downloads_all_in(folders: &[PathBuf]) -> Vec<(PathBuf, String)> {
     found.into_iter().map(|(_, p, f)| (p, f)).collect()
 }
 
-/// Mod archives (zip, 7z, rar) in the Downloads folder, newest first (0.62: the desktop's Downloads folder, and
+/// Mod archives (zip, 7z, rar) in the Downloads folder, newest first (the desktop's Downloads folder, and
 /// ~/Downloads too when that is another folder).
 pub fn downloads(home: &Path) -> Vec<PathBuf> {
     downloads_in(&crate::watch::default_folders(home))

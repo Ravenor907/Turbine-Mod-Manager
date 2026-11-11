@@ -112,10 +112,13 @@ fn broken_binary_files_are_errors_not_panics() {
 }
 
 #[test]
-fn crc32_matches_the_standard_check_value() {
-    assert_eq!(shortcuts::crc32(b"123456789"), 0xCBF4_3926);
-    assert_eq!(shortcuts::crc32(b""), 0);
-    assert_eq!(shortcuts::crc32(b"The quick brown fox jumps over the lazy dog"), 0x414F_A339);
+fn shortcut_ids_use_the_standard_crc32() {
+    // Steam's shortcut ids use the same CRC-32 as zip: the standard check values, and an id worked out separately.
+    assert_eq!(shortcuts::legacy_appid("\"C:\\Games\\game.exe\"", "Game"), 3_806_792_068);
+    assert_eq!(shortcuts::legacy_appid("", "123456789"), 0xCBF4_3926 | 0x8000_0000);
+    assert_eq!(turbine_engine::zip::crc32(b"123456789"), 0xCBF4_3926);
+    assert_eq!(turbine_engine::zip::crc32(b""), 0);
+    assert_eq!(turbine_engine::zip::crc32(b"The quick brown fox jumps over the lazy dog"), 0x414F_A339);
 }
 
 #[test]
@@ -123,7 +126,7 @@ fn shortcut_ids_and_the_rungameid_link() {
     // Steam's rule for old shortcuts: crc32(exe + name) with the top bit set.
     let exe = "\"/usr/bin/flatpak\"";
     let id = shortcuts::legacy_appid(exe, "Google Chrome");
-    assert_eq!(id, shortcuts::crc32(b"\"/usr/bin/flatpak\"Google Chrome") | 0x8000_0000);
+    assert_eq!(id, turbine_engine::zip::crc32(b"\"/usr/bin/flatpak\"Google Chrome") | 0x8000_0000);
     assert!(id & 0x8000_0000 != 0);
     // The 64-bit id: appid in the top half, 0x02000000 in the bottom.
     assert_eq!(shortcuts::game_id(0x9000_0042), (0x9000_0042u64 << 32) | 0x0200_0000);

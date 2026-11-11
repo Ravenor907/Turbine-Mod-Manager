@@ -1,4 +1,4 @@
-//! 0.6: the Steam menu plugin's requests (quick.rs) and Mods off / Mods on in the store.
+//! The Steam menu plugin's requests (quick.rs) and Mods off / Mods on in the store.
 
 mod support;
 

@@ -1,4 +1,4 @@
-//! 0.62: Turbine's own Steam compatibility tool, "Turbine (mods)".
+//! Turbine's own Steam compatibility tool, "Turbine (mods)".
 //!
 //! Game Mode starts Steam again the moment it closes, so Turbine can't write Steam's settings files there (Steam
 //! writes its own copy back). A compatibility tool needs none of that: it is a new folder under Steam's
@@ -507,8 +507,8 @@ fn line_time(line: &str) -> Option<&str> {
     (t.as_bytes()[4] == b'-' && t.as_bytes()[10] == b' ' && t.as_bytes()[13] == b':').then_some(t)
 }
 
-/// Keeps the Proton Steam itself last used for the game (0.62 break test M5: the record never moved once it was
-/// written). Called at every Play and when the Proton row is read. Rules, after the re-check's N3:
+/// Keeps the Proton Steam itself last used for the game, so the record follows Steam's own choice. Called at every
+/// Play and when the Proton row is read. Rules:
 /// - The player's own pick is never replaced.
 /// - Only Steam's own launches count (the game started with a Proton of Steam's choosing, through the Launch
 ///   Options line). What the tool chose by itself is never written down: a record of it froze the game on the
@@ -535,10 +535,8 @@ pub fn remember_proton(data: &Path, app_id: &str) -> Option<PathBuf> {
         Some(mark) => log.lines().filter(|l| line_time(l).is_some_and(|t| t > mark.as_str())).map(|l| format!("{l}\n")).collect(),
         None => log,
     };
-    if let Some(dir) = last_steam_proton_in(&counted, app_id) {
-        if is_proton(&dir) && now.as_ref().map(|(d, _)| d.as_path()) != Some(dir.as_path()) {
-            let _ = write_proton_record(data, app_id, &dir, ProtonHow::Steam);
-        }
+    if let Some(dir) = last_steam_proton_in(&counted, app_id) && is_proton(&dir) && now.as_ref().map(|(d, _)| d.as_path()) != Some(dir.as_path()) {
+        let _ = write_proton_record(data, app_id, &dir, ProtonHow::Steam);
     }
     proton_choice(data, app_id)
 }
@@ -548,10 +546,8 @@ pub fn remember_proton(data: &Path, app_id: &str) -> Option<PathBuf> {
 /// `default.proton` up to date (`write_default_proton`).
 pub fn remember_proton_with(steam_root: &Path, data: &Path, app_id: &str) -> Option<PathBuf> {
     let _ = write_default_proton(steam_root, data);
-    if let Some(d) = remember_proton(data, app_id) {
-        if is_proton(&d) {
-            return Some(d);
-        }
+    if let Some(d) = remember_proton(data, app_id) && is_proton(&d) {
+        return Some(d);
     }
     let config = fs::read_to_string(config_file(steam_root)).unwrap_or_default();
     let name = chosen_in(&config, app_id).filter(|n| n != TOOL_NAME)?;
@@ -560,7 +556,7 @@ pub fn remember_proton_with(steam_root: &Path, data: &Path, app_id: &str) -> Opt
     Some(dir)
 }
 
-// ---- The Protons installed (0.62) ----
+// ---- The Protons installed ----
 
 /// What kind of Proton a folder is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -619,10 +615,8 @@ pub fn library_folders(steam_root: &Path) -> Vec<PathBuf> {
     let mut out = vec![steam_root.to_path_buf()];
     if let Some(v) = fs::read_to_string(steam_root.join("steamapps/libraryfolders.vdf")).ok().and_then(|t| vdf::parse(&t).ok()) {
         for (_, lib) in v.get("libraryfolders").map(|l| l.entries()).unwrap_or(&[]) {
-            if let Some(p) = lib.str_at(&["path"]).map(PathBuf::from) {
-                if p.is_absolute() && p.join("steamapps").is_dir() && !out.contains(&p) {
-                    out.push(p);
-                }
+            if let Some(p) = lib.str_at(&["path"]).map(PathBuf::from) && p.is_absolute() && p.join("steamapps").is_dir() && !out.contains(&p) {
+                out.push(p);
             }
         }
     }
@@ -844,7 +838,7 @@ pub fn steps(game_name: &str, listed: bool) -> Vec<String> {
     s
 }
 
-// ---- The Co-op tile (0.62 decision) ----
+// ---- The Co-op tile ----
 //
 // Steam keeps its non-Steam games in a file it writes back from memory when it closes, and Game Mode starts Steam
 // again at once. So the tile is added only where the file can be written safely: Desktop Mode. With Steam closed

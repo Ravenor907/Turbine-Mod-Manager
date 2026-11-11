@@ -232,10 +232,8 @@ impl Net {
     // ------------------------------------------------------------------------------------------------ Thunderstore
 
     pub fn index(&mut self, community: &str, force: bool) -> Result<(Arc<Vec<Package>>, Option<String>), String> {
-        if !force {
-            if let Some(i) = self.indexes.get(community) {
-                return Ok((i.clone(), None));
-            }
+        if !force && let Some(i) = self.indexes.get(community) {
+            return Ok((i.clone(), None));
         }
         let (list, note) = if let Some(dir) = &self.sample {
             let f = fs::File::open(dir.join("thunderstore_v1_lethal.json")).map_err(|e| format!("The sample index couldn't be read ({e})."))?;
@@ -550,10 +548,8 @@ impl Net {
     pub fn sample_sign_in(&mut self, free: bool) {
         if let Some(Ok(t)) = self.sample_text("nexus_validate.json") {
             self.account = nexus::parse_validate(&t).ok();
-            if free {
-                if let Some(a) = self.account.as_mut() {
-                    a.is_premium = false;
-                }
+            if free && let Some(a) = self.account.as_mut() {
+                a.is_premium = false;
             }
             self.key = Some("sample-key-for-screenshots".into());
         }
@@ -935,7 +931,7 @@ impl Net {
         Ok(1)
     }
 
-    /// 0.64: Microsoft's Visual C++ runtime installer, checked (vcrun::download), in Turbine's cache (a folder the
+    /// Microsoft's Visual C++ runtime installer, checked (vcrun::download), in Turbine's cache (a folder the
     /// host can read, so Proton can run it).
     pub fn fetch_vc_redist(&mut self, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<PathBuf, String> {
         self.no_downloads()?;
@@ -1014,7 +1010,7 @@ impl Net {
         Ok(Fetched { path, source: got.source, label: name, replaces: None })
     }
 
-    // ------------------------------------------------------------------------------------------------ anti-cheat games (0.57)
+    // ------------------------------------------------------------------------------------------------ anti-cheat games
 
     /// me3 from its official GitHub release, pinned (version, size and SHA-256 in anticheat.rs), unpacked into
     /// Turbine's own data folder. Nothing in it is run here.
@@ -1035,12 +1031,12 @@ impl Net {
         Ok(dir)
     }
 
-    /// Seamless Co-op for Elden Ring: the newest release its GitHub repository lists (0.62: never a fixed version,
+    /// Seamless Co-op for Elden Ring: the newest release its GitHub repository lists (never a fixed version:
     /// the mod refuses to run when it is out of date), checked against the size and digest GitHub gives for it. It
     /// is added like a loader: a mod in My mods that me3 loads from the profile folder. With a copy installed
     /// already (from anywhere), the store puts this one in its place.
     ///
-    /// 0.62: `have` is the version installed, if any. GitHub's newest release can be older than the copy from the
+    /// `have` is the version installed, if any. GitHub's newest release can be older than the copy from the
     /// mod's Nexus page: then nothing is downloaded and the words say so (None with the words). Otherwise the
     /// download, with the words that say which version it is.
     pub fn fetch_seamless(&mut self, have: Option<&str>, progress: &mut dyn FnMut(&str, u64, Option<u64>)) -> Result<(Option<Fetched>, String), String> {
@@ -1068,54 +1064,50 @@ impl Net {
         let installed = game.installed();
         let mut found: Vec<updates::Update> = Vec::new();
         let mut notes = Vec::new();
-        // 0.6 (intent I16): Nexus's own name, author, summary and picture for each installed Nexus mod, from the same
+        // Nexus's own name, author, summary and picture for each installed Nexus mod, from the same
         // lookup, so a mod added from a file shows as Nexus names it.
         let mut names: Vec<String> = Vec::new();
-        if let Some(c) = game.community.clone() {
-            if installed.iter().any(|m| m.kind == "thunderstore") {
-                match self.index(&c, false) {
-                    Ok((index, _)) => found.extend(updates::thunderstore_updates(&installed, &index)),
-                    Err(e) => notes.push(e),
-                }
+        if let Some(c) = game.community.clone() && installed.iter().any(|m| m.kind == "thunderstore") {
+            match self.index(&c, false) {
+                Ok((index, _)) => found.extend(updates::thunderstore_updates(&installed, &index)),
+                Err(e) => notes.push(e),
             }
         }
         // Nexus without a key: one GraphQL lookup for all of the game's Nexus mods (version and last change), then
         // the files of the ones that changed since they were added.
-        if let Some(domain) = game.domain.clone() {
-            if installed.iter().any(|m| m.kind == "nexus") {
-                let ids = updates::nexus_mod_ids(&domain, &installed);
-                let stamps = if self.sample.is_some() {
-                    match self.sample_text("nexus_graphql_by_id.json") {
-                        Some(Ok(t)) => nexus::parse_by_id(&t).map_err(|e| e.to_string()),
-                        _ => Ok(Vec::new()),
-                    }
-                } else {
-                    self.nexus_any().mods_by_id(&domain, &ids).map_err(err)
-                };
-                match stamps {
-                    Ok(stamps) => {
-                        for st in stamps.iter().filter(|st| !st.name.is_empty()) {
-                            let mine = game.have.iter().find(|h| nexus::source_mod(&h.source).is_some_and(|(hd, hm)| (hd == domain || hd.is_empty()) && hm == st.mod_id));
-                            if let Some(h) = mine {
-                                names.push(format!(
-                                    "{}:{{\"name\":{},\"author\":{},\"summary\":{},\"picture\":{}}}",
-                                    quote(&h.mod_id),
-                                    quote(&st.name),
-                                    quote(&st.author),
-                                    quote(&st.summary),
-                                    quote(&st.picture)
-                                ));
-                            }
-                        }
-                        for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
-                            match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
-                                Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
-                                Err(e) => notes.push(e),
-                            }
-                        }
-                    }
-                    Err(e) => notes.push(e),
+        if let Some(domain) = game.domain.clone() && installed.iter().any(|m| m.kind == "nexus") {
+            let ids = updates::nexus_mod_ids(&domain, &installed);
+            let stamps = if self.sample.is_some() {
+                match self.sample_text("nexus_graphql_by_id.json") {
+                    Some(Ok(t)) => nexus::parse_by_id(&t).map_err(|e| e.to_string()),
+                    _ => Ok(Vec::new()),
                 }
+            } else {
+                self.nexus_any().mods_by_id(&domain, &ids).map_err(err)
+            };
+            match stamps {
+                Ok(stamps) => {
+                    for st in stamps.iter().filter(|st| !st.name.is_empty()) {
+                        let mine = game.have.iter().find(|h| nexus::source_mod(&h.source).is_some_and(|(hd, hm)| (hd == domain || hd.is_empty()) && hm == st.mod_id));
+                        if let Some(h) = mine {
+                            names.push(format!(
+                                "{}:{{\"name\":{},\"author\":{},\"summary\":{},\"picture\":{}}}",
+                                quote(&h.mod_id),
+                                quote(&st.name),
+                                quote(&st.author),
+                                quote(&st.summary),
+                                quote(&st.picture)
+                            ));
+                        }
+                    }
+                    for (mod_id, m, game_id) in updates::nexus_stamp_candidates(&domain, &installed, &stamps) {
+                        match self.nexus_files_for(&domain, mod_id, Some(game_id).filter(|g| *g > 0)) {
+                            Ok(files) => found.extend(updates::nexus_update_from_files(m, &files)),
+                            Err(e) => notes.push(e),
+                        }
+                    }
+                }
+                Err(e) => notes.push(e),
             }
         }
         let items: Vec<String> = found
@@ -1210,7 +1202,7 @@ impl Net {
     // ------------------------------------------------------------------------------------------------ Turbine itself
 
     /// Looks for a newer Turbine. `back`: the newest stable release even if it's older (Go back to stable).
-    /// 0.63: `at_start`: the check Turbine makes by itself when it starts. It asks GitHub at most once every six
+    /// `at_start`: the check Turbine makes by itself when it starts. It asks GitHub at most once every six
     /// hours; in between the last answer is used. Check for updates (the button) always asks.
     pub fn self_check(&mut self, current: &str, labs: bool, back: bool, at_start: bool) -> Result<Option<selfupdate::Release>, String> {
         if let Some(t) = self.sample_text("github_turbine_releases.json") {
@@ -1232,11 +1224,9 @@ impl Net {
             selfupdate::Check::Available(r) => Some(*r),
             selfupdate::Check::UpToDate => None,
         };
-        if at_start {
-            if let Some(last) = fs::read_to_string(&kept).ok().and_then(|t| selfupdate::Remembered::parse(&t)).filter(|r| r.fresh(labs, now)) {
-                crate::log::line("update", &format!("Checked {} minutes ago: the answer from then is used (GitHub is asked again six hours after it)", (now - last.at) / 60));
-                return Ok(answer(last.answer(current)));
-            }
+        if at_start && let Some(last) = fs::read_to_string(&kept).ok().and_then(|t| selfupdate::Remembered::parse(&t)).filter(|r| r.fresh(labs, now)) {
+            crate::log::line("update", &format!("Checked {} minutes ago: the answer from then is used (GitHub is asked again six hours after it)", (now - last.at) / 60));
+            return Ok(answer(last.answer(current)));
         }
         let newest = selfupdate::newest(&self.client, labs).map_err(err)?;
         let last = selfupdate::Remembered::of(newest.as_ref(), labs, now);
@@ -1260,7 +1250,7 @@ impl Net {
         let d = selfupdate::download(&client, release, Some(&mut cb)).map_err(err)?;
         let bundle = dir.join(selfupdate::ASSET);
         fs::rename(&d.path, &bundle).map_err(|e| format!("Couldn't keep the update ({e})."))?;
-        // 0.61 (integration I12): into the same installation as the running Turbine (system or per user).
+        // Into the same installation as the running Turbine (system or per user).
         let info = fs::read_to_string("/.flatpak-info").unwrap_or_default();
         let args = selfupdate::install_args_to(&bundle, selfupdate::install_scope(&info));
         crate::log::line("update", &format!("Installing: {}", args.join(" ")));
@@ -1274,7 +1264,7 @@ impl Net {
             let msg = String::from_utf8_lossy(&out.stderr);
             let line = msg.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it stopped with an error").trim().to_string();
             crate::log::line("update", &format!("Install failed: {msg}"));
-            // 0.6 (integration I13): flatpak's own words only in the log; the player gets what to do.
+            // Flatpak's own words only in the log; the player gets what to do.
             let low = msg.to_ascii_lowercase();
             if ["summary", "remote", "could not resolve", "unable to connect", "network"].iter().any(|w| low.contains(w)) {
                 return Err("Turbine's update needs the internet to fetch a part from Flathub. Connect and try again.".into());
@@ -1288,7 +1278,7 @@ impl Net {
             return Err(format!("The update couldn't be installed ({line}). The details are in the activity log."));
         }
         crate::log::line("update", &format!("Installed Turbine {}", release.version));
-        // 0.63: the desktop's menu kept showing the icon from before an update. Its list of programs is rebuilt
+        // The desktop's menu keeps showing the icon from before an update. Its list of programs is rebuilt
         // (KDE's own tool, in Desktop Mode; nothing happens where it isn't there), so the entry and its icon are
         // read again.
         for tool in ["kbuildsycoca6", "kbuildsycoca5"] {

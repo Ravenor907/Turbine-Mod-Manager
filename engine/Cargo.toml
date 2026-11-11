@@ -1,7 +1,6 @@
 [package]
 name = "turbine-engine"
 description = "Game detection, installs and deploys for Turbine Mod Manager"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

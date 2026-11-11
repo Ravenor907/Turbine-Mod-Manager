@@ -72,7 +72,7 @@ fn restore_keeps_the_saves_first() {
 
 #[test]
 fn restoring_the_oldest_never_deletes_it() {
-    // Break test H1: ten snapshots, put back the oldest. Its pre-restore snapshot is the eleventh, and trimming
+    // Ten snapshots, put back the oldest. Its pre-restore snapshot is the eleventh, and trimming
     // must not remove the one being put back.
     let t = TempDir::new("saves-oldest");
     let save = t.path("save");
@@ -94,7 +94,7 @@ fn restoring_the_oldest_never_deletes_it() {
 
 #[test]
 fn restore_goes_to_the_folder_each_came_from() {
-    // Break test H2: the backup was taken when only B existed; A appears later. B's saves must go back to B.
+    // The backup was taken when only B existed; A appears later. B's saves must go back to B.
     let t = TempDir::new("saves-shift");
     let (a, b) = (t.path("A"), t.path("B"));
     fs::create_dir_all(&b).unwrap();
@@ -116,7 +116,7 @@ fn restore_goes_to_the_folder_each_came_from() {
 #[cfg(unix)]
 #[test]
 fn a_failed_backup_leaves_nothing_behind() {
-    // Break test H3a: an unreadable file stops the copy; no half-made folder is left.
+    // An unreadable file stops the copy; no half-made folder is left.
     use std::os::unix::fs::PermissionsExt;
     let t = TempDir::new("saves-part");
     let save = t.path("save");
@@ -140,7 +140,7 @@ fn a_failed_backup_leaves_nothing_behind() {
 
 #[test]
 fn backups_check_space_size_and_count_first() {
-    // Break test H3: no room, too big, too many files: refused with a plain reason, nothing copied, older
+    // No room, too big, too many files: refused with a plain reason, nothing copied, older
     // backups kept.
     let t = TempDir::new("saves-space");
     let save = t.path("save");
@@ -166,7 +166,7 @@ fn backups_check_space_size_and_count_first() {
     let e = saves::restore_with(&first.id, std::slice::from_ref(&save), &root, 400, Some(10)).unwrap_err();
     assert!(e.to_string().contains("not enough free space"), "{e}");
     assert_eq!(fs::read(save.join("a.sav")).unwrap(), vec![8u8; 4096]);
-    // Second break test N2: the player can still put it back, without keeping the saves as they are now.
+    // The player can still put it back, without keeping the saves as they are now.
     assert!(saves::couldnt_keep(&e));
     saves::restore_without_keeping(&first.id, std::slice::from_ref(&save), &root).unwrap();
     assert_eq!(fs::read(save.join("a.sav")).unwrap(), vec![7u8; 4096]);
@@ -174,7 +174,7 @@ fn backups_check_space_size_and_count_first() {
 
 #[test]
 fn restore_makes_a_deleted_save_folder_again() {
-    // Second break test N1: the whole save folder is gone; the backup goes back into it.
+    // The whole save folder is gone; the backup goes back into it.
     let t = TempDir::new("saves-gone");
     let save = t.path("Saves");
     fs::create_dir_all(&save).unwrap();

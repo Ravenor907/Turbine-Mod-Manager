@@ -1,7 +1,7 @@
-//! Nexus refuses GraphQL queries whose complexity is over 10000. The owner's device got "Query has complexity of
-//! 18440, which exceeds max complexity of 10000" for the mod page in 0.5, when its details query also asked for 100
-//! requirements. This estimates complexity the way that number works out (each field 1; a list field multiplies what
-//! it holds by its `count:`, or by 20 when it has none) and keeps every query Turbine sends well under the limit.
+//! Nexus refuses GraphQL queries whose complexity is over 10000: a mod page details query that also asks for 100
+//! requirements gets "Query has complexity of 18440, which exceeds max complexity of 10000". This estimates
+//! complexity the way that number works out (each field 1; a list field multiplies what it holds by its
+//! `count:`, or by 20 when it has none) and keeps every query Turbine sends well under the limit.
 
 use turbine_engine::json;
 use turbine_engine::nexus::{self, SearchSort};
@@ -83,7 +83,8 @@ fn query_of(body: &str) -> String {
 
 #[test]
 fn every_query_stays_well_under_the_limit() {
-    // The 0.5 details query, as sent: the estimate lands near what Nexus reported, so the rule is a fair one.
+    // A details query that also asks for 100 requirements: the estimate lands near what Nexus reported, so the rule
+    // is a fair one.
     let old = "query TurbineMod($ids: [CompositeDomainWithIdInput!]!) { legacyModsByDomain(ids: $ids) { nodes { modId name \
 summary version author pictureUrl thumbnailUrl endorsements downloads adultContent status updatedAt game { id domainName } \
 modRequirements { nexusRequirements(count: 100) { totalCount nodes { id modId modName gameId url notes externalRequirement } } \
@@ -110,7 +111,7 @@ dlcRequirements { notes gameExpansion { id name } } } } } }";
             assert!(n <= 100, "{what}: count {n}");
         }
     }
-    // The details query no longer carries the requirements; they are their own request with a short list.
+    // The details query doesn't carry the requirements; they are their own request with a short list.
     assert!(!query_of(&nexus::details_body("witcher3", 5)).contains("modRequirements"));
     assert!(query_of(&nexus::requirements_body("witcher3", 5)).contains(&format!("count: {}", nexus::MAX_REQUIREMENTS)));
 }
@@ -131,6 +132,6 @@ fn write_bodies_for_the_live_check() {
     write("files-witcher3-1021", nexus::files_body(952, 1021));
     write("updates-skyrimspecialedition", nexus::by_id_body("skyrimspecialedition", &[12604, 32444, 266]));
     write("details-kingdomcomedeliverance2-14", nexus::details_body("kingdomcomedeliverance2", 14));
-    // 0.56: "Which game on Nexus is this?" searches Nexus's games by name.
+    // "Which game on Nexus is this?" searches Nexus's games by name.
     write("games-skyrim", turbine_engine::nexus_games::games_search_body("skyrim"));
 }

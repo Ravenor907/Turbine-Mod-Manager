@@ -81,7 +81,7 @@ pub struct Report {
     pub put_back: Vec<String>,
     /// Settings files the player changed while the mod was in; kept to go back in next time.
     pub player_changes_saved: Vec<String>,
-    /// 0.62: what the store has to say about settings files changed in the game's folder (a damaged one that was
+    /// What the store has to say about settings files changed in the game's folder (a damaged one that was
     /// not taken over). Filled by the store, not by deploy itself.
     pub settings_notes: Vec<String>,
     /// Settings files put back in with the player's own changes.
@@ -366,10 +366,8 @@ fn placed_from(v: &Json, backups: Option<&Paths>) -> Result<Placed, String> {
         Some(Json::Str(s)) => Some(PathBuf::from(s)),
         _ => return Err("its backup can't be read".into()),
     };
-    if let (Some(b), Some(paths)) = (&backup, backups) {
-        if !backup_ok(paths, b) {
-            return Err(format!("its backup {} is outside Turbine's backup folder", b.display()));
-        }
+    if let (Some(b), Some(paths)) = (&backup, backups) && !backup_ok(paths, b) {
+        return Err(format!("its backup {} is outside Turbine's backup folder", b.display()));
     }
     let src_ino = opt_u64(v.get("srcIno")).ok_or("its source inode can't be read")?;
     let src_size = opt_u64(v.get("srcSize")).ok_or("its source size can't be read")?;
@@ -499,10 +497,8 @@ fn load_record(paths: &Paths, report: &mut Report) -> io::Result<Record> {
         Ok(None) if !exists(&prev) => Ok(Record::default()),
         Ok(None) | Err(_) => {
             let first = read(&paths.record, &mut Vec::new());
-            if let Err(e) = &first {
-                if e.kind() != io::ErrorKind::InvalidData {
-                    return Err(first.unwrap_err());
-                }
+            if let Err(e) = &first && e.kind() != io::ErrorKind::InvalidData {
+                return Err(first.unwrap_err());
             }
             match fs::read(&prev).ok().and_then(|b| String::from_utf8(b).ok()) {
                 Some(text) if parse_record(&text, Some(paths), &mut Vec::new()).is_ok() => {
@@ -556,10 +552,8 @@ fn op_from(v: &Json, paths: &Paths) -> Result<Op, String> {
                 Some(Json::Str(s)) => Some(PathBuf::from(s)),
                 _ => return Err("its backup can't be read".into()),
             };
-            if let Some(b) = &backup {
-                if !backup_ok(paths, b) {
-                    return Err(format!("its backup {} is outside Turbine's backup folder", b.display()));
-                }
+            if let Some(b) = &backup && !backup_ok(paths, b) {
+                return Err(format!("its backup {} is outside Turbine's backup folder", b.display()));
             }
             Ok(Op::Add { rel: rel.to_string(), source, copy, backup })
         }
@@ -632,10 +626,8 @@ fn clean_temp(target: &Path) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let n = e.file_name().to_string_lossy().into_owned();
-        if let Some(num) = n.strip_prefix(".turbine-tmp-") {
-            if !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
-                let _ = remove_if_file(&e.path());
-            }
+        if let Some(num) = n.strip_prefix(".turbine-tmp-") && !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
+            let _ = remove_if_file(&e.path());
         }
     }
 }
@@ -645,10 +637,8 @@ fn clean_link_tests(game: &Path) {
     let Ok(rd) = fs::read_dir(game) else { return };
     for e in rd.flatten() {
         let n = e.file_name().to_string_lossy().into_owned();
-        if let Some(num) = n.strip_prefix(".turbine-link-test-") {
-            if !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
-                let _ = remove_if_file(&e.path());
-            }
+        if let Some(num) = n.strip_prefix(".turbine-link-test-") && !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
+            let _ = remove_if_file(&e.path());
         }
     }
 }
@@ -684,14 +674,14 @@ fn changes_path(paths: &Paths, source: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
-/// 0.62: forgets the kept copy of a settings file as it was changed in place (see `do_remove`), so the next time
+/// Forgets the kept copy of a settings file as it was changed in place (see `do_remove`), so the next time
 /// its mod's file goes in, the mod's file itself is placed. The store calls this once it has merged the in-place
 /// changes into Turbine's own copy: from then on that copy is the whole truth. Answers true when a copy went.
 pub fn drop_saved_changes(paths: &Paths, source: &Path) -> bool {
     changes_path(paths, source).is_some_and(|p| is_file(&p) && fs::remove_file(&p).is_ok())
 }
 
-/// 0.62: where deploy keeps a copy of a settings file exactly as it placed it (next to the record), so a later
+/// Where deploy keeps a copy of a settings file exactly as it placed it (next to the record), so a later
 /// change made in place can be told apart from a later change to the mod's or Turbine's own copy.
 pub fn placed_copy(paths: &Paths, source: &Path) -> PathBuf {
     let mut out = paths.record.parent().unwrap_or(Path::new("/")).join("placed-settings");
@@ -748,10 +738,8 @@ impl BackupNames {
             if self.given.contains(d) {
                 return false;
             }
-            if let Ok(m) = fs::symlink_metadata(d) {
-                if !m.is_dir() {
-                    return false;
-                }
+            if let Ok(m) = fs::symlink_metadata(d) && !m.is_dir() {
+                return false;
             }
             a = d.parent();
         }
@@ -847,10 +835,8 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
     let game_dev = fs::metadata(&paths.game)?.dev();
     let mut copied_not_linked = 0;
     for (key, (rel, src)) in &chosen {
-        if let Some(p) = current.get(key) {
-            if p.source == *src && !again.contains(key) {
-                continue;
-            }
+        if let Some(p) = current.get(key) && p.source == *src && !again.contains(key) {
+            continue;
         }
         let actual = case.resolve(rel, &planned);
         let lk = actual.to_lowercase();
@@ -875,9 +861,9 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
         // A game file is here, or will be once the removals before this step are done: it gets backed up.
         let replaces_game_file = match current.get(&lk) {
             Some(p) if is_ours(p, &target) => p.backup.as_ref().is_some_and(|b| exists(b)),
-            // 0.62: Turbine's own settings copy that was changed in place is not a file of the game's: its removal
+            // Turbine's own settings copy that was changed in place is not a file of the game's: its removal
             // (planned before this add) moves it aside, so there is nothing here to back up. Counting it as the
-            // game's gave the new copy a backup name, and it stopped being treated as a settings file.
+            // game's would give the new copy a backup name, and it would stop being treated as a settings file.
             Some(p) if p.copy && p.backup.is_none() && config_like(&p.rel) && going.contains(&lk) && changes_path(paths, &p.source).is_some() => false,
             Some(p) => meta.is_some() || p.backup.as_ref().is_some_and(|b| exists(b)),
             None => meta.is_some(),
@@ -953,10 +939,8 @@ fn do_add(paths: &Paths, rel: &str, source: &Path, copy: bool, backup: &Option<P
             Ok(())
         }
         Err(e) => {
-            if let Some(b) = backup {
-                if !exists(&target) && is_file_or_link(b) {
-                    let _ = move_file(b, &target);
-                }
+            if let Some(b) = backup && !exists(&target) && is_file_or_link(b) {
+                let _ = move_file(b, &target);
             }
             Err(e)
         }
@@ -993,7 +977,7 @@ fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, rep
         if saved.is_some() {
             report.player_changes_restored.push(rel.to_string());
         }
-        // 0.62: a settings file's text as placed, kept for the merge of later in-place changes (small files only).
+        // A settings file's text as placed, kept for the merge of later in-place changes (small files only).
         if config_like(rel) && fs::metadata(target).is_ok_and(|m| m.len() <= 4 << 20) {
             let keep = placed_copy(paths, source);
             if let Some(d) = keep.parent() {
@@ -1308,10 +1292,8 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                     report.removed += 1;
                 } else if still_recorded {
                     // Already removed; put the game's file back if that step didn't happen.
-                    if !exists(&target) {
-                        if let Some(b) = &placed.backup {
-                            restore_backup(paths, &placed.rel, b)?;
-                        }
+                    if !exists(&target) && let Some(b) = &placed.backup {
+                        restore_backup(paths, &placed.rel, b)?;
                     }
                     record.files.retain(|p| p.rel != placed.rel);
                     report.removed += 1;

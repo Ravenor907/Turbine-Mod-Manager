@@ -1,4 +1,4 @@
-//! 0.6: Turbine from Steam's Quick Access menu (the optional Decky plugin in decky/). The plugin runs Turbine without
+//! Turbine from Steam's Quick Access menu (the optional Decky plugin in decky/). The plugin runs Turbine without
 //! its window, with one request on the command line, and reads one JSON line back:
 //!
 //! ```text
@@ -374,7 +374,7 @@ pub struct Peek {
     /// Seamless Co-op is among the mods (Turbine's own install of it).
     pub seamless: bool,
     pub seamless_on: bool,
-    /// 0.62: the highest version among the Seamless Co-op copies in the list, when one says its version.
+    /// The highest version among the Seamless Co-op copies in the list, when one says its version.
     pub seamless_version: Option<String>,
 }
 
@@ -383,7 +383,7 @@ pub fn existing_root(game: &Game, data_home: &Path) -> Option<PathBuf> {
     let key = crate::store::folder_safe(&game.id().replace(':', "-"));
     [true, false]
         .into_iter()
-        .map(|on_library| crate::store::choose_root(&key, &game.library, None, None, on_library, data_home))
+        .map(|on_library| crate::store::choose_root(&key, &game.library, on_library, data_home))
         .find(|r| r.join("state.json").is_file())
 }
 
@@ -408,16 +408,14 @@ pub fn peek(store_root: &Path) -> Peek {
             p.on += 1;
         }
         let src = sources.and_then(|s| s.get(id));
-        // 0.62: Seamless Co-op is known by its files (its ersc.dll in the mod's staged folder), so one from Nexus
+        // Seamless Co-op is known by its files (its ersc.dll in the mod's staged folder), so one from Nexus
         // counts like Turbine's own download.
         let own = src.and_then(|s| s.str_at("kind")) == Some("loader") && src.and_then(|s| s.str_at("id")) == Some("seamless");
         if own || staged_has_seamless(&crate::store::staged_dir(store_root, id), 4) {
             p.seamless = true;
             p.seamless_on |= on;
-            if let Some(v) = m.str_at("version").filter(|v| !v.is_empty()) {
-                if p.seamless_version.as_deref().is_none_or(|have| crate::updates::compare_versions(v, have) == std::cmp::Ordering::Greater) {
-                    p.seamless_version = Some(v.to_string());
-                }
+            if let Some(v) = m.str_at("version").filter(|v| !v.is_empty()) && p.seamless_version.as_deref().is_none_or(|have| crate::updates::compare_versions(v, have) == std::cmp::Ordering::Greater) {
+                p.seamless_version = Some(v.to_string());
             }
         }
     }

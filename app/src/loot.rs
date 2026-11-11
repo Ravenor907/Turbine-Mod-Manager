@@ -93,7 +93,7 @@ fn check_lists(masterlist: &Path, prelude: &Path, scratch: &Path) -> Result<(), 
     db.load_masterlist_with_prelude(masterlist, prelude).map_err(|e| format!("LOOT couldn't read it ({e})"))
 }
 
-/// 0.63: fetches one list. With the copy from before and the tag GitHub gave for it, GitHub is asked only whether it
+/// Fetches one list. With the copy from before and the tag GitHub gave for it, GitHub is asked only whether it
 /// changed (If-None-Match): "not changed" (304) keeps that copy and doesn't count against GitHub's hourly limit. A
 /// limit from GitHub gets its own words. Returns the tag of what is now in `to`.
 fn fetch(client: &Client, url: &str, to: &Path, have: &Path) -> Result<Option<String>, String> {

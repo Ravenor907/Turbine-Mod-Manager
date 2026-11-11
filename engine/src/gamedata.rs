@@ -55,7 +55,7 @@ pub struct AntiCheatFile {
     /// "warn", "stop" or "refuse" (online only: Turbine adds no mods at all).
     pub level: String,
     pub note: String,
-    /// 0.57: how Turbine plays it with mods. "warn" (the default: a warning before Play), "me3" (me3 starts the game
+    /// How Turbine plays it with mods. "warn" (the default: a warning before Play), "me3" (me3 starts the game
     /// without its anti-cheat, mods from a Turbine-owned me3 profile; built-in files only), "official" (the game has
     /// its own switch; `officialChoice` says which Play choice), "offline" (no anti-cheat on PC, but online play
     /// flags changed files: `offlineSetting` says how to start offline), "refuse" (no mods).
@@ -261,10 +261,8 @@ pub fn parse_game(file: &str, text: &str, builtin: bool) -> Result<GameFile, Str
             (Some(req_str(l, "use")?), opt_str(l, "source")?)
         }
     };
-    if let Some(src) = &loader_source {
-        if !src.starts_with("https://") {
-            return Err("\"loader\".\"source\" must be an https:// address".into());
-        }
+    if let Some(src) = &loader_source && !src.starts_with("https://") {
+        return Err("\"loader\".\"source\" must be an https:// address".into());
     }
     let native_launch = match v.get("nativeLaunch") {
         None | Some(Json::Null) => None,
@@ -274,16 +272,12 @@ pub fn parse_game(file: &str, text: &str, builtin: bool) -> Result<GameFile, Str
         }
     };
     let nexus = opt_str(&v, "nexus")?;
-    if let Some(d) = &nexus {
-        if d.is_empty() || !d.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
-            return Err(format!("\"nexus\" \"{d}\" isn't a Nexus game domain (lowercase letters and digits)"));
-        }
+    if let Some(d) = &nexus && (d.is_empty() || !d.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())) {
+        return Err(format!("\"nexus\" \"{d}\" isn't a Nexus game domain (lowercase letters and digits)"));
     }
     let thunderstore = opt_str(&v, "thunderstore")?;
-    if let Some(c) = &thunderstore {
-        if c.is_empty() || !c.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') {
-            return Err(format!("\"thunderstore\" \"{c}\" isn't a Thunderstore community name"));
-        }
+    if let Some(c) = &thunderstore && (c.is_empty() || !c.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')) {
+        return Err(format!("\"thunderstore\" \"{c}\" isn't a Thunderstore community name"));
     }
     let anti_cheat = match v.get("antiCheat") {
         None | Some(Json::Null) => None,
@@ -464,10 +458,8 @@ pub fn validate(games: &[GameFile], loaders: &[LoaderFile]) -> Vec<String> {
                 problems.push(format!("{}: {} ID {id} is also in {other}", g.file, store.key()));
             }
         }
-        if let Some(l) = &g.loader {
-            if !loaders.iter().any(|x| &x.key == l) {
-                problems.push(format!("{}: loader \"{l}\" has no file in data/loaders", g.file));
-            }
+        if let Some(l) = &g.loader && !loaders.iter().any(|x| &x.key == l) {
+            problems.push(format!("{}: loader \"{l}\" has no file in data/loaders", g.file));
         }
     }
     let mut keys: Vec<&str> = loaders.iter().map(|l| l.key.as_str()).collect();
@@ -556,11 +548,9 @@ pub fn load_player_dir(dir: &Path) -> (Vec<GameFile>, Vec<String>) {
             problems.push(format!("{name}: left out: {} ID {id} is already in another of your files", s.key()));
             continue;
         }
-        if let Some(l) = &g.loader {
-            if !b.loaders.iter().any(|x| &x.key == l) {
-                problems.push(format!("{name}: left out: there is no loader called \"{l}\""));
-                continue;
-            }
+        if let Some(l) = &g.loader && !b.loaders.iter().any(|x| &x.key == l) {
+            problems.push(format!("{name}: left out: there is no loader called \"{l}\""));
+            continue;
         }
         out.push(g);
     }

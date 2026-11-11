@@ -1,4 +1,4 @@
-//! 0.6: changes to Steam's own settings with one Steam restart the player agreed to (I1): a me3 game's Launch
+//! Changes to Steam's own settings with one Steam restart the player agreed to: a me3 game's Launch
 //! Options (and Undo putting the old ones back), and the optional co-op tile in Steam's library. The careful writers,
 //! the host script and the busy check are the engine's (turbine_engine::steam_restart, steam_setup, shortcuts).
 //! Also Turbine's own Steam library art and Labs' Proton log switch.
@@ -18,7 +18,7 @@ use turbine_engine::{shortcuts, steam, steam_art, steam_setup, Game};
 /// The localconfig.vdf that lists the game (the account signed in last first), or the newest one.
 fn localconfig_for(home: &Path, app_id: &str) -> Option<PathBuf> {
     let files = steam_setup::localconfig_files(home);
-    // 0.61: the signed-in account's file whenever it has one, even when another account lists the game.
+    // The signed-in account's file whenever it has one, even when another account lists the game.
     if let Some(f) = steam::signed_in_file(home, &files) {
         return Some(f);
     }
@@ -56,8 +56,8 @@ pub(crate) fn start(found: &[Game], game_mode: bool, job: Job) -> Result<&'stati
         crate::log::line("steam-setup", &format!("Not restarting Steam for {}: {why}", job.what));
         return Err(why);
     }
-    // 0.62: never in Game Mode while Steam runs. The session starts Steam again at once, so the file was written
-    // after Steam had read it, and Steam wrote its own copy back (the owner's device, 0.6 and 0.61).
+    // Never in Game Mode while Steam runs. The session starts Steam again at once, so the file would be written
+    // after Steam had read it, and Steam writes its own copy back.
     if let Err(why) = turbine_engine::compat_tool::restart_and_write_allowed(game_mode, crate::system::steam_running()) {
         crate::log::line("steam-setup", &format!("No Steam restart for {} in Game Mode: Steam's files can't be written safely there", job.what));
         return Err(why.to_string());
@@ -210,7 +210,7 @@ impl qobject::Turbine {
         let data = crate::backend::data_home();
         let r = job_for(&g, &kind, &resume).and_then(|job| {
             if kind == "undo" {
-                // 0.6 (break L8): marked undone only once the change is really made (now, or when the restart says done).
+                // Marked undone only once the change is really made (now, or when the restart says done).
                 let _ = std::fs::create_dir_all(data.join("steam-setup"));
                 let _ = std::fs::write(undo_file(&data), &g.store_id);
             }
@@ -292,7 +292,7 @@ impl qobject::Turbine {
         QString::from(format!("{{\"there\":{there}}}").as_str())
     }
 
-    /// 0.62: Turbine's Steam tool for a game (turbine_engine::compat_tool::state_json): is it written, does Steam
+    /// Turbine's Steam tool for a game (turbine_engine::compat_tool::state_json): is it written, does Steam
     /// list it yet, does the game use it, the steps for the player, the Proton it runs, and how the Co-op tile can
     /// be added here. Read only, except that the tool's folder is written when it is missing.
     pub fn steam_tool_json(&self, game_id: &QString) -> QString {
@@ -318,7 +318,7 @@ impl qobject::Turbine {
         QString::from(tool::state_json(&ask).as_str())
     }
 
-    /// 0.62: the Proton Turbine's Steam tool runs a game with, for the row "Proton for modded play":
+    /// The Proton Turbine's Steam tool runs a game with, for the row "Proton for modded play":
     /// {"name","dir","how" ("you", "steam", "tool" or "auto"),"words","auto","list":[{"name","dir","kind",
     /// "usable","current"}]} (turbine_engine::compat_tool::proton_json).
     pub fn proton_json(&self, game_id: &QString) -> QString {
@@ -329,7 +329,7 @@ impl qobject::Turbine {
         QString::from(turbine_engine::compat_tool::proton_json(&root, &data, &g.store_id).as_str())
     }
 
-    /// 0.62: the player's pick of the Proton for a game's modded play: one of protonJson's `dir`s, or "" for
+    /// The player's pick of the Proton for a game's modded play: one of protonJson's `dir`s, or "" for
     /// Automatic. Answers {"ok","words"}.
     pub fn proton_set(&self, game_id: &QString, dir: &QString) -> QString {
         let answer = |ok: bool, words: &str| QString::from(format!("{{\"ok\":{ok},\"words\":{}}}", quote(words)).as_str());
@@ -357,7 +357,7 @@ impl qobject::Turbine {
         }
     }
 
-    /// 0.62: how the Co-op tile can be added (or taken out) here and now: {"how","words","label"}. "direct":
+    /// How the Co-op tile can be added (or taken out) here and now: {"how","words","label"}. "direct":
     /// Desktop Mode with Steam closed (coopTileSet does it at once); "restart": Desktop Mode with Steam running
     /// (one restart, asked first); "later": Game Mode (the words say where); "none": no such tile for this game.
     pub fn coop_tile_offer_json(&self, game_id: &QString) -> QString {
@@ -372,7 +372,7 @@ impl qobject::Turbine {
         QString::from(way.offer_json(!tile_there(&g)).as_str())
     }
 
-    /// 0.62: adds or takes out the Co-op tile at once. Only with Steam closed (Desktop Mode); otherwise it answers
+    /// Adds or takes out the Co-op tile at once. Only with Steam closed (Desktop Mode); otherwise it answers
     /// why not and changes nothing. {"ok","words"}.
     pub fn coop_tile_set(&self, game_id: &QString, add: bool) -> QString {
         let answer = |ok: bool, words: &str| QString::from(format!("{{\"ok\":{ok},\"words\":{}}}", quote(words)).as_str());
@@ -438,7 +438,7 @@ impl qobject::Turbine {
     }
 }
 
-/// 0.6 (break M3): when the running Steam started (its oldest process, asked on the host), or None when that can't
+/// When the running Steam started (its oldest process, asked on the host), or None when that can't
 /// be told (no Steam, or no answer): then a change that is in the file counts as held.
 fn steam_started() -> Option<std::time::SystemTime> {
     let host = |args: &[&str]| {
@@ -454,7 +454,7 @@ fn steam_started() -> Option<std::time::SystemTime> {
     std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(secs + 1))
 }
 
-/// 0.6 (break L8): the game whose Launch Options an Undo is putting back, until the restart says it's done.
+/// The game whose Launch Options an Undo is putting back, until the restart says it's done.
 fn undo_file(data: &Path) -> PathBuf {
     data.join("steam-setup").join("undo-for.txt")
 }

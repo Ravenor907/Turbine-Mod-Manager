@@ -337,7 +337,7 @@ fn real_folders_with_the_catcher() {
     assert!(a.catch_up, "arrived before this Turbine started");
 }
 
-/// 0.62: Game Mods folders an older Turbine named with a long dash get the plain name, with everything in them.
+/// Game Mods folders an older Turbine named with a long dash get the plain name, with everything in them.
 #[test]
 fn folders_with_a_long_dash_get_their_plain_name() {
     use turbine_engine::watch;

@@ -1,4 +1,4 @@
-//! 0.59: Steam library art. Grid files are named by the shortcut's appid; the player's own art is never replaced;
+//! Steam library art. Grid files are named by the shortcut's appid; the player's own art is never replaced;
 //! Remove takes out only what Turbine wrote.
 
 mod support;
@@ -135,7 +135,7 @@ fn the_players_other_formats_and_cleared_art_are_respected() {
     // ...until the player asks for Turbine's art again.
     let got = steam_art::add_art_opts(&v1, &grid, 77, steam_art::TURBINE_PARTS, &record, true).unwrap();
     assert_eq!(outcome(&got, "77.png"), ArtOutcome::Written);
-    // A file of the player's that happens to equal Turbine's is never claimed (break L5): Remove leaves it.
+    // A file of the player's that happens to equal Turbine's is never claimed: Remove leaves it.
     let other = d.join("grid2");
     fs::create_dir_all(&other).unwrap();
     fs::copy(v1.join("logo.png"), other.join("9_logo.png")).unwrap();
@@ -147,8 +147,8 @@ fn the_players_other_formats_and_cleared_art_are_respected() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.62: the owner's log said "0 written, 0 of your own kept" at every start and nobody could tell whether the art
-/// was in place, cleared or missing. The line now accounts for every piece.
+/// The log line accounts for every piece, so it tells whether the art is in place, cleared or missing (not "0 written,
+/// 0 of your own kept" at every start).
 #[test]
 fn the_summary_accounts_for_every_piece() {
     let d = tmp("summary");
@@ -158,7 +158,7 @@ fn the_summary_accounts_for_every_piece() {
     let v1 = src(&d, "v1");
     let first = steam_art::add_art_opts(&v1, &grid, 5, steam_art::TURBINE_PARTS, &record, false).unwrap();
     assert_eq!(steam_art::summary(&first), "4 written");
-    // The second start: the same art is there. This is the owner's case, and it no longer reads as nothing done.
+    // The second start: the same art is there, and it doesn't read as nothing done.
     let second = steam_art::add_art_opts(&v1, &grid, 5, steam_art::TURBINE_PARTS, &record, false).unwrap();
     assert_eq!(steam_art::summary(&second), "4 already in place");
     assert!(!steam_art::nothing_shown(&second));

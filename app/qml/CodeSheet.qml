@@ -26,7 +26,7 @@ Overlay {
         color: cs.ui.c.panel
         border.color: cs.ui.c.line
         CardGuard {}
-        // 0.59: scrolls by touch when the words don't fit (150%).
+        // Scrolls by touch when the words don't fit (150%).
         Flickable {
             id: scroller
             anchors.fill: parent

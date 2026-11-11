@@ -101,10 +101,8 @@ impl GameIndex {
             .unwrap_or(-1);
         let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
         let mut c = cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((s, ix)) = c.get(root) {
-            if *s == stamp {
-                return ix.clone();
-            }
+        if let Some((s, ix)) = c.get(root) && *s == stamp {
+            return ix.clone();
         }
         let ix = Arc::new(GameIndex::build(root));
         c.insert(root.to_path_buf(), (stamp, ix.clone()));
@@ -403,10 +401,8 @@ fn decide(ctx: &Ctx, es: Vec<E>, from: String, depth: usize) -> Placement {
         return Placement::Sure { from, to: String::new(), rule };
     }
     // 7. The contents of the game's Data folder.
-    if let Some(data) = ix.dir("Data").filter(|d| !d.is_empty()) {
-        if top_files.is_empty() && !tops.is_empty() && tops.iter().all(|t| ix.has_dir(&format!("{data}/{t}"))) {
-            return Placement::Sure { from, to: data, rule: "data-contents" };
-        }
+    if let Some(data) = ix.dir("Data").filter(|d| !d.is_empty()) && top_files.is_empty() && !tops.is_empty() && tops.iter().all(|t| ix.has_dir(&format!("{data}/{t}"))) {
+        return Placement::Sure { from, to: data, rule: "data-contents" };
     }
     // 8. Folders the game has deeper down: every top folder inside one game folder.
     if top_files.is_empty() && !tops.is_empty() {

@@ -360,12 +360,10 @@ pub fn parse(bytes: &[u8]) -> Result<Config, String> {
         sort_named(&mut steps, order_of(Some(steps_el)), |s| s.name.clone());
         cfg.steps = steps;
     }
-    if let Some(c) = root.child("conditionalFileInstalls") {
-        if let Some(patterns) = c.child("patterns") {
-            for p in patterns.children_named("pattern") {
-                let cond = p.child("dependencies").map(parse_composite).unwrap_or(Condition::All(Vec::new()));
-                cfg.conditional.push((cond, parse_items(p.child("files"))));
-            }
+    if let Some(c) = root.child("conditionalFileInstalls") && let Some(patterns) = c.child("patterns") {
+        for p in patterns.children_named("pattern") {
+            let cond = p.child("dependencies").map(parse_composite).unwrap_or(Condition::All(Vec::new()));
+            cfg.conditional.push((cond, parse_items(p.child("files"))));
         }
     }
     Ok(cfg)
@@ -695,10 +693,8 @@ impl Session {
                     }
                 }
                 GroupKind::AtLeastOne => {
-                    if !row.iter().any(|&b| b) {
-                        if let Some(f) = first_usable.or(if row.is_empty() { None } else { Some(0) }) {
-                            row[f] = true;
-                        }
+                    if !row.iter().any(|&b| b) && let Some(f) = first_usable.or(if row.is_empty() { None } else { Some(0) }) {
+                        row[f] = true;
                     }
                 }
                 GroupKind::Any => {}

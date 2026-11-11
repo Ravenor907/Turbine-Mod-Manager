@@ -339,14 +339,7 @@ pub fn clean_name(suggested: &str, url: &str) -> String {
 
 /// The longest start of `s` that is at most `max` bytes and ends on a character boundary.
 fn cut_bytes(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
+    &s[..s.floor_char_boundary(max)]
 }
 
 /// The last part of an address's path, with %xx decoded.
@@ -452,10 +445,8 @@ pub fn keep_going(got: i64, free: Option<u64>) -> Result<(), String> {
     if got > 0 && got as u64 > MAX_BYTES {
         return Err("it went over 64 GB, more than Turbine takes".into());
     }
-    if let Some(f) = free {
-        if f < FREE_STOP {
-            return Err(format!("the disk is nearly full (less than {} free)", size_words(FREE_STOP)));
-        }
+    if let Some(f) = free && f < FREE_STOP {
+        return Err(format!("the disk is nearly full (less than {} free)", size_words(FREE_STOP)));
     }
     Ok(())
 }
@@ -499,7 +490,7 @@ pub fn no_gpu_wanted(data_dir: &Path) -> bool {
 
 // ------------------------------------------------------------------------------------------------ one Turbine
 
-extern "C" {
+unsafe extern "C" {
     // The C library's flock(2): a lock on an open file that the system drops when the process ends, however it ends.
     fn flock(fd: std::os::raw::c_int, operation: std::os::raw::c_int) -> std::os::raw::c_int;
 }
@@ -532,7 +523,7 @@ impl Lock {
     }
 }
 
-/// 0.6: a request from Steam's menu (quick.rs) holds this second lock for as long as it holds the main one, taken
+/// A request from Steam's menu (quick.rs) holds this second lock for as long as it holds the main one, taken
 /// before it and let go after it. A Turbine that starts meanwhile sees it and waits for the request to finish instead
 /// of closing as a second copy. (A lock file, not a process id: each Flatpak run has its own process numbers.)
 pub const QUICK_MARK: &str = "turbine.lock.quick";
@@ -542,7 +533,7 @@ pub fn quick_running(folder: &Path) -> bool {
     matches!(lock_instance(&folder.join(QUICK_MARK)), Lock::Taken)
 }
 
-/// 0.61 (break L3): for a request from Steam's menu, which of the two locks it got. The quick mark taken by someone
+/// For a request from Steam's menu, which of the two locks it got. The quick mark taken by someone
 /// else while the main lock is taken means another request from the menu holds them, not Turbine's window.
 pub fn another_request_holds(mark: &Lock, main: &Lock) -> bool {
     matches!(mark, Lock::Taken) && matches!(main, Lock::Taken)
@@ -564,10 +555,8 @@ pub fn lock_wait(path: &Path, max: Duration) -> Lock {
 pub fn lock_instance(path: &Path) -> Lock {
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::io::AsRawFd;
-    if let Some(dir) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            return Lock::Unknown(format!("its folder couldn't be made ({e})"));
-        }
+    if let Some(dir) = path.parent() && let Err(e) = std::fs::create_dir_all(dir) {
+        return Lock::Unknown(format!("its folder couldn't be made ({e})"));
     }
     let file = match std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).mode(0o600).open(path) {
         Ok(f) => f,

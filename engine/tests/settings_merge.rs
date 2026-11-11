@@ -1,4 +1,4 @@
-//! 0.6: a player's settings changes survive a mod update: repeated names by their place among the old values, list
+//! A player's settings changes survive a mod update: repeated names by their place among the old values, list
 //! items by their identity; what can't be placed for sure is listed for a second look, with the old file kept.
 
 use std::fs;

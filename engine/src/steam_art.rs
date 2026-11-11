@@ -1,4 +1,4 @@
-//! 0.59: Steam library art for Turbine's own non-Steam shortcut and for the co-op tile. Steam shows a non-Steam
+//! Steam library art for Turbine's own non-Steam shortcut and for the co-op tile. Steam shows a non-Steam
 //! game's art from userdata/<account>/config/grid/, named by the shortcut's appid: <appid>p.png (the 600x900
 //! capsule), <appid>.png (the 920x430 wide one), <appid>_hero.png, <appid>_logo.png and <appid>_icon.png.
 //!
@@ -89,7 +89,7 @@ pub enum ArtOutcome {
     PlayersOwn,
     /// Turbine has no such piece in the source folder.
     NoSource,
-    /// 0.6 (break M5): Turbine's file was there and the player cleared it in Steam: not written again until the
+    /// Turbine's file was there and the player cleared it in Steam: not written again until the
     /// player asks (Settings, Add).
     Cleared,
 }
@@ -112,7 +112,7 @@ fn is_ours(record: &ArtRecord, file: &Path) -> bool {
 /// Writes the pieces from `src` (<piece>.png) into `grid` for `appid`, never over the player's own art. `record`
 /// is Turbine's record file. Answers each grid file with what happened. `again`: the player asked for Turbine's art (Settings, Add, or a new tile), so pieces the player had cleared in
 /// Steam are written again. Without it (every start) they stay cleared. Only files Turbine wrote (in its record) are
-/// ever treated as Turbine's (break L5: an identical file of the player's is never adopted).
+/// ever treated as Turbine's (an identical file of the player's is never adopted).
 pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record: &Path, again: bool) -> io::Result<Vec<(PathBuf, ArtOutcome)>> {
     let mut rec = ArtRecord::load(record);
     let mut out = Vec::new();
@@ -159,7 +159,7 @@ pub fn add_art_opts(src: &Path, grid: &Path, appid: u32, parts: &[&str], record:
     Ok(out)
 }
 
-/// 0.62: one line that accounts for every piece. Zero counts are left out.
+/// One line that accounts for every piece. Zero counts are left out.
 pub fn summary(done: &[(PathBuf, ArtOutcome)]) -> String {
     let count = |o: ArtOutcome| done.iter().filter(|(_, x)| *x == o).count();
     let parts = [

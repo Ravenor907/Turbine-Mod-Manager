@@ -1,4 +1,4 @@
-//! 0.64: Microsoft's Visual C++ 2022 runtime in a game's Proton prefix.
+//! Microsoft's Visual C++ 2022 runtime in a game's Proton prefix.
 //!
 //! Cyberpunk 2077's RED4ext.dll and Cyber Engine Tweaks' cyber_engine_tweaks.asi stop at load with Windows error 998
 //! (ERROR_NOACCESS) when the prefix has no real Visual C++ 2022 runtime: Wine's own msvcp140/vcruntime140 and the

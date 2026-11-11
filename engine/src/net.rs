@@ -22,9 +22,9 @@ pub struct SourceInfo {
     pub sha256: Option<String>,
     /// Dependency ids.
     pub needs: Vec<String>,
-    /// 0.6: the mod's own title where it came from (Nexus's "Seamless Co-op"); the mod is named by it.
+    /// The mod's own title where it came from (Nexus's "Seamless Co-op"); the mod is named by it.
     pub title: Option<String>,
-    /// 0.6: its picture there, for the list and the panel.
+    /// Its picture there, for the list and the panel.
     pub picture: Option<String>,
 }
 
@@ -38,7 +38,7 @@ pub enum NetError {
     Denied(u16),
     /// Too many requests; try again later.
     RateLimited,
-    /// 0.63: GitHub is limiting or refusing requests from this connection (a 429, or a 401/403 from one of its
+    /// GitHub is limiting or refusing requests from this connection (a 429, or a 401/403 from one of its
     /// hosts); never the player's account or key. The minutes until it says to ask again.
     GitHubLimit(u32),
     TooBig { limit: u64 },
@@ -51,7 +51,7 @@ pub enum NetError {
     Http(u16),
     /// The player stopped it.
     Cancelled,
-    /// 0.6 (integration I6): the site isn't answering or a protection page stood in for the answer (5xx, or a 401/403
+    /// The site isn't answering or a protection page stood in for the answer (5xx, or a 401/403
     /// that is a web page with no answer from the site's API). Never the key's or the account's fault.
     Down,
     /// Anything else (curl missing, disk full, broken connection), in words.
@@ -112,7 +112,7 @@ pub const ALLOWED_HOSTS: &[&str] = &[
     "raw.githubusercontent.com",
     "objects.githubusercontent.com",
     "release-assets.githubusercontent.com",
-    // 0.64: Microsoft's Visual C++ runtime installer (its short link and its download server), for Cyberpunk's
+    // Microsoft's Visual C++ runtime installer (its short link and its download server), for Cyberpunk's
     // frameworks under Proton (vcrun.rs).
     "aka.ms",
     "download.visualstudio.microsoft.com",
@@ -306,7 +306,7 @@ pub fn parse_headers(text: &str) -> (u16, Vec<(String, String)>) {
     (status, headers)
 }
 
-/// 0.6 (integration I6): is this refusal really the site being down or blocked, not the key? A 5xx, or a 401/403 whose
+/// Is this refusal really the site being down or blocked, not the key? A 5xx, or a 401/403 whose
 /// answer is a web page (a protection page: its cf-mitigated or cf-ray header, or HTML) instead of the API's JSON.
 pub fn site_down(e: &NetError, headers: &[(String, String)], body_start: &[u8]) -> bool {
     let h = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.to_ascii_lowercase());
@@ -329,7 +329,7 @@ pub fn minutes_words(m: u32) -> String {
     }
 }
 
-/// 0.63: is this a limit or refusal from GitHub (the owner's 403 at Check for updates: 60 requests an hour for a
+/// Is this a limit or refusal from GitHub (a 403 at Check for updates: 60 requests an hour for a
 /// connection that isn't signed in)? The minutes to wait: from Retry-After (seconds), else X-RateLimit-Reset (the
 /// time it lifts, seconds since 1970) against `now`, else 15. At least 1, at most 60. None for other sites and
 /// other failures.
@@ -464,21 +464,17 @@ impl Client {
                 cleanup(true);
                 return Err(NetError::TooBig { limit: req.max_bytes });
             }
-            if total.is_none() {
-                if let Ok(h) = fs::read_to_string(&hdr) {
-                    let (st, headers) = parse_headers(&h);
-                    if (200..300).contains(&st) {
-                        total = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok());
-                    }
+            if total.is_none() && let Ok(h) = fs::read_to_string(&hdr) {
+                let (st, headers) = parse_headers(&h);
+                if (200..300).contains(&st) {
+                    total = headers.iter().find(|(k, _)| k == "content-length").and_then(|(_, v)| v.parse().ok());
                 }
             }
-            if let Some(p) = progress.as_mut() {
-                if !p(got, total) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    cleanup(true);
-                    return Err(NetError::Cancelled);
-                }
+            if let Some(p) = progress.as_mut() && !p(got, total) {
+                let _ = child.kill();
+                let _ = child.wait();
+                cleanup(true);
+                return Err(NetError::Cancelled);
             }
             // Short sleeps at first so quick API calls aren't slowed down.
             let pause = if started.elapsed() < Duration::from_millis(300) { 10 } else { 150 };
@@ -579,16 +575,12 @@ pub fn verify_file(path: &Path, check: &Expect) -> Result<Download, NetError> {
     if size > check.max_bytes {
         return Err(NetError::TooBig { limit: check.max_bytes });
     }
-    if let Some(want) = check.size {
-        if want != size {
-            return Err(NetError::Mismatch(format!("size {} instead of {}", human_size(size), human_size(want))));
-        }
+    if let Some(want) = check.size && want != size {
+        return Err(NetError::Mismatch(format!("size {} instead of {}", human_size(size), human_size(want))));
     }
     let got = sha256::file_hex(path).map_err(|e| NetError::Failed(format!("Couldn't read the download ({e}).")))?;
-    if let Some(want) = &check.sha256 {
-        if !sha256::same_digest(want, &got) {
-            return Err(NetError::Mismatch("its SHA-256 is different".into()));
-        }
+    if let Some(want) = &check.sha256 && !sha256::same_digest(want, &got) {
+        return Err(NetError::Mismatch("its SHA-256 is different".into()));
     }
     Ok(Download { path: path.to_path_buf(), size, sha256: got })
 }

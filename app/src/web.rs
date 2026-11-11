@@ -19,7 +19,7 @@ use turbine_engine::json::{quote, Json};
 use turbine_engine::watch::Arrival;
 use turbine_engine::Game;
 
-extern "C" {
+unsafe extern "C" {
     // webglue.cpp
     fn turbine_web_sign_out() -> i32;
     fn turbine_web_set_cookie(
@@ -78,7 +78,7 @@ pub fn set_signed_in(on: bool) {
 }
 
 /// The Downloads folder Turbine's browser saves into: the desktop's, the same one the watcher and the player's own
-/// browser use (0.61, integration I14).
+/// browser use.
 fn downloads_dir() -> PathBuf {
     turbine_engine::watch::downloads_folder(&turbine_engine::home_dir())
 }
@@ -119,13 +119,11 @@ impl qobject::Turbine {
             self.as_mut().pointer_hide();
             return;
         }
-        if !self.rust().pointer.shown {
-            if let Some((w, h)) = crate::pad::window_size() {
-                let (x, y) = if self.rust().pointer.x >= 0.0 { (self.rust().pointer.x, self.rust().pointer.y) } else { (w / 2.0, h / 2.0) };
-                self.as_mut().rust_mut().pointer.place(x, y);
-                self.as_mut().pointer_publish();
-                crate::pad::send(crate::pad::Kind::Move, x, y, 0, 0, 0);
-            }
+        if !self.rust().pointer.shown && let Some((w, h)) = crate::pad::window_size() {
+            let (x, y) = if self.rust().pointer.x >= 0.0 { (self.rust().pointer.x, self.rust().pointer.y) } else { (w / 2.0, h / 2.0) };
+            self.as_mut().rust_mut().pointer.place(x, y);
+            self.as_mut().pointer_publish();
+            crate::pad::send(crate::pad::Kind::Move, x, y, 0, 0, 0);
         }
     }
 
@@ -498,8 +496,8 @@ impl qobject::Turbine {
         let out = |how: &str, url: &str, steam: &str, text: &str| {
             QString::from(format!("{{\"how\":{},\"url\":{},\"steam\":{},\"text\":{}}}", quote(how), quote(url), quote(steam), quote(text)).as_str())
         };
-        // 0.6: Nexus's own sign-in (single sign-on) when Turbine has its slug: Nexus's approval page opens in Turbine's
-        // page from the list it gives, and the key comes back by itself. Otherwise the browser helper, as before.
+        // Nexus's own sign-in (single sign-on) when Turbine has its slug: Nexus's approval page opens in Turbine's
+        // page from the list it gives, and the key comes back by itself. Otherwise the browser helper.
         if let crate::nexus_sso::Method::Sso { .. } = crate::nexus_sso::method() {
             let qt = self.qt_thread();
             let show = |qt: &cxx_qt::CxxQtThread<qobject::Turbine>, page: &str| {
@@ -510,7 +508,7 @@ impl qobject::Turbine {
                 qt.queue(move |t| t.pages(QString::from("Sign in to Nexus Mods"), QString::from(json.as_str())))
                     .map_err(|_| "Turbine couldn't show the page".to_string())
             };
-            // 0.61 (break L4): one session per sign-in; a second press shows the waiting session's page again.
+            // One session per sign-in; a second press shows the waiting session's page again.
             let session = match crate::nexus_sso::Session::begin() {
                 Ok(s) => s,
                 Err(page) => {
@@ -572,18 +570,16 @@ impl qobject::Turbine {
             }
         };
         // Pressed again within 8 seconds: the browser is already starting; don't start it (and its window) again.
-        if *self.gamemode() {
-            if let Some(ago) = crate::launch::recently_opened(url, Instant::now()) {
-                crate::log::line("browser", &format!("Sign in with my browser: the browser was started {ago} ms ago, not starting it again"));
-                return out("guarded", url, "", WAITING_IN_BROWSER);
-            }
+        if *self.gamemode() && let Some(ago) = crate::launch::recently_opened(url, Instant::now()) {
+            crate::log::line("browser", &format!("Sign in with my browser: the browser was started {ago} ms ago, not starting it again"));
+            return out("guarded", url, "", WAITING_IN_BROWSER);
         }
         if reused && !*self.gamemode() {
             return out("guarded", url, "", WAITING_IN_BROWSER);
         }
         if !*self.gamemode() {
-            // A connected helper that has its own sign-in page opens it; the browser needn't open Nexus as well.
-            if crate::bridge::connected() && !crate::bridge::version_older(&crate::bridge::helper_version(), crate::bridge::SIGNIN_PAGE_SINCE) {
+            // A connected helper opens its own sign-in page; the browser needn't open Nexus as well.
+            if crate::bridge::connected() {
                 return out("helper", url, "", "Sign in in your browser: it shows Turbine's sign-in page. Turbine signs in by itself when you're done.");
             }
             return out("desktop", url, "", "Sign in in your browser. Turbine signs in by itself when you're done.");
@@ -718,10 +714,10 @@ impl qobject::Turbine {
 
     // ------------------------------------------------------------------------------------------------ build checks
 
-    /// The build's checks of the 0.54 regression fix, in a test run only: "watch" starts the Downloads watcher,
+    /// The build's checks of catching downloads, in a test run only: "watch" starts the Downloads watcher,
     /// "bridge:<json>" hands a helper message to Turbine as if the helper sent it, "drop:<from>|<name>" copies a file
     /// into Downloads, "partial:<name>" grows an unfinished download there, "page:<url>" opens a Nexus page the
-    /// Desktop way (the Slow download hint), "signin" passes a made-up sign-in from the helper through (0.55).
+    /// Desktop way (the Slow download hint), "signin" passes a made-up sign-in from the helper through.
     pub fn selftest_catch(mut self: Pin<&mut Self>, step: &QString) -> QString {
         if !crate::online::using_samples() {
             return QString::from("not a test run");

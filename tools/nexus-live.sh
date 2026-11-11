@@ -41,7 +41,7 @@ for f in "$dir"/*.json; do
   post "$(basename "$f" .json)" "$f" strict
 done
 if [ "$n" -eq 0 ]; then echo "::error title=Nexus live check::No request bodies from the engine in $dir"; failed=1; fi
-# 0.56: Nexus's public game list (Mods for any game matches names against it). A warning when it is gone: Turbine
+# Nexus's public game list (Mods for any game matches names against it). A warning when it is gone: Turbine
 # keeps its cached copy.
 code=$(curl -sS --max-time 60 -o /tmp/nexus-games.json -w '%{http_code}' -H 'Application-Name: TurbineModManager' \
   -H "Application-Version: $version" https://data.nexusmods.com/file/nexus-data/games.json 2>/dev/null || echo 000)

@@ -1,7 +1,7 @@
 import QtQuick
 
 // The one base for everything that covers the window: sheets, menus, pop-ups, the text prompt, the quick wheel and
-// the tutorial (0.59). It is the only place that decides "a tap outside closes".
+// the tutorial. It is the only place that decides "a tap outside closes".
 //
 // Why it exists: in Qt 6 a MouseArea that takes a press stops the items under it, but never the pointer handlers
 // (TapHandler, DragHandler, PointHandler) of the items under it: they still see the press and fire on release. So
@@ -17,7 +17,7 @@ Item {
     property bool closeOnOutside: true
     signal outsideTapped()
 
-    // 0.62: everything that covers the window comes in the same way: a short fade, and at Full a small growth
+    // Everything that covers the window comes in the same way: a short fade, and at Full a small growth
     // (Motion.qml). It is on screen and takes presses from the first frame: the animation never holds anything
     // back, and closing is instant. Each overlay's file hands the motion system in (motion: ui.motion).
     property Motion motion: Motion { level: "off" }

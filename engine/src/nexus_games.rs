@@ -88,7 +88,7 @@ const EDITION_WORDS: &[&str] = &[
     "directors", "extended", "final", "royal", "collection", "bundle", "game", "of", "the", "year",
 ];
 
-/// A game's name without its edition (0.62): the part in front of a colon, a dash or a bracket when what follows
+/// A game's name without its edition: the part in front of a colon, a dash or a bracket when what follows
 /// names an edition ("The Outer Worlds: Spacer's Choice Edition", "Slay the Princess - The Pristine Cut",
 /// "The Witcher 3: Wild Hunt - Game of the Year Edition" keeps "the witcher 3 wild hunt"), and trailing edition
 /// words without a separator ("Dark Souls Remastered"). Normalized like `normalize`. A name that is all edition
@@ -128,7 +128,7 @@ pub fn base_name(name: &str) -> String {
     }
 }
 
-/// Matches a store's game name against the list. Sure: one game with exactly this name, or (0.62) no game with
+/// Matches a store's game name against the list. Sure: one game with exactly this name, or no game with
 /// this name and exactly one game that is the same once both names lose their edition ("Slay the Princess - The
 /// Pristine Cut" is Nexus's "Slay the Princess"). Several games that differ only by edition or subtitle are asked
 /// about, those first (most mods first). Other candidates must share at least half of the name's telling words.

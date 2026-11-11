@@ -35,24 +35,31 @@ pub struct Pads {
     waits: VecDeque<u32>,
     /// A controller went away since the last `take_dropped_out` (holds in the interface stop).
     dropped_out: bool,
-    /// 0.6: how long the newest press read in the last poll waited in SDL's queue (ms), so the interface can judge a
+    /// How long the newest press read in the last poll waited in SDL's queue (ms), so the interface can judge a
     /// press by when it was made, not when it was handled (a stalled window handles it late).
     last_wait: u32,
-    /// 0.61 (integration I9): when SDL was last asked again for controllers while none was seen.
+    /// When SDL was last asked again for controllers while none was seen.
     last_rescan: Option<Instant>,
+}
+
+/// Steam sets these for apps it starts so they only see its virtual pad; in Desktop Mode that can leave Turbine with
+/// no pad at all. They are cleared so every pad SDL can see counts (twins are told apart by `dedupe`). Called by main
+/// before any thread starts; answers the lines for the log.
+pub fn clear_steam_filters() -> Vec<String> {
+    let mut said = Vec::new();
+    for k in ["SDL_GAMECONTROLLER_IGNORE_DEVICES", "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"] {
+        if let Ok(v) = std::env::var(k) {
+            said.push(format!("{k} was set ({} characters); cleared so SDL sees every controller", v.len()));
+            // SAFETY: main calls this before it starts any thread, so nothing else reads the environment yet.
+            unsafe { std::env::remove_var(k) };
+        }
+    }
+    said
 }
 
 impl Pads {
     /// Opens SDL's controller support. If SDL isn't available Turbine still runs, with keyboard and touch only.
     pub fn open() -> Self {
-        // Steam sets these for apps it starts so they only see its virtual pad; in Desktop Mode that can leave
-        // Turbine with no pad at all. Every pad SDL can see counts (twins are told apart by `dedupe`).
-        for k in ["SDL_GAMECONTROLLER_IGNORE_DEVICES", "SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT"] {
-            if let Ok(v) = std::env::var(k) {
-                crate::log::line("pad", &format!("{k} was set ({} characters); cleared so SDL sees every controller", v.len()));
-                std::env::remove_var(k);
-            }
-        }
         sdl2::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         let sdl = sdl2::init().ok();
         let subsystem = sdl.as_ref().and_then(|s| s.game_controller().ok());
@@ -93,11 +100,9 @@ impl Pads {
             let name = sub.name_for_index(i).unwrap_or_else(|_| "unnamed".into());
             let guid = self._sdl.as_ref().and_then(|s| s.joystick().ok()).and_then(|j| j.device_guid(i).ok()).map(|g| g.string()).unwrap_or_default();
             crate::log::line("pad", &format!("Device {i}: {name}, GUID {guid}, {}", if sub.is_game_controller(i) { "a game controller" } else { "not a game controller (no mapping)" }));
-            if sub.is_game_controller(i) {
-                if let Ok(c) = sub.open(i) {
-                    crate::log::line("pad", &format!("Controller found: {}", c.name()));
-                    self.open.push(c);
-                }
+            if sub.is_game_controller(i) && let Ok(c) = sub.open(i) {
+                crate::log::line("pad", &format!("Controller found: {}", c.name()));
+                self.open.push(c);
             }
         }
         if count == 0 {
@@ -105,7 +110,7 @@ impl Pads {
         }
     }
 
-    /// 0.61 (integration I9): with no controller open, asks SDL again from scratch (at most every `every`): after
+    /// With no controller open, asks SDL again from scratch (at most every `every`): after
     /// leaving Game Mode the controller can come back without SDL hearing it arrive. Answers whether one was found.
     pub fn rescan(&mut self, every: Duration) -> bool {
         if !self.open.is_empty() || self._sdl.is_none() || self.last_rescan.is_some_and(|t| t.elapsed() < every) {
@@ -269,11 +274,9 @@ impl Pads {
         }
         if let Some(sub) = self.subsystem.as_ref() {
             for index in added {
-                if let Ok(c) = sub.open(index) {
-                    if !self.open.iter().any(|o| o.instance_id() == c.instance_id()) {
-                        crate::log::line("pad", &format!("Controller connected: {}", c.name()));
-                        self.open.push(c);
-                    }
+                if let Ok(c) = sub.open(index) && !self.open.iter().any(|o| o.instance_id() == c.instance_id()) {
+                    crate::log::line("pad", &format!("Controller connected: {}", c.name()));
+                    self.open.push(c);
                 }
             }
         }
@@ -307,10 +310,8 @@ impl Pads {
             if self.held.contains_key(button) {
                 return false; // another pad already holds it
             }
-            if let Some((other, at)) = self.last_up.get(button) {
-                if *other != pad && now.duration_since(*at).as_millis() < TWIN_MS {
-                    return false; // the second copy of a tap just let go
-                }
+            if let Some((other, at)) = self.last_up.get(button) && *other != pad && now.duration_since(*at).as_millis() < TWIN_MS {
+                return false; // the second copy of a tap just let go
             }
             self.held.insert(button, pad);
             true
@@ -363,7 +364,7 @@ fn axis_names(axis: Axis, value: i16) -> Vec<(&'static str, i16)> {
 
 // ------------------------------------------------------------------------------------------------ pointer events
 
-extern "C" {
+unsafe extern "C" {
     // qtglue.cpp
     fn turbine_window_size(w: *mut f64, h: *mut f64) -> i32;
     fn turbine_pointer_event(kind: i32, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) -> i32;
@@ -402,7 +403,7 @@ pub fn send(kind: Kind, x: f64, y: f64, button: i32, buttons: i32, wheel: i32) {
     }
 }
 
-/// 0.61 (integration I9): what the sandbox sees of the input devices, for the activity log when no controller shows:
+/// What the sandbox sees of the input devices, for the activity log when no controller shows:
 /// how many event devices there are and how many Turbine may read.
 fn input_report() -> String {
     let Ok(rd) = std::fs::read_dir("/dev/input") else { return "the input devices folder isn't visible".into() };

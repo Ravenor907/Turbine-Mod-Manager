@@ -1,4 +1,4 @@
-//! 0.62: Turbine's Steam compatibility tool. The script runs here behind stubs of Steam's chain (launch wrapper and
+//! Turbine's Steam compatibility tool. The script runs here behind stubs of Steam's chain (launch wrapper and
 //! reaper in front, as Steam puts them) with stub runtimes, Protons and me3: each stub writes its arguments to a
 //! trace and passes control on the way the real one does. Paths hold spaces, as on the device.
 
@@ -214,7 +214,7 @@ fn the_three_files() {
     assert_eq!(m.str_at(&["manifest", "require_tool_appid"]), None);
     let s = tool::script_text(Path::new("/home/deck/.var/app/x/data/steam-launch"));
     assert!(s.starts_with("#!/bin/bash\n"));
-    // 0.63: the helper is read by /bin/bash itself, never by whichever "bash" comes first on the PATH a game
+    // The helper is read by /bin/bash itself, never by whichever "bash" comes first on the PATH a game
     // was started with.
     assert!(s.contains("\nexec /bin/bash \"$helper\"") && !s.contains("exec bash "));
     assert!(s.contains("launch='/home/deck/.var/app/x/data/steam-launch'\n"));
@@ -719,7 +719,7 @@ fn the_state_for_the_app_and_no_restart_in_game_mode() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.62: Report a bug (both reports use anticheat::launch_report_lines) holds the Steam launch logs, and says first
+/// Report a bug (both reports use anticheat::launch_report_lines) holds the Steam launch logs, and says first
 /// which Proton the tool used and why.
 #[test]
 fn the_report_lines_hold_the_launch_logs_and_the_proton_pick() {
@@ -742,7 +742,7 @@ fn the_report_lines_hold_the_launch_logs_and_the_proton_pick() {
     let _ = fs::remove_dir_all(&d);
 }
 
-/// 0.62 break test M5: choosing by itself, the tool never takes a Beta or Experimental while a finished numbered
+/// Choosing by itself, the tool never takes a Beta or Experimental while a finished numbered
 /// Proton can run, unless that Beta is the one Steam last used for the game.
 #[test]
 fn a_beta_is_never_picked_over_a_finished_proton() {
@@ -781,7 +781,7 @@ fn a_beta_is_never_picked_over_a_finished_proton() {
     s.done();
 }
 
-/// 0.62 break test M5: the record moves with what the game really ran with, also through the tool; the player's
+/// The record moves with what the game really ran with, also through the tool; the player's
 /// own pick is kept; Automatic removes it; default.proton is written.
 #[test]
 fn the_proton_record_follows_launches_and_the_players_pick() {
@@ -789,8 +789,8 @@ fn the_proton_record_follows_launches_and_the_players_pick() {
         return;
     }
     let s = Steam::new("record");
-    // No record: the tool chooses (Proton 11) at each launch. Its own choice is never written down (the re-check's
-    // N3: such a record froze the game on the tool's first pick).
+    // No record: the tool chooses (Proton 11) at each launch. Its own choice is never written down (such a record
+    // would freeze the game on the tool's first pick).
     assert_eq!(tool::proton_record(&s.data, APP), None);
     s.play();
     assert_eq!(tool::remember_proton(&s.data, APP), None);
@@ -809,7 +809,7 @@ fn the_proton_record_follows_launches_and_the_players_pick() {
     assert!(tool::set_proton_pick(&s.data, APP, Some(&s.d.join("nothing"))).is_err());
     assert!(tool::set_proton_pick(&s.data, "12a", None).is_err());
 
-    // The re-check's N3, its steps: a pick, one Play, then Automatic. Reading the row again (which looks at the
+    // A pick, one Play, then Automatic. Reading the row again (which looks at the
     // log) must not bring a record back, and the row names the newest finished Proton.
     tool::set_proton_pick(&s.data, APP, None).unwrap();
     assert_eq!(tool::proton_record(&s.data, APP), None);

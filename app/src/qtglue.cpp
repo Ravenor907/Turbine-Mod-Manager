@@ -48,8 +48,8 @@ extern "C" void turbine_install_qt_handler(Sink sink)
     s_previous = qInstallMessageHandler(handler);
 }
 
-// 0.63: who the window belongs to. Desktop Mode's taskbar showed a generic "X" for Turbine's window, because the
-// window named itself after the program file and no menu entry carries that name. With the desktop file's name the
+// Who the window belongs to. Named after the program file, the window gets a generic "X" in Desktop Mode's taskbar,
+// because no menu entry carries that name. With the desktop file's name the
 // taskbar finds Turbine's entry (its name and icon); the window icon itself comes from the icons the bundle
 // installs, for every place that asks the window and not the entry.
 extern "C" void turbine_window_identity()

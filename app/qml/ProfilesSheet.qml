@@ -44,7 +44,7 @@ Overlay {
         color: ps.ui.c.panel
         border.color: ps.ui.c.line
         CardGuard {}
-        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        // Scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
         Flickable {
             id: scroller
             anchors.fill: parent

@@ -94,7 +94,7 @@ pub fn threads() -> usize {
 
 /// Downloads, where reports and screenshots go.
 pub fn downloads() -> PathBuf {
-    // 0.62: the desktop's Downloads folder (where the player looks for the report), not always ~/Downloads.
+    // The desktop's Downloads folder (where the player looks for the report), not always ~/Downloads.
     turbine_engine::watch::downloads_folder(&turbine_engine::home_dir())
 }
 
@@ -231,7 +231,7 @@ pub fn build(r: &ReportInput) -> String {
     if !r.crash.trim().is_empty() {
         section(&mut out, "Crash log (last lines)", &r.crash);
     }
-    // 0.62: the Steam launch logs (the helper's and the Steam tool's log, me3's output and own log, Proton's log),
+    // The Steam launch logs (the helper's and the Steam tool's log, me3's output and own log, Proton's log),
     // as the other report has them: without them a game that closed by itself can't be told from one that never
     // started.
     let launch: Vec<String> = turbine_engine::anticheat::launch_report_lines(&crate::backend::data_home()).iter().map(|l| turbine_engine::report::redact(l)).collect();

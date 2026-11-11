@@ -1,8 +1,8 @@
 import QtQuick
 
-// 0.58, Edit settings: a mod's (or the game's) config file as a page of plain controls. Up and Down pick a setting;
+// Edit settings: a mod's (or the game's) config file as a page of plain controls. Up and Down pick a setting;
 // Left and Right change it (a toggle flips, a number steps, a list moves to the next choice); A flips a toggle,
-// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself (0.6); X opens the
+// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself; X opens the
 // options (the file as plain text, where A edits a line, or as a list; Reset to default); B goes back. Taps and
 // clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
 Overlay {
@@ -23,7 +23,7 @@ Overlay {
     property bool textMode: false
     property int focusIndex: 0
     property bool leaveArmed: false
-    // 0.62: rows after the settings that do something (Seamless Co-op's page: the Co-op tile): [{key, title, detail, label}].
+    // Rows after the settings that do something (Seamless Co-op's page: the Co-op tile): [{key, title, detail, label}].
     property var extraRows: []
     signal actionClicked(string key)
 
@@ -49,14 +49,14 @@ Overlay {
     readonly property bool plain: textMode || fields.length === 0
 
     signal saveClicked()
-    // 0.61 (I18): X opens the options (Show as text or as a list, Reset to default); Y is never used here.
+    // X opens the options (Show as text or as a list, Reset to default); Y is never used here.
     signal optionsClicked()
     function toggleView() { textMode = !textMode; focusIndex = firstField() }
     signal closeClicked()
     // A number or text to type: the field (or line), its value now, the words for the keyboard.
     signal typeAsked(var row, string value, string label)
 
-    // 0.6: plain names ("allow_invaders" is "Allow invaders"; Seamless Co-op's own get their meaning).
+    // Plain names ("allow_invaders" is "Allow invaders"; Seamless Co-op's own get their meaning).
     readonly property var plainNames: ({ cooppassword: "Session password", allow_invaders: "Allow invaders", overhead_player_display: "Over other players' heads",
         always_spectate_on_death: "Watch others after you die", default_boot_master_volume: "Volume at start", enemy_health_scaling: "Enemy health per player (%)",
         enemy_damage_scaling: "Enemy damage per player (%)", enemy_posture_scaling: "Enemy posture per player (%)", boss_health_scaling: "Boss health per player (%)",
@@ -130,7 +130,7 @@ Overlay {
         if (i >= 0 && i < shown.length) focusIndex = i
         list.positionViewAtIndex(focusIndex, ListView.Contain)
     }
-    // 0.59: the first Left or Right after the page opens changes nothing (it is often a press carried over).
+    // The first Left or Right after the page opens changes nothing (it is often a press carried over).
     property bool fresh: true
     onVisibleChanged: if (visible) fresh = true
     function handleButton(b) {
@@ -142,7 +142,7 @@ Overlay {
         else if (b === "a") activate(shown[focusIndex])
         else if (b === "start") saveClicked()
         else if (b === "x") optionsClicked()
-        // 0.6: changes save themselves; B only goes back (Main.qml saves anything still waiting first).
+        // Changes save themselves; B only goes back (Main.qml saves anything still waiting first).
         else if (b === "b") closeClicked()
     }
     onShownChanged: if (focusIndex >= shown.length) focusIndex = Math.max(0, shown.length - 1)

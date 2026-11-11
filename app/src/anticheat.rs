@@ -1,4 +1,4 @@
-//! Games with anti-cheat (0.57), the app's side: the ask-once answer, me3 and Seamless Co-op downloads, starting
+//! Games with anti-cheat, the app's side: the ask-once answer, me3 and Seamless Co-op downloads, starting
 //! me3 on the host with fixed arguments, the original record of the game folder, and the lines for Before you play.
 //! The rules and the checks themselves are the engine's (turbine_engine::anticheat).
 
@@ -83,10 +83,8 @@ pub(crate) fn checks(slot: &Slot, data: &Path) -> Vec<Check> {
     let rec = original(slot);
     let build_changed = rec.as_ref().is_some_and(|r| r.build.is_some() && slot.game.build.is_some() && r.build != slot.game.build);
     let mut out = ac::checks(&title(slot), a, on, me3.as_ref(), turned_off(slot), build_changed);
-    if let Some(st) = state(slot) {
-        if let Some(c) = ac::state_check(&title(slot), &st) {
-            out.push(c);
-        }
+    if let Some(st) = state(slot) && let Some(c) = ac::state_check(&title(slot), &st) {
+        out.push(c);
     }
     out
 }
@@ -180,7 +178,7 @@ pub(crate) fn ensure_helper(data: &Path) {
         Ok(false) => {}
         Err(e) => crate::log::line("launch", &format!("Couldn't write the Steam launch helper: {e}")),
     }
-    // 0.62: Turbine's Steam tool ("Turbine (mods)") next to Steam's other tools. A new folder Steam only reads, so
+    // Turbine's Steam tool ("Turbine (mods)") next to Steam's other tools. A new folder Steam only reads, so
     // it can be written while Steam runs; Steam lists it after its next start.
     if let Some(root) = steam_root() {
         match turbine_engine::compat_tool::install(&root, data) {
@@ -199,7 +197,7 @@ pub(crate) fn ensure_helper(data: &Path) {
     }
 }
 
-/// 0.62, before a co-op Play: the Seamless Co-op the game loads is the one in the list, and it has a session
+/// Before a co-op Play: the Seamless Co-op the game loads is the one in the list, and it has a session
 /// password. What the check found goes to the activity log (never the password); a version that disagrees is
 /// logged as a warning and doesn't stop the Play. Err: the words for the player.
 pub(crate) fn coop_ready(slot: &Slot, coop: ac::Coop) -> Result<(), String> {
@@ -229,7 +227,7 @@ pub(crate) fn coop_ready(slot: &Slot, coop: ac::Coop) -> Result<(), String> {
     }
 }
 
-/// 0.62: what the engine's look at Seamless Co-op found, for the interface (`coopChecked`). `tidied`: the copies a
+/// What the engine's look at Seamless Co-op found, for the interface (`coopChecked`). `tidied`: the copies a
 /// tidy just moved to Removed mods.
 fn post_coop_check(w: &mut Worker, game: &turbine_engine::Game, tidied: &[String]) {
     let Ok(s) = w.slot(game) else { return };
@@ -256,7 +254,7 @@ pub(crate) fn steam_root() -> Option<PathBuf> {
     turbine_engine::steam::steam_roots(&turbine_engine::home_dir()).into_iter().next()
 }
 
-/// 0.62: does Steam start this game through Turbine's Steam tool (chosen in the game's Properties, Compatibility)?
+/// Does Steam start this game through Turbine's Steam tool (chosen in the game's Properties, Compatibility)?
 pub(crate) fn via_tool(slot: &Slot, data: &Path, options_ok: bool) -> bool {
     use turbine_engine::compat_tool as tool;
     steam_root().is_some_and(|r| tool::route(&r, data, &slot.game.store_id, options_ok) == tool::Route::Tool)
@@ -267,10 +265,10 @@ pub(crate) fn launch_option_state(slot: &Slot, data: &Path) -> (Option<String>, 
     let set = turbine_engine::steam::launch_options(&turbine_engine::home_dir(), &slot.game.store_id);
     let need = ac::launch_option(data);
     let options_ok = set.as_deref().is_some_and(|s| ac::launch_option_ok(s, data));
-    // 0.62: the Proton Steam itself last used for the game is kept for Turbine's Steam tool, and a game that uses
+    // The Proton Steam itself last used for the game is kept for Turbine's Steam tool, and a game that uses
     // the tool is set up whatever its Launch Options say. Choosing the tool after an Undo sets it up again.
     let id = &slot.game.store_id;
-    // (0.62 break test: at every Play, from launches through the tool too; default.proton is kept as well.)
+    // (At every Play, launches through the tool included; default.proton is kept as well.)
     let _ = match steam_root() {
         Some(root) => turbine_engine::compat_tool::remember_proton_with(&root, data, id),
         None => turbine_engine::compat_tool::remember_proton(data, id),
@@ -326,7 +324,7 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     if via_tool(slot, data, false) {
         crate::log::line("launch", &format!("{}: Steam starts it through Turbine's Steam tool (\"Turbine (mods)\")", slot.game.name));
     }
-    // 0.62: the long line once per run, and again only when the Launch Options changed.
+    // The long line once per run, and again only when the Launch Options changed.
     static SAID: std::sync::OnceLock<std::sync::Mutex<turbine_engine::report::LogOnce>> = std::sync::OnceLock::new();
     let text = format!("{}: Steam Launch Options {words}; Turbine needs \"{need}\"", slot.game.name);
     if SAID.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).changed(&slot.game.store_id, &text) {
@@ -338,10 +336,8 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
         if undone {
             crate::log::line("launch", &format!("{}: the launch options change was undone; not started with mods until it is set again", slot.game.name));
         }
-        if let Some(s) = &set {
-            if let Err(e) = ac::remember_original(data, &slot.game.store_id, s) {
-                crate::log::line("launch", &format!("{}: couldn't keep the Launch Options as they were: {e}", slot.game.name));
-            }
+        if let Some(s) = &set && let Err(e) = ac::remember_original(data, &slot.game.store_id, s) {
+            crate::log::line("launch", &format!("{}: couldn't keep the Launch Options as they were: {e}", slot.game.name));
         }
         return Ok(false);
     }
@@ -381,7 +377,7 @@ fn state_words(slot: &Slot) -> String {
 }
 
 /// The game's own program in its folder (from the game data's gameExe): me3's Windows build starts it under Steam's
-/// own Proton (0.59). None when the data doesn't name it or it isn't there: the helper then gets the Linux me3.
+/// own Proton. None when the data doesn't name it or it isn't there: the helper then gets the Linux me3.
 fn game_exe(slot: &Slot) -> Option<std::path::PathBuf> {
     let rel = special(slot)?.game_exe.as_ref()?;
     Some(slot.game.install_dir.join(rel)).filter(|p| p.is_file())
@@ -573,13 +569,13 @@ impl qobject::Turbine {
         crate::log::line("launch", &format!("{}: Undo the launch options change: the helper starts nothing for it now; the player pastes back \"{}\"", g.name, ac::original_options(&data, &g.store_id)));
     }
 
-    /// 0.62: the Seamless Co-op copies in this game's list (the engine's coop_check); answered as `coopChecked`.
+    /// The Seamless Co-op copies in this game's list (the engine's coop_check); answered as `coopChecked`.
     pub fn coop_check(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
         self.as_mut().send(Some(game.id()), "Look at Seamless Co-op", false, Box::new(move |w: &mut Worker| post_coop_check(w, &game, &[])));
     }
 
-    /// 0.62: two copies of Seamless Co-op: the one the game loads (the newest) stays, the others go to Removed mods
+    /// Two copies of Seamless Co-op: the one the game loads (the newest) stays, the others go to Removed mods
     /// (the engine's seamless_tidy carries a session password over). Then the list and `coopChecked` again.
     pub fn seamless_tidy(mut self: Pin<&mut Self>) {
         let Some(game) = self.current_game() else { return };
@@ -593,7 +589,7 @@ impl qobject::Turbine {
                     Ok(g) => {
                         if !g.is_empty() {
                             crate::log::line("engine", &format!("{}: Seamless Co-op tidied: moved to Removed mods: {}", game.name, g.join(", ")));
-                            // 0.62: the words name the version kept (the highest, turned on).
+                            // The words name the version kept (the highest, turned on).
                             let words = w.slot(&game).map(|s| s.store.tidy_words(&g)).unwrap_or_else(|_| format!("Moved to Removed mods: {}.", g.join(", ")));
                             w.say(words, "ok");
                         }
@@ -662,7 +658,7 @@ impl qobject::Turbine {
         );
     }
 
-    /// 0.64: installs Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk's RED4ext
+    /// Installs Microsoft's Visual C++ 2022 runtime into the current game's Proton prefix (Cyberpunk's RED4ext
     /// and Cyber Engine Tweaks need it): download and check the installer, tell Wine to use Microsoft's DLLs, run the
     /// installer through the game's Proton, then look again.
     pub fn install_vc_runtime(mut self: Pin<&mut Self>) {
@@ -755,7 +751,7 @@ impl qobject::Turbine {
     }
 
     /// Gets Seamless Co-op from its GitHub release (the newest one, checked) and adds it to the current game like a
-    /// loader. 0.62: GitHub can lag behind the mod's Nexus page, so with a copy installed that is as new or newer
+    /// loader. GitHub can lag behind the mod's Nexus page, so with a copy installed that is as new or newer
     /// nothing is downloaded and the toast says so; otherwise the toast says which version is coming. (Opening the
     /// Nexus page first, anticheat::SEAMLESS_NEXUS, is the interface's choice; this is the download without Nexus.)
     pub fn install_seamless(mut self: Pin<&mut Self>) {
@@ -769,7 +765,7 @@ impl qobject::Turbine {
                 match net.fetch_seamless(have.as_deref(), &mut prog) {
                     Ok((Some(f), words)) => {
                         crate::log::line("net", &words);
-                        // 0.62: the toast names the version that is coming.
+                        // The toast names the version that is coming.
                         crate::actions::say(qt, format!("Getting {}...", f.label), "work");
                         let g = game.clone();
                         crate::actions::set(qt, move |t| t.add_fetched(g, f));

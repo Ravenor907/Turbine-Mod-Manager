@@ -1,4 +1,4 @@
-//! 0.64: the Visual C++ 2022 runtime in a Proton prefix (Cyberpunk's RED4ext and Cyber Engine Tweaks, error 998).
+//! The Visual C++ 2022 runtime in a Proton prefix (Cyberpunk's RED4ext and Cyber Engine Tweaks, error 998).
 
 mod support;
 

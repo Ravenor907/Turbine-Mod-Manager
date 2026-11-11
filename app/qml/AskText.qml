@@ -9,7 +9,7 @@ Overlay {
     required property var ui
     motion: ui.motion
     anchors.fill: parent
-    // Main.qml draws it only while app.sheet is "ask" (0.59).
+    // Main.qml draws it only while app.sheet is "ask".
     property bool shown: false
 
     property string title: ""
@@ -23,7 +23,7 @@ Overlay {
     signal accepted(string text)
     signal cancelled()
     signal edited(string text)            // every change, for filters that follow the typing
-    signal fieldTapped()                  // a tap on the field: Steam's keyboard again (0.59)
+    signal fieldTapped()                  // a tap on the field: Steam's keyboard again
 
     function open(t, n, start, ph, max, hide, done) {
         title = t; note = n || ""; placeholder = ph || ""

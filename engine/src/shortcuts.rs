@@ -31,25 +31,13 @@ pub const BROWSERS: &[(&str, &[&str])] = &[
     ("Vivaldi", &["com.vivaldi.vivaldi", "vivaldi-stable", "/usr/bin/vivaldi"]),
 ];
 
-/// The standard CRC-32 (IEEE, as zip uses), which Steam uses for old shortcut ids.
-pub fn crc32(data: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        crc ^= u32::from(b);
-        for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
-        }
-    }
-    !crc
-}
-
 /// Steam's appid for a shortcut that has none stored: crc32 of the program path (as stored, quotes and all) followed
 /// by the name, with the top bit set.
 pub fn legacy_appid(exe: &str, name: &str) -> u32 {
     let mut s = Vec::with_capacity(exe.len() + name.len());
     s.extend_from_slice(exe.as_bytes());
     s.extend_from_slice(name.as_bytes());
-    crc32(&s) | 0x8000_0000
+    crate::zip::crc32(&s) | 0x8000_0000
 }
 
 /// The 64-bit id steam://rungameid/ takes for a shortcut.
@@ -144,10 +132,8 @@ pub fn shortcut_files(home: &Path) -> Vec<PathBuf> {
         let Ok(rd) = std::fs::read_dir(root.join("userdata")) else { continue };
         for e in rd.flatten() {
             let f = e.path().join("config").join("shortcuts.vdf");
-            if let Ok(m) = std::fs::metadata(&f) {
-                if m.is_file() && !files.iter().any(|(_, p)| *p == f) {
-                    files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), f));
-                }
+            if let Ok(m) = std::fs::metadata(&f) && m.is_file() && !files.iter().any(|(_, p)| *p == f) {
+                files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), f));
             }
         }
     }
@@ -205,7 +191,7 @@ pub fn rungameid_from_env(value: &str) -> Option<String> {
     (!v.is_empty() && v.len() <= 20 && v.bytes().all(|b| b.is_ascii_digit()) && v != "0").then(|| format!("steam://rungameid/{v}"))
 }
 
-// ---- Turbine's own tiles (0.59: the co-op tile) ----
+// ---- Turbine's own tiles (the co-op tile) ----
 //
 // Steam keeps shortcuts.vdf in memory while it runs and writes it back over any change made meanwhile, and it reads
 // the file again only when it starts. There is no documented way to add a non-Steam game to a running Steam (the
@@ -282,11 +268,9 @@ pub enum TileChange {
 /// The shortcuts.vdf for the account signed in last (the most recently changed one), or, when that account has no
 /// non-Steam games yet, where its file goes.
 pub fn tile_file(home: &Path) -> Option<PathBuf> {
-    // 0.61: another account's file never stands in for the signed-in account's (it may have none yet).
-    if let Some(f) = shortcut_files(home).into_iter().next() {
-        if crate::steam::signed_in_account(home).is_none() || crate::steam::signed_in_file(home, std::slice::from_ref(&f)).is_some() {
-            return Some(f);
-        }
+    // Another account's file never stands in for the signed-in account's (it may have none yet).
+    if let Some(f) = shortcut_files(home).into_iter().next() && (crate::steam::signed_in_account(home).is_none() || crate::steam::signed_in_file(home, std::slice::from_ref(&f)).is_some()) {
+        return Some(f);
     }
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for root in crate::steam::steam_roots(home).into_iter().chain([home.join(".local/share/Steam"), home.join(".steam/steam")]) {
@@ -443,7 +427,7 @@ pub fn add_tile_with_art(file: &Path, tile: &NewShortcut, marker: &str, art_dir:
     let mut t = tile.clone();
     let appid = t.appid();
     let grid = crate::steam_art::grid_dir(file);
-    // 0.6 (break L7): the tile first, then its art, so a tile that couldn't be added leaves no art behind. Its icon
+    // The tile first, then its art, so a tile that couldn't be added leaves no art behind. Its icon
     // is where the art goes (known before it is written).
     if let (true, Some(name)) = (art_dir.join("icon.png").is_file(), crate::steam_art::grid_name(appid, "icon")) {
         t.icon = grid.join(name).to_string_lossy().to_string();

@@ -41,19 +41,6 @@ pub fn open(url: &str, game_mode: bool, browser_json: &str) -> String {
 
 /// Game Mode: the player's browser through Steam, then the page through the helper.
 pub fn open_through_steam(url: &str) -> String {
-    if bridge::paired() && !bridge::helper_knows_open() {
-        let v = bridge::helper_version();
-        let link = browser::steam_browser_link(url).unwrap_or_default();
-        crate::log::line(
-            "browser",
-            &format!(
-                "The browser helper is {v}, too old to open pages (it needs {}): Steam's browser opens the page right away instead. The player is told: {}",
-                bridge::OPEN_SINCE,
-                bridge::OLD_HELPER_TEXT
-            ),
-        );
-        return format!("{{\"how\":\"oldhelper\",\"name\":\"Steam's browser\",\"steam\":{},\"helperVersion\":{},\"error\":\"\"}}", quote(&link), quote(&v));
-    }
     crate::log::line("browser", "Game Mode: looking for a Chrome-family browser among Steam's non-Steam games (shortcuts.vdf, read only)");
     let Some(sc) = shortcuts::find_browser(&turbine_engine::home_dir()) else {
         crate::log::line("browser", "No Chrome-family browser among Steam's non-Steam games: Game Mode can't show one Turbine starts");

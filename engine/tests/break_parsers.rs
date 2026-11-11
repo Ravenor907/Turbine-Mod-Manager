@@ -260,10 +260,8 @@ fn guarded<T: Send + 'static>(what: &'static str, budget: Duration, f: impl FnOn
             }
             Err(RecvTimeoutError::Timeout) => {
                 let cpu = task.as_deref().and_then(task_cpu);
-                if let Some(c) = cpu {
-                    if c > budget {
-                        panic!("{what}: used {c:?} of CPU time, over its {budget:?}, so something hangs");
-                    }
+                if let Some(c) = cpu && c > budget {
+                    panic!("{what}: used {c:?} of CPU time, over its {budget:?}, so something hangs");
                 }
                 let backstop = if cpu.is_some() { budget * 10 } else { budget };
                 if wall.elapsed() > backstop {
@@ -387,14 +385,12 @@ fn fixed_block(w: &mut BitW, data: &[u8], last: bool) {
         let mut best = (0usize, 0usize);
         if i + 3 <= data.len() {
             let key = [data[i], data[i + 1], data[i + 2]];
-            if let Some(&p) = seen.get(&key) {
-                if i - p <= 32_768 {
-                    let mut l = 0;
-                    while l < 258 && i + l < data.len() && data[p + l] == data[i + l] {
-                        l += 1;
-                    }
-                    best = (l, i - p);
+            if let Some(&p) = seen.get(&key) && i - p <= 32_768 {
+                let mut l = 0;
+                while l < 258 && i + l < data.len() && data[p + l] == data[i + l] {
+                    l += 1;
                 }
+                best = (l, i - p);
             }
             seen.insert(key, i);
         }
@@ -981,8 +977,8 @@ fn zip64_lying_sizes_are_refused() {
 
 #[test]
 fn zip_huge_compressed_size_is_refused() {
-    // A 150-byte archive whose ZIP64 field says the entry holds 2^50 compressed bytes. Zip::read used to do
-    // vec![0; compressed] before reading, asking the allocator for 1 PiB so the process aborted. Refusing it in
+    // A 150-byte archive whose ZIP64 field says the entry holds 2^50 compressed bytes. A vec![0; compressed]
+    // before reading would ask the allocator for 1 PiB and abort the process. Refusing it in
     // open() (the data runs past the end of the file) or in read() are both fine.
     let (body, mut recs) = locals(&[f("a.txt", b"abc", Comp::Store)]);
     recs[0].csize = 1 << 50;

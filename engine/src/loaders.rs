@@ -1,7 +1,7 @@
 //! Script loaders from their official sources, and how each one goes into a game.
 //!
 //! - SKSE: skse.silverlock.org lists the current builds. The GOG build is a .7z there; the Steam Anniversary Edition
-//!   build is now published only on Nexus (the page links to Nexus mod 30379), so it comes through the Nexus module
+//!   build is published only on Nexus (the page links to Nexus mod 30379), so it comes through the Nexus module
 //!   (Premium) or, for free accounts, a plain "download it in Desktop Mode" message. A .7z is unpacked by the
 //!   archive module (bsdtar); this module returns the downloaded file.
 //! - BepInEx: the BepInExPack for each game from Thunderstore.
@@ -211,17 +211,15 @@ fn text_and_links(html: &str) -> (String, Vec<(usize, String)>) {
         };
         let tag = &rest[lt + 1..lt + gt];
         let lower = tag.to_ascii_lowercase();
-        if lower.starts_with("a ") || lower.starts_with("a\n") || lower.starts_with("a\t") {
-            if let Some(i) = lower.find("href") {
-                let after = tag[i + 4..].trim_start();
-                if let Some(v) = after.strip_prefix('=') {
-                    let v = v.trim_start();
-                    let href = match v.chars().next() {
-                        Some(q @ ('"' | '\'')) => v[1..].split(q).next().unwrap_or(""),
-                        _ => v.split(|c: char| c.is_whitespace()).next().unwrap_or(""),
-                    };
-                    links.push((text.len(), decode_entities(href)));
-                }
+        if (lower.starts_with("a ") || lower.starts_with("a\n") || lower.starts_with("a\t")) && let Some(i) = lower.find("href") {
+            let after = tag[i + 4..].trim_start();
+            if let Some(v) = after.strip_prefix('=') {
+                let v = v.trim_start();
+                let href = match v.chars().next() {
+                    Some(q @ ('"' | '\'')) => v[1..].split(q).next().unwrap_or(""),
+                    _ => v.split(|c: char| c.is_whitespace()).next().unwrap_or(""),
+                };
+                links.push((text.len(), decode_entities(href)));
             }
         }
         if lower.starts_with("br") || lower.starts_with("p") || lower.starts_with("/p") || lower.starts_with("li") || lower.starts_with("div") {
@@ -390,11 +388,9 @@ pub fn fetch_skse(
                 .cloned()
                 .ok_or_else(|| NetError::Failed("Nexus lists no main file for SKSE.".into()))?;
             let (d, _) = nx.download(account, &domain, mod_id, &file, progress)?;
-            if let Some(want) = known_sha256(&file.file_name) {
-                if !sha256::same_digest(want, &d.sha256) {
-                    let _ = std::fs::remove_file(&d.path);
-                    return Err(NetError::Mismatch("its SHA-256 is different".into()));
-                }
+            if let Some(want) = known_sha256(&file.file_name) && !sha256::same_digest(want, &d.sha256) {
+                let _ = std::fs::remove_file(&d.path);
+                return Err(NetError::Mismatch("its SHA-256 is different".into()));
             }
             let url = crate::nexus::mod_page_url(&domain, mod_id);
             Ok(LoaderDownload {
@@ -425,11 +421,9 @@ pub fn fetch_bepinex(
         .ok_or_else(|| NetError::Failed(format!("Thunderstore doesn't list {pack} right now.")))?;
     let (d, mut info) = thunderstore::download(client, pick, progress)?;
     let known = known_sha256(&format!("{}-{}.zip", pick.full_name, pick.version));
-    if let Some(want) = known {
-        if !sha256::same_digest(want, &d.sha256) {
-            let _ = std::fs::remove_file(&d.path);
-            return Err(NetError::Mismatch("its SHA-256 is different".into()));
-        }
+    if let Some(want) = known && !sha256::same_digest(want, &d.sha256) {
+        let _ = std::fs::remove_file(&d.path);
+        return Err(NetError::Mismatch("its SHA-256 is different".into()));
     }
     info.kind = "loader".into();
     info.needs.clear();
@@ -478,7 +472,7 @@ pub fn parse_seamless_release(text: &str) -> Result<SeamlessRelease, String> {
 }
 
 /// What "Get Seamless Co-op" should do, given the version installed (if any) and the newest release Turbine can
-/// download itself. GitHub's release can lag behind the mod's Nexus page (0.62: GitHub had 2.0.1 while Nexus had
+/// download itself. GitHub's release can lag behind the mod's Nexus page (GitHub had 2.0.1 while Nexus had
 /// 2.0.2), so a copy that is as new or newer is never touched.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SeamlessGet {
@@ -563,7 +557,7 @@ pub fn parse_smapi_release(text: &str) -> Result<SmapiRelease, String> {
 /// SMAPI's newest release page: GitHub redirects it to ".../releases/tag/<version>".
 pub const SMAPI_LATEST_PAGE: &str = "https://github.com/Pathoschild/SMAPI/releases/latest";
 
-/// 0.63: SMAPI's newest release without GitHub's API, from where its latest page ends up. Its installer is always
+/// SMAPI's newest release without GitHub's API, from where its latest page ends up. Its installer is always
 /// "SMAPI-<version>-installer.zip" under that tag. No size or digest comes this way, so the download is checked
 /// against Turbine's own list of known files when it has that version.
 pub fn smapi_release_from_page(effective_url: &str) -> Option<SmapiRelease> {
@@ -590,7 +584,7 @@ fn smapi_latest_from_page(client: &Client) -> Option<SmapiRelease> {
 pub fn fetch_smapi(client: &Client, native_linux: bool, progress: Option<Progress>) -> Result<LoaderDownload, NetError> {
     let rel = match client.send(&Request::get(SMAPI_LATEST).header("Accept", "application/vnd.github+json").max_bytes(4 << 20), None) {
         Ok(r) => parse_smapi_release(&r.take_text()?).map_err(|e| NetError::Failed(format!("{e}.")))?,
-        // 0.63: GitHub is limiting its API for this connection: the release page says which version is the newest.
+        // GitHub is limiting its API for this connection: the release page says which version is the newest.
         Err(NetError::GitHubLimit(m)) => smapi_latest_from_page(client).ok_or(NetError::GitHubLimit(m))?,
         Err(e) => return Err(e),
     };

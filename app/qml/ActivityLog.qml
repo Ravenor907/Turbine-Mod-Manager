@@ -12,7 +12,7 @@ Overlay {
 
     property var lines: []
     property int focusAt: 0
-    // 0.56: "What happened" (plain sentences with the time) unless the full log is asked for (X, for reports).
+    // "What happened" (plain sentences with the time) unless the full log is asked for (X, for reports).
     property bool full: false
     readonly property var buttons: [{ label: "Copy to clipboard" }, { label: "Save to Downloads" }, { label: full ? "Show what happened" : "Show the full log", key: "x" }, { label: "Close", key: "b" }]
     readonly property var shown: full ? lines : plain(lines)

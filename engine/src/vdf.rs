@@ -325,7 +325,7 @@ impl BinReader<'_> {
     }
 }
 
-// ---- Binary VDF, kept exactly (0.59: writing shortcuts.vdf) ----
+// ---- Binary VDF, kept exactly (for writing shortcuts.vdf) ----
 //
 // `parse_binary` turns every value into text, which is right for reading but would lose each value's type on the
 // way back. To change shortcuts.vdf, Turbine keeps each item's type byte and its value's exact bytes, changes only

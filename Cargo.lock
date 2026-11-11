@@ -1104,11 +1104,11 @@ dependencies = [
 
 [[package]]
 name = "turbine-engine"
-version = "0.1.0"
+version = "0.0.0"
 
 [[package]]
 name = "turbine-mod-manager"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "cxx",
  "cxx-qt",

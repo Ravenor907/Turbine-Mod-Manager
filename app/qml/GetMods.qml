@@ -1,6 +1,6 @@
 import QtQuick
 
-// Get mods: the mods as picture cards, four to a row (0.57: no bar over them; Y opens the pop-up with Search, Sort
+// Get mods: the mods as picture cards, four to a row (no bar over them; Y opens the pop-up with Search, Sort
 // and Category, and Add from Downloads is in the game menu): thumbnail, name, what it does in one line, "12K likes · 3.1M downloads",
 // an "In your mods · On" (or Off) or "Update ready" ribbon and a "Needs the mod loader" chip where known. (Recently viewed is on the
 // quick wheel.) When browsing failed (no key and Nexus refused), one big card
@@ -13,7 +13,7 @@ Item {
     property var result: null               // {source, items, categories, total, error, fallback}
     property bool loading: false
     property bool loadingMore: false
-    // 0.59: what is in effect ("Most liked · Armour · \"cloak\""), shown over the cards whenever it isn't the
+    // What is in effect ("Most liked · Armour · \"cloak\""), shown over the cards whenever it isn't the
     // default, and "Looking..." over the old cards while a new answer comes.
     property string summary: ""
     property var recent: []                 // the strip over the cards: [{id, name, icon, what}]
@@ -43,7 +43,7 @@ Item {
 
     Item {
         anchors.fill: parent
-        // Results (0.57: Good first mods is the grid's header, so it scrolls away with the cards)
+        // Results (Good first mods is the grid's header, so it scrolls away with the cards)
         Rectangle {
             id: summaryBar
             objectName: "getSummary"
@@ -291,7 +291,7 @@ Item {
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             visible: status === Image.Ready
-            // 0.62: a picture fades in when it has loaded.
+            // A picture fades in when it has loaded.
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { enabled: gm.ui.motion.on; NumberAnimation { duration: gm.ui.motion.base; easing.type: gm.ui.motion.enter } }
         }

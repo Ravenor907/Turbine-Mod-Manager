@@ -259,7 +259,7 @@ fn refused_targets() {
 
     // In the store: even with Replace them, refused files never go in, and the game's own exe stays.
     let t = TempDir::new("refused");
-    // (No anti-cheat in the game folder: 0.59 refuses mods for an unlisted game that has it.)
+    // (No anti-cheat in the game folder: Turbine refuses mods for an unlisted game that has it.)
     let g = game_at(&t.0, "Brass Pier", "BrassPier", "3999902", &["Data/", "BrassPier.exe"]);
     let zip = t.0.join("dl/Overwrite 1.0.zip");
     write_zip(&zip, &[("BrassPier.exe", "mod exe"), ("steam_api64.dll", "x"), ("EasyAntiCheat/eac.cfg", "y"), ("Data/new.txt", "new")]);
@@ -394,7 +394,7 @@ fn folder_lists_for_the_page() {
     assert!(tree.contains("{\"path\":\"\",\"files\":3}") && tree.contains("{\"path\":\"M\",\"files\":2}"), "{tree}");
 }
 
-// Break test of 0.56 (B1, M1, M2, M4, L6): each reproduces what the tester found.
+// Edge cases: each reproduces a real failure.
 
 #[test]
 fn fomod_in_a_basic_game_gets_placement_and_protections() {
@@ -541,7 +541,7 @@ fn import_zip_never_drops_an_ask_mod_in_the_exe_folder() {
 
 #[test]
 fn a_player_data_file_cannot_turn_protections_off() {
-    // Break test M3: a player's file says "bethesda", so Turbine's Basic detection isn't used. Its mods still
+    // A player's file says "bethesda", so Turbine's Basic detection isn't used. Its mods still
     // may not replace the game's files or place a refused file.
     let t = TempDir::new("custom-kind");
     let files_dir = t.0.join("games");
@@ -558,7 +558,7 @@ fn a_player_data_file_cannot_turn_protections_off() {
     assert_eq!(fs::read_to_string(g.install_dir.join("Data/brass.ini")).unwrap(), "game file Data/brass.ini");
     assert!(!g.install_dir.join("Data/steam_api64.dll").exists());
     assert!(g.install_dir.join("Data/new.esp").exists(), "{r:?}");
-    // Second break test N3: the player sees what was left out and can let this mod replace it.
+    // The player sees what was left out and can let this mod replace it.
     assert!(s.guarded_json().contains("Data/brass.ini"), "{}", s.guarded_json());
     s.set_replace(&id, true).unwrap();
     s.apply().unwrap();
@@ -574,7 +574,7 @@ fn a_player_data_file_cannot_turn_protections_off() {
 
 #[test]
 fn moving_a_mod_out_of_a_non_ascii_folder_keeps_its_paths() {
-    // Break test L1: "İ" lowercases to a longer string; paths are compared by parts.
+    // "İ" lowercases to a longer string; paths are compared by parts.
     let t = TempDir::new("move-utf");
     let g = game_at(&t.0, "Odd Game", "Odd", "3999911", &["Odd.exe", "İtems/", "B/"]);
     let zip = t.0.join("dl/Mover 1.0.zip");
@@ -591,7 +591,7 @@ fn moving_a_mod_out_of_a_non_ascii_folder_keeps_its_paths() {
 
 #[test]
 fn a_swap_cut_off_halfway_is_put_back_on_open() {
-    // Break test L2: the power goes out between the two renames of a mod's folder.
+    // The power goes out between the two renames of a mod's folder.
     let t = TempDir::new("swap-crash");
     let g = game_at(&t.0, "Odd Game", "Odd", "3999911", &["Odd.exe", "A/"]);
     let zip = t.0.join("dl/Mover 1.0.zip");
@@ -612,7 +612,7 @@ fn a_swap_cut_off_halfway_is_put_back_on_open() {
     assert_eq!(fs::read_to_string(s.root().join("mods").join(&id).join("A/x/one.bin")).unwrap(), "1");
 }
 
-/// 0.59 (I4): a game Turbine has no data file for, with anti-cheat in its folder, gets no mods at all.
+/// A game Turbine has no data file for, with anti-cheat in its folder, gets no mods at all.
 #[test]
 fn unlisted_anti_cheat_game_refuses_mods() {
     let t = TempDir::new("unlisted-ac");

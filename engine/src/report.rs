@@ -1,4 +1,4 @@
-//! 0.58: Settings > Report a problem. A plain text file the player can send: the recent activity log, Turbine's
+//! Settings > Report a problem. A plain text file the player can send: the recent activity log, Turbine's
 //! version, its settings, the screen size and each game with how Turbine plays it. Nothing secret goes in: any value
 //! after a word like key, token, cookie, password or authorization is replaced, and so is anything that looks like a
 //! long secret (a Nexus key, a session id).
@@ -76,7 +76,7 @@ pub struct ProblemReport {
     /// One line per game: "Name (store:id): how Turbine plays it".
     pub games: Vec<String>,
     pub log: Vec<String>,
-    /// 0.59: the Steam launch logs (`anticheat::launch_report_lines`): the helper's log, me3's output and own log,
+    /// The Steam launch logs (`anticheat::launch_report_lines`): the helper's log, me3's output and own log,
     /// Proton's log.
     pub launch: Vec<String>,
 }
@@ -117,7 +117,7 @@ pub fn file_name(stamp: &str) -> String {
     format!("Turbine-report-{stamp}.txt")
 }
 
-// ---- A quieter activity log (0.62) ----
+// ---- A quieter activity log ----
 
 /// The Nexus game answers after a scan as one line. `lines` are the per-game lines ("Nexus game for <name>:
 /// <domain> (<how>)", "...: ask (n candidates)", "...: not on Nexus (your pick)"); any other line passes through
@@ -179,41 +179,6 @@ impl LogOnce {
         self.last.insert(key.to_string(), text.to_string());
         true
     }
-}
-
-/// The crash log without the entries that were never crashes: before 0.6 every Game Mode exit (the display going
-/// away) left "The last run ended without closing" and often Qt's "no Qt platform plugin could be initialized".
-/// A "without closing" line stays when the line above it is a real error (a panic or another Qt error): then it
-/// belongs to a crash. Answers the cleaned text and how many lines went.
-pub fn clean_crash_log(text: &str) -> (String, usize) {
-    let display_gone = |l: &str| l.contains("no Qt platform plugin could be initialized");
-    let unclosed = |l: &str| l.contains("The last run ended without closing");
-    let mut kept: Vec<&str> = Vec::new();
-    let mut gone = 0;
-    let mut real_error_above = false;
-    for l in text.lines() {
-        if display_gone(l) {
-            gone += 1;
-            real_error_above = false;
-        } else if unclosed(l) {
-            if real_error_above {
-                kept.push(l);
-            } else {
-                gone += 1;
-            }
-            real_error_above = false;
-        } else {
-            if !l.trim().is_empty() {
-                real_error_above = true;
-            }
-            kept.push(l);
-        }
-    }
-    let mut out = kept.join("\n");
-    if !out.is_empty() {
-        out.push('\n');
-    }
-    (out, gone)
 }
 
 #[cfg(test)]
@@ -288,20 +253,5 @@ mod tests {
         assert!(once.changed("814380", "if [ -x ... ]"), "another game");
         assert!(once.changed("1245620", ""), "the player cleared them");
         assert!(!once.changed("1245620", ""));
-    }
-
-    #[test]
-    fn old_game_mode_exits_leave_the_crash_log() {
-        let log = "2026-11-06 17:43:05.976 The last run ended without closing (a crash, or it was stopped).\n\
-2026-11-07 10:01:07.131 Qt fatal: This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.\n\
-2026-11-07 10:01:20.168 The last run ended without closing (a crash, or it was stopped).\n\
-2026-11-08 09:00:00.000 panic in thread main at app/src/x.rs:1: index out of bounds\n\
-2026-11-08 09:00:05.000 The last run ended without closing (a crash, or it was stopped).\n\
-2026-11-09 17:14:14.402 The last run ended without closing (a crash, or it was stopped).\n";
-        let (clean, gone) = clean_crash_log(log);
-        assert_eq!(gone, 4);
-        assert_eq!(clean, "2026-11-08 09:00:00.000 panic in thread main at app/src/x.rs:1: index out of bounds\n2026-11-08 09:00:05.000 The last run ended without closing (a crash, or it was stopped).\n");
-        assert_eq!(clean_crash_log(&clean), (clean.clone(), 0), "a second pass changes nothing");
-        assert_eq!(clean_crash_log(""), (String::new(), 0));
     }
 }

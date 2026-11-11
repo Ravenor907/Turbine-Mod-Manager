@@ -17,13 +17,13 @@ def need(text, why):
 need("pnpm install --frozen-lockfile", "the Decky job must install from the committed lockfile")
 if "--no-frozen-lockfile" in wf:
     problems.append("the Decky job may not resolve new package versions")
-# 0.63 (owner): one green full build of the commit, a single named number at the top of the workflow.
+# One green full build of the commit, a single named number at the top of the workflow.
 REQUIRED_GREEN_BUILDS = 1
 need(f"\nenv:\n  REQUIRED_GREEN_BUILDS: {REQUIRED_GREEN_BUILDS}\n", f"the workflow must set REQUIRED_GREEN_BUILDS to {REQUIRED_GREEN_BUILDS} near its top")
 if wf.count("REQUIRED_GREEN_BUILDS:") != 1:
     problems.append("REQUIRED_GREEN_BUILDS must be set in exactly one place")
 need('if [ "$greens" -lt "$REQUIRED_GREEN_BUILDS" ]', "a release needs REQUIRED_GREEN_BUILDS green full builds of its commit")
-# 0.62: an attempt made by "Re-run failed jobs" carries the passed jobs over; it is not a green run of everything.
+# An attempt made by "Re-run failed jobs" carries the passed jobs over; it is not a green run of everything.
 need('select(.run_attempt != $a)', "only full attempts may count as green builds (not re-runs of the failed jobs alone)")
 if 'carried' in wf and wf.index('[ "$carried" = 0 ] || continue') > wf.index('greens=$((greens + 1))'):
     problems.append("the full-attempt check must come before a green run is counted")
@@ -37,7 +37,7 @@ if "No checksum beside" not in rel or "exit 1" not in rel.split("No checksum bes
     problems.append("a missing checksum must stop the release")
 if "::warning title=No checksum" in rel:
     problems.append("a missing checksum only warns")
-# 0.64: a commit that changes only the paths a push ignores reuses the green build of the commit before it. The walk
+# A commit that changes only the paths a push ignores reuses the green build of the commit before it. The walk
 # back must ignore exactly what the push trigger ignores (and nothing else), and must run before the green runs are
 # counted.
 top = wf[:wf.index("jobs:")]
@@ -51,8 +51,8 @@ elif wf.index(walk) > wf.index("greens=0"):
     problems.append("the walk back over ignored commits must come before the green builds are counted")
 if 'sha="$built"' not in wf:
     problems.append("the release must look for green builds of the commit the walk back found")
-# 0.63: Turbine's own update check reads the checksum file beside the bundle (it no longer asks GitHub's API, whose
-# hourly limit refused it), so the release must publish both checksum files.
+# Turbine's own update check reads the checksum file beside the bundle (not GitHub's API, whose hourly limit
+# can refuse it), so the release must publish both checksum files.
 for f in ("TurbineModManager.flatpak.sha256", "Turbine-Decky.zip.sha256"):
     if ("\n            " + f + "\n") not in rel:
         problems.append(f"the release must publish {f} beside its file: Turbine's updater checks the download against it")
@@ -60,8 +60,8 @@ decky = wf[wf.index("  decky:"):wf.index("  vendor:")]
 if "needs.reuse.outputs.run == ''" not in decky:
     problems.append("the Decky job must not build again for a release that reuses a green run")
 
-# 0.62: the app can't be built everywhere this script runs, and a function declared for the interface with no code
-# behind it only showed in the Flatpak build (olderSeamlessAnswer). Every #[qinvokable] declared in the bridge
+# The app can't be built everywhere this script runs, so a function declared for the interface with no code behind
+# it would only show in the Flatpak build. Every #[qinvokable] declared in the bridge
 # (app/src/backend.rs) needs a function of the same name with a body somewhere in app/src, taking the same number of
 # arguments and the same kind of self.
 

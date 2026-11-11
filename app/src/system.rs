@@ -92,7 +92,7 @@ pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
     use std::ffi::CString;
     use std::os::raw::{c_char, c_int};
     use std::os::unix::ffi::OsStrExt;
-    extern "C" {
+    unsafe extern "C" {
         // glibc's statvfs. On 64-bit Linux its struct starts with f_bsize, f_frsize, f_blocks, f_bfree, f_bavail,
         // all 64-bit; the buffer below is larger than the whole struct (112 bytes).
         fn statvfs(path: *const c_char, buf: *mut u64) -> c_int;
@@ -162,7 +162,7 @@ pub fn set_nxm_handler() -> Result<(), String> {
     r
 }
 
-/// 0.6: where the Steam menu plugin (decky/) is downloaded from: always the newest release's.
+/// Where the Steam menu plugin (decky/) is downloaded from: always the newest release's.
 pub const DECKY_PLUGIN_URL: &str = "https://github.com/Ravenor907/Turbine-Mod-Manager/releases/latest/download/Turbine-Decky.zip";
 
 /// Is there a file or folder at this path on the host (`test -e`, fixed arguments)? None when it can't be asked.
@@ -177,13 +177,13 @@ fn host_has_plugin(plugins: &std::path::Path) -> Option<bool> {
     answer(host("grep").args(["-r", "-l", "-s", "-F", "--include=package.json", "\"name\": \"turbine-decky\"", "--"]).arg(plugins), &[2])
 }
 
-/// 0.62: is Turbine's Steam menu plugin installed in Decky (for the Co-op tile, which the plugin adds with Steam's
+/// Is Turbine's Steam menu plugin installed in Decky (for the Co-op tile, which the plugin adds with Steam's
 /// own call)? Read only.
 pub fn decky_plugin_installed() -> bool {
     host_has_plugin(&turbine_engine::home_dir().join("homebrew/plugins")) == Some(true)
 }
 
-/// 0.6, Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
+/// Settings > Help > Steam menu plugin: is Decky Loader on this device, and Turbine's plugin in it?
 /// {"checked":true,"decky":true|false|null,"plugin":bool,"url"}. Read only.
 pub fn decky_json() -> String {
     use turbine_engine::json::quote;

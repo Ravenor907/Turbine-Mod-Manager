@@ -1,4 +1,4 @@
-//! Mods for any game (0.56): Basic support's "Where do these files go?" page and the question about files the game
+//! Mods for any game: Basic support's "Where do these files go?" page and the question about files the game
 //! already has, the Nexus game of games without one in their data file ("Which game on Nexus is this?"), the
 //! player's own game files, and anti-cheat. The engine decides (basic.rs, nexus_games.rs); this hands it to QML.
 
@@ -54,7 +54,7 @@ pub(crate) fn anti_cheat(slot: &Slot) -> Option<rules::AntiCheat> {
 
 /// The line for Before you play while any mod is on in a game with anti-cheat.
 pub(crate) fn anti_cheat_check(slot: &Slot) -> Option<rules::Check> {
-    // 0.57: a data file that says how to play it with mods has its own lines (anticheat.rs).
+    // A data file that says how to play it with mods has its own lines (anticheat.rs).
     if crate::anticheat::special(slot).is_some() {
         return None;
     }
@@ -221,7 +221,7 @@ impl qobject::Turbine {
         self.as_mut().net_send(
             "Nexus games",
             Box::new(move |net: &mut Net, qt: &Qt| {
-                // 0.62: one line for all the games' Nexus pages (the ones to ask about are named in it).
+                // One line for all the games' Nexus pages (the ones to ask about are named in it).
                 let lines = resolve(net, &games);
                 // The build's checks (a recorded game list) read each game's own line.
                 if std::env::var_os(nexus_games::FIXTURE_ENV).is_some() {
@@ -360,10 +360,8 @@ impl qobject::Turbine {
             "Replace the game's files or not",
             false,
             Box::new(move |w: &mut Worker| {
-                if let Ok(s) = w.slot(&game) {
-                    if let Err(e) = s.store.set_replace(&id, replace) {
-                        w.say(e.to_string(), "error");
-                    }
+                if let Ok(s) = w.slot(&game) && let Err(e) = s.store.set_replace(&id, replace) {
+                    w.say(e.to_string(), "error");
                 }
                 w.show(&game, true);
             }),

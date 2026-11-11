@@ -181,7 +181,7 @@ pub struct AntiCheat {
     /// "warn" (Play anyway allowed), "stop", or "refuse" (online only: no mods at all).
     pub level: String,
     pub note: String,
-    /// 0.57: "warn", "me3", "official", "offline" or "refuse" (see gamedata::AntiCheatFile). Empty is "warn".
+    /// "warn", "me3", "official", "offline" or "refuse" (see gamedata::AntiCheatFile). Empty is "warn".
     pub mode: String,
     pub starter: Option<String>,
     pub game_exe: Option<String>,
@@ -309,7 +309,7 @@ pub fn name_key(name: &str) -> String {
     name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
-/// 0.58: an online-only anti-cheat game owned somewhere else (Epic or GOG through Heroic) that the data files know
+/// An online-only anti-cheat game owned somewhere else (Epic or GOG through Heroic) that the data files know
 /// by its Steam id only: matched by its name, so it is refused the same way.
 pub fn refused_by_name(game_name: &str) -> Option<&'static GameDef> {
     let key = name_key(game_name);
@@ -371,7 +371,7 @@ impl GameRules {
                 launch_help: None,
                 family: Family::Standard,
                 support_level: Support::Basic,
-                // 0.59 (I4): anti-cheat found in a game Turbine has no data file for means no mods at all, the same
+                // Anti-cheat found in a game Turbine has no data file for means no mods at all, the same
                 // as the listed online-only games (a data file can allow one later, after research).
                 anti_cheat: crate::basic::GameIndex::cached(&game.install_dir).anti_cheat().map(|name| AntiCheat {
                     name: name.into(),
@@ -521,10 +521,8 @@ pub fn mod_folders(files: &[String]) -> Vec<String> {
     for f in files {
         let clean = f.replace('\\', "/");
         let mut parts = clean.trim_start_matches('/').split('/');
-        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) {
-            if top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
-                out.push(folder.to_string());
-            }
+        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) && top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
+            out.push(folder.to_string());
         }
     }
     out
@@ -733,10 +731,8 @@ fn map_bethesda(entries: &[Entry], data_root: &str, swap: Option<&(String, Strin
         } else if is_game_folder_item(e) || ((has_data_folder || has_top_binary) && e.is_top_file() && ext(&lc) == "ini") {
             out.push((e.src.clone(), e.rest(0)));
             // The script extender's loader also goes in as the launcher Steam starts.
-            if let Some((loader, launcher)) = swap {
-                if e.is_top_file() && lc.eq_ignore_ascii_case(loader) {
-                    out.push((e.src.clone(), launcher.clone()));
-                }
+            if let Some((loader, launcher)) = swap && e.is_top_file() && lc.eq_ignore_ascii_case(loader) {
+                out.push((e.src.clone(), launcher.clone()));
             }
         } else if has_fomod && !is_data_item(e) {
             // Option folders of an installer: chosen in the installer, not installed by default.
@@ -785,10 +781,8 @@ fn map_skse(entries: &[Entry], data_root: &str, swap: bool) -> Option<Vec<(Strin
     }
     if swap {
         for hook in &plan.hooks {
-            if let crate::loaders::Hook::LauncherSwap { original, replacement } = hook {
-                if let Some((src, _)) = out.iter().find(|(_, d)| d.eq_ignore_ascii_case(replacement)).cloned() {
-                    out.push((src, original.clone()));
-                }
+            if let crate::loaders::Hook::LauncherSwap { original, replacement } = hook && let Some((src, _)) = out.iter().find(|(_, d)| d.eq_ignore_ascii_case(replacement)).cloned() {
+                out.push((src, original.clone()));
             }
         }
     }
@@ -1265,10 +1259,8 @@ pub fn pre_play(game: &Game, rules: &GameRules, last_build: Option<&str>, needs_
     let fs = fs_type_for(&mounts, &dir.to_string_lossy());
     let loader_ok = rules.loader.is_none() || rules.loader_installed(game);
     let mut checks = pre_play_with(game, rules, last_build, needs_loader, free_bytes, fs.as_deref(), loader_ok);
-    if rules.plugins {
-        if let Ok(order) = plugins::LoadOrder::read(game) {
-            add_checks(&mut checks, master_checks(&order.missing_masters()));
-        }
+    if rules.plugins && let Ok(order) = plugins::LoadOrder::read(game) {
+        add_checks(&mut checks, master_checks(&order.missing_masters()));
     }
     checks
 }
@@ -1325,7 +1317,7 @@ pub struct ModFiles {
     pub files: Vec<String>,
 }
 
-/// 0.58, the game update warning: does this mod hook into the game's program (code that a game update usually
+/// The game update warning: does this mod hook into the game's program (code that a game update usually
 /// breaks until its maker updates it)? Programs and libraries (.dll, .asi, .exe, .so), script extender and loader
 /// plugins, and mods that need the script loader. Plain data (textures, meshes, .esp) usually keeps working.
 pub fn may_break_on_update(files: &[String], needs_loader: bool) -> bool {
@@ -1400,11 +1392,9 @@ pub fn present_files(game: &Game, rules: &GameRules) -> Vec<String> {
     let mut out = Vec::new();
     for want in rules.files_to_look_for() {
         if let Some(dir) = want.strip_suffix('/') {
-            if let Some(found) = find_ci(&game.install_dir, dir) {
-                if let Ok(rd) = std::fs::read_dir(found) {
-                    for e in rd.flatten() {
-                        out.push(format!("{dir}/{}", e.file_name().to_string_lossy()));
-                    }
+            if let Some(found) = find_ci(&game.install_dir, dir) && let Ok(rd) = std::fs::read_dir(found) {
+                for e in rd.flatten() {
+                    out.push(format!("{dir}/{}", e.file_name().to_string_lossy()));
                 }
             }
         } else if find_ci(&game.install_dir, &want).is_some() {
@@ -1476,71 +1466,65 @@ pub fn pre_play_with(
     let check = |level: &str, title: String, detail: String| Check { level: level.into(), title, detail };
     let mut checks = Vec::new();
 
-    if let (Some(now), Some(then)) = (game.build.as_deref(), last_build) {
-        if now != then {
-            let launcher = game.store.launcher();
-            let title = format!("{launcher} updated this game");
-            if rules.family == Family::Cyberpunk && needs_loader {
-                checks.push(check(
-                    "warn",
-                    title,
-                    format!(
-                        "{} changed since your mods were last set up. Cyber Engine Tweaks and RED4ext (and the mods \
-                         built on them) usually stop working after a game update until their makers release new \
-                         versions. If the game crashes at start or mods are missing, update them, or use Play \
-                         without mods: it starts the game clean.",
-                        game.name
-                    ),
-                ));
-            } else if rules.kind == Kind::Bethesda && needs_loader {
-                let loader = rules.loader.as_ref().map(|l| l.name.as_str()).unwrap_or("The script loader");
-                checks.push(check(
-                    "stop",
-                    title,
-                    format!(
-                        "{} changed since your mods were last set up. {loader} and the mods that use it usually stop \
-                         working after a game update until their makers release new versions. Play without mods is \
-                         safe: it starts the game clean.",
-                        game.name
-                    ),
-                ));
-            } else {
-                checks.push(check(
-                    "warn",
-                    title,
-                    format!(
-                        "{} changed since your mods were last set up. Some mods may not work until they are updated. \
-                         Play without mods is safe: it starts the game clean.",
-                        game.name
-                    ),
-                ));
-            }
-        }
-    }
-
-    if needs_loader && !loader_ok {
-        if let Some(l) = &rules.loader {
-            let level = if matches!(rules.kind, Kind::Bethesda | Kind::Smapi) { "stop" } else { "warn" };
-            checks.push(check(
-                level,
-                format!("{} is not installed", l.name),
-                format!("Some of your mods need it. {} Get it from {}", l.explain, l.source),
-            ));
-        }
-    }
-
-    if let Some(free) = free_bytes {
-        if free < LOW_SPACE {
+    if let (Some(now), Some(then)) = (game.build.as_deref(), last_build) && now != then {
+        let launcher = game.store.launcher();
+        let title = format!("{launcher} updated this game");
+        if rules.family == Family::Cyberpunk && needs_loader {
             checks.push(check(
                 "warn",
-                "Low space on the game's drive".into(),
+                title,
                 format!(
-                    "Only {} MB is free. The game may fail to save or update. Free some space: Steam's Settings, \
-                     Storage shows what uses it.",
-                    free / (1024 * 1024)
+                    "{} changed since your mods were last set up. Cyber Engine Tweaks and RED4ext (and the mods \
+                     built on them) usually stop working after a game update until their makers release new \
+                     versions. If the game crashes at start or mods are missing, update them, or use Play \
+                     without mods: it starts the game clean.",
+                    game.name
+                ),
+            ));
+        } else if rules.kind == Kind::Bethesda && needs_loader {
+            let loader = rules.loader.as_ref().map(|l| l.name.as_str()).unwrap_or("The script loader");
+            checks.push(check(
+                "stop",
+                title,
+                format!(
+                    "{} changed since your mods were last set up. {loader} and the mods that use it usually stop \
+                     working after a game update until their makers release new versions. Play without mods is \
+                     safe: it starts the game clean.",
+                    game.name
+                ),
+            ));
+        } else {
+            checks.push(check(
+                "warn",
+                title,
+                format!(
+                    "{} changed since your mods were last set up. Some mods may not work until they are updated. \
+                     Play without mods is safe: it starts the game clean.",
+                    game.name
                 ),
             ));
         }
+    }
+
+    if needs_loader && !loader_ok && let Some(l) = &rules.loader {
+        let level = if matches!(rules.kind, Kind::Bethesda | Kind::Smapi) { "stop" } else { "warn" };
+        checks.push(check(
+            level,
+            format!("{} is not installed", l.name),
+            format!("Some of your mods need it. {} Get it from {}", l.explain, l.source),
+        ));
+    }
+
+    if let Some(free) = free_bytes && free < LOW_SPACE {
+        checks.push(check(
+            "warn",
+            "Low space on the game's drive".into(),
+            format!(
+                "Only {} MB is free. The game may fail to save or update. Free some space: Steam's Settings, \
+                 Storage shows what uses it.",
+                free / (1024 * 1024)
+            ),
+        ));
     }
 
     if fs_type.is_some_and(is_exfat_type) {

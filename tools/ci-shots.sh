@@ -5,7 +5,7 @@
 # pictures (printed into the log as "SHOT <name> <base64>" too) and fails on any check that fails.
 set -eo pipefail
 MODE=${1:?"tools/ci-shots.sh 1280x800|1920x1080|x11|nexus [shard shards]"}
-# 0.6: the pictures of one size split over parallel jobs: this job takes its share (shard of shards). Each picture
+# The pictures of one size split over parallel jobs: this job takes its share (shard of shards). Each picture
 # goes to a shard by a guess of its run time from its kind, the longest first onto the least loaded shard, the same
 # way in every job; checks only read pictures their own shard took.
 SHARD=${2:-0}
@@ -54,7 +54,7 @@ guess() {   # seconds a picture takes, by its kind
   case "$1" in
     inputcheck*) echo 70 ;;
     browsertest*|browserpersist*|regress*) echo 200 ;;
-    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|inlinebrowser*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*|protoncheck*|reqcheck*) echo 28 ;;
+    controls*|legendcheck*|sheetcheck*|presscount*|nexusguard*|sizeinputs*|coopcheck*|editbutton*|heldcheck*|mmdguard*|passthrough*|golden*|abcheck*|barbuttons*|findfrom*|menufit*|startcheck*|bookcheck*|bookfull*|cooppw*|keycheck*|tilecheck*|oldercheck*|protoncheck*|reqcheck*) echo 28 ;;
     findpop*|fullscroll*|listbar*|ac*|modsettings*|coopsettings*|gameupdate*|ersaves*) echo 19 ;;
     loot*|nxm*|getmodsback*) echo 13 ;;
     *) echo 9 ;;
@@ -126,14 +126,14 @@ for size in $SIZES; do
   shoot "loader-$size" "$size" loader "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   # Labs mode and Seasonal (neither is saved from a picture).
   for page in about labs perfcheck; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
-  # 0.54: Labs > Activity log (after a game page's worth of lines).
+  # Labs > Activity log (after a game page's worth of lines).
   shoot "activity-$size" "$size" activity "$PWD/home" --game=$skyrim
-  need "activity-$size" "0.58: A on Settings, Labs, Activity log opens it ($size)" "Activity log sheet open after A on its Settings row: true"
-  need "activity-$size" "0.58: every Settings action row has an action ($size)" "Settings rows check: [0-9]+ action rows, 0 without an action"
+  need "activity-$size" "A on Settings, Labs, Activity log opens it ($size)" "Activity log sheet open after A on its Settings row: true"
+  need "activity-$size" "Every Settings action row has an action ($size)" "Settings rows check: [0-9]+ action rows, 0 without an action"
   shoot "report-$size" "$size" report "$PWD/home" --game=$skyrim
   shoot "autumn-$size" "$size" mods "$PWD/home" --game=steam:892970 --season=autumn "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
   shoot "snow-$size" "$size" settings "$PWD/home" --season=snow
-  # 0.3: Get Mods, details, installer choices, load order, profiles, accounts, updates.
+  # Get Mods, details, installer choices, load order, profiles, accounts, updates.
   lethal=steam:1966720
   shoot "browse-$size" "$size" browse "$PWD/home" --game=$lethal
   shoot "moddetails-$size" "$size" moddetails "$PWD/home" --game=$lethal
@@ -159,9 +159,9 @@ for size in $SIZES; do
     "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip|thunderstore|TurbineTest-Bigger_Pockets|1.0.3"
   # The browser: Settings > Accounts > Browser, the no-browser warning, the helper's steps, the status card.
   for page in browser nobrowser helper overlay overlaygm addbrowser; do shoot "$page-$size" "$size" $page "$PWD/home"; done
-  # 0.55: Settings, Getting mods in Game Mode (Steam's Game Mode is what SteamGamepadUI=1 says).
+  # Settings, Getting mods in Game Mode (Steam's Game Mode is what SteamGamepadUI=1 says).
   SHOOT_ENV="--env=SteamGamepadUI=1" shoot "accountsgm-$size" "$size" accountsgm "$PWD/home"
-  need "accountsgm-$size" "R5: Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, (keyFold|pasteKey, keyPage, nexusKey, keyWhat, signOut)$"
+  need "accountsgm-$size" "Game Mode's Getting mods: signed in or not first, page size, faster downloads; no own-browser rows ($size)" "Getting mods rows \(Game Mode true\): nexusSign, zoom, (keyFold|pasteKey, keyPage, nexusKey, keyWhat, signOut)$"
   if grep -Eq "Getting mods rows \(Game Mode true\):.*(, helper|, nxmHandler|, overlay|, browser(,|$))" "$PWD/data/accountsgm-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     echo "::error title=10: own-browser rows aren't folded in Game Mode ($size)::10: own-browser rows aren't folded in Game Mode ($size)"; fail=1; fi
   # Cyberpunk 2077 and The Witcher 3: their mods and the check before Play; install notes after adding.
@@ -169,7 +169,7 @@ for size in $SIZES; do
   w3=steam:292030
   shoot "mods-cyberpunk-$size" "$size" mods "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
   shoot "check-cyberpunk-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
-  # 0.64: Cyber Engine Tweaks on, and the Proton setup has only the 2019 runtime: Before you play offers the install.
+  # Cyber Engine Tweaks on, and the Proton setup has only the 2019 runtime: Before you play offers the install.
   shoot "vccheck-$size" "$size" check "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Cyber Engine Tweaks 1.35.zip"
   need "vccheck-$size" "Visual C++ runtime: found missing ($size)" "Visual C\+\+ runtime: This game's Proton setup has an older Visual C\+\+ runtime \(14\.29\.30153\)"
   need "vccheck-$size" "Visual C++ runtime: offered first ($size)" "Check before Play buttons: Install the Visual C\+\+ runtime; Play anyway"
@@ -177,7 +177,7 @@ for size in $SIZES; do
   shoot "checkend-cyberpunk-$size" "$size" checkend "$PWD/home" --game=$cp2077 "--selftest-import=$dl/Quiet Streets CET 1.0.zip,$dl/Neon Signs REDmod 1.1.zip"
   shoot "check-witcher-$size" "$size" check "$PWD/home" --game=$w3 "--selftest-import=$dl/Better Torches 1.0.zip,$dl/Faster Roach 2.0.zip"
   shoot "notes-witcher-$size" "$size" mods "$PWD/home" --game=$w3 "--selftest-import=$dl/Faster Roach 2.0.zip"
-  # 0.51: Kingdom Come: Deliverance I and II (a mod folder, a bare pak; a mod named for the other game).
+  # Kingdom Come: Deliverance I and II (a mod folder, a bare pak; a mod named for the other game).
   fresh "kcd-$size"; h="$PWD/fh/kcd-$size"
   shoot "mods-kcd1-$size" "$size" mods "$h" --game=steam:379430 "--selftest-import=$h/Downloads/Better Lockpicking 1.0.zip,$h/Downloads/Unlimited Saving 3.0.zip"
   shoot "mods-kcd2-$size" "$size" mods "$h" --game=steam:1771300 "--selftest-import=$h/Downloads/Herb Picking II 1.5.zip,$h/Downloads/Fast Travel KCD1 2.0.zip"
@@ -191,7 +191,7 @@ for size in $SIZES; do
   shoot "caught-$size" "$size" caught "$PWD/home" --game=$cp2077
   shoot "caughtgm-$size" "$size" caughtgm "$PWD/home" --game=$cp2077
   shoot "nexusnokey-$size" "$size" nexusnokey "$PWD/home" --game=$skyrim
-  # 0.5: Get mods without a key (grid, the fallback, a mod page free and Premium, back to the same search),
+  # Get mods without a key (grid, the fallback, a mod page free and Premium, back to the same search),
   # a game with no mods, Removed mods, a new mod arriving, opening Nexus, the rail, Look and the waiting pill.
   # Each of these gets its own copy of the home (the mod store sits in the game's library).
   fresh "getmods-$size"; h="$PWD/fh/getmods-$size"
@@ -211,27 +211,24 @@ for size in $SIZES; do
   fresh "newmod-$size"; h="$PWD/fh/newmod-$size"
   shoot "newmod-$size" "$size" newmod "$h" --game=$w3 "--selftest-import=$h/Downloads/All Quest Objectives On Map-5-1-0-5-1699999999.zip"
   shoot "opening-$size" "$size" opening "$PWD/home" --game=$w3
-  shoot "opening8s-$size" "$size" opening8s "$PWD/home" --game=$w3
   shoot "slowhint-$size" "$size" slowhint "$PWD/home" --game=$w3
   shoot "rail-$size" "$size" rail "$PWD/home" --game=$skyrim
   shoot "tvhidden-$size" "$size" tvhidden "$PWD/home"
   shoot "overlaywait-$size" "$size" overlaywait "$PWD/home"
-  # 0.54 controls: the beginner tutorial's cards (five from 0.64), the quick wheel (Up then Right: Sort), a removed mod
-  # dimmed in its row, the rail's quick menu, and the browser buttons under a mod page's button.
+  # The controls: the beginner tutorial's five cards, the quick wheel (Up then Right: Sort), a removed mod dimmed in
+  # its row, and the rail's quick menu.
   for n in 1 2 3 4 5; do shoot "tutorial$n-$size" "$size" "tutorial$n" "$PWD/home"; done
   for p in wheel ghost; do
     fresh "$p-$size"; h="$PWD/fh/$p-$size"
     shoot "$p-$size" "$size" $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
   done
   shoot "railmenu-$size" "$size" railmenu "$PWD/home" --game=$skyrim
-  # 0.55: the Nexus page's frame over a mod page (the page itself is drawn in the X11 run below).
+  # The Nexus page's frame over a mod page (the page itself is drawn in the X11 run below).
   fresh "browserframe-$size"; h="$PWD/fh/browserframe-$size"
   shoot "browserframe-$size" "$size" browserframe "$h" --game=$skyrim
-  fresh "inlinebrowser-$size"; h="$PWD/fh/inlinebrowser-$size"
-  shoot "inlinebrowser-$size" "$size" inlinebrowser "$h" --game=$w3 "--selftest-import=$h/Downloads/Better Torches 1.0.zip|nexus|witcher3:2109:1|1.0"
 done
 if [ "$MODE" = 1280x800 ]; then
-# 0.54 controls, the acceptance checks: pad presses through the same path a controller's take.
+# The controls, the acceptance checks: pad presses through the same path a controller's take.
 # A new home for each (not a copy of the shared one, whose mods earlier pictures turned on and off): both mods start on.
 for p in controls legendcheck sheetcheck inputcheck startcheck keycheck reqcheck; do
   rm -rf "$PWD/fh/$p"; python3 tools/fake-home.py "$PWD/fh/$p" > /dev/null; h="$PWD/fh/$p"
@@ -261,16 +258,15 @@ need $c "Quick wheel: View let go with nothing picked closes" 'Wheel held, nothi
 need $c "Quick wheel: a click on the middle closes" "Wheel middle clicked: it was open, now closed"
 need $c "Uninstall keeps the row" "Uninstall: row 1 is ghost"
 need $c "Put back" "Put back: .* is back"
-# 5: no sheet opened without a press (in the scripted pages and when Nexus is slow to show).
-for p in controls-1280x800 presscount-1280x800 nexusguard-1280x800 opening8s-1280x800; do
+# 5: no sheet opened without a press in the scripted pages.
+for p in controls-1280x800 presscount-1280x800 nexusguard-1280x800; do
   hits=$(grep -h "opened with no press" "$PWD/data/$p/turbine-mod-manager/activity.log" 2>/dev/null || true)
   if [ -n "$hits" ]; then echo "::error title=5: a sheet opened with no press ($p)::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
 done
-need opening8s-1280x800 "No sheet when Nexus is slow" "Still in front 8 seconds after Open: Open in Steam's browser and Always use Steam's browser are under the button"
 need nexusguard-1280x800 "3: three A presses, one browser" "Nexus guard: 3 presses of A, 1 browser launch,"
 need legendcheck-1280x800 "4: the legend is binds()" "Legend check: [0-9]+ contexts, 0 problems"
 need sheetcheck-1280x800 "6: A highlighted, B cancel, Start nothing" "Sheet rule: [0-9]+ sheets, 0 problems"
-# 0.62: Start. A tap is Settings and back, a hold let go early is nothing, 3 seconds is the Play choice (or Play, by
+# Start. A tap is Settings and back, a hold let go early is nothing, 3 seconds is the Play choice (or Play, by
 # the setting), A on Play plays, Ctrl+Enter is the hold, a menu's Start never plays, the bar's hint is a button.
 s=startcheck-1280x800
 need $s "Start: a tap opens Settings" "Start check: a tap opens Settings, legend .*START Close$"
@@ -287,7 +283,7 @@ need $s "Start: never plays from a menu" "Start check: Start on the mod menu: sh
 need $s "Start: the bar's hint is a 44 px button" "Start check: a click on the Start hint \(([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px tall\): Settings$"
 need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck, .* 0 problems \| .*start, wheel, Play"
 need $s "Start checks" "Start check done: 0 problems"
-# 0.62: the keyboard and the mouse drive every screen, and the bar's hints follow the last input used.
+# The keyboard and the mouse drive every screen, and the bar's hints follow the last input used.
 y=reqcheck-1280x800
 need $y "Requirements: one sheet after the add, Get them all" "Requirements check: after the add: This mod needs 2 others \| Get them all; Later"
 need $y "Requirements: Get them all lines them up and turns the installed one on" "Requirements check: Get them all: Getting 1 of 1: Test Library, the installed one turned on$"
@@ -338,11 +334,11 @@ need $y "The bar with the keyboard's names: nothing overlaps" "Bar check \(keych
 need $y "One sign-in status" "Key check: sign-in status: Settings says Nexus Mods: (Signed in, Turbine's browser is signed in|Not signed in, Turbine's browser is not signed in)$"
 need $y "Get Seamless Co-op: Nexus first when signed in, Turbine's own download otherwise" "Seamless Co-op plan: not signed in on Nexus: github; signed in: nexus \\(mod 510 of eldenring\\)"
 need $y "Key and mouse checks" "Key check done: 0 problems"
-# 0.62: Desktop Mode with no controller is normal: a line in the log, never a toast or a line in Settings.
+# Desktop Mode with no controller is normal: a line in the log, never a toast or a line in Settings.
 need $y "No controller in Desktop Mode: logged, nothing shown" "No controller in Desktop Mode: (logged once, no toast|a controller is seen, no toast)"
 hits=$(grep -n -E "No controller reaches Turbine|padHelp" app/qml/*.qml || true)
 if [ -n "$hits" ]; then echo "::error title=The no controller message is back::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
-# 0.62: Get mods as a page of a book: no game list, the page edges, Left and Right at the ends of a row, LB and RB,
+# Get mods as a page of a book: no game list, the page edges, Left and Right at the ends of a row, LB and RB,
 # a held D-pad, clicks on the edges, and the page-turn itself.
 fresh "bookcheck"; h="$PWD/fh/bookcheck"
 shoot "bookcheck-1280x800" 1280x800 bookcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
@@ -362,7 +358,7 @@ need $k "Book: a click on the right edge" "Book check: A click on the right edge
 need $k "Book: the bar on Get mods, nothing overlaps" "Bar check \(bookcheck, .* 0 problems"
 need $k "Book: B is My mods" "Book check: The bar on Get mods: .*B My mods"
 need $k "Book checks (animations off: nothing to wait for)" "Book check done: 0 problems, animations off, 0 page turns shown, 0 glides$"
-# 0.62: the same walk once more with animations at Full: only where things end up is asserted (the same lines), and
+# The same walk once more with animations at Full: only where things end up is asserted (the same lines), and
 # that the page turns and the glides really ran.
 fresh "bookfull"; h="$PWD/fh/bookfull"
 shoot "bookfull-1280x800" 1280x800 bookcheck "$h" --game=$skyrim --motion=full "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip|nexus|skyrimspecialedition:1:1|1.2"
@@ -373,7 +369,7 @@ need $k "Animations at Full: Right turns forward" "Book check: Right from the la
 need $k "Animations at Full: a held D-pad still stops at the edge" "Book check: Left held 1.5 s: card 1, the page stayed$"
 need $k "Animations at Full: the edges still turn the page" "Book check: A click on the right edge: Load order$"
 need $k "Animations at Full: every end state right, and the turns ran" "Book check done: 0 problems, animations full, [1-9][0-9]* page turns shown, [0-9]+ glides$"
-# 0.54 fixes: holds need a real press, a click on a row is A, the removed row, RT and R3, the tutorial, hidden games.
+# Input checks: holds need a real press, a click on a row is A, the removed row, RT and R3, the tutorial, hidden games.
 i=inputcheck-1280x800
 need $i "Holds: a click never deletes" "Hold check: a click on Hold A to delete: only the highlight moved"
 need $i "Holds: R3 never deletes" "Hold check: R3 on Hold A to delete: no hold"
@@ -391,7 +387,7 @@ need $i "A click on a Settings row is A" "Click check: a click on a Settings cho
 need $i "Rows are 44 px or more" "Click check: a mod row is ([4-9][4-9]|[5-9][0-9]|[1-9][0-9][0-9]) px tall"
 need $i "Move with the removed row" "Ghost check: Move with the removed row showing moves .*, the focused mod"
 need $i "A as the removed row goes" "Ghost check: A just as the removed row went: put back, the mod that slid up untouched"
-need $i "Tutorial waits" "Tutorial check: after the tutorial: sheet \"oldhelper\""
+need $i "Tutorial waits" "Tutorial check: after the tutorial: sheet \"notes\""
 need $i "Show hidden games" "Hidden check: every game hidden, the rail shows Show hidden games"
 need $i "Press twice: no repeat toast" "Press twice check: first A on Delete for good: the button says it, no toast"
 need $i "Add from Downloads: Y is Find" "Find check: Add from Downloads Y Find \(This game's files, All files\), All files showing"
@@ -402,14 +398,11 @@ need $i "Y is Find under a toast" "Toast check: Y with Undo showing: Find opened
 need $i "R3 undoes" "Toast check: R3 with Undo showing: [1-9][0-9]* mods? back on of [1-9]"
 need $i "Input checks" "Input check: 0 problems"
 fi
-for size in $SIZES; do
-  need inlinebrowser-$size "No inline browser buttons: Nexus opens in Turbine ($size)" "Inline browser buttons: none \(Nexus open in Turbine\), sheet \"\""
-done
 if [ "$MODE" = 1280x800 ]; then
 need presscount-1280x800 "Presses to a mod and Play" "Presses from the rail to a mod added and Play: "
 fi
 if [ "$MODE" = x11 ]; then
-# 10. The 0.54 regression: a helper report with no finish, a refused finish, and the Slow download hint.
+# 10. Helper reports and the Slow download hint: a helper report with no finish, a refused finish, and the hint.
 fresh "regress"; h="$PWD/fh/regress"
 timeout 90 dbus-run-session -- flatpak run --env=QT_QPA_PLATFORM=offscreen --env=QT_QUICK_BACKEND=software \
   --env=TURBINE_HOME="$h" --env=TURBINE_DATA="$PWD/data/regress" \
@@ -426,10 +419,10 @@ added=$(grep -c "Added to .*Skyrim Special Edition: " "$PWD/data/$r/turbine-mod-
 if [ "$added" -ge 2 ]; then echo "::notice title=10: both files added::$added added"; else echo "::error title=10: the files weren't both added::$added added"; (grep -h "catch\|bridge" "$PWD/data/$r/turbine-mod-manager/activity.log" | tail -n 40 || true); fail=1; fi
 fi
 if [ "$MODE" = 1280x800 ]; then
-# 0.51: Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
+# Get mods for Cyberpunk (its own mods, categories), who wins a shared file, the closed-early prompt,
 # the next requirement for a free account, and the bar over My mods.
 shoot "getmods-cyberpunk-1280x800" 1280x800 getmods "$PWD/home" --game=steam:1091500
-# 0.64: a non-Skyrim My mods for the site: Cyberpunk with Cyber Engine Tweaks under the Dependencies row.
+# A non-Skyrim My mods for the site: Cyberpunk with Cyber Engine Tweaks under the Dependencies row.
 shoot "mods-cyberpunk-deps-1280x800" 1280x800 mods "$PWD/home" --game=steam:1091500 "--selftest-import=$dl/Cyber Engine Tweaks 1.35.zip,$dl/Quiet Streets CET 1.0.zip"
 fresh "overlaps"; h="$PWD/fh/overlaps"
 shoot "overlaps-1280x800" 1280x800 overlaps "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip"
@@ -439,7 +432,7 @@ shoot "chain-1280x800" 1280x800 chain "$PWD/home" --game=steam:292030
 fresh "listbar"; h="$PWD/fh/listbar"
 shoot "listbar-1280x800" 1280x800 listbar "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Colors 1.1.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
 need listbar-1280x800 "My mods: Y opens the pop-up with Find, Show, Sort" "Find pop-up \\(My mods\\): field, Show 6, Sort 3$"
-need listbar-1280x800 "My mods pop-up legend (0.59: B is Done, X Clear all)" "My mods pop-up legend: A Choose · B Done · X Clear all · Y Keyboard$"
+need listbar-1280x800 "My mods pop-up legend (B is Done, X Clear all)" "My mods pop-up legend: A Choose · B Done · X Clear all · Y Keyboard$"
 if ran "getmods-cyberpunk-1280x800"; then
 log="$PWD/data/getmods-cyberpunk-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Get mods for Cyberpunk 2077: .* first Cyber Engine Tweaks" "$log"; then echo "::notice title=Get mods per game::$(grep -h 'Get mods for' "$log" | head -n1 | cut -c1-200)"
@@ -481,7 +474,7 @@ log="$PWD/data/playoptions-1280x800/turbine-mod-manager/activity.log"
 if grep -q "Play options open: true" "$log"; then echo "::notice title=Play options::Play options opened"
 else echo "::error title=Play options didn't open::Play options didn't open"; (grep -h "shot\|action" "$log" | tail -n 10 || true); fail=1; fi
 fi
-# 0.52: A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
+# A on Before you play runs the highlighted button (Not now must not play); the mod and game menus
 # offer the missing script extender; KCD II rows say a first-game mod may not work; Witcher's clash offers
 # turning off the newer mod; Interface size stops at the largest that fits.
 fresh "checkfocus"; h="$PWD/fh/checkfocus"
@@ -513,7 +506,7 @@ for size in $SIZES; do
   else echo "::error title=Witcher clash doesn't offer turning off the newer mod ($size)::Witcher clash doesn't offer turning off the newer mod ($size)"; (grep -h "Check before Play" "$log" | tail -n 4 || true); fail=1; fi
   fi
 done
-# 0.53: Game Mode's browser through Steam: with no shortcuts.vdf the check finds nothing and says so, and
+# Game Mode's browser through Steam: with no shortcuts.vdf the check finds nothing and says so, and
 # Add Chrome to Steam shows.
 for size in $SIZES; do
   if ran "addbrowser-$size"; then
@@ -523,7 +516,7 @@ for size in $SIZES; do
   else echo "::error title=Add Chrome to Steam didn't show ($size)::Add Chrome to Steam didn't show ($size)"; (grep -h "browser\|shot" "$log" | tail -n 6 || true); fail=1; fi
   fi
 done
-# 0.54: Labs > Activity log shows the log's lines.
+# Labs > Activity log shows the log's lines.
 for size in $SIZES; do
   if ran "activity-$size"; then
   log="$PWD/data/activity-$size/turbine-mod-manager/activity.log"
@@ -538,7 +531,7 @@ for size in $SIZES; do
   fi
 done
 # Interface size 150% on the handheld size; Desktop and TV layouts at 1920 x 1080.
-# 0.58: Interface size 50% to 150% with no cap: each input makes it smaller (D-pad Left, the - button clicked with the
+# Interface size 50% to 150% with no cap: each input makes it smaller (D-pad Left, the - button clicked with the
 # pointer, A's list; B cancels the list); the buttons are at least 44 pixels.
 if [ "$MODE" = 1280x800 ]; then
 shoot "sizeinputs-1280x800" 1280x800 sizeinputs "$PWD/home"
@@ -554,7 +547,7 @@ need $n "Size: D-pad Right makes it bigger" "Size by D-pad Right: [0-9]+% to [0-
 need $n "Size: 50% to 150% in 11 steps" "Size range: 50% to 150% in 11 steps"
 need $n "Size: buttons of 44 pixels or more" "Size buttons: - (4[4-9]|[5-9][0-9]|1[0-9][0-9]) x"
 if grep -q "PROBLEM" "$PWD/data/$n/turbine-mod-manager/activity.log"; then echo "::error title=Interface size check::$(grep -h PROBLEM "$PWD/data/$n/turbine-mod-manager/activity.log" | head -n3 | tr '\n' ' ' | cut -c1-300)"; fail=1; fi
-# 0.58: the bottom bar in a 1024 pixel wide window (the owner's Desktop Mode picture), both layouts.
+# The bottom bar in a 1024 pixel wide window (the owner's Desktop Mode picture), both layouts.
 shoot "mods-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
 shoot "mods-desktop-1024x700" 1024x700 mods "$PWD/home" --game=$skyrim --layout=desktop "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
 need mods-1024x700 "Bar at 1024 wide: nothing overlaps Play or the edge" "Bar check \(mods, 1024x700, size [0-9]+%\): [0-9]+ items, 0 problems"
@@ -563,7 +556,7 @@ rm -rf "$PWD/fh/modsempty-1024"; python3 tools/fake-home.py "$PWD/fh/modsempty-1
 shoot "modsempty-1024x700" 1024x700 modsempty "$h" --game=$skyrim
 need modsempty-1024x700 "Empty My mods card at 1024 wide" "No mods card: No mods for Skyrim"
 fi
-# 0.59: the start-up splash, mid-way and after; the first frame isn't later with it.
+# The start-up splash, mid-way and after; the first frame isn't later with it.
 for size in $SIZES; do
   shoot "splashmid-$size" "$size" splashmid "$PWD/home"
   shoot "splashafter-$size" "$size" splashafter "$PWD/home"
@@ -575,7 +568,7 @@ for size in $SIZES; do
   echo "::notice title=First frame with and without the splash ($size)::without ${a:-?} ms, with ${b:-?} ms"
   if [ -n "$a" ] && [ -n "$b" ] && [ "$b" -gt $((a + 400)) ]; then echo "::warning title=The splash made the first frame later ($size)::$a ms to $b ms"; fi
 done
-# 0.6: every sheet and menu ends above the bottom bar (its last row too) at 50%, 100% and 150%, and at 1024 wide.
+# Every sheet and menu ends above the bottom bar (its last row too) at 50%, 100% and 150%, and at 1024 wide.
 for size in $SIZES $( [ "$MODE" = 1280x800 ] && echo 1024x700 ); do
   for u in 50 100 150; do
     n="menufit-u$u-$size"
@@ -584,7 +577,7 @@ for size in $SIZES $( [ "$MODE" = 1280x800 ] && echo 1024x700 ); do
     need "$n" "Menus end above the bar ($size, $u%)" "Menu fit \\([0-9]+x[0-9]+, size [0-9]+%\\): [0-9]+ menus, 0 problems"
   done
 done
-# 0.58: every size reflows instead of clipping: pictures at 50% and 150%, each with the bar check.
+# Every size reflows instead of clipping: pictures at 50% and 150%, each with the bar check.
 for size in $SIZES; do
   for u in 50 150; do
     shoot "mods-u$u-$size" "$size" mods "$PWD/home" --game=$skyrim --uisize=$u "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
@@ -594,7 +587,7 @@ for size in $SIZES; do
     need "mods-u$u-$size" "Bar at $u% ($size): nothing overlaps" "Bar check \(mods, $size, size $u%\): [0-9]+ items, 0 problems"
     need "getmods-u$u-$size" "Get mods bar at $u% ($size)" "Bar check \(getmods, $size, size $u%\): [0-9]+ items, 0 problems"
   done
-  # 0.58: the launch check's sheet (the one-time Steam step for a me3 game is shot with Elden Ring, below).
+  # The launch check's sheet (the one-time Steam step for a me3 game is shot with Elden Ring, below).
   shoot "notstarted-$size" "$size" notstarted "$PWD/home" --game=$skyrim
   need "notstarted-$size" "Launch check: the Steam tool's words come first: nothing started, and which Proton ($size)" "Launch check with the tool's words: Turbine's Steam tool started nothing \(no Proton was found, so nothing started\); Proton at the last start \(Started with Proton 9.0 \(Beta\): Steam used it for this game last time.\); "
   need "notstarted-$size" "Why won't it start: the same words ($size)" "Why won't it start with the tool's words: .*Turbine's Steam tool started nothing: no Proton was found.*Proton at the last start: Started with Proton 9.0"
@@ -612,7 +605,7 @@ shoot "desktop-1920x1080" 1920x1080 mods "$PWD/home" --game=$skyrim --layout=des
 shoot "desktopgrid-1920x1080" 1920x1080 desktopgrid "$PWD/home" --game=$skyrim --layout=desktop
 shoot "tv-1920x1080" 1920x1080 tv "$PWD/home" --game=$skyrim --layout=tv --external-display
 fi
-# The 0.5 checks in the activity logs.
+# Checks in the activity logs.
 for size in $SIZES; do
   if ran "getmods-fallback-$size"; then
   log="$PWD/data/getmods-fallback-$size/turbine-mod-manager/activity.log"
@@ -639,7 +632,7 @@ for size in $SIZES; do
   fi
   fi
 done
-# 0.55: the nxm scheme and WebEngine are set up before the application exists, in every run.
+# The nxm scheme and WebEngine are set up before the application exists, in every run.
 for p in $( [ -n "$SIZES" ] && echo "game-$SIZES settings-$SIZES" ); do
   if ran "$p"; then
   log="$PWD/data/$p/turbine-mod-manager/activity.log"
@@ -682,7 +675,7 @@ if grep -q "^MimeType=.*x-scheme-handler/nxm" "$desk" && grep -q "^Exec=.*%u" "$
 else
   echo "::error title=nxm handler not exported::$desk"; (cat "$desk" 2>&1 || true); fail=1
 fi
-# 0.63: the taskbar finds Turbine's entry by the window's name, and every icon the Flatpak exports is the mark on a
+# The taskbar finds Turbine's entry by the window's name, and every icon the Flatpak exports is the mark on a
 # clear background (a picture with see-through pixels), at the six sizes and nowhere else.
 if grep -q "^StartupWMClass=io.github.ravenor907.TurbineModManager$" "$desk"; then
   echo "::notice title=Window class exported::$(grep -h '^StartupWMClass=' "$desk")"
@@ -731,7 +724,7 @@ else
 fi
 fi
 if [ "$MODE" = nexus ]; then
-# 0.55: Nexus inside Turbine, against the stand-in page (tools/nexus-stand-in.py) under X11, WebEngine drawing
+# Nexus inside Turbine, against the stand-in page (tools/nexus-stand-in.py) under X11, WebEngine drawing
 # without the GPU. The full run at both sizes, then a second run with the same profile (signed in stays).
 if command -v Xvfb > /dev/null; then
   Xvfb :78 -screen 0 1920x1080x24 > /dev/null 2>&1 &
@@ -808,11 +801,11 @@ if command -v Xvfb > /dev/null; then
     need $n "7: a second file of a name gets (2) ($size)" "Download: Dupe Test 1.0 \(2\).zip into Game Mods/$sky"
     need $n "1: the initiator is checked in C++ ($size)" "Mod Manager Download link from http://127.0.0.1:47800: initiator checked"
     need $n "4: Mod Manager Download comes to Turbine, which asks ($size)" "Mod Manager Download link from the browser \(scheme handler, from http://127.0.0.1:47800\): Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/2"
-    need $n "M6: the question names mod and file, opens on Not now, page input off ($size)" "Browser check: Mod Manager Download asks: Get .* \(.*\) for .*\?, focus Not now, A Not now, B Not now, page input off"
-    need $n "M6: A at once on the question is ignored ($size)" "Browser check: A at once on the question: ignored"
-    need $n "M6: Right then A after a second gets it ($size)" "Browser check: Right then A after a second gets it: yes"
-    need $n "L1: two taps on Get it don't get it ($size)" "Browser check: two taps on Get it: still asking"
-    need $n "L2: a page alert or confirm doesn't replace the question ($size)" "Browser check: a page alert and confirm while asking: the question stays"
+    need $n "The question names mod and file, opens on Not now, page input off ($size)" "Browser check: Mod Manager Download asks: Get .* \(.*\) for .*\?, focus Not now, A Not now, B Not now, page input off"
+    need $n "A at once on the question is ignored ($size)" "Browser check: A at once on the question: ignored"
+    need $n "Right then A after a second gets it ($size)" "Browser check: Right then A after a second gets it: yes"
+    need $n "Two taps on Get it don't get it ($size)" "Browser check: two taps on Get it: still asking"
+    need $n "A page alert or confirm doesn't replace the question ($size)" "Browser check: a page alert and confirm while asking: the question stays"
     need $n "4: and its file goes into Game Mods ($size)" "Test run: pretending to download nxm://skyrimspecialedition/mods/1/files/2.* into Game Mods/$sky"
     need $n "4: the page stays on the file page ($size)" "after Mod Manager Download the page is still the file page: yes"
     need $n "8: B on the first page closes, focus on Get it ($size)" "B on the first page closed it; focus on Get it"
@@ -860,8 +853,8 @@ for p in press:
     nxt = [f for f in files if f > p]
     gap = (nxt[0] - p) if nxt else -1
     print(f"::notice title=3: Slow download wait::{gap:.3f} s from the press to the file request")
-    # 0.65: the press and the file are two requests to the stand-in, a few ms apart either way: 4.9 s still proves
-    # the page's 5 second wait (4.997 s on a fast PC failed the check).
+    # The press and the file are two requests to the stand-in, a few ms apart either way: 4.9 s still proves the
+    # page's 5 second wait (a fast PC can log 4.997 s).
     if gap < 4.9:
         bad = 1
         print(f"::error title=3: the file came sooner than 5 seconds after the press::{gap:.3f} s")
@@ -905,10 +898,10 @@ PY
   pneed "1b: going to an outside site drops the press" "The page left Nexus \(http://127.0.0.1:47801/bounce\)"
   pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
   pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
-  pneed "1c (M5): another mod's link asks first: Not now and no input for the first second, then the ring on Get it (I17)" "Browser check: another mod's link asks: Get .* \(.*\) for .*\?, at first A Not now, B Not now, input off; after the quiet second A Get it, B Not now"
-  pneed "1c (M5): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/2/files/57"
-  pneed "1c (H1c): a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* \(.*\) for .*\?, at first A Not now, B Not now, input off; after the quiet second A Get it, B Not now"
-  pneed "1c (H1c): ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/56"
+  pneed "1c: another mod's link asks first: Not now and no input for the first second, then the ring on Get it" "Browser check: another mod's link asks: Get .* \(.*\) for .*\?, at first A Not now, B Not now, input off; after the quiet second A Get it, B Not now"
+  pneed "1c: ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/2/files/57"
+  pneed "1c: a tap on an outside page asks first" "Browser check: a tap off Nexus asks: Get .* \(.*\) for .*\?, at first A Not now, B Not now, input off; after the quiet second A Get it, B Not now"
+  pneed "1c: ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/1/files/56"
   pneed "1c: Not now downloads nothing" "Browser check: after Not now, nothing downloaded: yes"
   asked=$(printf '%s\n' "$after" | grep -E "pretending to download nxm://skyrimspecialedition/mods/(1/files/56|2/files/57)" || true)
   if [ -n "$asked" ]; then echo "::error title=1c: a link that asked downloaded anyway::1c: a link that asked downloaded anyway"; fail=1; fi
@@ -917,7 +910,7 @@ PY
     echo "::error title=1: a link with no press got through::1: a link with no press got through"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
   echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
-  pneed "10 (I10): closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added by itself."
+  pneed "10: closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added by itself."
   pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
   pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
   pneed "10: ... and the screen doesn't jump to it when it lands" "New mod from a download that went on after Nexus closed: the focus stays where it is"
@@ -927,7 +920,7 @@ else
   echo "::error title=No Xvfb::the Nexus page checks didn't run"; fail=1
 fi
 fi
-# 0.56, Mods for any game: Lantern Hollow (Unreal, anti-cheat, two Nexus games with its name) and Brass Pier (Data and
+# Mods for any game: Lantern Hollow (Unreal, anti-cheat, two Nexus games with its name) and Brass Pier (Data and
 # Mods folders, one exact Nexus match), with Nexus's game list from a recorded copy.
 NG="--env=TURBINE_NEXUS_GAMES=$PWD/samples/nexus_games_list.json"
 lh=steam:3999901
@@ -955,10 +948,10 @@ for size in $SIZES; do
   need "basicmenu-$size" "Any game: Change where it goes ($size)" "Mod menu: .*Change where it goes"
   fresh "checkbasic-$size"; h="$PWD/fh/checkbasic-$size"
   SHOOT_ENV="$NG" shoot "checkbasic-$size" "$size" check "$h" --game=$lh "--selftest-import=$h/Downloads/Wand Glow 1.0.zip"
-  # 0.59 (I4): anti-cheat in a game with no data file means no mods (the unreal-paks rule is in the engine tests).
-  need "checkbasic-$size" "I4: an unlisted anti-cheat game refuses mods ($size)" "needs its anti-cheat to play at all"
+  # Anti-cheat in a game with no data file means no mods (the unreal-paks rule is in the engine tests).
+  need "checkbasic-$size" "An unlisted anti-cheat game refuses mods ($size)" "needs its anti-cheat to play at all"
 done
-# 0.56 and 0.57, layout: a renamed mod, the bars hidden with the details panel; no top bar, the game's name, tabs
+# Layout: a renamed mod, the bars hidden with the details panel; no top bar, the game's name, tabs
 # and Play in the bottom bar; the Y pop-up on Get mods; Get mods scrolled to full screen and back.
 for size in $SIZES; do
   shoot "tucked-$size" "$size" tucked "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
@@ -977,7 +970,7 @@ for size in $SIZES; do
   shoot "why-$size" "$size" why "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   need "why-$size" "Why won't it start ($size)" "Why won't it start: .*(isn't installed|Try it without mods)"
 done
-# 0.57, anti-cheat games (a home of their own): Elden Ring asks once before Play with mods; its mod goes into the
+# Anti-cheat games (a home of their own): Elden Ring asks once before Play with mods; its mod goes into the
 # Turbine-owned me3 profile and never the game folder; Before you play says me3 comes next; Halo's guide; Destiny 2
 # (online only) refuses mods.
 for size in $SIZES; do
@@ -985,11 +978,9 @@ for size in $SIZES; do
   er=steam:1245620
   shoot "acask-$size" "$size" acask "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
   need "acask-$size" "Anti-cheat: Elden Ring is played through me3 ($size)" "Anti-cheat rules: me3, ask true, off false, me3 ready false, 1 mods; bar: Elden Ring \\| .* · Mods offline$"
-  need "acask-$size" "I2: one question before the first modded Play, A plays ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Not now$"
-  # 0.58: the one-time Launch Options step for a me3 game (A copies the exact text). 0.62: one sheet with the Steam
-  # tool's steps, Check again on A, Set it up myself as the other way; the restart way only in Desktop Mode, never in
-  # Game Mode. 0.64: shot with Elden Ring itself (it was shot with Skyrim's id under Elden Ring's name, so its steps
-  # were Skyrim's).
+  need "acask-$size" "One question before the first modded Play, A plays ($size)" "Anti-cheat sheet: msg Play Elden Ring with mods\\? \\| buttons Play with mods, offline, Not now$"
+  # The one-time step for a me3 game, shot with Elden Ring itself: one sheet with the Steam tool's steps, Check again
+  # on A, Set it up myself as the other way; the restart way only in Desktop Mode, never in Game Mode.
   shoot "launchsetup-$size" "$size" launchsetup "$h" --game=$er
   need "launchsetup-$size" "Steam tool: one sheet with the steps, Check again first ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, first: .* \| says after Steam's next start: (true \(restart first true\)|false \(restart first false\)) \| buttons Check again; Set it up myself; Restart Steam and set it up; Not now \| Game Mode false"
   need "launchsetup-$size" "Steam tool: Check again keeps the steps until it is picked ($size)" "Tool steps, Check again: sheet msg, checks 1, Play asked 0 times, route (none|options)"
@@ -1011,35 +1002,35 @@ for size in $SIZES; do
   shoot "acrefuse-$size" "$size" acrefuse "$h" --game=steam:1085660 "--selftest-import=$h/Downloads/Guardian Colors 1.0.zip"
   need "acrefuse-$size" "Anti-cheat: an online-only game refuses mods ($size)" "needs its anti-cheat to play at all"
   need "acrefuse-$size" "Anti-cheat: the refusal on screen ($size)" "Refused: tabs 1, status Needs its anti-cheat: no mods, Play shown"
-  # 0.58: Seamless Co-op settings (its own copy; the session password first), Play Seamless Co-op in the bar, and
+  # Seamless Co-op settings (its own copy; the session password first), Play Seamless Co-op in the bar, and
   # Elden Ring's saves by kind.
   shoot "coopsettings-$size" "$size" coopsettings "$h" --game=$er "--selftest-import=$h/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   need "coopsettings-$size" "Seamless Co-op settings in the game menu ($size)" "Seamless in: true; game menu: .*Co-op settings"
   need "coopsettings-$size" "Seamless Co-op settings: the password first, toggles, lists and numbers ($size)" "Seamless page: Seamless Co-op settings \| first cooppassword \| cooppassword:text, allow_invaders:toggle, overhead_player_display:list, default_boot_master_volume:number, enemy_health_scaling:number"
-  need "coopsettings-$size" "I3: co-op is chosen at Play, no separate button ($size)" "Co-op chosen at Play: true"
+  need "coopsettings-$size" "Co-op is chosen at Play, no separate button ($size)" "Co-op chosen at Play: true"
   need "coopsettings-$size" "The bar with Co-op: nothing overlaps, Play is the one button ($size)" "Bar check \(coopbar, .* 0 problems \| .*wheel, Play"
-  # 0.6 (I3): the Play choice, the password step, the remembered choice, settings from three places, saved edits.
+  # The Play choice, the password step, the remembered choice, settings from three places, saved edits.
   rm -rf "$PWD/fh/coop-$size"; python3 tools/fake-home.py "$PWD/fh/coop-$size" --anticheat > /dev/null; hc="$PWD/fh/coop-$size"
   shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   n="coopcheck-$size"
-  need $n "I3: Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
+  need $n "Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
   need $n "Seamless Co-op loads only with its own Play: said at the Play choice and on its row ($size)" "Co-op only: the Play choice says \"Seamless Co-op loads only with Play Seamless Co-op. A plays the highlighted one.\"; Play with mods: Solo, [0-9]+ mods? on. Seamless Co-op stays out.; its row in My mods: Loads only with Play Seamless Co-op$"
-  need $n "I3: no password: its settings open on it with the keyboard, nothing started ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true, Play asked 0 times"
-  need $n "I3: with the password typed, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false, Play asked 1 times, co-op true"
-  need $n "I3: the choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"
-  need $n "I3: settings from the Play choice ($size)" "Co-op settings from the Play choice \\(Y\\): Seamless Co-op settings"
-  need $n "I3: settings first in the game menu ($size)" "Game menu first row: Co-op settings"
-  need $n "I3: settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
-  need $n "I3: settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
-  need $n "I12: edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
+  need $n "No password: its settings open on it with the keyboard, nothing started ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true, Play asked 0 times"
+  need $n "With the password typed, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false, Play asked 1 times, co-op true"
+  need $n "The choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"
+  need $n "Settings from the Play choice ($size)" "Co-op settings from the Play choice \\(Y\\): Seamless Co-op settings"
+  need $n "Settings first in the game menu ($size)" "Game menu first row: Co-op settings"
+  need $n "Settings from the game menu ($size)" "Co-op settings from the game menu: Seamless Co-op settings"
+  need $n "Settings from the mod's X menu ($size)" "Co-op settings from the mod's X menu: Seamless Co-op settings"
+  need $n "Edits save by themselves ($size)" "Co-op edits saved by themselves: 0 waiting"
   need $n "Co-op tile: asked once after the install, one press, the restart said first ($size)" "Co-op tile question: asked by itself 0 times; after the install: asked, Add a Co-op tile to Steam\\?? \\| (Restart Steam and add it|Add it); Not now; B: sheet \"\"; a second time: not asked$"
   need $n "Co-op tile: its row on the Co-op settings page ($size)" "Co-op settings page: row Co-op tile in Steam \\[Add\\], A Add, A opens: Add a Co-op tile to Steam\\??$"
   if ran "coopcheck-$size"; then
   ini=$(find "$hc" "$PWD/data/$n" -name ersc_settings.ini -not -path "*Downloads*" 2>/dev/null | xargs grep -l "dragon" 2>/dev/null | head -n1)
-  if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=I3: the ini has the password, the toggle and the number ($size)::$ini"
-  else echo "::error title=I3: the ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
+  if [ -n "$ini" ] && grep -q "^cooppassword = dragon" "$ini" && grep -q "^enemy_health_scaling = 50" "$ini" && grep -Eq "^allow_invaders = [01]" "$ini"; then echo "::notice title=The ini has the password, the toggle and the number ($size)::$ini"
+  else echo "::error title=The ini doesn't have the edits ($size)::${ini:-no ersc_settings.ini with the password}"; (find "$hc" "$PWD/data/$n" -name ersc_settings.ini -exec sh -c 'echo "$1"; cat "$1"' _ {} \; 2>/dev/null | head -n 40); fail=1; fi
   fi
-  # 0.62: the Co-op tile follows the engine's answer: Desktop Mode with Steam closed adds it at once, with Steam
+  # The Co-op tile follows the engine's answer: Desktop Mode with Steam closed adds it at once, with Steam
   # running after one restart (asked first); Game Mode only says where it can be added, with OK.
   rm -rf "$PWD/fh/tile-$size"; python3 tools/fake-home.py "$PWD/fh/tile-$size" --anticheat > /dev/null; ht="$PWD/fh/tile-$size"
   shoot "tilecheck-$size" "$size" tilecheck "$ht" --game=$er "--selftest-import=$ht/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
@@ -1053,7 +1044,7 @@ for size in $SIZES; do
   need $n "Co-op tile in Game Mode: later, words only ($size)" "Tile check: Game Mode true, how later, label \"\", words: The tile can be added in Desktop Mode"
   need $n "Co-op tile in Game Mode: not asked ($size)" "Tile check: asked once after the install: no \\(later\\)$"
   need $n "Co-op tile in Game Mode: the row opens the words with OK only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| OK$"
-  # 0.62: "Proton for modded play". Two made-up Protons in the Steam library: one the tool can start, and one whose
+  # "Proton for modded play". Two made-up Protons in the Steam library: one the tool can start, and one whose
   # Steam Linux Runtime isn't installed (dimmed, with the reason). The row, the list, a pick, Automatic again, and
   # the same from the tool's steps sheet.
   rm -rf "$PWD/fh/proton-$size"; python3 tools/fake-home.py "$PWD/fh/proton-$size" --anticheat > /dev/null; hq="$PWD/fh/proton-$size"
@@ -1071,7 +1062,7 @@ for size in $SIZES; do
   need $n "Proton list: Automatic again ($size)" "Proton check: the list opened on Proton 9.0; Automatic again: Proton for modded play: Automatic.*, how (auto|steam|tool)$"
   need $n "Proton on the tool's steps sheet ($size)" "Proton check: the tool's steps sheet: Check again; Set it up myself; Proton: Automatic[^;]*; Not now \\| Proton for modded play: Automatic"
   need $n "Proton from the steps: its button opens the list, B comes back ($size)" "Proton check: its button on the steps: pick Proton for modded play; B: sheet msg \\(One step before .* plays with mods\\)$"
-  # 0.62: a Seamless Co-op file older than the one installed is asked about: A keeps the one installed (B too), X
+  # A Seamless Co-op file older than the one installed is asked about: A keeps the one installed (B too), X
   # uses the older file; it is never added by itself and never reported as a mod that failed.
   rm -rf "$PWD/fh/older-$size"; python3 tools/fake-home.py "$PWD/fh/older-$size" --anticheat > /dev/null; ho="$PWD/fh/older-$size"
   # (The copy installed came from Nexus as 2.0.1; the older file is another download, Turbine's own, that says 1.9.0.)
@@ -1088,10 +1079,10 @@ for size in $SIZES; do
   need $n "Older Seamless Co-op: the password carried over ($size)" "Older check: the password carried over: yes$"
   need $n "Older Seamless Co-op: the newer copy can be put back ($size)" "Older check: Removed mods offers: the 2.0.1 copy, A Put back, used twice: no$"
   if ran "$n" && grep -q "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::error title=Older Seamless Co-op was reported as a failed mod ($size)::$(grep -h "Couldn't add Seamless Co-op" "$PWD/data/$n/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"; fail=1; fi
-  # 0.62 (the owner's device): Seamless Co-op never starts with an empty session password. Every way a co-op start
+  # Seamless Co-op never starts with an empty session password. Every way a co-op start
   # comes, with the password empty: nothing starts and Co-op settings open on the password with the keyboard.
   rm -rf "$PWD/fh/cooppw-$size"; python3 tools/fake-home.py "$PWD/fh/cooppw-$size" --anticheat > /dev/null; hp="$PWD/fh/cooppw-$size"
-  # (0.62: this copy is added as a Nexus download, so every co-op path here also proves it counts as Seamless Co-op.)
+  # (This copy is added as a Nexus download, so every co-op path here also proves it counts as Seamless Co-op.)
   shoot "cooppw-$size" "$size" cooppw "$hp" --game=$er "--selftest-import=$hp/Downloads/Seamless Co-op 2.0.1.zip|nexus|eldenring:510:1|2.0.1"
   n="cooppw-$size"
   stop="nothing started, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true$"
@@ -1106,7 +1097,7 @@ for size in $SIZES; do
   need $n "Co-op password: the Play job says why ($size)" "Seamless Co-op not started: no session password"
   need $n "Co-op password: B and B leave nothing waiting ($size)" "Co-op password check: The tile, then B and B: sheet \"\", waiting false, Play asked 0 times$"
   need $n "Co-op password: two quotes are empty ($size)" "Co-op password check: A password of two quotes: nothing started, the password counts as empty$"
-  # 0.62: two copies of Seamless Co-op: the engine's look through the bridge, the one sheet on opening the game and
+  # Two copies of Seamless Co-op: the engine's look through the bridge, the one sheet on opening the game and
   # before a co-op start, Tidy up and Not now, and the version warning as a toast with both versions.
   need $n "Two copies: the engine's look comes back ($size)" "Co-op password check: the engine's look at Seamless Co-op: installed \\(.*\\), 0 other copies, sheet \"\"$"
   need $n "Two copies: one sheet with Tidy up and Not now, and the version toast ($size)" "Co-op password check: two copies, on opening the game: You have two copies of Seamless Co-op. Turbine keeps the newest and moves the other to Removed mods. Your password is kept. \\| Tidy up; Not now \\| toast: Your list says Seamless Co-op 2.0.1, but its file says it is 1.9.0"
@@ -1128,7 +1119,7 @@ for size in $SIZES; do
   shoot "ersaves-$size" "$size" ersaves "$h" --game=$er
   need "ersaves-$size" "Elden Ring saves: normal, modded and co-op apart ($size)" "Saves by kind: solo 1 files, [0-9]+ backups; modded 1 files, [0-9]+ backups; coop 1 files, [0-9]+ backups"
 done
-# 0.58: Edit settings on a mod (Right steps the number, Start saves; the edited copy goes into the game), and the
+# Edit settings on a mod (Right steps the number, Start saves; the edited copy goes into the game), and the
 # game update warning (A plays without mods until they update).
 for size in $SIZES; do
   fresh "modsettings-$size"; h="$PWD/fh/modsettings-$size"
@@ -1145,7 +1136,7 @@ for size in $SIZES; do
   if [ -n "$ini" ] && grep -q "Glow=1.6" "$ini"; then echo "::notice title=Edit settings: the edited copy is in the game ($size)::$ini"
   else echo "::error title=Edit settings: the game doesn't have the edited value ($size)::${ini:-no LanternGlow.ini}: $(cat "$ini" 2>/dev/null)"; fail=1; fi
   fi
-  # 0.6: outcome checks by real presses and clicks (not pictures): A and B on every screen, nothing through a pop-up,
+  # Outcome checks by real presses and clicks (not pictures): A and B on every screen, nothing through a pop-up,
   # and the golden path from an empty game to Play and back.
   rm -rf "$PWD/fh/abcheck-$size"; python3 tools/fake-home.py "$PWD/fh/abcheck-$size" > /dev/null; h="$PWD/fh/abcheck-$size"
   shoot "abcheck-$size" "$size" abcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
@@ -1169,23 +1160,23 @@ for size in $SIZES; do
   need "golden-$size" "Journey: A puts it back ($size)" "Journey put back: .* is back in My mods"
   if ran "golden-$size" && ! grep -q "Journey put back" "$PWD/data/golden-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     grep -h "engine\|action\|Journey\|Sheet" "$PWD/data/golden-$size/turbine-mod-manager/activity.log" | tail -n 30 | sed 's/^/::notice title=golden log::/' || true; fi
-  # 0.6 (break M1, M2): the Mod Manager Download question's guard, timed from its first frame.
+  # The Mod Manager Download question's guard, timed from its first frame.
   rm -rf "$PWD/fh/mmdguard-$size"; python3 tools/fake-home.py "$PWD/fh/mmdguard-$size" > /dev/null; h="$PWD/fh/mmdguard-$size"
   shoot "mmdguard-$size" "$size" mmdguard "$h" --game=$skyrim
-  need "mmdguard-$size" "M8: at first Not now, input off, A ignored ($size)" "Guard at first: A Not now, B Not now, input off; A at [0-9]+ ms: ignored"
-  need "mmdguard-$size" "M2: a press made in the first second but handled late is ignored ($size)" "Guard late press: made at 500 ms, handled at [0-9]+ ms: ignored"
-  need "mmdguard-$size" "M8: after the quiet second the ring is on Get it ($size)" "Guard after the quiet second: ring on Get it, A Get it"
-  need "mmdguard-$size" "M1: Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
-  need "mmdguard-$size" "M1: then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
-  need "mmdguard-$size" "N3: an A made before the ring moved, handled after, is Not now ($size)" "Guard stalled A: made at 1100 ms, ring on Get it, handled at [0-9]+ ms: Not now, nothing downloaded"
-  need "mmdguard-$size" "0.62: a question with no names yet opens on Not now, and a second link at once is dropped ($size)" "Guard twice, the first: Get mod 1 \\(file 3\\) for .*\\?: ring on Not now, A Not now, B Not now, input off; a second link at once: ring on Not now, A Not now, B Not now, input off, dropped$"
-  need "mmdguard-$size" "0.62: the same at its first frame ($size)" "Guard twice, at its first frame: ring on Not now, A Not now, B Not now, input off$"
-  need "mmdguard-$size" "0.62: the names coming late change the title only ($size)" "Guard names late: Get SkyUI \\(SkyUI 5.2SE\\) for .*\\?, ring unchanged, the quiet second unchanged$"
-  need "mmdguard-$size" "0.62: an A after the names came is still ignored ($size)" "Guard names late, A made at 300 ms: ignored$"
-  need "mmdguard-$size" "0.62: asked again at once, it opens on Not now ($size)" "Guard again at once: asked: ring on Not now, A Not now, B Not now, input off$"
-  need "mmdguard-$size" "0.62: an A in the turn it opens is ignored ($size)" "Guard again at once, A: ignored$"
-  need "mmdguard-$size" "0.62: asked again, the same at its first frame ($size)" "Guard again, at its first frame: ring on Not now, A Not now, B Not now, input off$"
-  # 0.6: Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
+  need "mmdguard-$size" "At first Not now, input off, A ignored ($size)" "Guard at first: A Not now, B Not now, input off; A at [0-9]+ ms: ignored"
+  need "mmdguard-$size" "A press made in the first second but handled late is ignored ($size)" "Guard late press: made at 500 ms, handled at [0-9]+ ms: ignored"
+  need "mmdguard-$size" "After the quiet second the ring is on Get it ($size)" "Guard after the quiet second: ring on Get it, A Get it"
+  need "mmdguard-$size" "Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
+  need "mmdguard-$size" "Then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
+  need "mmdguard-$size" "An A made before the ring moved, handled after, is Not now ($size)" "Guard stalled A: made at 1100 ms, ring on Get it, handled at [0-9]+ ms: Not now, nothing downloaded"
+  need "mmdguard-$size" "A question with no names yet opens on Not now, and a second link at once is dropped ($size)" "Guard twice, the first: Get mod 1 \\(file 3\\) for .*\\?: ring on Not now, A Not now, B Not now, input off; a second link at once: ring on Not now, A Not now, B Not now, input off, dropped$"
+  need "mmdguard-$size" "The same at its first frame ($size)" "Guard twice, at its first frame: ring on Not now, A Not now, B Not now, input off$"
+  need "mmdguard-$size" "The names coming late change the title only ($size)" "Guard names late: Get SkyUI \\(SkyUI 5.2SE\\) for .*\\?, ring unchanged, the quiet second unchanged$"
+  need "mmdguard-$size" "An A after the names came is still ignored ($size)" "Guard names late, A made at 300 ms: ignored$"
+  need "mmdguard-$size" "Asked again at once, it opens on Not now ($size)" "Guard again at once: asked: ring on Not now, A Not now, B Not now, input off$"
+  need "mmdguard-$size" "An A in the turn it opens is ignored ($size)" "Guard again at once, A: ignored$"
+  need "mmdguard-$size" "Asked again, the same at its first frame ($size)" "Guard again, at its first frame: ring on Not now, A Not now, B Not now, input off$"
+  # Mods off from Steam's menu: the note in My mods and its Turn them back on (A, and a tap).
   rm -rf "$PWD/fh/heldcheck-$size"; python3 tools/fake-home.py "$PWD/fh/heldcheck-$size" > /dev/null; h="$PWD/fh/heldcheck-$size"
   shoot "heldcheck-$size" "$size" heldcheck "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
   need "heldcheck-$size" "Mods off from Steam's menu shows in My mods with its way back ($size)" "Held note: row 1 held \| Mods off from Steam's menu: 2 mods turned off \| legend A Turn them back on"
@@ -1193,13 +1184,13 @@ for size in $SIZES; do
   need "heldcheck-$size" "Turn them back on by a tap ($size)" "Held back on by a tap: 2 of 2 on, note gone"
   if ran "heldcheck-$size" && ! grep -q "Held back on by a tap: 2 of 2 on" "$PWD/data/heldcheck-$size/turbine-mod-manager/activity.log" 2>/dev/null; then
     grep -h "engine\|action\|quick\|Held" "$PWD/data/heldcheck-$size/turbine-mod-manager/activity.log" | tail -n 25 | sed 's/^/::notice title=heldcheck log::/' || true; fi
-  # 0.6 (I8): Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
+  # Edit settings on the mod's panel, by a tap and by Right then A; none for a mod without settings.
   fresh "editbutton-$size"; h="$PWD/fh/editbutton-$size"
   shoot "editbutton-$size" "$size" editbutton "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip,$h/Downloads/Brighter Lanterns 1.2.zip"
-  if grep -q "Edit button: the panel doesn't fit here" "$PWD/data/editbutton-$size/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=I8: no panel at $size::the row's X menu has Edit settings"; else
-  need "editbutton-$size" "I8: a tap on Edit settings opens that mod's ($size)" "Edit button tapped: sheet settingsedit for Lantern Glow"
-  need "editbutton-$size" "I8: Right then A opens it ($size)" "Edit button by Right then A: sheet settingsedit for Lantern Glow"
-  need "editbutton-$size" "I8: no button for a mod without settings ($size)" "Edit button for a mod without settings \\(.*\\): none"
+  if grep -q "Edit button: the panel doesn't fit here" "$PWD/data/editbutton-$size/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=No panel at $size::the row's X menu has Edit settings"; else
+  need "editbutton-$size" "A tap on Edit settings opens that mod's ($size)" "Edit button tapped: sheet settingsedit for Lantern Glow"
+  need "editbutton-$size" "Right then A opens it ($size)" "Edit button by Right then A: sheet settingsedit for Lantern Glow"
+  need "editbutton-$size" "No button for a mod without settings ($size)" "Edit button for a mod without settings \\(.*\\): none"
   fi
   fresh "gameupdate-$size"; h="$PWD/fh/gameupdate-$size"
   shoot "gameupdate-$size" "$size" gameupdate "$h" --game=$skyrim "--selftest-import=$h/Downloads/Lantern Glow SKSE 2.0.zip"
@@ -1220,12 +1211,7 @@ if [ "$MODE" = 1280x800 ]; then
   else echo "::error title=Any game: the game's own files changed::Any game: the game's own files changed"; ls -la "$g" "$g/Data"; fail=1; fi
   fi
 fi
-if [ "$MODE" = 1920x1080 ]; then
-  # 5: no sheet opened without a press when Nexus is slow to show.
-  hits=$(grep -h "opened with no press" "$PWD/data/opening8s-1920x1080/turbine-mod-manager/activity.log" 2>/dev/null || true)
-  if [ -n "$hits" ]; then echo "::error title=5: a sheet opened with no press (opening8s-1920x1080)::$(echo "$hits" | head -n1 | cut -c1-200)"; fail=1; fi
-fi
-# 0.58: every picture's bottom bar: no hint under Play or another hint, nothing past the edge, the game's name whole.
+# Every picture's bottom bar: no hint under Play or another hint, nothing past the edge, the game's name whole.
 bars=$(grep -h "Bar check .* items, [1-9][0-9]* problems" "$PWD"/data/*/turbine-mod-manager/activity.log 2>/dev/null || true)
 nbars=$(cat "$PWD"/data/*/turbine-mod-manager/activity.log 2>/dev/null | grep -c "Bar check " || true)
 if [ -n "$bars" ]; then

@@ -24,7 +24,7 @@ Overlay {
     // Buttons: { label }; the first is the main one.
     property var buttons: []
     property int focusIndex: 0
-    // The buttons stay in view when the words don't fit (0.59).
+    // The buttons stay in view when the words don't fit.
     onFocusIndexChanged: Qt.callLater(() => root.ui.follow(scroller, content, loaderButtons))
     onVisibleChanged: if (visible) Qt.callLater(() => root.ui.follow(scroller, content, loaderButtons))
 
@@ -55,7 +55,7 @@ Overlay {
 
         CardGuard {}   // taps on the card don't close it
 
-        // 0.59: scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
+        // Scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
         Flickable {
             id: scroller
             anchors.fill: parent

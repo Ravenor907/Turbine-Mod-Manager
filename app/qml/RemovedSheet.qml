@@ -43,7 +43,7 @@ Overlay {
         border.color: rs.ui.c.line
         clip: true
         CardGuard {}
-        // 0.59: scrolls by touch and follows the focus (a long list at 150% runs past the card).
+        // Scrolls by touch and follows the focus (a long list at 150% runs past the card).
         Flickable {
             id: flick
             anchors.fill: parent
@@ -63,7 +63,7 @@ Overlay {
                 spacing: rs.ui.px(8)
             Repeater {
                 id: rows
-                // 0.59 (T10): the mods first, Empty (delete them all for good) last.
+                // The mods first, Empty (delete them all for good) last.
                 model: rs.mods.concat([{ empty: true }])
                 Rectangle {
                     id: row
@@ -98,7 +98,7 @@ Overlay {
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13)
                         }
                     }
-                    // Every action is a button too (touch has no X): Put back, and Delete now (B16).
+                    // Every action is a button too (touch has no X): Put back, and Delete now.
                     Row {
                         id: buttons
                         anchors.right: parent.right; anchors.rightMargin: rs.ui.px(6)

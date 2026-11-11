@@ -182,7 +182,7 @@ pub fn scan(home: &Path, scan: &mut Scan) {
     }
 }
 
-// ---- Wine and Proton prefixes (0.6) ----
+// ---- Wine and Proton prefixes ----
 //
 // Heroic keeps each game's settings in <config>/heroic/GamesConfig/<app name>.json, under the app name:
 // "winePrefix" (the prefix folder) and "wineVersion" {"type": "wine" | "proton" | "toolkit" | ...}. A Proton
@@ -216,13 +216,9 @@ pub fn prefix_for(root: &Path, home: &Path, app_name: &str, title: &str) -> Opti
         return None;
     }
     let mut scratch = Scan::default();
-    if let Some(v) = read_json(&root.join("GamesConfig").join(format!("{app_name}.json")), &mut scratch) {
-        if let Some(cfg) = v.get(app_name) {
-            if let Some(wp) = cfg.str_at("winePrefix").filter(|p| !p.is_empty()) {
-                let wine_type = cfg.get("wineVersion").and_then(|w| w.str_at("type")).unwrap_or("wine");
-                return Some(registry_dir(&expand_home(wp, home), wine_type));
-            }
-        }
+    if let Some(v) = read_json(&root.join("GamesConfig").join(format!("{app_name}.json")), &mut scratch) && let Some(cfg) = v.get(app_name) && let Some(wp) = cfg.str_at("winePrefix").filter(|p| !p.is_empty()) {
+        let wine_type = cfg.get("wineVersion").and_then(|w| w.str_at("type")).unwrap_or("wine");
+        return Some(registry_dir(&expand_home(wp, home), wine_type));
     }
     let defaults = read_json(&root.join("config.json"), &mut scratch);
     let d = defaults.as_ref().and_then(|v| v.get("defaultSettings"));

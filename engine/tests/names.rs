@@ -1,4 +1,4 @@
-//! 0.6: download names to the clean names players see (the owner's Seamless Co-op among them).
+//! Download names to the clean names players see (the owner's Seamless Co-op among them).
 use turbine_engine::store::clean_name;
 
 #[test]

@@ -3,7 +3,7 @@ import QtQuick
 // The quick wheel (View): a pie of eight wedges in fixed places, the same on every screen. The left stick (or a
 // pointer over it) picks a wedge by its angle; the D-pad still works (Up then Right is Up-right). The picked wedge
 // fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name, dimmed.
-// 0.62: the middle is neutral: with nothing picked (the stick at rest) it says Close and how to choose.
+// The middle is neutral: with nothing picked (the stick at rest) it says Close and how to choose.
 // While it is open everything behind it is turned off (Main.qml's topLayer), and this backdrop takes every press,
 // scroll and hover; a tap outside the pie or in the middle closes it.
 // Main.qml owns the slots ({label, ok, desc}) and the keys; a tap on a wedge does it.
@@ -74,7 +74,7 @@ Overlay {
             anchors.fill: parent
             property int sel: qw.focusIndex
             property var okList: qw.slots.map(s => !!s.ok)
-            // 0.62: the picked wedge's fill fades in.
+            // The picked wedge's fill fades in.
             property real selPart: 1
             onSelPartChanged: requestPaint()
             NumberAnimation { id: selFade; target: canvas; properties: "selPart"; from: 0; to: 1; duration: qw.ui.motion.fast; easing.type: qw.ui.motion.enter }

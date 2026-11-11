@@ -1,4 +1,4 @@
-//! Save backups before Play (0.56): before a game starts with mods, Turbine copies its save folders into a dated
+//! Save backups before Play: before a game starts with mods, Turbine copies its save folders into a dated
 //! snapshot in its own data folder, and keeps the newest ten (or fewer, so all of them fit in 2 GB). Copy only:
 //! the game's saves are never changed, except when the player puts a backup back, and that first takes a snapshot
 //! of the saves as they are. Links are never followed and nothing outside the save folders is read.
@@ -167,7 +167,7 @@ pub fn free_bytes(path: &Path) -> Option<u64> {
     use std::ffi::CString;
     use std::os::raw::{c_char, c_int};
     use std::os::unix::ffi::OsStrExt;
-    extern "C" {
+    unsafe extern "C" {
         // The C library's statvfs. On 64-bit Linux its struct starts with f_bsize, f_frsize, f_blocks, f_bfree,
         // f_bavail, all 64-bit; the buffer below is larger than the whole struct (112 bytes).
         fn statvfs(path: *const c_char, buf: *mut u64) -> c_int;
@@ -242,10 +242,8 @@ pub fn backup_with(folders: &[PathBuf], root: &Path, now: u64, free: Option<u64>
             return Ok(Some(newest));
         }
     }
-    if let Some(free) = free {
-        if free < bytes.saturating_add(SPARE) {
-            return Err(other(format!("not enough free space to back up the saves ({} needed, {} free)", gb(bytes + SPARE), gb(free))));
-        }
+    if let Some(free) = free && free < bytes.saturating_add(SPARE) {
+        return Err(other(format!("not enough free space to back up the saves ({} needed, {} free)", gb(bytes + SPARE), gb(free))));
     }
     let mut id = stamp(now);
     let mut n = 1;
@@ -361,7 +359,7 @@ fn put_back(id: &str, folders: &[PathBuf], root: &Path, now: u64, free: Option<u
 }
 
 
-// ---- 0.58: Elden Ring's three kinds of save ----
+// ---- Elden Ring's three kinds of save ----
 //
 // The normal game keeps ER0000.sl2; Turbine's me3 profile its own TurbineModded.sl2 (anticheat::ME3_SAVEFILE); and
 // Seamless Co-op ER0000.co2. They are listed apart, and each can be put back from a backup on its own (the saves as

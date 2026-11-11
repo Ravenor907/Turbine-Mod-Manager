@@ -46,9 +46,8 @@ Most components take `required property var ui`, and Main.qml always passes `kit
   "fallback"), `focusIndex`, `active`, `columns`; signals `recentClicked`, `itemClicked`, `itemMenu`,
   `fallbackClicked(key)`, `scrolled(first, last)`, `contentScrolled(y, before, longer)`; `gridItem(i)`.
 - **ModDetails**: a mod's page over Get mods. `info`, `fallbackPicture`, `focused`, `mainLabel`, `mainLine`,
-  `mainProgress`, `focusIndex` (0 the main button, 2 and on the requirements), `helpLabels`, `helpFocus`,
-  `settingsLabel`, `settingsFocused`; signals `installClicked()`, `helpClicked(i)`, `needClicked(i)`,
-  `settingsClicked()`; `scroll(d)`.
+  `mainProgress`, `focusIndex` (0 the main button, 2 and on the requirements), `settingsLabel`, `settingsFocused`;
+  signals `installClicked()`, `needClicked(i)`, `settingsClicked()`; `scroll(d)`.
 - **LoadOrderList**: the Load order tab. `plugins`, `error`, `messages` (LOOT's notes), `note`, `owners`,
   `focusIndex` (-1 Sort automatically), `moving`, `active`; signals `sortClicked()`, `rowClicked(i)`, `rowMenu(i)`,
   `scrolled(first, last)`; `rowItem(i)`.
@@ -128,3 +127,8 @@ All are Overlays that fill their parent and show with `visible`; Main.qml handle
   `choose(group, option)`, `next()`, `back()`, `stop()`, `openTurbine()`.
 - **StatusLine**: a state icon, bold words and a detail (FomodSheet's top line). `level` (ok, busy, warn, stop),
   `words`, `detail`.
+
+## The build's checks
+
+- **SelfCheck**: what each `--page=` picture of tools/ci-shots.sh sets up, presses and logs. Main.qml loads it only
+  in screenshot runs (`shot.on`), passes itself as `app` and lists the items the checks reach by id in `checkIds`.

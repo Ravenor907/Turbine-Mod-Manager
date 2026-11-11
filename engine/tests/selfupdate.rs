@@ -166,7 +166,7 @@ fn checks_downloads_and_verifies() {
     let (dir, client) = fake("flow");
     // Only pre-releases so far: the latest page answers 404, which means up to date.
     assert_eq!(su::check(&client, "0.1", false).unwrap(), Check::UpToDate);
-    // 0.63: the newest release is read from where the latest page ends up, never from GitHub's API.
+    // The newest release is read from where the latest page ends up, never from GitHub's API.
     serve(&dir, su::LATEST_PAGE, b"<html>the release page</html>");
     extra(&dir, su::LATEST_PAGE, "effective", &format!("{TAG}v0.31"));
     let Check::Available(r) = su::check(&client, "0.3", false).unwrap() else { panic!("0.31 is newer than 0.3") };
@@ -195,7 +195,7 @@ fn checks_downloads_and_verifies() {
     // A bundle that doesn't match is deleted.
     serve(&dir, &r.asset_url, b"9876543210");
     assert_eq!(su::download(&client, &r, None), Err(NetError::Mismatch("its SHA-256 is different".into())));
-    // No checksum file (a release from before 0.63): GitHub's own digest and size for that tag's bundle.
+    // No checksum file (an older release): GitHub's own digest and size for that tag's bundle.
     fs::remove_file(dir.join("served").join(sha_url.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect::<String>())).unwrap();
     let api = format!("{}v0.31", su::TAG_API);
     serve(&dir, &api, release("v0.31", false, "", &format!("sha256 {sha}")).as_bytes());

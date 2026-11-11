@@ -71,7 +71,7 @@ Rectangle {
 
     HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
     // Touch: hold a moment for the mod's options (like X).
-    // A double-click opens the mod (0.63): Main counts it from the clicks (the row may be built again between them).
+    // A double-click opens the mod: Main counts it from the clicks (the row may be built again between them).
     TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
 
@@ -124,7 +124,7 @@ Rectangle {
             radius: root.ui.px(6)
             anchors.verticalCenter: parent.verticalCenter
             color: root.isOn ? root.wash(root.ui.c.accent, 0.28) : root.ui.c.ground
-            // 0.62: the pill's fill fades between ON and OFF.
+            // The pill's fill fades between ON and OFF.
             Behavior on color { enabled: root.ui.motion.on; ColorAnimation { duration: root.ui.motion.fast; easing.type: root.ui.motion.enter } }
             border.width: root.isOn ? 0 : Math.max(1, root.ui.px(1.5))
             border.color: root.ui.c.line
@@ -177,7 +177,7 @@ Rectangle {
         Text {
             width: parent.width
             text: root.name || ""
-            // 0.6: a name is never cut mid-word: it wraps (the line under it gives way first).
+            // A name is never cut mid-word: it wraps (the line under it gives way first).
             wrapMode: Text.WordWrap
             // Off rows are dimmer but stay readable (muted keeps at least 4.5:1 on every theme).
             color: root.isOn ? root.ui.c.text : root.focused ? root.ui.c.soft : root.ui.c.muted

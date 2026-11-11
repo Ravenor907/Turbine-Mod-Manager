@@ -159,7 +159,7 @@ pub fn headers_public(app_version: &str) -> Vec<(String, String)> {
 /// What a call that needs the key says when there is none.
 pub const NEEDS_KEY: &str = "This needs a Nexus Mods key (Settings, Getting mods).";
 
-/// 0.63: a refusal from Nexus's API (401 or 403) that nothing more exact explains: here, and only here, the
+/// A refusal from Nexus's API (401 or 403) that nothing more exact explains: here, and only here, the
 /// account or the key is what to look at. Refusals from other sites never say so.
 pub fn refused_words(e: NetError) -> NetError {
     match e {
@@ -926,7 +926,7 @@ pub struct ModStamp {
     pub updated: u64,
     /// Nexus's number for the game (for the files query).
     pub game_id: u64,
-    /// 0.6 (intent I16): the mod's own words, so a mod added from a file gets its Nexus name, author, summary and
+    /// The mod's own words, so a mod added from a file gets its Nexus name, author, summary and
     /// picture without a key ("" when not given).
     pub author: String,
     pub summary: String,
@@ -1555,7 +1555,7 @@ pub fn best_md5_match(matches: &[Md5Match], size: u64) -> Option<&Md5Match> {
 /// The record for a file identified by its MD5: a proper Nexus source, so it gets the mod's name, version and update
 /// checks like a file added through Mod Manager Download.
 pub fn md5_source_info(m: &Md5Match, sha256: Option<String>) -> SourceInfo {
-    // 0.6: named by its Nexus title, with its picture.
+    // Named by its Nexus title, with its picture.
     SourceInfo {
         title: (!m.mod_info.name.trim().is_empty()).then(|| m.mod_info.name.trim().to_string()),
         picture: (!m.mod_info.picture_url.is_empty()).then(|| m.mod_info.picture_url.clone()),

@@ -247,10 +247,8 @@ impl LoadOrder {
         fixed_names.extend(read_lines(&files.ccc)?);
         for n in fixed_names {
             let lc = n.to_lowercase();
-            if let Some(real) = on_disk.get(&lc) {
-                if taken.insert(lc) {
-                    plugins.push(make(real, true, true));
-                }
+            if let Some(real) = on_disk.get(&lc) && taken.insert(lc) {
+                plugins.push(make(real, true, true));
             }
         }
         // plugins.txt order.

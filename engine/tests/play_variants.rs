@@ -76,5 +76,32 @@ fn a_setup_that_closed_early_is_not_the_one_that_worked() {
     assert_eq!(s.restore_target().unwrap().id, worked);
     let added: Vec<String> = s.mods().iter().filter(|m| m.enabled && !s.setup_on(&worked).contains(&m.id)).map(|m| m.id.clone()).collect();
     assert_eq!(added, vec![mb.item.id.clone()]);
+    // The one before the mods on now, without unmarking anything.
+    let on: Vec<String> = s.mods().iter().filter(|m| m.enabled).map(|m| m.id.clone()).collect();
+    assert_eq!(s.last_working_except(&on).unwrap().id, worked);
+    assert!(s.last_working_except(std::slice::from_ref(&ma.item.id)).is_none(), "the only played setup has these mods on");
     assert!(!s.mark_not_working().unwrap(), "nothing more to unmark");
+}
+
+#[test]
+fn the_setup_that_worked_before_the_one_that_closed() {
+    use turbine_engine::json;
+    use turbine_engine::store::{last_working_except, quick_exit_json, Setup};
+    let s = |id: &str, at: u64, played: bool| Setup { id: id.into(), saved_at: at, mods_on: 0, played };
+    let ids = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let (a, b, c, d) = (s("a", 10, true), s("b", 30, true), s("c", 40, false), s("d", 30, true));
+    let list = vec![(&c, ids(&["x", "y"])), (&a, ids(&["x"])), (&b, ids(&["y", "x"])), (&d, ids(&["z"]))];
+    // The newest played one (the first of two saved at the same time), not the one with the mods on now.
+    assert_eq!(last_working_except(&list, &ids(&["q"])), Some(2));
+    assert_eq!(last_working_except(&list, &ids(&["x", "y"])), Some(3));
+    assert_eq!(last_working_except(&list[..3], &ids(&["x", "y"])), Some(1));
+    assert_eq!(last_working_except(&list[..1], &[]), None, "never played");
+    let j = json::parse(
+        r#"{"setups":[{"id":"s1","savedAt":5,"modsOn":1,"played":true,"on":["m0"]},{"id":"s2","savedAt":9,"played":true,"on":["m0","m1"]}],
+            "mods":[{"id":"m0","enabled":true},{"id":"m1","enabled":true},{"id":"m2","enabled":true},{"id":"m3","enabled":false}]}"#,
+    )
+    .unwrap();
+    assert_eq!(quick_exit_json(&j), r#"{"worked":{"id":"s2","savedAt":9,"played":true,"on":["m0","m1"]},"added":["m2"]}"#);
+    let none = json::parse(r#"{"setups":[{"id":"s","savedAt":1,"played":"yes","on":[]}],"mods":[]}"#).unwrap();
+    assert_eq!(quick_exit_json(&none), r#"{"worked":null,"added":[]}"#);
 }

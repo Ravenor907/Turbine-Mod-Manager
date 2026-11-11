@@ -1,4 +1,4 @@
-//! 0.6 (integration audit B4): Heroic games get the Wine or Proton DLL overrides their mod frameworks need, from
+//! Heroic games get the Wine or Proton DLL overrides their mod frameworks need, from
 //! Heroic's own game settings, and a Heroic game with a script loader starts the loader through Heroic's link.
 
 mod support;

@@ -211,30 +211,30 @@ jobs:
         run: |
           mkdir -p /tmp/engine
           # The engine's built-in game data (build.rs does this under cargo).
-          rustc +1.97.0 --edition 2021 -O engine/build.rs -o /tmp/engine/gen
+          rustc +1.97.0 --edition 2024 -O engine/build.rs -o /tmp/engine/gen
           CARGO_MANIFEST_DIR="$PWD/engine" OUT_DIR=/tmp/engine /tmp/engine/gen > /dev/null
-          OUT_DIR=/tmp/engine rustc +1.97.0 --edition 2021 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/engine/libturbine_engine.rlib
+          OUT_DIR=/tmp/engine rustc +1.97.0 --edition 2024 -O --crate-type rlib --crate-name turbine_engine engine/src/lib.rs -o /tmp/engine/libturbine_engine.rlib
       - name: Test the browser helper's link (app/src/bridge.rs)
         shell: bash
         run: |
-          rustc +1.97.0 --edition 2021 --test app/src/bridge.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/bridge-tests
+          rustc +1.97.0 --edition 2024 --test app/src/bridge.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/bridge-tests
           /tmp/engine/bridge-tests
           # Turbine's end of Sign in with my browser, from the same bridge.rs, for the helper's whole-handshake check.
-          rustc +1.97.0 --edition 2021 tools/signin-standin.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/signin-standin
+          rustc +1.97.0 --edition 2024 tools/signin-standin.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/signin-standin
       - name: Test the controller pointer (app/src/pointer.rs needs only the standard library)
         shell: bash
         run: |
-          rustc +1.97.0 --edition 2021 --test app/src/pointer.rs -o /tmp/pointer-tests
+          rustc +1.97.0 --edition 2024 --test app/src/pointer.rs -o /tmp/pointer-tests
           /tmp/pointer-tests
       - name: Test Turbine's browser decisions (app/src/browse.rs)
         shell: bash
         run: |
-          rustc +1.97.0 --edition 2021 --test app/src/browse.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/browse-tests
+          rustc +1.97.0 --edition 2024 --test app/src/browse.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/browse-tests
           /tmp/engine/browse-tests
       - name: Test Nexus single sign-on against a stand-in server (app/src/nexus_sso.rs)
         shell: bash
         run: |
-          rustc +1.97.0 --edition 2021 --test app/src/nexus_sso.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/sso-tests
+          rustc +1.97.0 --edition 2024 --test app/src/nexus_sso.rs --extern turbine_engine=/tmp/engine/libturbine_engine.rlib -o /tmp/engine/sso-tests
           /tmp/engine/sso-tests
       - name: Test the browser helper (extension/, Node 22)
         shell: bash
@@ -344,7 +344,7 @@ jobs:
     if: needs.reuse.outputs.run == ''
     runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
@@ -449,7 +449,7 @@ jobs:
     needs: [flatpak]
     runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     strategy:
       fail-fast: false

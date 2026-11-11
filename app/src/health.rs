@@ -1,4 +1,4 @@
-//! 0.56: save backups before Play, "Why won't it start?", the launch option doctor and Check game folder. The
+//! Save backups before Play, "Why won't it start?", the launch option doctor and Check game folder. The
 //! engine does the work (saves.rs, deploy::verify, steam::launch_options); this hands it to QML. All read only,
 //! except a backup (a copy into Turbine's own folder) and putting one back (which keeps the saves first).
 
@@ -117,7 +117,7 @@ impl qobject::Turbine {
             ),
             Err(_) => "null".into(),
         };
-        // 0.58: a game me3 starts with mods needs Turbine's Steam launch helper in its Launch Options.
+        // A game me3 starts with mods needs Turbine's Steam launch helper in its Launch Options.
         use turbine_engine::anticheat as ac;
         let me3 = game.store == turbine_engine::games::Store::Steam && rules.anti_cheat.as_ref().is_some_and(|a| ac::mode(a) == ac::Mode::Me3);
         let needed = if me3 {
@@ -128,7 +128,7 @@ impl qobject::Turbine {
         };
         let set = if game.store == turbine_engine::games::Store::Steam { steam::launch_options(&turbine_engine::home_dir(), &game.store_id) } else { None };
         let ok = if me3 { set.as_deref().is_some_and(|x| ac::launch_option_ok(x, &data_home())) } else { set.as_deref().is_some_and(|x| !needed.is_empty() && x.contains(needed.replace("%command%", "").trim())) };
-        // 0.59: "PROTON_LOG=1 if ..." in front of Turbine's line is a shell error (Steam starts nothing): the doctor
+        // "PROTON_LOG=1 if ..." in front of Turbine's line is a shell error (Steam starts nothing): the doctor
         // offers the same settings with export in front instead.
         let fix = if me3 { set.as_deref().and_then(|x| ac::launch_option_fix(x, &data_home())) } else { None };
         let needed = match &fix {

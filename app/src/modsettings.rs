@@ -1,4 +1,4 @@
-//! 0.58: Edit settings (a mod's config files, or the game's own from the game menu), Seamless Co-op settings (its
+//! Edit settings (a mod's config files, or the game's own from the game menu), Seamless Co-op settings (its
 //! ersc_settings.ini through the same page, password first), and Elden Ring's saves view (normal, modded and co-op
 //! saves apart). The engine reads and writes (turbine_engine::settings, saves); this hands it to QML. Every save
 //! is logged, never a password.
@@ -53,7 +53,7 @@ fn target(game: &Game, mod_id: &str, rel: &str) -> Result<Target, String> {
     if !default.is_file() {
         return Err("The mod doesn't have that file any more.".into());
     }
-    // 0.62: changes made to the file in the game's folder come into Turbine's copy first, so the page shows what
+    // Changes made to the file in the game's folder come into Turbine's copy first, so the page shows what
     // the game has and a save can't drop them.
     if store::sync_in_place(game, &root, mod_id, rel) {
         crate::log::line("settings", &format!("{rel}: changes made in the game's folder were taken into Turbine's copy"));
@@ -89,7 +89,7 @@ fn settings_json(game: &Game, id: &str, rel: &str) -> String {
     let fields = settings::parse(&text, fmt);
     let lines: Vec<String> = text.split('\n').take(600).map(|l| quote(l.trim_end_matches('\r'))).collect();
     let edited = if id.is_empty() { settings::game_original(&t.root, rel).exists() } else { t.now != t.default };
-    // 0.6: settings to look at again after the mod's last update (the player's file before it is kept).
+    // Settings to look at again after the mod's last update (the player's file before it is kept).
     let (look, gone) = if id.is_empty() { (Vec::new(), Vec::new()) } else { settings::review_notes(&t.root, id, rel) };
     let review = settings::review_words("The mod", &look, &gone).unwrap_or_default();
     let review_names: Vec<String> = look.iter().chain(gone.iter()).map(|n| quote(n)).collect();
@@ -127,7 +127,7 @@ impl qobject::Turbine {
         QString::from(format!("[{}]", items.join(",")).as_str())
     }
 
-    /// 0.62: is Seamless Co-op's session password set, for the game on screen? 1 set, 0 empty (a co-op start
+    /// Is Seamless Co-op's session password set, for the game on screen? 1 set, 0 empty (a co-op start
     /// must open Co-op settings first), -1 when its settings file isn't found.
     pub fn coop_password_state(&self, mod_id: &QString) -> i32 {
         let Some(game) = self.current_game() else { return -1 };
@@ -294,7 +294,7 @@ impl qobject::Turbine {
     }
 }
 
-/// 0.62: Seamless Co-op's session password in both places it lives: Turbine's copy of ersc_settings.ini (the one
+/// Seamless Co-op's session password in both places it lives: Turbine's copy of ersc_settings.ini (the one
 /// Co-op settings shows) and the copy the mod itself loads (in the me3 profile's mods folder, placed by the last
 /// apply). The mod refuses to start with an empty one, so every co-op start checks the copy it will load.
 pub(crate) struct CoopPassword {
@@ -396,12 +396,10 @@ fn coop_ext(game: &Game) -> String {
         let id = e.file_name().to_string_lossy().to_string();
         for rel in settings::config_files(&e.path(), 4, 20).into_iter().filter(|r| r.to_ascii_lowercase().ends_with("ersc_settings.ini")) {
             let src = settings::effective(&root, &id, &rel, &e.path().join(&rel));
-            if let Ok(t) = std::fs::read_to_string(src) {
-                if let Some(f) = settings::parse(&t, Format::Ini).into_iter().find(|f| f.key == "save_file_extension") {
-                    let v = f.value.trim().trim_start_matches('.');
-                    if !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric()) {
-                        return v.to_string();
-                    }
+            if let Ok(t) = std::fs::read_to_string(src) && let Some(f) = settings::parse(&t, Format::Ini).into_iter().find(|f| f.key == "save_file_extension") {
+                let v = f.value.trim().trim_start_matches('.');
+                if !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    return v.to_string();
                 }
             }
         }

@@ -1,4 +1,4 @@
-//! What 0.3 adds to the bridge: Get Mods (Thunderstore and Nexus Mods), downloads, the loader install, installer
+//! The bridge's online side: Get Mods (Thunderstore and Nexus Mods), downloads, the loader install, installer
 //! choices (FOMOD), the Load order tab, profiles, mod updates, the Nexus account and Turbine's own updates.
 //!
 //! Network work runs on the download lane (online.rs); anything that changes a game's mods runs on the mod worker
@@ -110,7 +110,7 @@ pub(crate) fn progress(qt: &Qt) -> impl FnMut(&str, u64, Option<u64>) + '_ {
 }
 
 /// Every downloaded file goes to the mod worker to be added.
-fn hand_over<'a>(qt: &'a Qt, game: &Game) -> impl FnMut(Fetched) + 'a {
+fn hand_over<'a>(qt: &'a Qt, game: &Game) -> impl FnMut(Fetched) + 'a + use<'a> {
     let game = game.clone();
     move |f: Fetched| {
         let g = game.clone();
@@ -124,7 +124,7 @@ fn own_download(path: &Path) -> bool {
     path.parent().and_then(|d| d.file_name()).is_some_and(|n| n.to_string_lossy().starts_with("named-"))
 }
 
-/// 0.63: an older Seamless Co-op file whose question was never answered (a second such file arrived, or Turbine is
+/// An older Seamless Co-op file whose question was never answered (a second such file arrived, or Turbine is
 /// closing) is settled the way the question's default does: the one installed is kept, the Downloads watcher is told
 /// the file is settled, and a file Turbine downloaded itself is removed.
 pub(crate) fn settle_older(w: &mut Worker, why: &str) {
@@ -140,10 +140,8 @@ pub(crate) fn settle_older(w: &mut Worker, why: &str) {
 
 fn remove_download(path: &Path) {
     let _ = std::fs::remove_file(path);
-    if let Some(dir) = path.parent() {
-        if dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with("named-")) {
-            let _ = std::fs::remove_dir(dir);
-        }
+    if let Some(dir) = path.parent() && dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with("named-")) {
+        let _ = std::fs::remove_dir(dir);
     }
 }
 
@@ -230,13 +228,13 @@ pub(crate) fn add_archive_with(w: &mut Worker, game: &Game, path: &Path, source:
             crate::anygame::queue_place(w, game, *p);
             Outcome::Choices { name }
         }
-        // 0.62: an older Seamless Co-op than the one installed is not an error: the player is asked (Keep the one
+        // An older Seamless Co-op than the one installed is not an error: the player is asked (Keep the one
         // installed, the default, or Use this one). The file waits for the answer; nothing reports it as a mod that
         // failed, and nothing tries it again by itself.
         Err(e) if turbine_engine::anticheat::older_seamless_in(&e).is_some() => {
             let (have, this) = turbine_engine::anticheat::older_seamless_in(&e).unwrap_or_default();
             crate::log::line("engine", &format!("{label}: Seamless Co-op {this} is older than the {have} installed: asking (Keep {have}, or Use {this})"));
-            // 0.63: one question at a time. A file that was still waiting for its answer is settled first (kept).
+            // One question at a time. A file that was still waiting for its answer is settled first (kept).
             if w.older_seamless.as_ref().is_some_and(|(_, p, _, _)| p.as_path() != path) {
                 settle_older(w, "another older Seamless Co-op file arrived before the answer");
             }
@@ -341,11 +339,9 @@ fn choices_message(p: &turbine_engine::store::Pending, sid: u64) -> Option<Strin
 /// Tells the browser helper about the installer on screen (or that the last one is done).
 fn send_choices(w: &mut Worker) {
     let front = w.pending.front().map(|(_, p, sid)| (*sid, choices_message(p, *sid)));
-    if let Some(prev) = w.fomod_sent {
-        if front.as_ref().map(|(s, _)| *s) != Some(prev) {
-            crate::bridge::broadcast(&format!("{{\"type\":\"choices.done\",\"sessionId\":{}}}", quote(&prev.to_string())));
-            w.fomod_sent = None;
-        }
+    if let Some(prev) = w.fomod_sent && front.as_ref().map(|(s, _)| *s) != Some(prev) {
+        crate::bridge::broadcast(&format!("{{\"type\":\"choices.done\",\"sessionId\":{}}}", quote(&prev.to_string())));
+        w.fomod_sent = None;
     }
     if let Some((sid, Some(m))) = front {
         crate::bridge::broadcast(&m);
@@ -472,10 +468,8 @@ pub(crate) fn bridge_choice(w: &mut Worker, what: &str, session: &str, step: usi
             let mut err = None;
             for (gi, g) in view.groups.iter().enumerate() {
                 for (oi, o) in g.options.iter().enumerate() {
-                    if selected.iter().any(|x| *x == crate::catch::option_id(gi, oi)) && !o.selected {
-                        if let Err(e) = p.session.select(gi, oi) {
-                            err = Some(e);
-                        }
+                    if selected.iter().any(|x| *x == crate::catch::option_id(gi, oi)) && !o.selected && let Err(e) = p.session.select(gi, oi) {
+                        err = Some(e);
                     }
                 }
             }
@@ -510,10 +504,8 @@ fn game_of(w: &Worker, gid: &str) -> Option<Game> {
 /// Keeps plugins.txt in step after an apply (Skyrim): new plugins are listed, removed ones dropped.
 pub(crate) fn sync_order(w: &mut Worker, game: &Game) {
     let plugins = w.slot(game).map(|s| s.rules.plugins).unwrap_or(false);
-    if plugins {
-        if let Err(e) = plugins::sync(game) {
-            crate::log::line("engine", &format!("Load order not synced: {e}"));
-        }
+    if plugins && let Err(e) = plugins::sync(game) {
+        crate::log::line("engine", &format!("Load order not synced: {e}"));
     }
 }
 
@@ -629,7 +621,7 @@ fn sort_order(w: &mut Worker, game: &Game, lists: Option<crate::loot::Lists>, wh
             }
             Err(e) => {
                 crate::log::line("loot", &format!("LOOT sort failed: {e}"));
-                // T11: the reason stays in the activity log (it names the sorting library and its list).
+                // The reason stays in the activity log (it names the sorting library and its list).
                 note = "Couldn't sort with the community list, so the game's own files go first. The reason is in the activity log.".to_string();
             }
         }
@@ -861,7 +853,7 @@ impl qobject::Turbine {
         self.rust().game_info.clone()
     }
 
-    /// 0.62: the answer to "This Seamless Co-op is older" (the `olderSeamless` signal). true: the same file is
+    /// The answer to "This Seamless Co-op is older" (the `olderSeamless` signal). true: the same file is
     /// added again, allowed this once for exactly that file, and the newer copy goes to Removed mods; false: the
     /// one installed stays, the file is left alone and the Downloads watcher is told it is settled. Either way the
     /// waiting file is taken from the worker here, so no answer can be used twice.
@@ -877,7 +869,7 @@ impl qobject::Turbine {
                     return;
                 };
                 let Some(game) = w.slots.get(&game_id).map(|s| s.game.clone()) else {
-                    // 0.63: the game went away meanwhile: nothing is added, and Turbine's own download goes.
+                    // The game went away meanwhile: nothing is added, and Turbine's own download goes.
                     crate::log::line("engine", &format!("{label}: the game it was for isn't open any more; nothing added"));
                     if own_download(&path) {
                         remove_download(&path);
@@ -925,7 +917,7 @@ impl qobject::Turbine {
                     None => f.replaces,
                 };
                 add_archive(w, &game, &f.path, f.source, replaces, &f.label);
-                // 0.62: an older Seamless Co-op waiting for the player's answer keeps its file until then
+                // An older Seamless Co-op waiting for the player's answer keeps its file until then
                 // (older_seamless_answer removes it).
                 if w.older_seamless.as_ref().is_none_or(|(_, p, _, _)| *p != f.path) {
                     remove_download(&f.path);
@@ -994,7 +986,7 @@ impl qobject::Turbine {
             &name,
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let r = if source == "nexus" { net.browse_nexus(&info, &text, &category, &sort, offset) } else { net.browse_ts(&info, &text, &category, &sort) };
-                // 0.59: the answer names the whole question (words, category, sort, source), so the app can drop an
+                // The answer names the whole question (words, category, sort, source), so the app can drop an
                 // answer that comes back after a newer question.
                 let echo = format!("\"qcat\":{},\"qsort\":{},\"qsrc\":{}", quote(&category), quote(&sort), quote(&source));
                 let j = match r {
@@ -1671,10 +1663,8 @@ impl qobject::Turbine {
                         Box::new(move |net: &mut Net, qt: &Qt| {
                             let mut each = hand_over(qt, &g);
                             let mut prog = progress(qt);
-                            if !wanted.is_empty() {
-                                if let Err(e) = net.install_ts(&info, &wanted, false, &mut each, &mut prog) {
-                                    say(qt, e, "error");
-                                }
+                            if !wanted.is_empty() && let Err(e) = net.install_ts(&info, &wanted, false, &mut each, &mut prog) {
+                                say(qt, e, "error");
                             }
                             let premium = !fetch.is_empty() && net.account().map(|a| a.is_premium).unwrap_or(false);
                             if premium {
@@ -1841,7 +1831,7 @@ impl qobject::Turbine {
         self.self_check_how(labs, back, false)
     }
 
-    /// 0.63: the check at start: at most one question to GitHub every six hours (online::Net::self_check).
+    /// The check at start: at most one question to GitHub every six hours (online::Net::self_check).
     pub fn self_check_at_start(self: Pin<&mut Self>, labs: bool) {
         self.self_check_how(labs, false, true)
     }

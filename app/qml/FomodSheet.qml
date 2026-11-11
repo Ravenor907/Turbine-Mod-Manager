@@ -3,7 +3,7 @@ import QtQuick
 // Installer choices (a mod's FOMOD installer): one question per page, big options, and a preview of the focused one
 // (its picture from the archive and its description). The D-pad moves, A picks; in "pick one" questions A also goes
 // on. The last row is Next (or Install on the last page). B goes back a page, and on the first page asks "Stop
-// installing?" with Keep choosing highlighted (0.59: A presses the highlighted button, B keeps choosing; touch has
+// installing?" with Keep choosing highlighted (A presses the highlighted button, B keeps choosing; touch has
 // both buttons). Start goes on from any row.
 // LB and RB do nothing here, so a game can't be switched mid-install. Main.qml drives it with handleButton().
 Overlay {

@@ -1,4 +1,4 @@
-//! Games with anti-cheat (0.57). What the game's data file says (`rules::AntiCheat`) decides the way Turbine plays
+//! Games with anti-cheat. What the game's data file says (`rules::AntiCheat`) decides the way Turbine plays
 //! it with mods:
 //!
 //! - **me3** (Elden Ring, Nightreign, Armored Core VI, Dark Souls III, Sekiro): me3 starts the game's own program
@@ -38,7 +38,7 @@ pub const ME3_SHA256: &str = "f31579deebf75b4702059694b664bdd8917c4773ab0c266715
 /// The files Turbine takes from the release (everything else in it is left out).
 pub const ME3_FILES: &[&str] = &["bin/me3", "bin/win64/me3-launcher.exe", "bin/win64/me3_mod_host.dll", "bin/win64/me3.exe"];
 
-/// Seamless Co-op for Elden Ring. 0.62: no fixed version any more. The mod refuses to run when it is out of date,
+/// Seamless Co-op for Elden Ring. No version is pinned: the mod refuses to run when it is out of date,
 /// so a pinned release can never be right for long: Turbine gets the newest release its repository lists
 /// (loaders::fetch_seamless, size and SHA-256 recorded at the download) or the player gets it from Nexus.
 /// On Nexus: the game's domain and the mod's number (its page usually has the newest version first).
@@ -201,7 +201,7 @@ pub enum AcState {
     /// The starter is as recorded, but another tool left its backup copy beside it ("<starter>.backup"). Steam's
     /// verify doesn't remove extra files; Turbine offers to remove only that file, after a hold to confirm.
     LeftoverBackup(String),
-    /// Turbine still has files in the game folder (a restore that didn't finish, or files from before 0.57).
+    /// Turbine still has files in the game folder (a restore that didn't finish, or files a deploy put there).
     TurbineFilesLeft(usize),
 }
 
@@ -347,7 +347,7 @@ pub fn profile_text(game: &str, natives: &[String], savefile: Option<&str>) -> S
     if let Some(s) = savefile {
         t.push_str(&format!("savefile = {}\n", toml_str(s)));
     }
-    // 0.62: me3 leaves the games' code protection (Arxan) running unless the profile says otherwise, and its timed
+    // me3 leaves the games' code protection (Arxan) running unless the profile says otherwise, and its timed
     // check then closes a modded game without a word after 20 to 30 seconds (the owner's Elden Ring 1.17.2). The
     // key is a top-level one of me3's v1 profile, so it stays above the first table. me3 forces it for Dark Souls
     // III anyway; writing it for every game keeps one profile shape.
@@ -380,14 +380,14 @@ pub fn launch_args(me3: &Path, profile: &Path) -> Vec<String> {
     ]
 }
 
-// ---- Starting through Steam (0.58) ----
+// ---- Starting through Steam ----
 //
 // In Game Mode a game only shows when Steam itself started it. So a modded launch goes through Steam too: the player
 // sets the game's Launch Options once to `<helper> %command%` (the launch option doctor shows and copies the exact
 // text; Turbine never writes Steam's settings), and Turbine starts the game with steam://rungameid/<app id>. The
 // helper is a small script Turbine writes into its own data folder. When Turbine has mods on for the game (a
 // "<app id>.me3" file next to it, one argument per line), it starts the game through me3 with Turbine's profile.
-// Otherwise (no file, or "<app id>.plain" for one Play without mods) it runs Steam's own command unchanged. 0.59:
+// Otherwise (no file, or "<app id>.plain" for one Play without mods) it runs Steam's own command unchanged.
 // Steam's command stays whole in its own order (launch wrapper, reaper with the app id, runtime, Proton); me3's
 // Windows build takes the place of the game's program under Steam's own Proton (`helper_args_for`). Without the
 // reaper and the app id in front, the game starts the normal way. Every step goes to steam-launch.log next to it.
@@ -435,8 +435,8 @@ pub fn launch_option(data: &Path) -> String {
 }
 
 /// Do the Launch Options as set in Steam run the helper with Steam's command after it, in the line that falls back
-/// to Steam's own command without the helper? The older line (the helper alone, before 0.58's release) is outdated:
-/// it counts as not set, so Play shows the one-time step again with the line that falls back. In front of the line
+/// to Steam's own command without the helper? A line with the helper alone (no fallback)
+/// counts as not set, so Play shows the one-time step again with the line that falls back. In front of the line
 /// only `export NAME=value;` statements may stand (`export PROTON_LOG=1; if ...`): `NAME=value if ...` is a shell
 /// syntax error, so Steam would start nothing (`launch_option_fix` offers the export form).
 pub fn launch_option_ok(set: &str, data: &Path) -> bool {
@@ -527,7 +527,7 @@ pub fn launch_option_uses_helper(set: &str, data: &Path) -> bool {
 }
 
 /// Keeps the player's Launch Options from before Turbine's line: whatever they are while they don't hold Turbine's
-/// line is what Undo puts back (0.6, break M4: the newest, so options the player changed after an Undo aren't lost
+/// line is what Undo puts back (the newest, so options the player changed after an Undo aren't lost
 /// to older ones).
 pub fn remember_original(data: &Path, app_id: &str, set: &str) -> io::Result<()> {
     if launch_option_uses_helper(set, data) || !app_id.bytes().all(|b| b.is_ascii_digit()) || app_id.is_empty() {
@@ -545,12 +545,12 @@ pub fn original_options(data: &Path, app_id: &str) -> String {
 /// The helper's text. It runs only Turbine's own me3 from the file Turbine wrote, or Steam's own command.
 /// `flatpak_id`: Turbine's Flatpak; when it is no longer installed the helper runs Steam's own command.
 ///
-/// 0.59: Steam's whole command stays as Steam built it (the launch wrapper with its options, the reaper with
+/// Steam's whole command stays as Steam built it (the launch wrapper with its options, the reaper with
 /// `SteamLaunch AppId=<app>`, the runtime and Proton with its verb, in Steam's own order). With me3's Windows build
 /// (the normal case) only the game's program after Proton's verb is swapped for me3.exe, so Proton is exactly the
-/// one Steam chose. With the Linux me3 (an older armed file) everything before the runtime stays in front. When the
-/// reaper or `AppId=<app>` isn't in what stays in front, the game starts the normal way. me3 runs as a child: its
-/// exit code, run time and last output lines go to steam-launch.log.
+/// one Steam chose. With the Linux me3 (used when the game's program isn't known) everything before the runtime
+/// stays in front. When the reaper or `AppId=<app>` isn't in what stays in front, the game starts the normal way.
+/// me3 runs as a child: its exit code, run time and last output lines go to steam-launch.log.
 pub fn helper_text(flatpak_id: Option<&str>) -> String {
     let installed = match flatpak_id {
         Some(id) => format!(
@@ -743,7 +743,7 @@ pub fn write_helper(data: &Path, flatpak_id: Option<&str>) -> io::Result<bool> {
 
 /// me3's arguments for the helper (the program first), without flatpak-spawn: the helper already runs on the host.
 /// This is the Linux me3, which builds its own runtime and Proton; `helper_args_for` with the game's program is the
-/// 0.59 way.
+/// normal way.
 pub fn helper_args(me3: &Path, profile: &Path) -> Vec<String> {
     launch_args(me3, profile).into_iter().skip(2).collect()
 }
@@ -753,7 +753,7 @@ pub fn windows_path(p: &Path) -> String {
     format!("Z:{}", p.to_string_lossy().replace('/', "\\"))
 }
 
-/// me3's arguments for the helper (0.59). With the game's program (`game_exe`, the host path): me3's Windows build,
+/// me3's arguments for the helper. With the game's program (`game_exe`, the host path): me3's Windows build,
 /// which the helper runs under Steam's own Proton in place of the game's program, with the game and the profile as
 /// Z: paths (`--exe` means me3 needs no Steam lookup of its own; its Windows binaries are next to me3.exe). Without
 /// it: the Linux me3 (`helper_args`).
@@ -840,7 +840,7 @@ pub fn launch_report_lines(data: &Path) -> Vec<String> {
             out.extend(lines);
         }
     };
-    // 0.62: first, in one sentence, which Proton Turbine's Steam tool used at the last launch and why (the tool
+    // First, in one sentence, which Proton Turbine's Steam tool used at the last launch and why (the tool
     // chooses by itself when Turbine has no record of the one Steam used), or why it started nothing.
     let recent = last_lines(&dir.join("steam-launch.log"), 80);
     if let Some(w) = crate::compat_tool::nothing_started(&recent).map(|w| format!("Turbine's Steam tool: {w}")).or_else(|| crate::compat_tool::proton_words(&recent).map(|w| format!("Turbine's Steam tool: {w}"))) {
@@ -973,7 +973,7 @@ pub fn is_seamless_native(n: &str) -> bool {
     l.ends_with("/ersc.dll") || l == "ersc.dll"
 }
 
-// ---- Seamless Co-op's session password (0.62) ----
+// ---- Seamless Co-op's session password ----
 //
 // The mod stops the game at once when its settings file has no session password ("Please enter a session password
 // in your settings file"). The file it reads is the ersc_settings.ini next to its ersc.dll, and under me3 that is
@@ -1085,7 +1085,7 @@ pub fn coop_password(store_root: &Path) -> CoopPassword {
     }
 }
 
-// ---- Which Seamless Co-op the game loads (0.62) ----
+// ---- Which Seamless Co-op the game loads ----
 
 /// Is this path Seamless Co-op's DLL (whatever folder it is in)?
 pub fn is_seamless_file(rel: &str) -> bool {
@@ -1095,8 +1095,8 @@ pub fn is_seamless_file(rel: &str) -> bool {
 /// Is this list of files Seamless Co-op's own package, and nothing else: its ersc.dll in a SeamlessCoop folder with
 /// ersc_settings.ini beside it, at the top or one folder down ("Game/SeamlessCoop/..."), and beside that folder
 /// only a few loose files (its launcher, a readme)? A bigger mod that merely carries an ersc.dll somewhere is not
-/// (0.62 break test M3: such a bundle took Seamless Co-op's place in the list), and neither is a pack that holds a
-/// whole SeamlessCoop folder among other folders (the re-check's L-b): those are mods of their own.
+/// (such a bundle must not take Seamless Co-op's place in the list), and neither is a pack that holds a
+/// whole SeamlessCoop folder among other folders: those are mods of their own.
 pub fn is_seamless_package(files: &[String]) -> bool {
     let lower: Vec<String> = files.iter().map(|f| f.replace('\\', "/").to_ascii_lowercase()).collect();
     lower.iter().any(|f| {
@@ -1178,14 +1178,10 @@ pub fn coop_password_put(text: &str, password: &str) -> Option<String> {
         let line = raw.trim();
         if let Some(name) = line.strip_prefix('[').and_then(|l| l.split(']').next()) {
             section = name.trim().to_ascii_lowercase();
-        } else if !line.starts_with(';') && !line.starts_with('#') {
-            if let Some((key, _)) = line.split_once('=') {
-                if key.trim().trim_start_matches('\u{feff}').eq_ignore_ascii_case("cooppassword") {
-                    let in_section = section == "password";
-                    if hit.is_none() || (in_section && hit.is_some_and(|(_, s)| !s)) {
-                        hit = Some((pos, in_section));
-                    }
-                }
+        } else if !line.starts_with(';') && !line.starts_with('#') && let Some((key, _)) = line.split_once('=') && key.trim().trim_start_matches('\u{feff}').eq_ignore_ascii_case("cooppassword") {
+            let in_section = section == "password";
+            if hit.is_none() || (in_section && hit.is_some_and(|(_, s)| !s)) {
+                hit = Some((pos, in_section));
             }
         }
         pos += raw.len();
@@ -1215,7 +1211,7 @@ pub fn write_profile_for(store_root: &Path, game: &str, coop: Coop) -> io::Resul
     let has = all.iter().any(|n| is_seamless_native(n));
     let (nat, save): (Vec<String>, Option<&str>) = match coop {
         Coop::Solo => (all.into_iter().filter(|n| !is_seamless_native(n)).collect(), Some(ME3_SAVEFILE)),
-        // 0.62: never a co-op profile for a Play the mod would stop at once (no session password in its file).
+        // Never a co-op profile for a Play the mod would stop at once (no session password in its file).
         Coop::Seamless if has => match coop_password(store_root).ready() {
             Ok(()) => (all, None),
             Err(why) => return Err(io::Error::new(io::ErrorKind::InvalidInput, why)),

@@ -53,7 +53,7 @@ def main(home):
         # Kingdom Come: Deliverance I and II (Windows builds through Proton; the second game ships a lower-case mods folder).
         (steam, "379430", "Kingdom Come: Deliverance", "KingdomComeDeliverance", "Bin/Win64/KingdomCome.exe", True, (120, 100, 60), (30, 25, 15)),
         (steam, "1771300", "Kingdom Come: Deliverance II", "KingdomComeDeliverance2", "Bin/Win64MasterMasterSteamPGO/KingdomCome.exe", True, (90, 110, 70), (20, 28, 15)),
-        # 0.56, Mods for any game: two made-up games Turbine has no rules for (Basic support).
+        # Mods for any game: two made-up games Turbine has no rules for (Basic support).
         (steam, "3999901", "Lantern Hollow", "Lantern Hollow", "Lantern/Binaries/Win64/Lantern-Win64-Shipping.exe", True, (180, 120, 50), (30, 20, 10)),
         (steam, "3999902", "Brass Pier", "Brass Pier", "BrassPier.exe", True, (150, 110, 60), (25, 20, 15)),
     ]
@@ -64,7 +64,7 @@ def main(home):
         if proton:
             os.makedirs(os.path.join(apps, "compatdata", app_id, "pfx"), exist_ok=True)
         png(os.path.join(steam, "appcache/librarycache", app_id, "library_600x900.png"), 60, 90, top, bottom)
-    # 0.64: Cyberpunk's Proton setup has only Steam's 2019 Visual C++ runtime (14.29), the case RED4ext and Cyber Engine
+    # Cyberpunk's Proton setup has only Steam's 2019 Visual C++ runtime (14.29), the case RED4ext and Cyber Engine
     # Tweaks fail with error 998: a vcruntime140.dll with that version in its version resource.
     vc = bytearray(b"MZ" + b"\0" * 510) + bytes([0xBD, 0x04, 0xEF, 0xFE]) + (0x00010000).to_bytes(4, "little") \
         + ((14 << 16) | 29).to_bytes(4, "little") + (30153 << 16).to_bytes(4, "little") + b"\0" * 64
@@ -255,7 +255,7 @@ def downloads(folder):
         "QuietStreets/init.lua": "-- placeholder, never run\nreturn {}\n",
         "QuietStreets/settings.json": "{}",
     }, now - 4 * 86400)
-    # 0.64: Cyberpunk 2077: Cyber Engine Tweaks itself (its plugin and the ASI loader), for the Visual C++ runtime check.
+    # Cyberpunk 2077: Cyber Engine Tweaks itself (its plugin and the ASI loader), for the Visual C++ runtime check.
     zip_file(os.path.join(folder, "Cyber Engine Tweaks 1.35.zip"), {
         "bin/x64/plugins/cyber_engine_tweaks.asi": b"MZ" + b"\0" * 62,
         "bin/x64/version.dll": b"MZ" + b"\0" * 62,
@@ -298,7 +298,7 @@ def downloads(folder):
         "FastTravel/mod.manifest": manifest % "Fast Travel",
         "FastTravel/Data/travel.pak": pak,
     }, now - 6 * 86400)
-    # 0.56, Basic support: an Unreal pak mod (Lantern Hollow); a mod with its own Data folder, one with loose files
+    # Basic support: an Unreal pak mod (Lantern Hollow); a mod with its own Data folder, one with loose files
     # Turbine can't place, and one that would replace the game's own files (Brass Pier).
     zip_file(os.path.join(folder, "Wand Glow 1.0.zip"), {
         "WandGlow_P.pak": b"pak" * 20, "WandGlow_P.utoc": b"utoc", "WandGlow_P.ucas": b"ucas", "readme.txt": "Glowing wands.\n",
@@ -344,7 +344,7 @@ def anticheat_games(home):
         "parts/am_f_9000.partsbnd.dcx": b"made-up armor",
     }, now - 3 * 86400)
     zip_file(os.path.join(home, "Downloads", "Guardian Colors 1.0.zip"), {"colors.txt": b"x"}, now - 3 * 86400)
-    # 0.58: the other two kinds of Elden Ring save (modded through me3, Seamless Co-op), and a made-up Seamless Co-op
+    # The other two kinds of Elden Ring save (modded through me3, Seamless Co-op), and a made-up Seamless Co-op
     # with a settings file laid out the way its own is (sections, numbered choices in the comments, a password).
     saves = os.path.join(steam, "steamapps/compatdata/1245620/pfx/drive_c/users/steamuser/AppData/Roaming/EldenRing/76561190000000000")
     write(os.path.join(saves, "TurbineModded.sl2"), "a modded save\n")

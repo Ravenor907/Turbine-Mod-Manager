@@ -20,10 +20,10 @@ Rectangle {
     property string kind: "info"
 
     signal hidden()
-    // A press on the toast (0.59): Main.qml stops that press reaching anything beneath it.
+    // A press on the toast: Main.qml stops that press reaching anything beneath it.
     signal pressedOn()
     signal pressEnded()
-    // 0.6: a toast can carry its next step as a button ("R3 Undo"): a tap on it, or the key, does it.
+    // A toast can carry its next step as a button ("R3 Undo"): a tap on it, or the key, does it.
     property string actionLabel: ""
     property string actionGlyph: ""
     signal actionClicked()
@@ -49,7 +49,7 @@ Rectangle {
     y: parent ? parent.height - height - bottomMargin : 0
     z: 50
     width: Math.min(maxWidth, toastRow.implicitWidth + ui.px(24))
-    // 0.59: wraps to three lines rather than cutting a message off.
+    // Wraps to three lines rather than cutting a message off.
     height: Math.max(ui.px(46), toastRow.implicitHeight + ui.px(20))
     radius: ui.px(6)
     color: Qt.tint(ui.c.raised, Qt.rgba(ui.c.accent.r, ui.c.accent.g, ui.c.accent.b, 0.06))
@@ -57,11 +57,11 @@ Rectangle {
     border.color: ui.c.accentLo
     opacity: shown ? 1 : 0
     visible: opacity > 0
-    // 0.62: it fades in and out, and at Full slides up a little as it comes and back down as it goes.
+    // It fades in and out, and at Full slides up a little as it comes and back down as it goes.
     Behavior on opacity { NumberAnimation { duration: root.ui.motion.base; easing.type: root.shown ? root.ui.motion.enter : root.ui.motion.leave } }
     transform: Translate { y: (1 - root.opacity) * root.ui.px(14) * root.ui.motion.slide }
 
-    // A tap on the toast dismisses it and goes nowhere else (0.59).
+    // A tap on the toast dismisses it and goes nowhere else.
     MouseArea {  // overlay-check: the toast's own box, not the window
         anchors.fill: parent
         enabled: root.shown

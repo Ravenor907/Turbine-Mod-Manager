@@ -16,6 +16,7 @@ mod online;
 mod pad;
 mod pointer;
 mod quick;
+mod seen;
 mod single;
 mod steamsetup;
 mod system;
@@ -45,7 +46,7 @@ pub(crate) fn cache_dir() -> std::path::PathBuf {
         .join("turbine-mod-manager")
 }
 
-extern "C" {
+unsafe extern "C" {
     // qtglue.cpp
     fn turbine_install_qt_handler(sink: extern "C" fn(i32, *const std::os::raw::c_char, *const std::os::raw::c_char));
     fn turbine_window_identity();
@@ -104,8 +105,8 @@ fn chromium_flags() {
     }
     let all = flags.join(" ");
     log::line("web", &format!("Chromium switches: {all}"));
-    // Before any thread starts: nothing else reads the environment yet.
-    std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", all);
+    // SAFETY: main calls this before it starts any thread, so nothing else reads the environment yet.
+    unsafe { std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", all) };
 }
 
 /// QtWebEngine's QML module comes from the Flatpak's base under /app; it is added to where QML looks when it isn't
@@ -116,7 +117,8 @@ fn qml_import_path() {
             let now = std::env::var("QML_IMPORT_PATH").unwrap_or_default();
             if !now.split(':').any(|p| p == dir) {
                 let v = if now.is_empty() { dir.to_string() } else { format!("{now}:{dir}") };
-                std::env::set_var("QML_IMPORT_PATH", v);
+                // SAFETY: main calls this before it starts any thread.
+                unsafe { std::env::set_var("QML_IMPORT_PATH", v) };
             }
             log::line("web", &format!("QtWebEngine's QML from {dir}"));
             return;
@@ -161,8 +163,8 @@ fn choose_platform() -> Option<&'static str> {
     if set || !x11 || !system::is_steamos() {
         return None;
     }
-    // Before any thread starts: nothing else reads the environment yet.
-    std::env::set_var("QT_QPA_PLATFORM", "xcb");
+    // SAFETY: main calls this before it starts any thread, so nothing else reads the environment yet.
+    unsafe { std::env::set_var("QT_QPA_PLATFORM", "xcb") };
     Some("xcb")
 }
 
@@ -182,27 +184,29 @@ fn choose_drawing() -> Option<&'static str> {
     } else {
         return None;
     };
-    // Before any thread starts: nothing else reads the environment yet.
-    std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+    // SAFETY: main calls this before it starts any thread, so nothing else reads the environment yet.
+    unsafe { std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1") };
     let flags = std::env::var("QTWEBENGINE_CHROMIUM_FLAGS").unwrap_or_default();
     if !flags.split_whitespace().any(|f| f == "--disable-gpu") {
-        std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", format!("{flags} --disable-gpu").trim());
+        // SAFETY: as above.
+        unsafe { std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", format!("{flags} --disable-gpu").trim()) };
     }
     Some(why)
 }
 
 fn main() {
-    // 0.6: the host script's call once Steam has closed: make the waiting change to Steam's settings, then end.
+    // The host script's call once Steam has closed: make the waiting change to Steam's settings, then end.
     if let Some(code) = steamsetup::apply_from_args() {
         std::process::exit(code);
     }
-    // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
+    // A request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
     if let Some(req) = quick::wanted() {
         std::process::exit(quick::run(req));
     }
     let _ = labs::started();
     let platform = choose_platform();
     let software = choose_drawing();
+    let pad_filters = pad::clear_steam_filters();
     // One Turbine at a time: a Nexus link given to a second launch goes to the running one, a second launch with no
     // link brings the running one to the front, and either way this one ends before it touches the logs, the
     // partial downloads or the browser's profile (screenshot runs skip this).
@@ -214,12 +218,12 @@ fn main() {
     if matches!(start, Some(single::Start::Forwarded)) {
         return;
     }
-    // 0.6: the lock is held by a request from Steam's menu (Mods off, Play...), not by another window: wait for it to
+    // The lock is held by a request from Steam's menu (Mods off, Play...), not by another window: wait for it to
     // finish (seconds), then open as usual.
     let mut waited_for_quick = false;
     if matches!(lock, browse::Lock::Taken) && browse::quick_running(&lock_folder) {
         eprintln!("A request from Steam's menu is running; Turbine opens when it is done.");
-        // As long as the plugin waits for a change (decky/main.py CHANGE_TIMEOUT, break L3).
+        // As long as the plugin waits for a change (decky/main.py CHANGE_TIMEOUT).
         lock = browse::lock_wait(&lock_folder.join(browse::LOCK_FILE), std::time::Duration::from_secs(300));
         waited_for_quick = true;
     }
@@ -239,6 +243,9 @@ fn main() {
     }
     if let Some(why) = software {
         log::line("app", &format!("Software drawing ({why})"));
+    }
+    for l in pad_filters {
+        log::line("pad", &l);
     }
     if system::developer() {
         log::line("app", &format!("Developer switch on ({}=1): no \"not supported\" notice", system::DEVELOPER_ENV));
@@ -285,14 +292,12 @@ fn main() {
         log::line("nxm", &format!("Started with a Nexus link: {}", redacted(&l)));
         single::push(l);
     }
-    // 0.6: Open or Report from Steam's menu, asked just before Steam started Turbine for it.
-    if !screenshot {
-        if let Some(l) = turbine_engine::quick::take_request(&log::folder(&backend::data_home()), now_secs()) {
-            log::line("quick", &format!("Started from Steam's menu: {l}"));
-            single::push(l);
-        }
+    // Open or Report from Steam's menu, asked just before Steam started Turbine for it.
+    if !screenshot && let Some(l) = turbine_engine::quick::take_request(&log::folder(&backend::data_home()), now_secs()) {
+        log::line("quick", &format!("Started from Steam's menu: {l}"));
+        single::push(l);
     }
-    // 0.6: Turbine's own Steam library art (at every start, so after every update too; never over the player's own).
+    // Turbine's own Steam library art (at every start, so after every update too; never over the player's own).
     if !screenshot {
         std::thread::spawn(steamsetup::art_at_start);
     }
@@ -301,7 +306,7 @@ fn main() {
         a.as_mut().set_organization_name(&QString::from("Turbine Mod Manager"));
         a.as_mut().set_application_name(&QString::from("Turbine Mod Manager"));
     }
-    // 0.63: the window carries the menu entry's name and Turbine's icon (Desktop Mode's taskbar showed a generic one).
+    // The window carries the menu entry's name and Turbine's icon (otherwise Desktop Mode's taskbar shows a generic one).
     // SAFETY: after QGuiApplication, on the main thread; takes and keeps nothing from this side.
     unsafe { turbine_window_identity() };
     // The browser's profile: kept in Turbine's data folder (signed in stays signed in), its cache in the cache folder.

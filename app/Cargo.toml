@@ -1,7 +1,6 @@
 [package]
 name = "turbine-mod-manager"
 description = "Controller-first mod manager for SteamOS handhelds"
-version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

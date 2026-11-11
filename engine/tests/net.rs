@@ -285,7 +285,7 @@ fn failures_become_net_errors_and_leave_no_files() {
     let u = "https://api.github.com/limited";
     f.serve(u, b"slow down");
     f.extra(u, "status", "429");
-    // 0.63: a limit or refusal from GitHub is its own failure, with the minutes it says to wait.
+    // A limit or refusal from GitHub is its own failure, with the minutes it says to wait.
     f.extra(u, "headers", "Retry-After: 61\r\n");
     assert_eq!(f.client.get_text(u, &[]), Err(NetError::GitHubLimit(2)));
     assert_eq!(NetError::GitHubLimit(2).to_string(), "GitHub is limiting requests right now. Try again in about 2 minutes.");

@@ -130,10 +130,8 @@ fn without_copy_number(stem: &str) -> &str {
     let s = stem.trim_end();
     if let Some(open) = s.rfind('(') {
         let inner = &s[open + 1..];
-        if let Some(num) = inner.strip_suffix(')') {
-            if !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
-                return s[..open].trim_end();
-            }
+        if let Some(num) = inner.strip_suffix(')') && !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit()) {
+            return s[..open].trim_end();
         }
     }
     s
@@ -234,7 +232,7 @@ pub fn default_folders(home: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// 0.61 (integration I14): the desktop's Downloads folder as the sandbox sees it, for the watcher and Turbine's own
+/// The desktop's Downloads folder as the sandbox sees it, for the watcher and Turbine's own
 /// browser alike: $XDG_DOWNLOAD_DIR when set, else user-dirs.dirs in $XDG_CONFIG_HOME (where Flatpak puts the
 /// host's copy) or ~/.config, else ~/Downloads.
 pub fn downloads_folder(home: &Path) -> PathBuf {
@@ -246,10 +244,8 @@ pub fn downloads_folder(home: &Path) -> PathBuf {
 
 /// The same, from the given environment value and config folders (first one with a Downloads line wins).
 pub fn downloads_folder_from(home: &Path, env: Option<&str>, configs: &[PathBuf]) -> PathBuf {
-    if let Some(p) = env.map(str::trim).filter(|p| p.starts_with('/')).map(PathBuf::from) {
-        if p != home {
-            return p;
-        }
+    if let Some(p) = env.map(str::trim).filter(|p| p.starts_with('/')).map(PathBuf::from) && p != home {
+        return p;
     }
     for dir in configs.iter().filter(|d| d.is_absolute()) {
         if let Some(p) = fs::read_to_string(dir.join("user-dirs.dirs")).ok().and_then(|t| parse_user_dirs(&t, home)) {
@@ -277,7 +273,7 @@ pub const OTHER_FOLDER: &str = "Other";
 /// The folder name for a game inside Game Mods: its name without characters browsers or file systems refuse
 /// (< > : " / \\ | ? * and control characters), spaces kept, at most 80 characters, never "." or "..".
 pub fn game_folder_name(name: &str) -> String {
-    // 0.62: a long dash in a game's name ("Slay the Princess \u{2014} The Pristine Cut") becomes a plain hyphen.
+    // A long dash in a game's name ("Slay the Princess \u{2014} The Pristine Cut") becomes a plain hyphen.
     let cleaned: String = name.chars().map(plain_dash).filter(|c| !c.is_control() && !"<>:\"/\\|?*".contains(*c)).collect();
     let words = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
     let t: String = words.trim_matches('.').chars().take(80).collect();
@@ -289,8 +285,8 @@ fn plain_dash(c: char) -> char {
     if matches!(c, '\u{2014}' | '\u{2013}' | '\u{2012}' | '\u{2015}') { '-' } else { c }
 }
 
-/// 0.62: Game Mods folders made by an older Turbine with a long dash in their name ("The Witcher 3 Wild Hunt
-/// \u{2014} Remastered") get the name `game_folder_name` gives now (a plain hyphen), with everything in them. A
+/// Game Mods folders with a long dash in their name ("The Witcher 3 Wild Hunt
+/// \u{2014} Remastered") get the name `game_folder_name` gives (a plain hyphen), with everything in them. A
 /// folder is left for the next start while a download is still being written into it. When the new name is there
 /// already, the files move over one by one (a file with the same name there stays where it is, and so does the old
 /// folder). Links are never followed. The watcher's remembered files (`state_file`, CatchState) follow the move.
@@ -349,22 +345,20 @@ pub fn rename_dash_folders(downloads: &[PathBuf], state_file: Option<&Path>) -> 
             moved.push((old, new));
         }
     }
-    if let (Some(file), false) = (state_file, moved.is_empty()) {
-        if let Some(mut st) = CatchState::load(file) {
-            let fix = |k: &String| {
-                moved.iter().fold(k.clone(), |k, (old, new)| {
-                    // Only a file that really is at the new place now follows; the rest keep their old path.
-                    let (o, n) = (format!("{}/", old.display()), format!("{}/", new.display()));
-                    match k.find(&o) {
-                        Some(i) if Path::new(&format!("{n}{}", &k[i + o.len()..])).exists() => format!("{}{n}{}", &k[..i], &k[i + o.len()..]),
-                        _ => k,
-                    }
-                })
-            };
-            st.ignored = st.ignored.iter().map(fix).collect();
-            st.pending = st.pending.iter().map(fix).collect();
-            let _ = st.save(file);
-        }
+    if let (Some(file), false) = (state_file, moved.is_empty()) && let Some(mut st) = CatchState::load(file) {
+        let fix = |k: &String| {
+            moved.iter().fold(k.clone(), |k, (old, new)| {
+                // Only a file that really is at the new place now follows; the rest keep their old path.
+                let (o, n) = (format!("{}/", old.display()), format!("{}/", new.display()));
+                match k.find(&o) {
+                    Some(i) if Path::new(&format!("{n}{}", &k[i + o.len()..])).exists() => format!("{}{n}{}", &k[..i], &k[i + o.len()..]),
+                    _ => k,
+                }
+            })
+        };
+        st.ignored = st.ignored.iter().map(fix).collect();
+        st.pending = st.pending.iter().map(fix).collect();
+        let _ = st.save(file);
     }
     lines
 }

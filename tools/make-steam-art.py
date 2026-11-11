@@ -159,7 +159,7 @@ def coop_logo():
 
 def coop_icon():
     w = h = 256
-    # 0.62: a clear background, like the app icon: the mark, dimmed, with the word over it.
+    # A clear background, like the app icon: the mark, dimmed, with the word over it.
     b = f"""{mark("m", 8, 8, 240, opacity=0.38)}
 {word("CO-OP", 128, 146, 50, spacing=0)}"""
     return svg(w, h, b, bg=False)

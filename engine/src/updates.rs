@@ -109,10 +109,8 @@ fn nexus_mod_of(id: &str, domain: &str) -> Option<u64> {
 pub fn nexus_mod_ids(domain: &str, installed: &[Installed]) -> Vec<u64> {
     let mut out: Vec<u64> = Vec::new();
     for m in installed.iter().filter(|m| m.kind == "nexus") {
-        if let Some(id) = nexus_mod_of(&m.id, domain) {
-            if !out.contains(&id) {
-                out.push(id);
-            }
+        if let Some(id) = nexus_mod_of(&m.id, domain) && !out.contains(&id) {
+            out.push(id);
         }
     }
     out

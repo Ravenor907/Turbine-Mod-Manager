@@ -485,36 +485,19 @@ const PORT_FILE: &str = "bridge-port";
 /// The version the last connected helper reported.
 const HELPER_VERSION_FILE: &str = "bridge-helper-version";
 
-/// The first helper version that knows "open" (opens a Nexus page in a new tab).
-pub const OPEN_SINCE: &str = "0.53";
-/// The first helper version that knows "reload" (reloads itself from its folder with chrome.runtime.reload()).
-pub const RELOAD_SINCE: &str = "0.54";
-/// The helper version that knows the sign-in request (0.55).
-pub const SIGNIN_SINCE: &str = "0.55";
-/// The helper version with its own sign-in page (0.59): it opens that page itself when asked for the sign-in.
-pub const SIGNIN_PAGE_SINCE: &str = "0.59";
-/// What the player does once when the helper is too old to reload itself.
-pub const OLD_HELPER_TEXT: &str =
-    "Your browser helper is out of date. In Chrome, open chrome://extensions and press the reload arrow on Turbine browser helper.";
-
 /// The helper version this Turbine carries (from its manifest), set once at start; "" when it has none.
 pub static BUNDLED: OnceLock<String> = OnceLock::new();
 /// Run before Turbine asks a helper to reload: puts Turbine's newer helper files in the folder it loads from. False
 /// when that didn't fully work (the reload is then not asked for: it would load a half-updated helper, or the old one).
 pub static BEFORE_RELOAD: OnceLock<fn() -> bool> = OnceLock::new();
 
-/// Compares two dotted versions ("0.53", "0.41", "1.2"): numbers part by part, missing parts are 0. Anything that
-/// isn't a number counts as 0, so a broken version is always "older".
+/// Is version `a` older than `b`? Versions are decimals ("0.6" is newer than "0.59"), as Turbine numbers its
+/// releases. A broken `a` is older than a good `b`; a broken `b` makes nothing older.
 pub fn version_older(a: &str, b: &str) -> bool {
-    let parts = |v: &str| -> Vec<u64> { v.trim().split('.').map(|p| p.trim().parse().unwrap_or(0)).collect() };
-    let (x, y) = (parts(a), parts(b));
-    for i in 0..x.len().max(y.len()) {
-        let (p, q) = (x.get(i).copied().unwrap_or(0), y.get(i).copied().unwrap_or(0));
-        if p != q {
-            return p < q;
-        }
+    match turbine_engine::selfupdate::compare(a, b) {
+        Some(o) => o.is_lt(),
+        None => turbine_engine::selfupdate::compare(b, b).is_some(),
     }
-    false
 }
 
 /// What Turbine does about a helper of version `helper` when it carries `bundled`.
@@ -522,17 +505,13 @@ pub fn version_older(a: &str, b: &str) -> bool {
 pub enum HelperAge {
     /// As new as Turbine's (or Turbine carries none, or the version isn't known).
     Current,
-    /// Older, and it knows "reload": Turbine asks it to reload itself from its folder.
+    /// Older: Turbine asks it to reload itself from its folder.
     Reload,
-    /// Older, and too old to reload itself: the player presses reload in chrome://extensions once.
-    Manual,
 }
 
 pub fn helper_age(helper: &str, bundled: &str) -> HelperAge {
     if helper.is_empty() || bundled.is_empty() || !version_older(helper, bundled) {
         HelperAge::Current
-    } else if version_older(helper, RELOAD_SINCE) {
-        HelperAge::Manual
     } else {
         HelperAge::Reload
     }
@@ -649,21 +628,19 @@ pub fn set_games(json: String) {
     }
 }
 
-/// {"running","port","paired","connected","ext","error","moved","helper","bundled","outdated","manual"} for Settings.
-/// "helper": the version the last connected helper reported; "outdated": it is older than the one Turbine carries;
-/// "manual": too old to reload itself (the player presses reload in chrome://extensions once).
+/// {"running","port","paired","connected","ext","error","moved","helper","bundled","outdated"} for Settings.
+/// "helper": the version the last connected helper reported; "outdated": it is older than the one Turbine carries.
 pub fn status_json() -> String {
     let bundled = BUNDLED.get().map(String::as_str).unwrap_or("");
     let g = state();
     match g.as_ref() {
         None => format!(
-            "{{\"running\":false,\"port\":0,\"paired\":false,\"connected\":0,\"ext\":\"\",\"error\":\"\",\"moved\":false,\"helper\":\"\",\"bundled\":{},\"outdated\":false,\"manual\":false}}",
+            "{{\"running\":false,\"port\":0,\"paired\":false,\"connected\":0,\"ext\":\"\",\"error\":\"\",\"moved\":false,\"helper\":\"\",\"bundled\":{},\"outdated\":false}}",
             quote(bundled)
         ),
         Some(s) => {
-            let age = helper_age(&s.helper_version, bundled);
             format!(
-                "{{\"running\":{},\"port\":{},\"paired\":{},\"connected\":{},\"ext\":{},\"error\":{},\"moved\":{},\"helper\":{},\"bundled\":{},\"outdated\":{},\"manual\":{}}}",
+                "{{\"running\":{},\"port\":{},\"paired\":{},\"connected\":{},\"ext\":{},\"error\":{},\"moved\":{},\"helper\":{},\"bundled\":{},\"outdated\":{}}}",
                 s.port != 0,
                 s.port,
                 s.paired.is_some(),
@@ -673,27 +650,14 @@ pub fn status_json() -> String {
                 s.moved && s.clients.is_empty(),
                 quote(&s.helper_version),
                 quote(bundled),
-                age != HelperAge::Current,
-                age == HelperAge::Manual
+                helper_age(&s.helper_version, bundled) != HelperAge::Current
             )
         }
     }
 }
 
-/// The version the last connected helper reported ("" when none has connected yet).
-pub fn helper_version() -> String {
-    state().as_ref().map(|s| s.helper_version.clone()).unwrap_or_default()
-}
-
-/// Does the helper know "open"? False only when the last one that connected was older than OPEN_SINCE: then a page
-/// shouldn't wait for it.
-pub fn helper_knows_open() -> bool {
-    let v = helper_version();
-    v.is_empty() || !version_older(&v, OPEN_SINCE)
-}
-
 /// A helper said its version in hello: kept (and saved). Answers whether Turbine should ask it to reload now (it is
-/// older than Turbine's, knows "reload", and wasn't asked for this version yet this run).
+/// older than Turbine's and wasn't asked for this version yet this run).
 pub fn note_helper_version(v: &str) -> bool {
     let v: String = v.trim().chars().filter(|c| c.is_ascii_digit() || *c == '.').take(20).collect();
     let bundled = BUNDLED.get().cloned().unwrap_or_default();
@@ -727,7 +691,7 @@ pub fn paired() -> bool {
 /// no helper).
 pub const OPEN_WAIT: Duration = Duration::from_secs(180);
 
-/// 0.61 (integration I7e): how long a page waits for the helper. The sign-in page lives as long as its sign-in
+/// How long a page waits for the helper. The sign-in page lives as long as its sign-in
 /// request (SIGNIN_WAIT), so a slow first browser start still gets it; other pages OPEN_WAIT.
 pub fn open_wait(url: &str) -> Duration {
     if url == SIGNIN_URL {
@@ -943,24 +907,15 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
                 match helper_age(&hv, &bundled) {
                     HelperAge::Current => String::new(),
                     HelperAge::Reload => format!(", older than Turbine's {bundled}"),
-                    HelperAge::Manual => format!(", older than Turbine's {bundled} and too old to reload itself"),
                 }
             ));
             if let Some(url) = take_pending_open() {
-                if version_older(&hv, OPEN_SINCE) {
-                    log(&format!("Didn't ask helper {hv} to open {url}: it is too old to know how"));
-                } else {
-                    let sent = send(&out, OP_TEXT, open_message(&url).as_bytes());
-                    log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
-                }
+                let sent = send(&out, OP_TEXT, open_message(&url).as_bytes());
+                log(&format!("Asked the helper to open {url} in a new tab{}", if sent { "" } else { " (it didn't take it)" }));
             }
             if let Some(m) = signin_waiting_message(Instant::now()) {
-                if version_older(&hv, SIGNIN_SINCE) {
-                    log(&format!("Didn't ask helper {hv} for the sign-in: it is too old to know how (it needs {SIGNIN_SINCE})"));
-                } else {
-                    let sent = send(&out, OP_TEXT, m.as_bytes());
-                    log(&format!("Asked the helper for the Nexus sign-in{}", if sent { "" } else { " (it didn't take it)" }));
-                }
+                let sent = send(&out, OP_TEXT, m.as_bytes());
+                log(&format!("Asked the helper for the Nexus sign-in{}", if sent { "" } else { " (it didn't take it)" }));
             }
             if reload {
                 // Turbine's newer files go into its folder first (catch.rs), so the reload picks them up.
@@ -989,7 +944,7 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
 
 // ---------------------------------------------------------------------------------------------------- sign-in
 
-// Sign-in pass-through (0.55): Nexus's Google button (and any other provider the embedded browser can't use) works
+// Sign-in pass-through: Nexus's Google button (and any other provider the embedded browser can't use) works
 // in the player's own browser. The player presses "Sign in with my browser" in Turbine; Turbine makes a one-time
 // request id and sends {"type":"signin.request","id","url"} to the helper. After the player has signed in there, the
 // helper answers {"type":"signin.cookies","id","cookies":[...]} with Nexus's cookies only, and Turbine puts them into
@@ -997,7 +952,7 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
 // or an old one (SIGNIN_WAIT) is refused whole. Cookies for any other site are dropped one by one. Cookie values are
 // never logged or written anywhere but the browser's own cookie store.
 //
-// 0.59: the helper shows its own page for the request ("Turbine is waiting for you to sign in to Nexus Mods"), sees
+// The helper shows its own page for the request ("Turbine is waiting for you to sign in to Nexus Mods"), sees
 // the sign-in by Nexus's sign-in cookie itself (already signed in counts), and says where it is with
 // {"type":"signin.status","id","step"} (a fixed word, for the activity log). The request carries "steam":true in Game
 // Mode, so the page says how to get back to Turbine there. After Turbine took the sign-in, the player may also give
@@ -1396,11 +1351,9 @@ pub fn copy_helper(from: &Path, to: &Path) -> Result<usize, String> {
     let mut result = Ok(files.len());
     for (i, f) in files.iter().enumerate() {
         let dest = to.join(f);
-        if let Some(dir) = dest.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                result = Err(format!("{}: {e}", f.display()));
-                break;
-            }
+        if let Some(dir) = dest.parent() && let Err(e) = std::fs::create_dir_all(dir) {
+            result = Err(format!("{}: {e}", f.display()));
+            break;
         }
         // A rename replaces whatever is at `dest` (a link included) instead of writing through it.
         if let Err(e) = std::fs::rename(stage.join(i.to_string()), &dest) {
@@ -1708,29 +1661,29 @@ mod tests {
     }
 
     #[test]
-    fn helper_versions_compare_by_number() {
-        assert!(version_older("0.41", "0.53"));
-        assert!(version_older("0.9", "0.10"));
-        assert!(version_older("0.53", "1.0"));
-        assert!(version_older("0.5", "0.5.1"));
-        assert!(!version_older("0.53", "0.53"));
-        assert!(!version_older("0.54", "0.53"));
+    fn helper_versions_compare_as_decimals() {
+        assert!(version_older("0.61", "0.64"));
+        assert!(version_older("0.59", "0.6"));
+        assert!(!version_older("0.6", "0.59"));
+        assert!(version_older("0.69", "0.7"));
+        assert!(!version_older("0.7", "0.69"));
+        assert!(version_older("0.64", "1.0"));
+        assert!(!version_older("0.64", "0.64"));
+        assert!(!version_older("0.60", "0.6"));
         assert!(!version_older("1.0", "0.99"));
         assert!(version_older("?", "0.1"));
+        assert!(!version_older("0.1", "?"));
     }
 
     #[test]
-    fn old_helpers_reload_or_ask_the_player() {
-        assert_eq!(helper_age("0.53", "0.53"), HelperAge::Current);
-        assert_eq!(helper_age("0.60", "0.54"), HelperAge::Current);
-        assert_eq!(helper_age("", "0.54"), HelperAge::Current);
-        assert_eq!(helper_age("0.52", ""), HelperAge::Current);
-        // 0.53 and earlier don't know "reload": the player presses the reload arrow once.
-        assert_eq!(helper_age("0.41", "0.54"), HelperAge::Manual);
-        assert_eq!(helper_age("0.53", "0.54"), HelperAge::Manual);
-        assert_eq!(helper_age("0.54", "0.55"), HelperAge::Reload);
+    fn older_helpers_reload() {
+        assert_eq!(helper_age("0.64", "0.64"), HelperAge::Current);
+        assert_eq!(helper_age("0.65", "0.64"), HelperAge::Current);
+        assert_eq!(helper_age("", "0.64"), HelperAge::Current);
+        assert_eq!(helper_age("0.61", ""), HelperAge::Current);
+        assert_eq!(helper_age("0.61", "0.64"), HelperAge::Reload);
+        assert_eq!(helper_age("0.6", "0.59"), HelperAge::Current);
         assert_eq!(reload_message(), "{\"type\":\"reload\"}");
-        assert!(OLD_HELPER_TEXT.contains("chrome://extensions"));
     }
 
     // ---------------------------------------------------------------- the helper's copy (catch.rs runs it)

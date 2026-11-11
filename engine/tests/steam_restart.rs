@@ -1,4 +1,4 @@
-//! 0.6: the one Steam restart that changes Steam's own settings. The host script runs against stub Steam processes:
+//! The one Steam restart that changes Steam's own settings. The host script runs against stub Steam processes:
 //! it closes Steam, makes the change only once Steam is gone, starts Steam again (or lets Game Mode's session do it)
 //! and brings Turbine back. Also the job file, applying it, and the busy check.
 
@@ -99,12 +99,10 @@ impl FakeSteam {
         assert!(t.elapsed() < Duration::from_secs(2), "the first run returns at once (it starts itself apart)");
         let t = Instant::now();
         loop {
-            if let Some((state, words)) = steam_restart::read_result(data) {
-                if state != "running" {
-                    // The link back to Turbine comes right after the result.
-                    std::thread::sleep(Duration::from_millis(400));
-                    return (state, words);
-                }
+            if let Some((state, words)) = steam_restart::read_result(data) && state != "running" {
+                // The link back to Turbine comes right after the result.
+                std::thread::sleep(Duration::from_millis(400));
+                return (state, words);
             }
             assert!(t.elapsed() < Duration::from_secs(30), "no result: {}", fs::read_to_string(steam_restart::log_file(data)).unwrap_or_default());
             std::thread::sleep(Duration::from_millis(50));
@@ -392,8 +390,8 @@ fn a_change_steam_wrote_again_and_kept_is_held() {
 }
 
 
-/// The build on GitHub failed once with "Text file busy": a stand-in script was run while a child started by
-/// another test's thread still held it open for writing. Scripts are written by a child process now; here many
+/// A stand-in script run while a child started by another test's thread still holds it open for writing fails with
+/// "Text file busy". Scripts are written by a child process, so that can't happen; here many
 /// threads write scripts and run them at once, while others keep starting children, and none may fail.
 #[test]
 fn scripts_written_and_run_at_once_are_never_busy() {

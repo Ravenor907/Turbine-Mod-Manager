@@ -1,4 +1,4 @@
-//! 0.6: the game update warning also sees an update that is still waiting in Steam.
+//! The game update warning also sees an update that is still waiting in Steam.
 
 use std::fs;
 use turbine_engine::steam::{self, PendingUpdate};
