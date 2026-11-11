@@ -19,6 +19,36 @@ fn os_release_is_steamos(text: &str) -> bool {
     })
 }
 
+/// The developer switch: TURBINE_DEVELOPER=1 (tools/dev-build.sh sets it) lets Turbine run on a development PC as if
+/// it were supported, without the "not supported" notice. It changes nothing else.
+pub const DEVELOPER_ENV: &str = "TURBINE_DEVELOPER";
+
+pub fn developer() -> bool {
+    std::env::var(DEVELOPER_ENV).is_ok_and(|v| v == "1")
+}
+
+/// SteamOS, or the developer switch: what the "not supported" notice asks.
+pub fn supported() -> bool {
+    is_steamos() || developer()
+}
+
+/// Running under WSL (Windows' Linux): its kernel names itself "microsoft". WSL has no GPU that the Flatpak's Mesa
+/// can use.
+pub fn in_wsl() -> bool {
+    fs::read_to_string("/proc/sys/kernel/osrelease").is_ok_and(|r| kernel_is_wsl(&r))
+}
+
+fn kernel_is_wsl(release: &str) -> bool {
+    let r = release.to_ascii_lowercase();
+    r.contains("microsoft") || r.contains("wsl")
+}
+
+/// Is there a GPU to draw with (a render node in /dev/dri)? On a device without one Mesa only prints errors before it
+/// falls back by itself.
+pub fn has_render_node() -> bool {
+    fs::read_dir("/dev/dri").is_ok_and(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("renderD")))
+}
+
 /// Running inside Game Mode (gamescope) rather than the desktop.
 pub fn in_game_mode() -> bool {
     let var = |k: &str| std::env::var(k).unwrap_or_default();
@@ -146,6 +176,13 @@ mod tests {
         // Only SteamOS itself counts; distributions that look like it get the "not supported" notice.
         assert!(!super::os_release_is_steamos("ID=bazzite\nID_LIKE=\"fedora steamos\"\n"));
         assert!(super::os_release_is_steamos("ID=\"steamos\"\n"));
+    }
+
+    #[test]
+    fn reads_wsl_kernel() {
+        assert!(super::kernel_is_wsl("6.18.58.1-microsoft-standard-WSL2\n"));
+        assert!(super::kernel_is_wsl("4.4.0-19041-Microsoft"));
+        assert!(!super::kernel_is_wsl("6.11.11-valve24-2-neptune-611\n"));
     }
 
     #[test]

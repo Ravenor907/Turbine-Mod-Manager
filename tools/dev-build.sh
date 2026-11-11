@@ -15,4 +15,6 @@ sh tools/get-fonts.sh
 git rev-parse --short=9 HEAD > app/build-commit.txt
 flatpak-builder --user --install --force-clean --ccache --install-deps-from=flathub --disable-rofiles-fuse \
   build-dir packaging/io.github.ravenor907.TurbineModManager.json
-flatpak run io.github.ravenor907.TurbineModManager
+# TURBINE_DEVELOPER=1: runs on this PC without the "not supported" notice. Without a GPU (WSL) Turbine picks
+# software drawing by itself.
+flatpak run --env=TURBINE_DEVELOPER=1 io.github.ravenor907.TurbineModManager

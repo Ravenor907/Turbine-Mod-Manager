@@ -1164,7 +1164,7 @@ impl Default for TurbineRust {
             games: QString::from("[]"),
             problems: QString::default(),
             version: QString::from(crate::VERSION),
-            steamos: crate::system::is_steamos(),
+            steamos: crate::system::supported(),
             gamemode: crate::system::in_game_mode(),
             pads: false,
             pad_name: QString::default(),

@@ -150,6 +150,31 @@ fn choose_platform() -> Option<&'static str> {
     Some("xcb")
 }
 
+/// Software drawing where there is no GPU to draw with (WSL, or no render node): Mesa is told to use llvmpipe from
+/// the start instead of trying the GPU drivers and zink first (a screen of MESA/ZINK errors, then the same result).
+/// Qt Quick keeps drawing through OpenGL, so the effects and the Nexus page work as usual, only slower. Chromium
+/// leaves the GPU alone too. Anything the player already set (LIBGL_ALWAYS_SOFTWARE, QT_QUICK_BACKEND) is kept.
+fn choose_drawing() -> Option<&'static str> {
+    let set = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    if set("LIBGL_ALWAYS_SOFTWARE") || set("QT_QUICK_BACKEND") {
+        return None;
+    }
+    let why = if system::in_wsl() {
+        "WSL has no GPU for Mesa"
+    } else if !system::has_render_node() {
+        "no GPU render node in /dev/dri"
+    } else {
+        return None;
+    };
+    // Before any thread starts: nothing else reads the environment yet.
+    std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+    let flags = std::env::var("QTWEBENGINE_CHROMIUM_FLAGS").unwrap_or_default();
+    if !flags.split_whitespace().any(|f| f == "--disable-gpu") {
+        std::env::set_var("QTWEBENGINE_CHROMIUM_FLAGS", format!("{flags} --disable-gpu").trim());
+    }
+    Some(why)
+}
+
 fn main() {
     // 0.6: a request from Steam's menu (the optional Decky plugin): answered without the window, then this ends.
     // 0.6: the host script's call once Steam has closed: make the waiting change to Steam's settings, then end.
@@ -161,6 +186,7 @@ fn main() {
     }
     let _ = labs::started();
     let platform = choose_platform();
+    let software = choose_drawing();
     // One Turbine at a time: a Nexus link given to a second launch goes to the running one, a second launch with no
     // link brings the running one to the front, and either way this one ends before it touches the logs, the
     // partial downloads or the browser's profile (screenshot runs skip this).
@@ -194,6 +220,12 @@ fn main() {
     log::line("app", &format!("Device {}; {}", labs::device(), labs::system()));
     if let Some(p) = platform {
         log::line("app", &format!("Drawing through {p} (SteamOS: the status overlay needs X11)"));
+    }
+    if let Some(why) = software {
+        log::line("app", &format!("Software drawing ({why})"));
+    }
+    if system::developer() {
+        log::line("app", &format!("Developer switch on ({}=1): no \"not supported\" notice", system::DEVELOPER_ENV));
     }
     match &lock {
         browse::Lock::Mine(_) if waited_for_quick => log::line("app", "One Turbine at a time: waited for a request from Steam's menu to finish, then took the lock"),
