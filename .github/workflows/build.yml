@@ -36,7 +36,7 @@ jobs:
   # full build runs as before.
   reuse:
     name: A checked build of this commit?
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     permissions:
       actions: read
     outputs:
@@ -125,7 +125,7 @@ jobs:
 
   rules:
     name: House rules
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -186,11 +186,12 @@ jobs:
 
   engine:
     name: Engine tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # The pinned toolchain and the engine's build folder, kept between runs (the engine has no outside crates).
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.rustup/toolchains/1.97.0-*
@@ -249,7 +250,7 @@ jobs:
 
   nexus:
     name: Nexus without a key (live)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Send Nexus's public GraphQL the exact requests Turbine sends, with no key
@@ -268,7 +269,7 @@ jobs:
     needs: [reuse]
     # A release ships the plugin the green runs built (reuse), never a new build.
     if: needs.reuse.outputs.run == ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Typecheck, test and build the plugin
@@ -317,7 +318,7 @@ jobs:
 
   vendor:
     name: Rust crates for the offline Flatpak build
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Vendor the locked crates
@@ -344,7 +345,7 @@ jobs:
     # a release).
     needs: [rules, vendor, reuse]
     if: needs.reuse.outputs.run == ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
@@ -373,6 +374,7 @@ jobs:
       # 0.6: the caches are restored every run but saved only when their key is new (saving took 105 s a run).
       # The runtimes and BaseApp, keyed on the manifest (their versions are there).
       - id: sdkcache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: |
@@ -383,6 +385,7 @@ jobs:
       # flatpak-builder's state (sources, ccache, modules that didn't change), keyed on the manifest and the locked
       # crates; a change to Turbine's own code reuses it.
       - id: fbcache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: .flatpak-builder
@@ -390,11 +393,17 @@ jobs:
           restore-keys: fb2-
       - name: Build Flatpak
         shell: bash
+        env:
+          KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
         run: |
+          # 0.65: on the owner's PC (TURBINE_RUNNER=local) the runtimes and flatpak-builder's state stay in the
+          # runner's own folder between runs instead of going through the GitHub cache.
+          state=.flatpak-builder
+          if [ -n "$KEEP" ]; then export FLATPAK_SYSTEM_DIR="$KEEP/flatpak-system"; state="$KEEP/flatpak-builder"; fi
           flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           set +e
           flatpak-builder --repo=repo --disable-rofiles-fuse --force-clean --ccache --install-deps-from=flathub \
-            --state-dir=.flatpak-builder flatpak_app packaging/io.github.ravenor907.TurbineModManager.json > build.log 2>&1
+            --state-dir="$state" flatpak_app packaging/io.github.ravenor907.TurbineModManager.json > build.log 2>&1
           code=$?
           set -e
           tail -n 60 build.log
@@ -412,14 +421,14 @@ jobs:
           if [ "$bytes" -gt $((300 * 1048576)) ]; then echo "::error title=Bundle too big::$mb MB, over the 300 MB limit"; exit 1; fi
           sha256sum TurbineModManager.flatpak | tee TurbineModManager.flatpak.sha256
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        if: steps.sdkcache.outputs.cache-hit != 'true'
+        if: runner.environment == 'github-hosted' && steps.sdkcache.outputs.cache-hit != 'true'
         with:
           path: |
             /var/lib/flatpak
             ~/.local/share/flatpak
           key: flatpak-sdk-${{ hashFiles('packaging/*.json') }}
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        if: steps.fbcache.outputs.cache-hit != 'true'
+        if: runner.environment == 'github-hosted' && steps.fbcache.outputs.cache-hit != 'true'
         with:
           path: .flatpak-builder
           key: fb2-${{ hashFiles('packaging/*.json', 'Cargo.lock') }}
@@ -441,7 +450,7 @@ jobs:
   checks:
     name: Checks (${{ matrix.part }} ${{ matrix.shard }}/${{ matrix.shards }})
     needs: [flatpak]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     container:
       image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
@@ -476,6 +485,7 @@ jobs:
       # The KDE runtime the bundle runs on, installed once and kept (not Turbine itself, installed fresh each time).
       # The KDE runtime: one cache for every shard, saved only when the manifest changes.
       - id: rtcache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
         with:
           path: |
@@ -485,11 +495,15 @@ jobs:
           restore-keys: flatpak-runtime-${{ matrix.part == 'x11' && 'x11' || matrix.part == 'nexus' && 'nexus' || 'pics' }}-
       - name: Pictures and checks (${{ matrix.part }})
         shell: bash
+        env:
+          KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
         run: |
+          # 0.65: on the owner's PC each runner keeps its own Flatpak user folder between runs.
+          if [ -n "$KEEP" ]; then export FLATPAK_USER_DIR="$KEEP/flatpak-user"; fi
           flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           bash tools/ci-shots.sh "${{ matrix.part }}" "${{ matrix.shard }}" "${{ matrix.shards }}"
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        if: steps.rtcache.outputs.cache-hit != 'true' && matrix.shard == 0
+        if: runner.environment == 'github-hosted' && steps.rtcache.outputs.cache-hit != 'true' && matrix.shard == 0
         with:
           path: |
             ~/.local/share/flatpak
@@ -509,7 +523,7 @@ jobs:
     if: >-
       always() && github.event_name == 'workflow_dispatch' && inputs.release &&
       needs.reuse.result == 'success' && needs.reuse.outputs.run != '' && needs.rules.result == 'success' && needs.engine.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
     permissions:
       contents: write
       actions: read
