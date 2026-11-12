@@ -15,6 +15,20 @@
   <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.65" date="2026-11-12" type="development">
+      <description>
+        <p>A cleaner, calmer Turbine on every screen:</p>
+        <ul>
+          <li>A refreshed look: dialogs that fit the screen with their buttons always in view, one bottom bar on every page with A and B always shown, a clear focus ring, and an icon for every action</li>
+          <li>Smooth, quick animations for pages, tabs, menus, dialogs and lists; Settings, Look, Animations has Reduced (fades only) and Off</li>
+          <li>Plain, consistent words throughout, with each game's full name</li>
+          <li>Text stays readable and nothing is cut off at every interface size, on the Deck and on a TV</li>
+          <li>Mod settings save automatically</li>
+          <li>Fixes: the game menu's Go back row has its icon, masters and base-game plugins show their badges again, and likes and downloads read right ("1 like")</li>
+          <li>Runs on the newer KDE and Qt 6.11 runtime</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.64" date="2026-11-10" type="development">
       <description>
         <p>What a mod needs, lined up, and Cyberpunk's frameworks working under Proton:</p>
