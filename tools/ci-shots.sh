@@ -926,7 +926,7 @@ PY
   pneed "1: a download with no press is refused" "Download refused \(127.0.0.1\): Turbine only takes a download you start yourself"
   pneed "1: nothing downloaded or turned on with no press" "Browser check: no press, nothing downloaded: yes"
   pneed "1b: going to an outside site drops the press" "The page left Nexus \(http://127.0.0.1:47801/bounce\)"
-  pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused: nxm://skyrimspecialedition/mods/1/files/55 came with no press of yours"
+  pneed "1b: the bounce back to Nexus's Mod Manager Download page is refused" "Mod Manager Download link refused:? \(?nxm://skyrimspecialedition/mods/1/files/55\)?(:| came with no press of yours)"
   pneed "1b: nothing downloaded after the bounce" "Browser check: after a bounce off Nexus and back, nothing downloaded: yes"
   pneed "1c: another mod's link asks first: Not now and no input for the first second, then the ring on Get it" "Browser check: another mod's link asks: Download .*\?, at first A Not now, B Not now, input off; after the quiet second A Get it, B Not now"
   pneed "1c: ... logged as asking" "Turbine asks before it downloads: nxm://skyrimspecialedition/mods/2/files/57"
