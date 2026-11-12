@@ -130,6 +130,7 @@ Overlay {
         height: report.ui.px(46)
         radius: report.ui.px(6)
         color: focused ? report.ui.c.focusFill : report.ui.c.card
+        Behavior on color { enabled: report.ui.motion.on; ColorAnimation { duration: report.ui.motion.quick; easing.type: report.ui.motion.ease } }
         border.color: report.ui.c.accent
         border.width: focused ? report.ui.px(2) : 0
         Text {

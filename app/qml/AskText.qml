@@ -41,6 +41,8 @@ Overlay {
     Scrim { ui: ask.ui }
     Card {
         ui: ask.ui
+        // Near the top, so it grows from its top edge.
+        transformOrigin: Item.Top
         anchors.horizontalCenter: parent.horizontalCenter
         y: ask.ui.px(40)
         width: Math.min(parent.width - ask.ui.px(32), ask.ui.px(640))

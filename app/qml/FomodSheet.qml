@@ -80,10 +80,18 @@ Overlay {
     property int lastStep: -1
     onBack: lastStep = stepIndex
 
-    Rectangle { anchors.fill: parent; color: fs.ui.c.ground }
+    // A page of its own: it fades in whole, and each question comes in from the side it was asked from.
+    fadesWhole: true
+    backdrop: ground
+    readonly property int where: stepIndex * 100 + page
+    property int whereWas: 0
+    onWhereChanged: { if (visible) questionIn.play((where < whereWas ? -1 : 1) * fs.ui.px(fs.ui.motion.shift), 0); whereWas = where }
+    Rectangle { id: ground; anchors.fill: parent; color: fs.ui.c.ground }
     Column {
         // Off while "Stop installing?" is up, so a tap on it never reaches an option underneath.
         enabled: !fs.askStop
+        opacity: questionIn.part
+        transform: Arrive { id: questionIn; motion: fs.ui.motion }
         anchors.fill: parent
         anchors.margins: fs.ui.px(14)
         spacing: fs.ui.px(8)
@@ -165,6 +173,7 @@ Overlay {
                         height: isNext ? fs.ui.px(48) : fs.ui.px(64)
                         radius: fs.ui.px(8)
                         color: isNext ? (foc ? fs.ui.c.accentHi : fs.ui.c.accent) : foc ? fs.ui.c.focusFill : fs.ui.c.card
+                        Behavior on color { enabled: fs.ui.motion.on; ColorAnimation { duration: fs.ui.motion.quick; easing.type: fs.ui.motion.ease } }
                         border.color: foc ? (isNext ? fs.ui.c.text : fs.ui.c.accent) : "transparent"
                         border.width: foc ? fs.ui.px(2) : 0
                         opacity: !isNext && o && !o.canChange && !o.selected ? 0.55 : 1

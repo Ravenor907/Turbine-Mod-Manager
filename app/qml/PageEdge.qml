@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Shapes
 
 // One page edge on Get mods: the page to the left or the page to the right, a button for a click or a finger (at
-// least 44 px wide). It slides with the page while Get mods turns.
+// least 44 px wide). It moves and fades with the page while Get mods turns.
 //
 // win (required): Main.qml's window. label: the page's name. dir: -1 the page to the left, 1 the page to the right.
 Rectangle {
@@ -12,7 +12,9 @@ Rectangle {
     property int dir: -1
     width: win.tpx(34); height: parent.height
     z: win.turnTo === 1 ? 3 : 0
-    transform: Translate { x: edge.win.turnTo === 1 ? edge.win.turnX : 0 }
+    opacity: win.tabFade(1)
+    enabled: win.turnFrom !== 1
+    transform: Translate { x: edge.win.tabShift(1) }
     color: edgeHover.hovered ? win.colors.focusFill : win.colors.panel
     Rectangle { x: edge.dir < 0 ? parent.width - width : 0; width: Math.max(1, edge.win.px(1)); height: parent.height; color: edge.win.colors.line }
     Text {

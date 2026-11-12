@@ -212,6 +212,7 @@ Overlay {
                         radius: perf.ui.px(8)
                         opacity: index > 0 && perf.running ? 0.5 : 1
                         color: focused ? perf.ui.c.focusFill : perf.ui.c.raised
+                        Behavior on color { enabled: perf.ui.motion.on; ColorAnimation { duration: perf.ui.motion.quick; easing.type: perf.ui.motion.ease } }
                         border.color: focused ? perf.ui.c.text : perf.ui.c.line
                         border.width: focused ? perf.ui.px(2) : Math.max(1, perf.ui.px(1))
                         Text {

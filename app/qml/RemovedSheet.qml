@@ -73,6 +73,7 @@ Overlay {
                     height: Math.max(rs.ui.tpx(48), rowText.implicitHeight + rs.ui.px(12))
                     radius: rs.ui.px(6)
                     color: foc ? rs.ui.c.focusFill : rs.ui.c.card
+                    Behavior on color { enabled: rs.ui.motion.on; ColorAnimation { duration: rs.ui.motion.quick; easing.type: rs.ui.motion.ease } }
                     border.color: rs.ui.c.accent
                     border.width: foc ? rs.ui.px(2) : 0
                     HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }

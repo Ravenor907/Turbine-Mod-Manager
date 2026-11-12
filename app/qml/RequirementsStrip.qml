@@ -5,10 +5,17 @@ import QtQuick
 //
 // app (required): Main.qml's window. kit (required): Main.qml's kit (colors, see COMPONENTS.md).
 Rectangle {
+    id: strip
     required property var app
     required property var kit
     readonly property var c: kit.c
     visible: app.reqStripWords !== ""
+    // It drops in from above as it fades in, and its words fade over as the next requirement comes.
+    opacity: stripIn.part
+    transform: Arrive { id: stripIn; motion: strip.kit.motion }
+    onVisibleChanged: if (visible) stripIn.play(0, -app.px(kit.motion.nudge))
+    readonly property string words: app.reqStripWords
+    onWordsChanged: if (visible && words !== "" && !stripIn.running) stripIn.play(0, 0, kit.motion.swapFrom)
     z: 95
     anchors.horizontalCenter: parent.horizontalCenter
     y: app.px(8)

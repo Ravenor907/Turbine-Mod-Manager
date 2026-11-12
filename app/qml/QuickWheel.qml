@@ -25,6 +25,8 @@ Overlay {
 
     anchors.fill: parent
     z: 70
+    // Its backdrop fades away under the bottom bar (z 40), as the bar was over it.
+    ghostZ: 39
 
     // The backdrop takes every press, scroll and hover, so the page behind never sees one.
     Scrim { ui: qw.ui }
@@ -56,8 +58,11 @@ Overlay {
         readonly property real inner: outer * 0.30
         width: outer * 2; height: outer * 2
         anchors.centerIn: parent
-        scale: qw.visible ? 1 : 0.92
-        Behavior on scale { enabled: qw.ui.motion.moves; NumberAnimation { duration: qw.ui.motion.moveFast; easing.type: qw.ui.motion.enter } }
+        // It fades in and grows from the middle as it opens (Overlay.qml).
+        property real showFade: 1
+        property real showMove: 1
+        opacity: showFade
+        scale: 1 - (1 - showMove) * (1 - qw.ui.motion.popScale)
 
         // -1 the middle, -2 outside the pie, else the wedge (0 is Up, then clockwise).
         function wedgeAt(px, py) {
@@ -75,11 +80,9 @@ Overlay {
             anchors.fill: parent
             property int sel: qw.focusIndex
             property var okList: qw.slots.map(s => !!s.ok)
-            // The picked wedge's fill fades in.
-            property real selPart: 1
-            onSelPartChanged: requestPaint()
-            NumberAnimation { id: selFade; target: canvas; properties: "selPart"; from: 0; to: 1; duration: qw.ui.motion.fast; easing.type: qw.ui.motion.enter }
-            onSelChanged: { if (qw.ui.motion.on && sel >= 0) selFade.restart(); else { selFade.stop(); selPart = 1 } requestPaint() }
+            // The picked wedge's fill fades in: a cover in the plain wedge's look is drawn once over it and fades
+            // away (an opacity, so nothing is painted again while it fades).
+            onSelChanged: { requestPaint(); selCover.cover() }
             onOkListChanged: requestPaint()
             onWidthChanged: requestPaint()
             property color acc: qw.ui.c.accent
@@ -97,11 +100,42 @@ Overlay {
                     g.closePath()
                     g.fillStyle = String(qw.ui.c.raised)
                     g.fill()
-                    if (i === sel) { g.globalAlpha = selPart; g.fillStyle = String(okList[i] ? qw.ui.c.accent : qw.ui.c.line); g.fill(); g.globalAlpha = 1 }
+                    if (i === sel) { g.fillStyle = String(okList[i] ? qw.ui.c.accent : qw.ui.c.line); g.fill() }
                     g.lineWidth = Math.max(2, qw.ui.px(4))
                     g.strokeStyle = String(qw.ui.c.ground)
                     g.stroke()
                 }
+            }
+        }
+        Canvas {
+            id: selCover
+            anchors.fill: parent
+            property int wedge: -1
+            opacity: 0
+            visible: opacity > 0
+            NumberAnimation { id: selFade; target: selCover; properties: "opacity"; from: 1; to: 0; duration: qw.ui.motion.quick; easing.type: qw.ui.motion.ease }
+            function cover() {
+                selFade.stop(); opacity = 0
+                if (!qw.ui.motion.on || canvas.sel < 0) return
+                wedge = canvas.sel
+                requestPaint()
+                selFade.start()
+            }
+            onPaint: {
+                const g = getContext("2d")
+                g.reset()
+                if (wedge < 0) return
+                const cx = width / 2, cy = height / 2, R = pie.outer, r = pie.inner
+                const a0 = (wedge * 45 - 22.5 - 90) * Math.PI / 180, a1 = (wedge * 45 + 22.5 - 90) * Math.PI / 180
+                g.beginPath()
+                g.arc(cx, cy, R, a0, a1, false)
+                g.arc(cx, cy, r, a1, a0, true)
+                g.closePath()
+                g.fillStyle = String(qw.ui.c.raised)
+                g.fill()
+                g.lineWidth = Math.max(2, qw.ui.px(4))
+                g.strokeStyle = String(qw.ui.c.ground)
+                g.stroke()
             }
         }
         // The wedges' names (never empty: a wedge with nothing to do here keeps its name, in grey).

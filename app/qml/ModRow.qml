@@ -23,6 +23,12 @@ Rectangle {
     signal clicked()
     signal menuClicked()
     readonly property Item pillItem: pill
+    // The row was just built again with the mod turned the other way: the pill fades over from its last look.
+    function flipFrom(wasOn) {
+        if (!ui.motion.on || wasOn === isOn) return
+        pillWas.on = wasOn
+        pillWasFade.restart()
+    }
 
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
@@ -45,10 +51,16 @@ Rectangle {
     implicitHeight: Math.max(ui.px(compact ? 38 : 54), rowWords.implicitHeight + ui.px(12))
     radius: ui.px(6)
     color: ui.c.card
+    // Pressed by a finger or the pointer: it gives a little (Full).
+    scale: rowTap.pressed ? ui.motion.pressScale : 1
+    Behavior on scale { enabled: root.ui.motion.moves; NumberAnimation { duration: root.ui.motion.moveQuick; easing.type: root.ui.motion.ease } }
 
-    // Focus: brass glow ring, warm gradient and a brass border.
+    // Focus: brass glow ring, warm gradient and a brass border. It fades in as the focus arrives and out as it leaves.
+    component FocusFade: NumberAnimation { duration: root.ui.motion.quick; easing.type: root.ui.motion.ease }
     Rectangle {
-        visible: root.focused
+        opacity: root.focused ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: root.ui.motion.on; FocusFade {} }
         anchors.fill: parent
         anchors.margins: -root.ui.px(3)
         radius: root.radius + root.ui.px(3)
@@ -57,7 +69,9 @@ Rectangle {
         border.color: Qt.rgba(root.ui.c.accent.r, root.ui.c.accent.g, root.ui.c.accent.b, 0.14)
     }
     Rectangle {
-        visible: root.focused
+        opacity: root.focused ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: root.ui.motion.on; FocusFade {} }
         anchors.fill: parent
         radius: root.radius
         border.width: Math.max(1, root.ui.px(1.5))
@@ -72,7 +86,7 @@ Rectangle {
     HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
     // Touch: hold a moment for the mod's options (like X).
     // A double-click opens the mod: Main counts it from the clicks (the row may be built again between them).
-    TapHandler { longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
+    TapHandler { id: rowTap; longPressThreshold: 0.5; onTapped: root.clicked(); onLongPressed: root.menuClicked() }
     TapHandler { acceptedButtons: Qt.RightButton; onTapped: root.menuClicked() }
 
     Row {
@@ -125,7 +139,7 @@ Rectangle {
             anchors.verticalCenter: parent.verticalCenter
             color: root.isOn ? root.wash(root.ui.c.accent, 0.28) : root.ui.c.ground
             // The pill's fill fades between ON and OFF.
-            Behavior on color { enabled: root.ui.motion.on; ColorAnimation { duration: root.ui.motion.fast; easing.type: root.ui.motion.enter } }
+            Behavior on color { enabled: root.ui.motion.on; ColorAnimation { duration: root.ui.motion.quick; easing.type: root.ui.motion.ease } }
             border.width: root.isOn ? 0 : Math.max(1, root.ui.px(1.5))
             border.color: root.ui.c.line
             Text {
@@ -136,6 +150,29 @@ Rectangle {
                 font.pixelSize: root.ui.fpx(14)
                 font.bold: true
                 font.letterSpacing: root.ui.px(0.4)
+            }
+            // The pill's last look over it, fading away, when the row was built again just after it turned
+            // (flipFrom).
+            Rectangle {
+                id: pillWas
+                property bool on: false
+                anchors.fill: parent
+                radius: parent.radius
+                opacity: 0
+                visible: opacity > 0
+                color: on ? root.wash(root.ui.c.accent, 0.28) : root.ui.c.ground
+                border.width: on ? 0 : Math.max(1, root.ui.px(1.5))
+                border.color: root.ui.c.line
+                Text {
+                    anchors.centerIn: parent
+                    text: pillWas.on ? "ON" : "OFF"
+                    color: pillWas.on ? root.ui.readable(root.ui.c.accentHi, pillWas.color) : root.ui.c.muted
+                    font.family: root.ui.bodyFont
+                    font.pixelSize: root.ui.fpx(14)
+                    font.bold: true
+                    font.letterSpacing: root.ui.px(0.4)
+                }
+                NumberAnimation { id: pillWasFade; target: pillWas; properties: "opacity"; from: 1; to: 0; duration: root.ui.motion.standard; easing.type: root.ui.motion.ease }
             }
         }
     }

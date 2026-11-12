@@ -14,9 +14,14 @@ ListView {
     required property var look
     readonly property var c: kit.c
     readonly property Motion mo: kit.motion
-    visible: app.page === "game" && app.game !== null && app.tab === 0 && app.modsLoaded && !app.modPage
+    visible: app.page === "game" && app.game !== null && app.onTab(0) && app.modsLoaded && !app.modPage
     z: app.turnTo === 0 ? 3 : 0
-    transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
+    // Showing up on its own (the mods read after a moment), the list fades in.
+    onVisibleChanged: if (visible) listIn.appear(() => modList.kit.arriving, 0, 0)
+    opacity: app.tabFade(0) * listIn.part
+    // Fading out as another tab comes in, it takes no taps (they reach the page coming in).
+    enabled: app.turnFrom !== 0
+    transform: [Translate { x: app.tabShift(0) }, Arrive { id: listIn; motion: modList.mo }]
     // The bars sliding away or back change the list's height: the focused row stays fully in view.
     onHeightChanged: if (app.modIndex >= 0) app.reveal(modList, app.modIndex)
     // A touch or wheel scroll hides the bars going down and brings them back going up or at the top.
@@ -35,6 +40,33 @@ ListView {
         const n = app.depMods.map(m => app.mods.findIndex(x => x.id === m.id) + 1).filter(x => x > 0).sort((a, b) => a - b)
         return n.length > 0 ? "load order " + n.join(", ") : ""
     }
+    // Rows that change: the list is built again on every change (Main.qml's listItems), so each row is told where it
+    // was. At Full a row whose place changed (moved, or pushed by a row that came or went) glides from where it was;
+    // a row that is new fades in where it is, and a mod uninstalled or put back fades over in place. A pill that
+    // turned on or off fades from its last look. Not when the list is another (a game switch, a new find): only
+    // when at least half of it was there before, and never while its page is coming in.
+    readonly property bool flips: mo.on && visible && !kit.arriving
+    property var placed: ({})             // the rows on screen now: key -> {y, on}
+    property var before: ({})             // the same for the list before this one
+    property real builtAt: 0
+    property bool flipping: false
+    function keyOf(it) { return it.kind + ":" + (it.m && it.m.id !== undefined ? it.m.id : "") }
+    // The list makes the new rows before it says its model changed, so the first row of a new list starts it.
+    property var shownModel: null
+    function newList() {
+        const list = app.listItems
+        if (list === shownModel) return
+        shownModel = list
+        before = placed; placed = ({})
+        builtAt = Date.now()
+        const now = (list || []).map(keyOf)
+        let kept = 0
+        for (const k of now) if (before[k] !== undefined || before[twin(k)] !== undefined) kept++
+        flipping = flips && now.length > 0 && kept * 2 >= now.length
+    }
+    onModelChanged: newList()
+    // A mod's row and its uninstalled row are one place in the list.
+    function twin(k) { return k.indexOf("mod:") === 0 ? "ghost:" + k.slice(4) : k.indexOf("ghost:") === 0 ? "mod:" + k.slice(6) : "" }
     currentIndex: Math.max(0, app.modIndex)
     highlightFollowsCurrentItem: false
     onCurrentIndexChanged: app.glide(modList, () => app.reveal(modList, modList.currentIndex))
@@ -53,16 +85,29 @@ ListView {
         readonly property bool foc: app.zone === "main" && app.sheet === "" && app.modIndex === index
         readonly property Item pill: row.pillItem
         width: modList.width
-        // Just moved (it slides in from where it was) or put back (it fades in).
-        transform: Translate { id: entryShift; y: 0 }
-        NumberAnimation { id: entrySlide; target: entryShift; properties: "y"; to: 0; duration: mo.moveFast; easing.type: mo.enter }
-        NumberAnimation { id: entryFade; target: entry; properties: "opacity"; from: 0; to: 1; duration: mo.base; easing.type: mo.enter }
-        Component.onCompleted: {
-            const n = app.rowNudge
-            if (!n || !entry.m || n.id !== entry.m.id || Date.now() - n.at > 400) return
-            if (n.dir === 0) entryFade.start()
-            else if (mo.moves) { entryShift.y = n.dir * (entry.height + modList.spacing); entrySlide.start() }
+        // Where it was in the list before this one (see flips): it glides or fades from there. Placed as soon as it
+        // is made and again when the list puts it in its place, both before anything is drawn.
+        readonly property string key: modList.keyOf(modelData)
+        opacity: rowIn.part
+        transform: Arrive { id: rowIn; motion: mo; fadeTime: mo.standard; moveTime: mo.moveStandard }
+        property bool placedOnce: false
+        function place() {
+            modList.newList()
+            const on = entry.kind === "mod" && entry.m.enabled === true
+            modList.placed[key] = { y: y, on: on }
+            if (!modList.flipping || Date.now() - modList.builtAt > 300) return
+            const was = modList.before[key], pair = modList.before[modList.twin(key)]
+            rowIn.settle()
+            if (was !== undefined) {
+                if (Math.abs(was.y - y) > 1) rowIn.play(0, was.y - y, 1)
+                if (!placedOnce && entry.kind === "mod" && was.on !== on) row.flipFrom(was.on)
+            }
+            else if (pair !== undefined) rowIn.play(0, pair.y - y, mo.swapFrom)
+            else rowIn.play(0, 0, 0)
+            placedOnce = true
         }
+        onYChanged: place()
+        Component.onCompleted: place()
         height: kind === "mod" ? row.implicitHeight : kind === "held" ? Math.max(app.touchFloor + app.px(8), app.px(52)) : app.px(app.desktopLayout ? 38 : 46)
         ModRow {
             id: row
@@ -100,6 +145,7 @@ ListView {
             radius: app.px(6)
             // Removed (n) at the bottom; a mod just uninstalled stays dimmed in its place for 8 seconds.
             color: entry.foc ? c.focusFill : "transparent"
+            Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
             border.color: entry.foc ? c.accent : c.line
             border.width: entry.foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
             opacity: entry.kind === "ghost" && !entry.foc ? 0.6 : 1

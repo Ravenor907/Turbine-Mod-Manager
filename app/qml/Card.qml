@@ -5,11 +5,17 @@ import QtQuick
 // is part of the fill (a gradient with a hard stop), so the rounded corners clip it like the card itself.
 //
 // ui (required): Main.qml's kit. band: the accent band along the top. fill: the card's color.
+// showFade, showMove: 0 to 1 as its Overlay brings it in (a fade, and a growth from Motion's popScale about its
+// transformOrigin, the centre unless the card's file says where it comes from).
 Rectangle {
     id: card
     required property var ui
     property bool band: true
     property color fill: ui.c.panel
+    property real showFade: 1
+    property real showMove: 1
+    opacity: showFade
+    scale: 1 - (1 - showMove) * (1 - ui.motion.popScale)
     radius: ui.radius
     border.width: Math.max(1, ui.px(1))
     border.color: ui.c.line

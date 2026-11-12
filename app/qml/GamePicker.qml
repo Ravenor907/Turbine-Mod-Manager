@@ -68,6 +68,7 @@ Overlay {
                 height: gp.ui.px(50)
                 radius: gp.ui.px(6)
                 color: foc ? gp.ui.c.focusFill : gp.ui.c.card
+                Behavior on color { enabled: gp.ui.motion.on; ColorAnimation { duration: gp.ui.motion.quick; easing.type: gp.ui.motion.ease } }
                 border.color: gp.ui.c.accent
                 border.width: foc ? gp.ui.px(2) : 0
                 Column {

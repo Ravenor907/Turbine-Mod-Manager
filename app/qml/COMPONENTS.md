@@ -78,7 +78,8 @@ Main.qml keeps the state and the logic; these files are its screen, cut into par
 know Main.qml: each takes `required property var app` (Main.qml's window) and `kit`, reads Main.qml's properties and
 calls its functions directly (taps ask `app.gate()` first). Inside, `c` and `mo` are `kit.c` and `kit.motion`.
 
-- **GameRail**: the game rail. `itemAt(i)` (a tile, Show hidden games or the gear); `railList`.
+- **GameRail**: the game rail. `itemAt(i)` (a tile, Show hidden games or the gear); `railList`; `slide` (how far its
+  edge is from its room while it slides; Main.qml's page and the bottom bar follow it).
 - **ModList**: My mods' list and its rows (ModRow, and the removed, held, Dependencies and Removed rows). `look`.
 - **ModPanel**: the details panel beside My mods (on a row that isn't a mod, a short summary of that row). `panelEdit`.
 - **NoModsCard**: the empty My mods card.
@@ -103,7 +104,8 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
 ## Building blocks
 
 - **Overlay**: the root of everything that covers the window (sheets, menus, the wheel, the tutorial); a tap outside
-  closes it. `closeOnOutside`, `motion`; signal `outsideTapped()`.
+  closes it, and it brings in its backdrop and card (a Card grows in, a SideSheet slides in) and lifts the backdrop
+  as it goes. `closeOnOutside`, `motion`, `backdrop`, `fadesWhole`, `ghostZ`; signal `outsideTapped()`.
 - **Scrim**: an overlay's backdrop (the kit's `scrim`), its first child.
 - **CardGuard**: the first child of an overlay's card, so taps on the card never count as outside.
 - **Card**: the card look of everything in the middle of the window: panel color, the kit's radius, a thin line and
@@ -126,9 +128,44 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
   path data; the row's words choose first, `kit.iconFor`), `available`, `danger`, `more`, `focused`, `dangerColor`,
   `iconShown`; signals `clicked()`, `held(down)`.
 - **KeyCap**: a controller button as a small cap. `k` ("a", "lb").
-- **Motion**: every duration and curve (tools/qml-check.js fails the build on one written elsewhere). `level`
-  ("full", "reduced", "off"); read `on`, `moves`, `fast`, `base`, `moveFast`, `moveBase`, `page`, `enter`, `leave`,
-  `even`, `fromScale`, `slide`, the splash's times and `spin`.
+- **Motion**: every duration, curve, distance and scale (tools/qml-check.js fails the build on a duration or curve
+  written elsewhere). `level` ("full", "reduced", "off"); read `on`, `moves`, the times `quick`, `standard`,
+  `gentle` (fades) and `moveQuick`, `moveStandard`, `moveGentle` (travel, 0 unless Full), the curves `ease`, `glide`,
+  `even`, the distances `nudge`, `shift`, `sheetShift`, the scales `popScale`, `pressScale`, `swapFrom`, the
+  splash's times and `spin`. See "How things move" below.
+- **Arrive**: something arriving in place (a page, a tab's content, the next card, words changing): a Translate for
+  the item's transform whose `part` is the item's opacity; `play(dx, dy, from)`, `appear(busy, dx, dy)`, `settle()`,
+  `fadeTime`, `moveTime`, `running`.
+
+## How things move
+
+One motion language, all of it in Motion.qml, at three levels (Settings, Look, Animations): Full (fades, short
+slides, small scales), Reduced (the fades alone: nothing travels or grows) and Off (instant; the build's pictures run
+this way unless `--motion=` says otherwise).
+
+| What | How | Time |
+| --- | --- | --- |
+| The focus moving | the item's own ring and fill fade over; on the main screens a ring glides from the last item to the new one | quick |
+| A press by touch or the pointer | the button or row gives to `pressScale` while held | quick |
+| Words changing in place (the bar's hints, the details panel, a toast's words) | a fade up from `swapFrom`, not while a list is run through quickly | quick |
+| Leaving | a sheet, menu or the wheel: the card goes at once (its words already show what the press did) and its backdrop lifts; a toast fades out, sinking | quick |
+| A dialog, menu, pop-up or the wheel | the backdrop fades in; the card fades in and grows from `popScale` | standard |
+| A side sheet | the backdrop fades in; the sheet fades in and slides `sheetShift` in from the right | standard |
+| A tab (LB, RB) | the new page fades in sliding `shift` from its side; the old one fades out quickly, drifting `nudge` the other way | standard |
+| Rows that move, come or go | a row that changed place glides from where it was; a new row fades in; a pill that turned fades over | standard |
+| A toast | fades in as it rises `nudge` | standard |
+| The rail folding away (Get mods, scrolling down) | the rail slides out, the page moves with its edge (laid out once) | standard |
+| A page (another game, Settings, Where do these files go?, Nexus) | fades in as it rises `nudge` | gentle |
+| A mod's page over Get mods | slides `shift` in from the right as it fades in; back, the cards come from the left | standard |
+| A Settings section, a tutorial card, an installer question | fades in, moving `nudge` or `shift` from the side it was asked from | standard |
+| Something showing up on its own (an empty state, the list or a mod's page once read, the requirements strip) | fades in (an empty state and the strip also move `nudge` into place); not when it comes with its page or tab | standard |
+| The splash | the icon fades and grows in over the ground, then the whole splash fades into the app | about 1 s |
+
+Curves: `ease` (OutCubic) for fades and small changes, `glide` (OutQuint) for travel into place, `even` for a ring
+that fills; nothing bounces or overshoots. The rules: an animation only follows a state that has already changed,
+so a press during one acts at once and a new one takes over from the last (nothing queues); only opacity, position
+and scale animate (no layout while anything moves, no layers, no shaders); Off is the same picture, pixel for pixel,
+as before anything moved, and tools/ci-shots.sh checks that a few pages end in exactly that picture at Full.
 
 ## The game page
 

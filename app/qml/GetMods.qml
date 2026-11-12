@@ -161,6 +161,7 @@ Item {
                     readonly property bool foc: gm.active && gm.focusArea === "recent" && gm.focusIndex === index
                     width: gm.ui.px(250); height: recentList.height; radius: gm.ui.px(6)
                     color: foc ? gm.ui.c.focusFill : gm.ui.c.card
+                    Behavior on color { enabled: gm.ui.motion.on; ColorAnimation { duration: gm.ui.motion.quick; easing.type: gm.ui.motion.ease } }
                     border.color: gm.ui.c.accent
                     border.width: foc ? gm.ui.px(2) : 0
                     Thumb { id: rthumb; x: gm.ui.px(4); y: gm.ui.px(4); width: gm.ui.px(78); height: parent.height - gm.ui.px(8); src: rc.modelData.icon || ""; name: rc.modelData.name || "" }
@@ -205,6 +206,7 @@ Item {
                         anchors.margins: gm.ui.px(4)
                         radius: gm.ui.px(6)
                         color: cell.foc ? gm.ui.c.focusFill : gm.ui.c.card
+                        Behavior on color { enabled: gm.ui.motion.on; ColorAnimation { duration: gm.ui.motion.quick; easing.type: gm.ui.motion.ease } }
                         border.color: gm.ui.c.accent
                         border.width: cell.foc ? gm.ui.px(2) : 0
                         clip: true
@@ -297,7 +299,7 @@ Item {
             visible: status === Image.Ready
             // A picture fades in when it has loaded.
             opacity: status === Image.Ready ? 1 : 0
-            Behavior on opacity { enabled: gm.ui.motion.on; NumberAnimation { duration: gm.ui.motion.base; easing.type: gm.ui.motion.enter } }
+            Behavior on opacity { enabled: gm.ui.motion.on; NumberAnimation { duration: gm.ui.motion.standard; easing.type: gm.ui.motion.ease } }
         }
         Text {
             visible: !img.visible

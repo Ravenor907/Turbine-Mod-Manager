@@ -22,10 +22,15 @@ Rectangle {
     implicitHeight: Math.max(ui.px(48), entryText.implicitHeight + ui.px(14))
     radius: ui.px(6)
     color: "transparent"
+    // Pressed by a finger or the pointer: it gives a little (Full).
+    scale: entryTap.pressed ? ui.motion.pressScale : 1
+    Behavior on scale { enabled: entry.ui.motion.moves; NumberAnimation { duration: entry.ui.motion.moveQuick; easing.type: entry.ui.motion.ease } }
 
-    // Focus: warm gradient with a brass border.
+    // Focus: warm gradient with a brass border, fading in as the focus arrives and out as it leaves.
     Rectangle {
-        visible: entry.focused
+        opacity: entry.focused ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: entry.ui.motion.on; NumberAnimation { duration: entry.ui.motion.quick; easing.type: entry.ui.motion.ease } }
         anchors.fill: parent
         radius: entry.radius
         border.width: Math.max(1, entry.ui.px(1.5))
@@ -38,7 +43,7 @@ Rectangle {
     }
 
     HoverHandler { onHoveredChanged: entry.ui.hover(parent, hovered) }
-    TapHandler { onTapped: entry.clicked(); onPressedChanged: entry.held(pressed) }
+    TapHandler { id: entryTap; onTapped: entry.clicked(); onPressedChanged: entry.held(pressed) }
 
     Rectangle {
         id: entryIcon

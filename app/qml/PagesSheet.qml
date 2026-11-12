@@ -73,6 +73,7 @@ Overlay {
                     height: pg.ui.px(row.modelData.note ? 62 : 50)
                     radius: pg.ui.px(6)
                     color: foc ? pg.ui.c.focusFill : pg.ui.c.card
+                    Behavior on color { enabled: pg.ui.motion.on; ColorAnimation { duration: pg.ui.motion.quick; easing.type: pg.ui.motion.ease } }
                     border.color: pg.ui.c.accent
                     border.width: foc ? pg.ui.px(2) : 0
                     Column {

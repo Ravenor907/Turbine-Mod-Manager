@@ -564,6 +564,7 @@ Item {
                 readonly property bool foc: index === nb.dlIndex
                 width: dlList.width; height: nb.ui.px(66); radius: nb.ui.px(8)
                 color: foc ? nb.ui.c.focusFill : nb.ui.c.card
+                Behavior on color { enabled: nb.ui.motion.on; ColorAnimation { duration: nb.ui.motion.quick; easing.type: nb.ui.motion.ease } }
                 border.color: foc ? nb.ui.c.accentHi : nb.ui.c.line
                 border.width: foc ? Math.max(2, nb.ui.px(2.5)) : Math.max(1, nb.ui.px(1))
                 Column {

@@ -10,9 +10,13 @@ Rectangle {
     required property var kit
     readonly property var c: kit.c
     readonly property bool cardFocus: app.zone === "main" && app.listItems.length === 0
-    visible: app.emptyMods
+    visible: app.onTab(0) && app.emptyModsRoom
     z: app.turnTo === 0 ? 3 : 0
-    transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
+    // Showing up on its own (the last mod uninstalled, the mods read), it fades in as it rises into place.
+    onVisibleChanged: if (visible) arrive.appear(() => card.kit.arriving, 0, app.px(kit.motion.nudge))
+    opacity: app.tabFade(0) * arrive.part
+    enabled: app.turnFrom !== 0
+    transform: [Translate { x: app.tabShift(0) }, Arrive { id: arrive; motion: card.kit.motion }]
     anchors.centerIn: parent
     width: Math.min(parent.width - app.px(32), app.px(520))
     height: emptyCol.implicitHeight + app.px(48)

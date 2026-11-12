@@ -47,6 +47,7 @@ Item {
                 width: sortRow.implicitWidth + lo.ui.px(26); height: lo.ui.px(40); radius: lo.ui.px(8)
                 anchors.verticalCenter: parent.verticalCenter
                 color: foc ? lo.ui.c.focusFill : lo.ui.c.card
+                Behavior on color { enabled: lo.ui.motion.on; ColorAnimation { duration: lo.ui.motion.quick; easing.type: lo.ui.motion.ease } }
                 border.color: foc ? lo.ui.c.accent : lo.ui.c.line
                 border.width: foc ? lo.ui.px(2) : Math.max(1, lo.ui.px(1))
                 Row {
@@ -86,16 +87,46 @@ Item {
             spacing: lo.ui.px(4)
             model: lo.plugins
             onMovementEnded: lo.scrolled(indexAt(10, contentY + lo.ui.px(10)), indexAt(10, contentY + height - lo.ui.px(10)))
+            // A plugin moved or sorted: the list is built again, so each row is told where it was and, at Full, glides
+            // from there (only when most of the list was there before, never while the tab is coming in).
+            property var placed: ({})
+            property var before: ({})
+            property real builtAt: 0
+            property bool flipping: false
+            // The list makes the new rows before it says its model changed, so the first row of a new list starts it.
+            property var shownModel: null
+            function newList() {
+                const plugins = lo.plugins
+                if (plugins === shownModel) return
+                shownModel = plugins
+                before = placed; placed = ({})
+                builtAt = Date.now()
+                const now = (plugins || []).map(x => x.name)
+                flipping = lo.ui.motion.moves && visible && !lo.ui.arriving && now.length > 0 && now.filter(k => before[k] !== undefined).length * 2 >= now.length
+            }
+            onModelChanged: newList()
             delegate: Rectangle {
                 id: row
                 required property int index
                 required property var modelData
                 readonly property var p: modelData
                 readonly property bool foc: lo.active && lo.focusIndex === index
+                transform: Arrive { id: rowIn; motion: lo.ui.motion }
+                function place() {
+                    list.newList()
+                    list.placed[row.p.name] = y
+                    if (!list.flipping || Date.now() - list.builtAt > 300) return
+                    const was = list.before[row.p.name]
+                    rowIn.settle()
+                    if (was !== undefined && Math.abs(was - y) > 1) rowIn.play(0, was - y, 1)
+                }
+                onYChanged: place()
+                Component.onCompleted: place()
                 width: list.width
                 height: lo.ui.px(46)
                 radius: lo.ui.px(6)
                 color: foc ? lo.ui.c.focusFill : lo.ui.c.card
+                Behavior on color { enabled: lo.ui.motion.on; ColorAnimation { duration: lo.ui.motion.quick; easing.type: lo.ui.motion.ease } }
                 border.color: lo.ui.c.accent
                 border.width: foc ? lo.ui.px(2) : 0
                 Row {

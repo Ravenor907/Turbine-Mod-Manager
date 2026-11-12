@@ -22,8 +22,12 @@ Item {
     implicitWidth: maxWidth
     implicitHeight: content.implicitHeight
 
+    // Showing up on its own (not with a page or tab coming in), it fades in as it rises a little into place.
+    onVisibleChanged: if (visible) arrive.appear(() => root.ui.arriving, 0, ui.px(ui.motion.nudge))
     Column {
         id: content
+        opacity: arrive.part
+        transform: Arrive { id: arrive; motion: root.ui.motion }
         anchors.centerIn: parent
         width: Math.min(root.width > 0 ? root.width : root.maxWidth, root.maxWidth)
         spacing: root.ui.px(10)

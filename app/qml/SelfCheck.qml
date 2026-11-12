@@ -46,7 +46,6 @@ Item {
     readonly property var startHintKey: app.checkIds.startHintKey
     readonly property var startRing: app.checkIds.startRing
     readonly property var toast: app.checkIds.toast
-    readonly property var turnLine: app.checkIds.turnLine
     readonly property var shot: app.checkIds.shot
 
     // Pages that wait for the engine (imports, menus, the check) get more time before the picture.
@@ -303,6 +302,8 @@ Item {
             // Every picture checks the bottom bar (nothing overlaps Play or goes past the edge).
             legend.check(shot.page)
             if (shot.page.indexOf("splash") === 0) app.note("check", "Splash check (" + shot.page + "): shown " + splash.shown + ", icon opacity " + splashIcon.opacity.toFixed(2) + ", scale " + splashIcon.scale.toFixed(2) + ", rail icon none")
+            // A picture with animations asked for (--motion=full or reduced): everything has come to rest by now.
+            if (shot.arg("motion") !== "" && mo.on && shot.page.indexOf("splash") !== 0) app.note("check", "Motion check: " + shot.page + (app.motionStill ? " settled" : " still moving") + " (animations " + mo.level + ")")
             ;(shot.page === "overlay" || shot.page === "overlaywait" ? panelWin : shot.page === "overlaygm" || shot.page === "caughtgm" ? hudWin : app).contentItem.grabToImage(function (r) { r.saveToFile(shot.path); Qt.quit() })
         }
     }
@@ -1151,7 +1152,7 @@ Item {
         }
         // Get mods as a page of a book, by real presses and clicks: no game list there, the edges name the pages
         // beside it, Left from the first column and Right from the last turn the page (a held D-pad stops at the
-        // edge), LB and RB and a click on an edge turn it too, and the page coming in slides over the other.
+        // edge), LB and RB and a click on an edge turn it too, and the page coming in slides in as the other fades.
         else if (name === "bookcheck") {
             m.bad = 0
             const say = (ok, text) => { if (!ok) m.bad++; check("Book check: " + text + (ok ? "" : "  PROBLEM")) }
@@ -1161,14 +1162,14 @@ Item {
             script = [
                 () => { if (!app.game || !app.modsLoaded || app.mods.length < 1) return false; app.sheet = ""; app.page = "game"; app.zone = "main"; app.tab = 0; app.modIndex = 0 },
                 () => { say(rail.width > 0 && !edgeBack.visible, "My mods: the game list is " + (rail.width > 0 ? "there" : "gone") + ", page edges " + (edgeBack.visible ? "shown" : "none")); m.turns = app.turnsShown; pad("rb")
-                        say(app.tab === 1 && app.lastTurnDir === 1 && (mo.moves ? app.turnTo === 1 && turnLine.visible && app.turnsShown === m.turns + 1 : !turnLine.visible), "RB: " + tabName() + " comes in from the " + (app.lastTurnDir > 0 ? "right" : "left")) },
+                        say(app.tab === 1 && app.lastTurnDir === 1 && (mo.moves ? app.turnTo === 1 && app.turnInMove < 1 && app.turnsShown === m.turns + 1 : app.turnTo < 0), "RB: " + tabName() + " comes in from the " + (app.lastTurnDir > 0 ? "right" : "left")) },
                 () => { if (app.getItems.length < app.gridColumns || app.turnTo >= 0 || rail.width > 0) return false
                         say(rail.width === 0 && edgeBack.visible && edgeBack.width >= 44 && edgeNext.visible === app.bookHasNext && app.bookHasNext,
                             "Get mods: the game list is " + (rail.width === 0 ? "gone" : "there") + ", left edge " + (edgeBack.visible ? edgeBack.label : "none") + " (" + Math.round(edgeBack.width) + " px), right edge " + (edgeNext.visible ? edgeNext.label : "none"))
                         app.zone = "main"; app.getArea = "grid"; app.getIndex = 1; pad("left")
                         say(app.tab === 1 && app.getIndex === 0, "Left inside the row: card " + (app.getIndex + 1) + ", still " + tabName())
                         pad("left")
-                        say(app.tab === 0 && app.zone === "main" && app.lastTurnDir === -1 && modList.visible && (mo.moves ? app.turnTo === 0 && getView.visible && turnLine.visible : !getView.visible),
+                        say(app.tab === 0 && app.zone === "main" && app.lastTurnDir === -1 && modList.visible && (mo.moves ? app.turnTo === 0 && getView.visible && app.turnInMove < 1 : !getView.visible),
                             "Left from the first column: " + tabName() + " comes in from the " + (app.lastTurnDir < 0 ? "left" : "right") + ", zone " + app.zone) },
                 () => { if (app.turnTo >= 0 || rail.width < app.px(72)) return false
                         say(app.tab === 0 && !getView.visible && rail.width > 0, "The turn done: " + tabName() + ", Get mods " + (getView.visible ? "still showing" : "put away") + ", the game list back"); pad("rb") },

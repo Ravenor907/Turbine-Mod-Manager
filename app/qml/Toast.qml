@@ -32,6 +32,8 @@ Rectangle {
 
     // show(text, strong, detail); the last two are optional.
     function show(t, s, d) {
+        // Another message while one is up: the words fade over in place.
+        if (shown && (text !== (t || "") || strong !== (s || ""))) wordsIn.play(0, 0, ui.motion.swapFrom)
         text = t || ""
         strong = s || ""
         detail = d || ""
@@ -74,9 +76,9 @@ Rectangle {
     }
     opacity: shown ? 1 : 0
     visible: opacity > 0
-    // It fades in and out, and at Full slides up a little as it comes and back down as it goes.
-    Behavior on opacity { NumberAnimation { duration: root.ui.motion.base; easing.type: root.shown ? root.ui.motion.enter : root.ui.motion.leave } }
-    transform: Translate { y: (1 - root.opacity) * root.ui.px(14) * root.ui.motion.slide }
+    // It fades in as it rises a little into place (Full), and fades out quicker, sinking back as it goes.
+    Behavior on opacity { NumberAnimation { duration: root.shown ? root.ui.motion.standard : root.ui.motion.quick; easing.type: root.ui.motion.ease } }
+    transform: Translate { y: (1 - root.opacity) * root.ui.px(root.ui.motion.nudge) }
 
     // A tap on the toast dismisses it and goes nowhere else.
     MouseArea {  // overlay-check: the toast's own box, not the window
@@ -98,6 +100,8 @@ Rectangle {
 
     Row {
         id: toastRow
+        opacity: wordsIn.part
+        transform: Arrive { id: wordsIn; motion: root.ui.motion; fadeTime: root.ui.motion.quick }
         anchors.verticalCenter: parent.verticalCenter
         x: root.banner ? Math.max(root.ui.px(18), Math.round((root.width - implicitWidth) / 2)) : root.ui.px(18)
         spacing: root.ui.px(12)

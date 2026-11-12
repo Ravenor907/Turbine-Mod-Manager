@@ -72,6 +72,11 @@ Item {
     Flickable {
         id: view
         visible: !md.loading && !(md.info && md.info.error)
+        // The page read: it fades in where "Reading the mod's page..." was (with the page itself when that is
+        // still coming in).
+        opacity: pageRead.part
+        onVisibleChanged: if (visible) pageRead.appear(() => md.ui.arriving, 0, 0)
+        Arrive { id: pageRead; motion: md.ui.motion }
         anchors.fill: parent
         contentHeight: md.stacked ? leftCol.implicitHeight + rightCol.implicitHeight + md.ui.px(24) : Math.max(leftCol.implicitHeight, rightCol.implicitHeight) + md.ui.px(8)
         clip: true
@@ -93,7 +98,7 @@ Item {
                     asynchronous: true
                     visible: status === Image.Ready
                     opacity: status === Image.Ready ? 1 : 0
-                    Behavior on opacity { enabled: md.ui.motion.on; NumberAnimation { duration: md.ui.motion.base; easing.type: md.ui.motion.enter } }
+                    Behavior on opacity { enabled: md.ui.motion.on; NumberAnimation { duration: md.ui.motion.standard; easing.type: md.ui.motion.ease } }
                 }
                 Text {
                     visible: !pic.visible
@@ -233,6 +238,7 @@ Item {
                     readonly property bool foc: md.focused && md.focusIndex === index + 2
                     width: rightCol.width; height: md.ui.px(44); radius: md.ui.px(6)
                     color: foc ? md.ui.c.focusFill : md.ui.c.card
+                    Behavior on color { enabled: md.ui.motion.on; ColorAnimation { duration: md.ui.motion.quick; easing.type: md.ui.motion.ease } }
                     border.color: md.ui.c.accent
                     border.width: foc ? md.ui.px(2) : 0
                     Text {

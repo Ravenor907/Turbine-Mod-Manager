@@ -138,7 +138,7 @@ Window {
         panelEdit: modPanel.panelEdit, panelWin: panelWin, perfList: perfList, pickMenu: pickMenu, playBtn: legend.playBtn,
         rail: rail, railList: rail.railList, resetHold: resetHold, seen: seen, settingsView: settingsView,
         sheetLayer: sheetLayer, shot: shot, splash: splash, splashIcon: splash.splashIcon, startHint: legend.startHint,
-        startHintKey: legend.startHintKey, startRing: legend.startRing, toast: toast, turnLine: turnLine
+        startHintKey: legend.startHintKey, startRing: legend.startRing, toast: toast
     })
 
     // ---------------------------------------------------------------- size
@@ -215,7 +215,13 @@ Window {
     // ---------------------------------------------------------------- Labs mode and the activity log
     readonly property bool labsOn: labsSet.on || (shot.on && shot.labs)
     function note(kind, text) { Turbine.log(kind, text) }
-    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); barsHidden = false; if (page === "settings") settingsFresh = true; else settingsFrom = null }
+    onPageChanged: { note("page", "Page " + page); stopDangerHolds(); barsHidden = false; if (page === "settings") settingsFresh = true; else settingsFrom = null; pageArrived() }
+    // A whole page arriving (another game from the rail, Settings, Where do these files go?, Nexus, back from it):
+    // it fades up as it rises a little into place (Arrive.qml, gentle). The state is already the new page's.
+    function pageArrived() {
+        if (page === "browser") browserIn.play(0, px(mo.nudge))
+        else pageIn.play(0, px(mo.nudge))
+    }
     // No top bar on the game screen. Going down a long list hides the bottom bar and the rail too, so the
     // content is truly full screen; going up, reaching the top, View, a tab change, a sheet or the rail bring them
     // back. Reduce motion: no slide, they just go and come.
@@ -228,26 +234,32 @@ Window {
     Motion { id: mo; level: app.motionLevel }
     // A list or grid brought to its focused row: `jump` puts it there (positionViewAtIndex and the like); at Full
     // the view then glides from where it was instead of snapping. One at a time, never an overshoot, and a new
-    // one takes over from wherever the last had got to.
+    // one takes over from wherever the last had got to. Only within about a screen: further (a list opening on a
+    // row far down, a jump to the top or the end) it is simply there, as with animations off.
     NumberAnimation {
         id: glideAnim
-        properties: "contentY"; duration: mo.moveBase; easing.type: mo.enter
+        properties: "contentY"; duration: mo.moveStandard; easing.type: mo.glide
         // It ends exactly where a jump would have put it (rows of different heights can move the mark on the way).
         onFinished: { const j = app.glideJump; app.glideJump = null; if (j) j() }
     }
     property var glideJump: null
     property int glides: 0
+    // Nothing still moving of what the build's motion check knows (page turns, the rail, pages and a mod's page
+    // arriving, list glides).
+    readonly property bool motionStill: turnTo < 0 && rail.slide === 0 && !pageIn.running && !browserIn.running && !modIn.running && !gridBack.running && !glideAnim.running
     function glide(view, jump) {
         if (!mo.moves || !view || !view.visible) { jump(); return }
         if (glideAnim.running) {
+            const was = glideAnim.target, wasJump = glideJump
             glideAnim.stop(); glideJump = null
-            // Another view's glide ends where it was going.
-            if (glideAnim.target && glideAnim.target !== view) glideAnim.target.contentY = glideAnim.to
+            // Another view's glide ends exactly where a jump puts it now (its rows may have been laid out since
+            // its glide began).
+            if (was && was !== view) { if (wasJump) wasJump(); else was.contentY = glideAnim.to }
         }
         const from = view.contentY
         jump()
         const to = view.contentY
-        if (Math.abs(to - from) < 1) return
+        if (Math.abs(to - from) < 1 || Math.abs(to - from) > view.height) return
         view.contentY = from
         glideAnim.target = view; glideAnim.from = from; glideAnim.to = to
         glideJump = jump
@@ -307,7 +319,8 @@ Window {
     // ---- Get mods is a page of a book. No game list there: My mods is the page to the left (its name and an
     // arrow down the left edge) and Load order the page to the right. Left from the first column, LB, a swipe to
     // the right or a click on the edge turns back; Right from the last column, RB, a swipe to the left or the right
-    // edge turns forward. The page coming in slides over the one it covers, a brass line at its edge.
+    // edge turns forward. The page coming in fades up as it slides in a short way from its side; the one it replaces
+    // fades out quickly, drifting the other way (Reduced: the fades alone).
     readonly property bool bookTab: page === "game" && !!game && tab === 1
     readonly property bool bookPage: bookTab && !modPage
     readonly property bool bookHasNext: tabs.length > 2
@@ -323,30 +336,44 @@ Window {
         switchTab(d)
         return true
     }
-    property int turnFrom: -1             // the tab being covered while a page turns, else -1
-    property int turnTo: -1
+    property int turnFrom: -1             // the tab going while a page turns, else -1
+    property int turnTo: -1               // the tab coming in while a page turns, else -1
     property int turnDir: 0               // -1: the page comes in from the left (back), 1: from the right
-    property real turnPart: 1
+    // 0 to 1 while a page turns: the page coming in (its fade, its travel), the page going (gone at 1).
+    property real turnInFade: 1
+    property real turnInMove: 1
+    property real turnOut: 1
     property int turnsShown: 0
     property int tabBefore: 0
     property real gameChangedAt: 0        // a tab that changes with the game is no page turn
-    // Full: the page slides in. Reduced: it fades in where it is (turnFade).
-    readonly property real turnX: turnTo < 0 || !mo.moves ? 0 : turnDir * (1 - turnPart) * content.width
-    readonly property real turnFade: turnTo >= 0 && !mo.moves ? 1 - turnPart : 0
     property int lastTurnDir: 0
-    NumberAnimation {
+    ParallelAnimation {
         id: turnAnim
-        target: app; properties: "turnPart"
-        from: 0; to: 1; duration: mo.page; easing.type: mo.enter
+        NumberAnimation { target: app; properties: "turnInFade"; from: 0; to: 1; duration: mo.standard; easing.type: mo.ease }
+        NumberAnimation { target: app; properties: "turnInMove"; from: 0; to: 1; duration: mo.moveStandard; easing.type: mo.glide }
+        NumberAnimation { target: app; properties: "turnOut"; from: 0; to: 1; duration: mo.quick; easing.type: mo.ease }
         onFinished: { app.turnFrom = -1; app.turnTo = -1 }
     }
+    property bool turnModPage: false      // the page going is a mod's page (over Get mods)
+    // Both pages start from how they look now (one may still be coming in or going from a turn a moment ago).
+    property real turnOutFade: 1
+    property real turnOutShift: 0
+    property real turnInFrom: 0
     function turnStart(from, to) {
+        turnOutFade = tabFade(from); turnOutShift = tabShift(from)
+        turnInFrom = to === turnFrom ? tabFade(to) : 0
         turnAnim.stop()
         turnFrom = from; turnTo = to; turnDir = to > from ? 1 : -1
-        turnPart = 0
+        turnModPage = from === 1 && modPage
+        turnInFade = 0; turnInMove = 0; turnOut = 0
         turnsShown++
         turnAnim.start()
     }
+    // What a tab's page draws: it shows on its tab, and stays while it turns away. Its opacity and its sideways
+    // shift while a page turns (1 and 0 otherwise).
+    function onTab(n) { return tab === n || turnFrom === n }
+    function tabFade(n) { return n === turnTo ? turnInFrom + (1 - turnInFrom) * turnInFade : n === turnFrom ? turnOutFade * (1 - turnOut) : 1 }
+    function tabShift(n) { return n === turnTo ? turnDir * (1 - turnInMove) * px(mo.shift) : n === turnFrom ? turnOutShift - turnDir * turnOut * px(mo.nudge) : 0 }
     onTabChanged: {
         // One page to the next in the same game: the turn. (Not in the build's pictures, but for its own check.)
         if (page === "game" && !!game && Date.now() - gameChangedAt > 150 && Math.abs(tab - tabBefore) === 1 && mo.on) turnStart(tabBefore, tab)
@@ -516,6 +543,8 @@ Window {
         function iconPath(name) { return name ? (icons[name] || name) : "" }
         // The motion system, and the glide to a focused row.
         readonly property Motion motion: mo
+        // A page or a tab is on its way in: what shows up inside it comes with it (no fade of its own).
+        readonly property bool arriving: app.turnTo >= 0 || pageIn.running
         function glide(view, jump) { app.glide(view, jump) }
         function reveal(view, i) { app.reveal(view, i) }
         // Words for the mod pages: "24.0 MB" ("" for none), "Mar 4, 2025" from "2025-03-04" (anything else stays as it
@@ -2000,6 +2029,7 @@ Window {
     }
     onGameChanged: {
         gameChangedAt = Date.now()
+        if (game && !sameGameReorder && page === "game") pageArrived()
         allOffWas = []
         disarm()
         barsHidden = false
@@ -2246,7 +2276,6 @@ Window {
     }
     function putBack(id) {
         note("action", "Put back " + id)
-        nudgeRow(id, 0)
         if (ghost && ghost.id === id) { ghost = null; ghostTimer.stop() }
         Turbine.undoRemove(id)
         toast.hide()
@@ -2277,10 +2306,6 @@ Window {
         moveSaved = mods.slice()
     }
     // d rows (Up/Down 1, Left/Right 10); LT/RT pass a large number for top or bottom.
-    // A row that just moved, came back or arrived slides or fades into its place (the list is rebuilt when
-    // it changes, so the row is told where it came from: {id, dir: -1 from above, 1 from below, 0 a fade, at}).
-    property var rowNudge: null
-    function nudgeRow(id, dir) { rowNudge = mo.on ? { id: id, dir: dir, at: Date.now() } : null }
     function stepMove(d) {
         const from = modIndex
         const to = Math.max(0, Math.min(mods.length - 1, from + d))
@@ -2288,7 +2313,6 @@ Window {
         let list = mods.slice()
         const m = list.splice(from, 1)[0]
         list.splice(to, 0, m)
-        nudgeRow(m.id, to > from ? -1 : 1)
         mods = list
         modIndex = to
     }
@@ -2749,7 +2773,12 @@ Window {
     // The danger holds stop whenever the sheet or the page changes.
     function stopDangerHolds() { stopReset(); stopConfirm(); startHold.stop(); startHeld = 0; clickHeld = false; disarm() }
     // (onPageChanged and onTabChanged, near the top, call it too.)
-    onModPageChanged: { stopDangerHolds(); pageSettings = false }
+    onModPageChanged: {
+        stopDangerHolds(); pageSettings = false
+        // A mod's page comes in from the right over Get mods; going back, the cards come in from the left.
+        if (modPage) modIn.play(px(mo.shift), 0)
+        else if (tab === 1 && turnFrom !== 1) gridBack.play(-px(mo.shift), 0)
+    }
     readonly property var gameMenuItems: [
         { icon: "play", title: "Play without mods", detail: acMode === "me3" ? "Starts it the normal way, with its anti-cheat. Nothing is deleted." : "Starts the game with no mods. Nothing is deleted.", ok: true, act: "original" },
         // One row for both ways back: the last setup that worked, or (with more saved) the list, newest first.
@@ -3320,7 +3349,9 @@ Window {
         return id !== "" && rules && rules.domain ? "https://www.nexusmods.com/" + rules.domain + "/mods/" + id : ""
     }
     // The panel on the right of My mods: only on wide screens (16:9 and up), with something highlighted.
-    readonly property bool showModPanel: page === "game" && !!game && tab === 0 && modsLoaded && !modPage && mods.length > 0 && width / Math.max(1, height) >= 1.5 && designWidth >= 700
+    readonly property bool showModPanel: tab === 0 && modPanelRoom
+    // The panel's room on My mods, whatever the tab (it fades out with My mods while a page turns).
+    readonly property bool modPanelRoom: page === "game" && !!game && modsLoaded && !modPage && mods.length > 0 && width / Math.max(1, height) >= 1.5 && designWidth >= 700
     // The details panel's first line: "Version 1.2 · On · added Nov 9 · 3 files" (and the author when known).
     function versionOf(m) {
         if (!m) return ""
@@ -3708,9 +3739,12 @@ Window {
     // This game has somewhere to get mods (Nexus or Thunderstore).
     readonly property bool canGetMods: !!rules && (!!rules.domain || sources.length > 0)
     // An empty My mods: the centered card (any game, after a Basic game's first-visit card).
-    readonly property bool emptyMods: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && !acRefused && !basicIntro && !modPage
+    readonly property bool emptyMods: tab === 0 && emptyModsRoom
+    // My mods' empty card and Basic first-visit card, whatever the tab (they fade out with My mods while a page turns).
+    readonly property bool emptyModsRoom: page === "game" && !!game && modsLoaded && mods.length === 0 && !acRefused && !basicIntroRoom && !modPage
     onEmptyModsChanged: if (emptyMods) Qt.callLater(() => note("page", "No mods card: No mods for " + gameTitle + " yet | legend " + legendHints.map(h => h[0].toUpperCase() + " " + h[1]).join(" · ")))
-    readonly property bool basicIntro: page === "game" && !!game && tab === 0 && modsLoaded && mods.length === 0 && basicGame && !acRefused
+    readonly property bool basicIntro: tab === 0 && basicIntroRoom
+    readonly property bool basicIntroRoom: page === "game" && !!game && modsLoaded && mods.length === 0 && basicGame && !acRefused
                                        && (introSeen || []).indexOf(game.id) < 0
     onBasicIntroChanged: {
         if (introSeen === null) introSeen = parse(seen.basicIntroDone, [])
@@ -3991,9 +4025,10 @@ Window {
         const p = focusCenter()
         Turbine.wheelAt(p.x, p.y, d)
     }
-    // ---- The focus ring glides. Each thing draws its own ring where the focus rests; when the focus moves,
-    // a ring travels from the last one to the new one (120 ms) and fades as it lands. Only at Full, only on the
-    // main screens (the game list, My mods, Get mods, Play), and never while a list is still gliding to its row.
+    // ---- The focus ring glides. Each thing draws its own ring where the focus rests, fading in as the focus
+    // arrives and out as it leaves; when the focus moves, a ring travels from the last one to the new one (Motion's
+    // quick, on the glide curve) and fades as it lands. Only at Full, only on the main screens (the game list, My
+    // mods, Get mods, Play), and never while a list is still gliding to its row.
     property Item focusWas: null
     function focusItemNow() {
         if (sheet !== "" || wheelOpen || page === "browser" || page === "place") return null
@@ -4047,12 +4082,12 @@ Window {
             id: ringMove
             PropertyAction { target: focusRing; properties: "opacity"; value: 0.9 }
             ParallelAnimation {
-                NumberAnimation { id: ringX; target: focusRing; properties: "x"; duration: mo.moveFast; easing.type: mo.enter }
-                NumberAnimation { id: ringY; target: focusRing; properties: "y"; duration: mo.moveFast; easing.type: mo.enter }
-                NumberAnimation { id: ringW; target: focusRing; properties: "width"; duration: mo.moveFast; easing.type: mo.enter }
-                NumberAnimation { id: ringH; target: focusRing; properties: "height"; duration: mo.moveFast; easing.type: mo.enter }
+                NumberAnimation { id: ringX; target: focusRing; properties: "x"; duration: mo.moveQuick; easing.type: mo.glide }
+                NumberAnimation { id: ringY; target: focusRing; properties: "y"; duration: mo.moveQuick; easing.type: mo.glide }
+                NumberAnimation { id: ringW; target: focusRing; properties: "width"; duration: mo.moveQuick; easing.type: mo.glide }
+                NumberAnimation { id: ringH; target: focusRing; properties: "height"; duration: mo.moveQuick; easing.type: mo.glide }
             }
-            NumberAnimation { target: focusRing; properties: "opacity"; to: 0; duration: mo.fast; easing.type: mo.leave }
+            NumberAnimation { target: focusRing; properties: "opacity"; to: 0; duration: mo.quick; easing.type: mo.ease }
         }
     }
     // The middle of whatever has the focus ring, in window pixels.
@@ -5417,6 +5452,8 @@ Window {
             if (!modPage) pushResults()
         }
         history = history.concat([{ kind: "mod", id: String(item.id), item: item }])
+        // Another mod's page over this one (LB, RB, a requirement, back): the new page settles in place.
+        if (modPage && (!detailsItem || String(detailsItem.id) !== String(item.id))) modIn.play(0, px(mo.nudge))
         detailsItem = item
         detailsData = { loading: true }
         modPage = true
@@ -7280,7 +7317,8 @@ Window {
         light: c.light
         moving: (app.active || shot.on) && mo.moves
     }
-    Row {
+    // The rail and the page beside it (not a Row: the rail keeps drawing while it slides out of a room of 0).
+    Item {
         id: mainRow
         anchors.fill: parent
         // Off while anything covers it (see topLayer).
@@ -7296,8 +7334,11 @@ Window {
         // ===== Main
         Item {
             id: main
+            x: rail.width
             width: parent.width - rail.width
             height: parent.height
+            // Laid out for the rail's new room at once; moved with the rail's edge while it slides (GameRail.qml).
+            transform: Translate { x: rail.slide }
 
             Column {
                 id: mainCol
@@ -7317,26 +7358,14 @@ Window {
                     width: parent.width
                     height: mainCol.height - y
                     clip: true
+                    opacity: pageIn.part
+                    transform: Arrive { id: pageIn; motion: mo; fadeTime: mo.gentle; moveTime: mo.moveGentle }
                     // Seasonal leaves and snow fade out behind the lists and cards (they show in the margins).
                     Rectangle { anchors.fill: parent; color: c.ground; opacity: app.seasonKind !== "" ? 0.85 : 0 }
 
-                    // ---- A page turning. The page being covered dims, the one coming in slides over it on its own
-                    // ground, and a brass line marks its edge.
-                    Rectangle { anchors.fill: parent; z: 1; visible: app.turnTo >= 0 && mo.moves; color: c.ground; opacity: 0.55 }
-                    Rectangle { id: turnGround; x: app.turnX; width: parent.width; height: parent.height; z: 2; visible: app.turnTo >= 0 && mo.moves; color: c.ground }
-                    // Reduced: the new page fades in from the ground.
-                    Rectangle { anchors.fill: parent; z: 6; visible: app.turnFade > 0; color: c.ground; opacity: app.turnFade }
-                    Rectangle {
-                        id: turnLine
-                        z: 4
-                        visible: app.turnTo >= 0 && mo.moves
-                        x: app.turnDir < 0 ? app.turnX + parent.width - width : app.turnX
-                        width: Math.max(2, app.px(3)); height: parent.height
-                        color: c.accentHi
-                    }
                     // The page edges on Get mods (PageEdge.qml).
-                    PageEdge { id: edgeBack; win: app; visible: app.bookPage; x: 0; label: "My mods"; dir: -1 }
-                    PageEdge { id: edgeNext; win: app; visible: app.bookPage && app.bookHasNext; x: parent.width - width; label: (app.tabs[2] || "Load order").replace(/ \(\d+\)$/, ""); dir: 1 }
+                    PageEdge { id: edgeBack; win: app; visible: app.bookPage || (app.turnFrom === 1 && !app.modPage); x: 0; label: "My mods"; dir: -1 }
+                    PageEdge { id: edgeNext; win: app; visible: (app.bookPage || (app.turnFrom === 1 && !app.modPage)) && app.bookHasNext; x: parent.width - width; label: (app.tabs[2] || "Load order").replace(/ \(\d+\)$/, ""); dir: 1 }
 
                     // No games, mods being read.
                     EmptyState {
@@ -7360,8 +7389,10 @@ Window {
                     Row {
                         id: moveLine
                         z: app.turnTo === 0 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
-                        visible: app.page === "game" && app.tab === 0 && !app.modPage && app.game !== null && app.modsLoaded && (app.mods.length > 0 || app.moving || app.selecting || app.listFiltered)
+                        opacity: app.tabFade(0)
+                        transform: Translate { x: app.tabShift(0) }
+                        enabled: app.turnFrom !== 0
+                        visible: app.page === "game" && app.onTab(0) && !app.modPage && app.game !== null && app.modsLoaded && (app.mods.length > 0 || app.moving || app.selecting || app.listFiltered)
                         height: visible ? app.px(30) : 0
                         x: app.px(6)
                         width: parent.width - app.px(12)
@@ -7404,7 +7435,10 @@ Window {
                     EmptyState {
                         ui: kit
                         anchors.fill: parent
-                        visible: app.page === "game" && app.game !== null && app.tab === 1 && app.sources.length === 0
+                        visible: app.page === "game" && app.game !== null && app.onTab(1) && app.sources.length === 0
+                        opacity: app.tabFade(1)
+                        transform: Translate { x: app.tabShift(1) }
+                        enabled: app.turnFrom !== 1
                         title: "Get mods"
                         body: app.nexusUnknown ? "Turbine couldn't find " + app.gameTitle + " on Nexus Mods. Pick it yourself, or add a mod file (X)."
                               : "This game isn't on Nexus Mods or Thunderstore. You can still add a mod file."
@@ -7417,7 +7451,10 @@ Window {
                     EmptyState {
                         ui: kit
                         anchors.fill: parent
-                        visible: app.page === "game" && app.acRefused && app.tab === 0 && app.mods.length === 0 && !app.modPage
+                        visible: app.page === "game" && app.acRefused && app.onTab(0) && app.mods.length === 0 && !app.modPage
+                        opacity: app.tabFade(0)
+                        transform: Translate { x: app.tabShift(0) }
+                        enabled: app.turnFrom !== 0
                         title: app.gameTitle + " needs its anti-cheat"
                         body: app.acInfo ? app.acInfo.refuseWords : ""
                         buttonKey: ""
@@ -7433,7 +7470,10 @@ Window {
                     EmptyState {
                         ui: kit
                         anchors.fill: parent
-                        visible: app.basicIntro && !app.modPage
+                        visible: app.onTab(0) && app.basicIntroRoom && !app.modPage
+                        opacity: app.tabFade(0)
+                        transform: Translate { x: app.tabShift(0) }
+                        enabled: app.turnFrom !== 0
                         title: "Mods for " + app.gameTitle
                         body: "Turbine has no rules for this game yet. It puts each mod where its files show they belong, and asks when it can't tell. Turning a mod off always puts the game back."
                         buttonKey: "a"
@@ -7472,9 +7512,11 @@ Window {
                         // Between the page edges (My mods on the left; Load order on the right where the game has one).
                         anchors.leftMargin: app.tpx(34) + app.px(6)
                         anchors.rightMargin: app.bookHasNext ? app.tpx(34) + app.px(6) : 0
-                        visible: app.page === "game" && app.game !== null && (app.tab === 1 || (app.turnFrom === 1 && mo.moves)) && app.sources.length > 0 && !app.modPage
+                        visible: app.page === "game" && app.game !== null && app.onTab(1) && app.sources.length > 0 && !app.modPage && !(app.turnFrom === 1 && app.turnModPage)
                         z: app.turnTo === 1 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 1 ? app.turnX : 0 }
+                        opacity: app.tabFade(1) * gridBack.part
+                        transform: [Translate { x: app.tabShift(1) }, Arrive { id: gridBack; motion: mo }]
+                        enabled: app.turnFrom !== 1
                         // Touch: a swipe to the right turns back to My mods, to the left forward to Load order.
                         DragHandler {
                             enabled: app.bookPage && app.sheet === "" && !app.wheelOpen
@@ -7515,7 +7557,10 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.modPage
+                        visible: app.page === "game" && (app.modPage || (app.turnFrom === 1 && app.turnModPage))
+                        opacity: app.tabFade(1) * modIn.part
+                        transform: [Translate { x: app.tabShift(1) }, Arrive { id: modIn; motion: mo }]
+                        enabled: app.turnFrom !== 1
                         info: app.detailsData
                         fallbackPicture: app.detailsItem && app.detailsItem.icon ? app.detailsItem.icon : ""
                         focused: app.zone === "main" && app.sheet === ""
@@ -7537,9 +7582,11 @@ Window {
                         ui: kit
                         anchors.fill: parent
                         anchors.topMargin: app.px(4)
-                        visible: app.page === "game" && app.game !== null && (app.tab === 2 || (app.turnFrom === 2 && mo.moves)) && !app.modPage
+                        visible: app.page === "game" && app.game !== null && app.onTab(2) && !app.modPage
                         z: app.turnTo === 2 ? 3 : 0
-                        transform: Translate { x: app.turnTo === 2 ? app.turnX : 0 }
+                        opacity: app.tabFade(2)
+                        transform: Translate { x: app.tabShift(2) }
+                        enabled: app.turnFrom !== 2
                         plugins: app.order
                         error: app.orderError
                         messages: app.orderMessages
@@ -7587,6 +7634,8 @@ Window {
         active: app.browserOpen
         visible: app.page === "browser"
         enabled: app.topLayer === 0
+        opacity: browserIn.part
+        transform: Arrive { id: browserIn; motion: mo; fadeTime: mo.gentle; moveTime: mo.moveGentle }
         sourceComponent: Component {
             NexusBrowser {
                 ui: kit
@@ -7715,7 +7764,8 @@ Window {
         id: legend
         app: app
         kit: kit
-        anchors.leftMargin: rail.width
+        // Beside the rail's edge where it shows, so it never covers the rail while the rail slides.
+        anchors.leftMargin: rail.width + rail.slide
     }
     QuickWheel {
         ui: kit
@@ -7845,8 +7895,8 @@ Window {
         timeout: shot.page === "newmod" ? 0 : 4000
     }
     // ---------------------------------------------------------------- The start-up splash
-    // The only branding (Splash.qml): Turbine's icon zooming in and out, about 1.2 s. Once per launch, never when
-    // coming back from a game or the background; any press, tap or click skips it.
+    // The only branding (Splash.qml): Turbine's icon coming in, then fading into the app, about 1 s. Once per
+    // launch, never when coming back from a game or the background; any press, tap or click skips it.
     Splash {
         id: splash
         app: app

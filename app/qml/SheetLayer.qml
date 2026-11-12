@@ -401,6 +401,12 @@ Item {
         readonly property bool hint: !seen.railHintDone || shot.page === "rail"
         visible: on && app.sheet === ""
         z: 20
+        // It fades in beside the rail as the rail takes the focus, then glides along with the focused tile.
+        opacity: tipIn.part
+        transform: Arrive { id: tipIn; motion: kit.motion; fadeTime: kit.motion.quick; moveTime: kit.motion.moveQuick }
+        property bool follows: false
+        onVisibleChanged: { follows = false; if (visible) { tipIn.play(-app.px(kit.motion.nudge), 0); Qt.callLater(() => railLabel.follows = railLabel.visible) } }
+        Behavior on y { enabled: railLabel.follows && kit.motion.moves; NumberAnimation { duration: kit.motion.moveQuick; easing.type: kit.motion.glide } }
         // Beside the focused tile, like a tooltip (never over the top of the page).
         x: rail.width + app.px(8)
         y: {

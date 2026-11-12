@@ -15,7 +15,7 @@ ListView {
     spacing: app.px(4)
     model: 2000
     currentIndex: app.perfIndex
-    highlightMoveDuration: mo.moveFast
+    highlightMoveDuration: mo.moveQuick
     onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
     delegate: Rectangle {
         id: prow

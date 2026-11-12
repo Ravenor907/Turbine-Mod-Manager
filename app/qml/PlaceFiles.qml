@@ -122,6 +122,7 @@ Item {
                         height: pf.ui.px(46)
                         radius: pf.ui.px(6)
                         color: foc ? pf.ui.c.focusFill : modelData.kind === "here" ? pf.ui.c.raised : "transparent"
+                        Behavior on color { enabled: pf.ui.motion.on; ColorAnimation { duration: pf.ui.motion.quick; easing.type: pf.ui.motion.ease } }
                         border.color: pf.ui.c.accent
                         border.width: foc ? pf.ui.px(2) : 0
                         Accessible.role: Accessible.ListItem

@@ -31,9 +31,21 @@ Rectangle {
         if (r.kind === "needsq" && app.reqQ) return ["Still to get", app.reqQ.forName + " still needs " + app.plural(app.reqQ.items.length - app.reqQ.index, "mod", "mods") + ". A goes on where you left off."]
         return ["", ""]
     }
-    visible: app.showModPanel
+    visible: app.onTab(0) && app.modPanelRoom
+    // Another row highlighted: its details fade over in place (not while the list is being run through quickly,
+    // so holding the D-pad never flickers).
+    property Arrive swapIn: Arrive { motion: modPanel.mo; fadeTime: modPanel.mo.quick }
+    readonly property string shownKey: m ? "mod " + m.id : row ? row.kind + " " + (row.m ? row.m.id : "") : ""
+    property real swappedAt: 0
+    onShownKeyChanged: {
+        const t = Date.now()
+        if (visible && t - swappedAt > 250) swapIn.play(0, 0, mo.swapFrom)
+        swappedAt = t
+    }
     z: app.turnTo === 0 ? 3 : 0
-    transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
+    opacity: app.tabFade(0)
+    transform: Translate { x: app.tabShift(0) }
+    enabled: app.turnFrom !== 0
     width: visible ? Math.round(parent.width * 0.36) : 0
     radius: app.px(8)
     color: c.panel
@@ -43,6 +55,7 @@ Rectangle {
     // A row that isn't a mod: its name and what it holds.
     Column {
         visible: !modPanel.m && modPanel.rowWords[0] !== ""
+        opacity: modPanel.swapIn.part
         x: app.px(18); y: app.px(18)
         width: parent.width - app.px(36)
         spacing: app.px(10)
@@ -60,6 +73,7 @@ Rectangle {
     }
     Column {
         visible: modPanel.m !== null
+        opacity: modPanel.swapIn.part
         x: app.px(14); y: app.px(14)
         width: parent.width - app.px(28)
         spacing: app.px(8)
@@ -75,7 +89,7 @@ Rectangle {
                 asynchronous: true
                 visible: status === Image.Ready
                 opacity: status === Image.Ready ? 1 : 0
-                Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.base; easing.type: mo.enter } }
+                Behavior on opacity { enabled: mo.on; NumberAnimation { duration: mo.standard; easing.type: mo.ease } }
             }
             Text {
                 visible: !panelPic.visible
@@ -130,6 +144,7 @@ Rectangle {
     // What X offers, on one line: X's cap and "More options (9)". A tap opens them too (touch has every action).
     Row {
         visible: modPanel.m !== null
+        opacity: modPanel.swapIn.part
         anchors.left: parent.left; anchors.bottom: parent.bottom
         anchors.margins: app.px(14)
         spacing: app.px(8)

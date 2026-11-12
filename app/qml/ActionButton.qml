@@ -26,14 +26,20 @@ Rectangle {
     implicitHeight: ui.tpx(44)
     radius: ui.radiusSmall
     opacity: dim ? 0.55 : 1
+    // Pressed by a finger or the pointer: it gives a little (Full).
+    scale: abTap.pressed ? ui.motion.pressScale : 1
+    Behavior on scale { enabled: ab.ui.motion.moves; NumberAnimation { duration: ab.ui.motion.moveQuick; easing.type: ab.ui.motion.ease } }
     border.width: primary ? 0 : Math.max(1, ui.px(1))
     border.color: ui.c.line
     gradient: Gradient {
         GradientStop { position: 0; color: ab.primary ? ab.ui.c.accentHi : ab.ui.c.raised }
         GradientStop { position: 1; color: ab.primary ? ab.ui.c.accent : ab.ui.c.raised }
     }
+    // The ring fades in as the highlight arrives and out as it leaves.
     Rectangle {
-        visible: ab.focused
+        opacity: ab.focused ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: ab.ui.motion.on; NumberAnimation { duration: ab.ui.motion.quick; easing.type: ab.ui.motion.ease } }
         anchors.fill: parent
         anchors.margins: -ab.ui.px(4)
         radius: ab.radius + ab.ui.px(4)
@@ -74,5 +80,5 @@ Rectangle {
         }
     }
     HoverHandler { onHoveredChanged: ab.ui.hover(ab, hovered) }
-    TapHandler { onTapped: ab.clicked(); onPressedChanged: ab.held(pressed) }
+    TapHandler { id: abTap; onTapped: ab.clicked(); onPressedChanged: ab.held(pressed) }
 }

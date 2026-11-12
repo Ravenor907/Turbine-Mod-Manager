@@ -7,7 +7,7 @@ import QtQuick.Shapes
 // a hint.
 //
 // ui (required): Main.qml's kit. view (required): the Flickable or ListView. color: what the view sits on.
-// size: how tall each fade is. chevron: the chevron at the bottom.
+// size: how tall each fade is. chevron: the chevron at the bottom. The cues fade in and out (Motion's quick).
 Item {
     id: sf
     required property var ui
@@ -25,9 +25,12 @@ Item {
     anchors.fill: chevronBelow ? view : parent
     z: 10
     enabled: false
+    component Cue: NumberAnimation { duration: sf.ui.motion.quick; easing.type: sf.ui.motion.ease }
     Rectangle {
         width: parent.width; height: sf.size
-        visible: sf.above
+        opacity: sf.above ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: sf.ui.motion.on; Cue {} }
         gradient: Gradient {
             GradientStop { position: 0; color: sf.color }
             GradientStop { position: 1; color: Qt.rgba(sf.color.r, sf.color.g, sf.color.b, 0) }
@@ -36,7 +39,9 @@ Item {
     Rectangle {
         anchors.bottom: parent.bottom
         width: parent.width; height: sf.size
-        visible: sf.below
+        opacity: sf.below ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: sf.ui.motion.on; Cue {} }
         gradient: Gradient {
             GradientStop { position: 0; color: Qt.rgba(sf.color.r, sf.color.g, sf.color.b, 0) }
             GradientStop { position: 0.7; color: sf.color }
@@ -45,7 +50,9 @@ Item {
     }
     // More below.
     Shape {
-        visible: sf.below && sf.chevron
+        opacity: sf.below && sf.chevron ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { enabled: sf.ui.motion.on; Cue {} }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: sf.chevronBelow ? -height - sf.ui.px(1) : sf.ui.px(1)

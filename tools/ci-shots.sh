@@ -108,20 +108,43 @@ need() {   # need <shot> <title> <grep -E pattern>
   if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"
   else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet\|focus\|Rail " "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 60 || true); fail=1; fi
 }
+# Animations at Full end where none would have put them: the same page once more with --motion=full, right after its
+# picture with animations off (the same home), says everything settled and gives the same picture (up to 200 pixels
+# may move by more than 3%: a large letter's edges are not always drawn the same way twice, with animations or not;
+# anything more is a page that ended somewhere else).
+settled() {   # settled <picture with animations off> <page> <home> [more arguments]
+  local base=$1 page=$2 home=$3; shift 3
+  ran "$base" || return 0
+  local n="$base-full"
+  ASSIGN[$n]=$SHARD
+  shoot "$n" "${base##*-}" "$page" "$home" "$@" --motion=full
+  need "$n" "Motion check: $page settled at Full" "Motion check: $page settled \(animations full\)$"
+  [ -s "shots/$n.png" ] && [ -s "shots/$base.png" ] || return 0
+  cmp -s "shots/$base.png" "shots/$n.png" && return 0
+  local d
+  d=$(python3 -c 'import runpy, sys; m = runpy.run_path("tools/shot-diff.py"); c, box, _ = m["compare"](m["read_png"](sys.argv[1]), m["read_png"](sys.argv[2]), 3); print(c, box)' "shots/$base.png" "shots/$n.png" || echo "999999 unreadable")
+  if [ "${d%% *}" -le 200 ]; then echo "::notice title=Motion check: $page ends in the same picture::$n ($d)"
+  else echo "::error title=Motion check: $page ends elsewhere at Full::$n differs from $base: $d (pixels, box)"; fail=1; fi
+}
 dl="$PWD/home/Downloads"
 skyrim=steam:489830
 # A copy of the home for pictures whose mod store sits in the game's library.
 fresh() { rm -rf "$PWD/fh/$1" && mkdir -p "$PWD/fh" && cp -a "$PWD/home" "$PWD/fh/$1"; }
 for size in $SIZES; do
   for page in game settings details perf notice; do shoot "$page-$size" "$size" "$page" "$PWD/home"; done
+  settled "settings-$size" settings "$PWD/home"
   shoot "nogames-$size" "$size" game "$PWD/empty"
   shoot "mods-skyrim-$size" "$size" mods "$PWD/home" --game=$skyrim \
     "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
+  settled "mods-skyrim-$size" mods "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip,$dl/Lantern Glow SKSE 2.0.zip"
   shoot "mods-valheim-$size" "$size" mods "$PWD/home" --game=steam:892970 "--selftest-import=$dl/TurbineTest-Bigger_Pockets-1.0.3.zip"
   shoot "mods-stardew-$size" "$size" mods "$PWD/home" --game=gog:1453375253 "--selftest-import=$dl/Quiet Rooster 1.4.zip"
   shoot "menu-$size" "$size" menu "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
+  settled "menu-$size" menu "$PWD/home" --game=$skyrim "--selftest-import=$dl/Brighter Lanterns 1.2.zip"
   shoot "gamemenu-$size" "$size" gamemenu "$PWD/home" --game=$skyrim
+  settled "gamemenu-$size" gamemenu "$PWD/home" --game=$skyrim
   shoot "check-$size" "$size" check "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
+  settled "check-$size" check "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   shoot "add-$size" "$size" add "$PWD/home" --game=$skyrim
   shoot "loader-$size" "$size" loader "$PWD/home" --game=$skyrim "--selftest-import=$dl/Lantern Glow SKSE 2.0.zip"
   # Labs mode and Seasonal (neither is saved from a picture).
@@ -218,6 +241,7 @@ for size in $SIZES; do
   # The controls: the beginner tutorial's five cards, the quick wheel (Up then Right: Sort), a removed mod dimmed in
   # its row, and the rail's quick menu.
   for n in 1 2 3 4 5; do shoot "tutorial$n-$size" "$size" "tutorial$n" "$PWD/home"; done
+  settled "tutorial1-$size" tutorial1 "$PWD/home"
   for p in wheel ghost; do
     fresh "$p-$size"; h="$PWD/fh/$p-$size"
     shoot "$p-$size" "$size" $p "$h" --game=$skyrim "--selftest-import=$h/Downloads/Brighter Lanterns 1.2.zip,$h/Downloads/Lantern Glow SKSE 2.0.zip"
@@ -561,7 +585,7 @@ for size in $SIZES; do
   shoot "splashmid-$size" "$size" splashmid "$PWD/home"
   shoot "splashafter-$size" "$size" splashafter "$PWD/home"
   need "splashmid-$size" "Splash: the icon shows while it plays ($size)" "Splash check \(splashmid\): shown true, icon opacity 0\.[1-9]|Splash check \(splashmid\): shown true, icon opacity 1"
-  need "splashafter-$size" "Splash: gone after about 1.2 s ($size)" "Splash check \(splashafter\): shown false"
+  need "splashafter-$size" "Splash: gone after about 1 s ($size)" "Splash check \(splashafter\): shown false"
   need "splashafter-$size" "Splash: played through ($size)" "Splash done \(played\) after (1[0-9]{3}|[5-9][0-9]{2}) ms"
   a=$(grep -ho "First frame drawn [0-9]* ms" "$PWD/data/game-$size/turbine-mod-manager/activity.log" 2>/dev/null | head -n1 | grep -o "[0-9]*" || true)
   b=$(grep -ho "First frame drawn [0-9]* ms" "$PWD/data/splashafter-$size/turbine-mod-manager/activity.log" 2>/dev/null | head -n1 | grep -o "[0-9]*" || true)

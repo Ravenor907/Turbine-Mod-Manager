@@ -26,9 +26,15 @@ Overlay {
 
     anchors.fill: parent
     z: 100
+    // It fades in whole over the page, and each card comes in from the side it was asked from (Next from the right,
+    // Back from the left).
+    fadesWhole: true
+    backdrop: ground
+    property int cardWas: 0
+    onCardChanged: { if (visible) cardIn.play((card < cardWas ? -1 : 1) * ui.px(ui.motion.shift), 0); cardWas = card }
 
     // The cards cover the window entirely: nothing behind them competes with their words.
-    Rectangle { anchors.fill: parent; color: tut.ui.c.ground }
+    Rectangle { id: ground; anchors.fill: parent; color: tut.ui.c.ground }
 
     // A face button as it looks on the pad: round, its letter in the middle.
     component Face: Column {
@@ -94,6 +100,8 @@ Overlay {
     }
     Column {
         id: body
+        opacity: cardIn.part
+        transform: Arrive { id: cardIn; motion: tut.ui.motion }
         anchors.centerIn: stage
         width: Math.min(parent.width - tut.ui.px(60), tut.ui.px(760))
         spacing: tut.ui.px(18)

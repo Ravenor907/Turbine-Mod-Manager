@@ -22,6 +22,12 @@ Row {
     visible: app.page === "settings"
     anchors.fill: parent
     spacing: app.px(14)
+    // The section on the right comes in when LB, RB or a tap picks another: a fade and a short rise from the side of
+    // the list it was picked from (Arrive.qml).
+    property Arrive sectionIn: Arrive { motion: page.mo }
+    readonly property int sectionNow: app.setSection
+    property int sectionWas: 0
+    onSectionNowChanged: { if (visible) sectionIn.play(0, (sectionNow < sectionWas ? -1 : 1) * app.px(mo.nudge)); sectionWas = sectionNow }
     Column {
         width: app.px(170)
         spacing: app.px(4)
@@ -34,6 +40,7 @@ Row {
                 required property string modelData
                 width: parent.width; height: app.px(40); radius: app.px(6)
                 color: app.setSection === index ? c.raised : "transparent"
+                Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
                 Rectangle { visible: app.setSection === parent.index; width: app.px(3); height: parent.height; color: c.accent; radius: app.px(2) }
                 Label { win: app; x: app.px(14); anchors.verticalCenter: parent.verticalCenter; text: parent.modelData; font.pixelSize: app.fpx(16); font.bold: app.setSection === parent.index; color: app.setSection === parent.index ? c.text : c.muted }
                 HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
@@ -48,6 +55,8 @@ Row {
         width: parent.width - app.px(184)
         height: parent.height
         visible: app.sec === "Look"
+        opacity: page.sectionIn.part
+        transform: page.sectionIn
         clip: true
         spacing: app.px(4)
         model: app.lookRows
@@ -68,6 +77,7 @@ Row {
             height: srow.modelData.slider ? Math.max(app.px(62), app.tpx(36) + app.fpx(13) + app.px(16)) : app.px(50)
             radius: app.px(6)
             color: foc ? c.focusFill : c.card
+            Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
             border.color: c.accent
             border.width: foc ? app.px(2) : 0
             opacity: srow.modelData.dim ? 0.6 : 1
@@ -92,7 +102,7 @@ Row {
                             color: on ? Qt.tint(c.card, Qt.rgba(c.accent.r, c.accent.g, c.accent.b, 0.12)) : c.ground
                             border.color: on ? c.accent : c.line
                             border.width: Math.max(1, app.px(on ? 1.5 : 1))
-                            Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.fast; easing.type: mo.enter } }
+                            Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
                             Label { win: app; anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.accentText : c.muted }
                             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                             TapHandler {
@@ -162,11 +172,11 @@ Row {
                         // The slider's fill and knob glide to the new value.
                         Rectangle {
                             width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent
-                            Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
+                            Behavior on width { enabled: mo.moves; NumberAnimation { duration: mo.moveQuick; easing.type: mo.glide } }
                         }
                         Rectangle {
                             x: parent.width * track.part - width / 2
-                            Behavior on x { enabled: mo.moves; NumberAnimation { duration: mo.moveFast; easing.type: mo.enter } }
+                            Behavior on x { enabled: mo.moves; NumberAnimation { duration: mo.moveQuick; easing.type: mo.glide } }
                             anchors.verticalCenter: parent.verticalCenter
                             width: app.px(18); height: width; radius: width / 2; color: c.accentHi
                         }
@@ -204,12 +214,15 @@ Row {
         width: parent.width - app.px(184)
         spacing: app.px(8)
         visible: app.sec === "About"
+        opacity: page.sectionIn.part
+        transform: page.sectionIn
         Row {
             spacing: app.px(14)
             Rectangle {
                 readonly property bool foc: app.zone === "settings" && app.setRow === 0
                 width: app.px(76); height: width; radius: app.px(10)
                 color: foc ? c.focusFill : "transparent"
+                Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
                 border.color: c.accent
                 border.width: foc ? app.px(2) : 0
                 Image {
@@ -240,6 +253,8 @@ Row {
         width: parent.width - app.px(184)
         height: parent.height
         visible: app.sec === "Getting mods" || app.sec === "Updates" || app.sec === "Labs" || app.sec === "Help"
+        opacity: page.sectionIn.part
+        transform: page.sectionIn
         clip: true
         spacing: app.px(4)
         model: app.rowsNow
@@ -293,6 +308,7 @@ Row {
                 height: Math.max(lrow.isItem ? app.px(66) : app.px(50), labsWords.implicitHeight + app.px(18) + (stacked ? app.px(32) + app.px(8) : 0))
                 radius: app.px(6)
                 color: lrow.foc ? c.focusFill : c.card
+                Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.quick; easing.type: mo.ease } }
                 border.color: c.accent
                 border.width: lrow.foc ? app.px(2) : 0
                 Column {

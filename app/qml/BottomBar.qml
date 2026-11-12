@@ -60,7 +60,7 @@ Rectangle {
     readonly property bool shown: visible && !(app.barsHidden && app.sheet === "" && !app.wheelOpen)
     anchors.bottom: parent.bottom
     anchors.bottomMargin: shown ? 0 : -height - bw.px(2)
-    Behavior on anchors.bottomMargin { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
+    Behavior on anchors.bottomMargin { enabled: mo.moves; NumberAnimation { duration: mo.moveStandard; easing.type: mo.glide } }
     anchors.left: parent.left
     anchors.right: parent.right
     // A taller bar with room between its groups.
@@ -319,10 +319,12 @@ Rectangle {
         Row {
             id: legendRow
             visible: true
-            // The hints fade over when they change (another screen, another row, the pad, keys or the mouse).
+            // The hints fade over when they change (another screen, another row, the pad, keys or the mouse); not
+            // while a list is being run through quickly, so holding the D-pad never flickers them.
             readonly property string said: app.legendHints.slice(0, legend.hintsFit).map(h => app.glyph(h[0]) + " " + h[1] + (h[3] ? app.glyph(h[3]) + h[4] : "")).join("|")
-            onSaidChanged: if (mo.on && legend.visible) hintsFade.restart()
-            NumberAnimation { id: hintsFade; target: legendRow; properties: "opacity"; from: 0.25; to: 1; duration: mo.base; easing.type: mo.enter }
+            property real saidAt: 0
+            onSaidChanged: { const t = Date.now(); if (mo.on && legend.visible && t - saidAt > 250) hintsFade.restart(); saidAt = t }
+            NumberAnimation { id: hintsFade; target: legendRow; properties: "opacity"; from: mo.swapFrom; to: 1; duration: mo.quick; easing.type: mo.ease }
             anchors.verticalCenter: parent.verticalCenter
             spacing: bw.px(16)
             Repeater {
