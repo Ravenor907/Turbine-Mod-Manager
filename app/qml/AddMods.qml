@@ -139,7 +139,10 @@ Overlay {
                     height: width
                     radius: root.ui.px(6)
                     color: fileRow.focused ? Qt.tint(root.ui.c.card, Qt.rgba(root.ui.c.accent.r, root.ui.c.accent.g, root.ui.c.accent.b, 0.28)) : root.ui.c.raised
+                    // Only on a row wholly in view: a line icon isn't cut by the list's clip with every renderer, so on
+                    // a row half past the edge it would draw outside the panel.
                     Shape {
+                        visible: fileRow.y >= fileList.contentY - 1 && fileRow.y + fileRow.height <= fileList.contentY + fileList.height + 1
                         anchors.centerIn: parent
                         width: root.ui.px(18)
                         height: width

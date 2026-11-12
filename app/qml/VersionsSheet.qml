@@ -34,7 +34,7 @@ Overlay {
             Text { text: "Other files"; color: vs.ui.c.text; font.family: vs.ui.titleFont; font.pixelSize: vs.ui.fpx(18); font.bold: true }
             Text {
                 width: parent.width; wrapMode: Text.WordWrap
-                text: vs.note !== "" ? vs.note : vs.modName + ": A installs the chosen one in place of the one you have, in the same spot and on or off."
+                text: vs.note !== "" ? vs.note : vs.modName + ": A puts the one you pick in place of yours, in the same spot, on or off as before."
                 color: vs.note !== "" ? vs.ui.c.warn : vs.ui.c.soft
                 font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.fpx(15)
             }

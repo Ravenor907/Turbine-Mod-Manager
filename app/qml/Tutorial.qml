@@ -1,11 +1,12 @@
 import QtQuick
 
 // The beginner tutorial: five cards on first run, each with the real buttons drawn large. 1: A picks, B goes back,
-// X options, Y find. 2: View opens the quick wheel. 3: getting a mod (Get mods, A on a mod, sign in to Nexus right in
+// X options, Y find. 2: VIEW opens the wheel. 3: getting a mod (Get mods, A on a mod, sign in to Nexus right in
 // Turbine with a free account, Slow download, Added, what it needs lined up after it). 4: START: a tap is Settings, a
 // 3 second hold is Play options (Play Seamless Co-op there too). 5: good to know: Steam's own Play through
 // Turbine (mods), games on an SD card or a second drive, Cyberpunk's Visual C++ runtime, updates. Then "Pick a game to
-// start". Main.qml moves between the cards (A or Right next, Left back, B skips, Start finishes) and remembers it was
+// start". Each card is its title, one or two lines and a picture, centred above the page dots and the buttons.
+// Main.qml moves between the cards (A or Right next, Left back, B skips, Start finishes) and remembers it was
 // seen; Settings, Help shows it again.
 Overlay {
     id: tut
@@ -81,34 +82,43 @@ Overlay {
         Text { width: st.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; text: st.n + ". " + st.words; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(16) }
     }
 
+    // The card: the space above the dots and buttons, its words and picture centred in it (never under them).
+    Item {
+        id: stage
+        anchors.top: parent.top
+        anchors.topMargin: tut.ui.px(24)
+        anchors.bottom: footer.top
+        anchors.bottomMargin: tut.ui.px(20)
+        anchors.left: parent.left
+        anchors.right: parent.right
+    }
     Column {
         id: body
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: -tut.ui.px(20)
+        anchors.centerIn: stage
         width: Math.min(parent.width - tut.ui.px(60), tut.ui.px(760))
         spacing: tut.ui.px(18)
 
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
-            text: ["The buttons", "The quick wheel", "Getting a mod", "Start", "Good to know"][tut.card] || ""
+            text: ["The buttons", "The wheel", "Getting a mod", "Play options", "Good to know"][tut.card] || ""
             color: tut.ui.c.accentText
             font.family: tut.ui.titleFont; font.pixelSize: tut.ui.fpx(28); font.bold: true
         }
+        // One or two lines: the picture under it says the rest.
         Text {
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
-            // Short, touch included, the game's own way to get mods, and the real Start glyph.
-            text: [tut.keys ? "Enter or Space picks, Esc goes back. Move with W A S D or the arrows. R: options for the highlighted thing. F: find and sort. Q and E: the pages. The mouse works too: click, double-click a mod to open it, right-click for options."
-                            : "A picks, B goes back. X: options for the highlighted thing. Y: find and sort. LB and RB: tabs (on a mod page, the next result). Touch works too: tap, or hold for options.",
-                   tut.keys ? "Hold Tab for the quick wheel from anywhere, pick with the mouse or W A S D, and let go: Find, Add from Downloads, Settings, your games and more."
-                            : "View opens the quick wheel from anywhere: Find, Add from Downloads, Settings, your games and more.",
-                   tut.thunderstore ? "Open Get mods, A on a mod, then A on Install. Turbine adds it with what it needs."
-                                    : "Open Get mods, A on a mod, then A on Get it on Nexus. Nexus opens right here: sign in once (a free account is enough; with Premium it downloads with no press) and press Slow download. Turbine adds it, and lines up anything it needs.",
-                   tut.keys ? "Hold Space for 3 seconds for Play options: play with your mods, or Play Seamless Co-op where it is in. Esc on a game's first page opens Settings. A click on the Play button plays too."
-                            : "Hold " + tut.startGlyph + " for 3 seconds for Play options: play with your mods, or Play Seamless Co-op where it is in. A tap of " + tut.startGlyph + " opens Settings. A on the Play button plays too.",
-                   "Turbine sets up what it can by itself and asks only when it must."][tut.card] || ""
+            text: [tut.keys ? "Enter or Space picks, Esc goes back, R shows options, F finds and sorts, Q and E switch tabs. The mouse works too: right-click for options."
+                            : "LB and RB switch tabs. Touch works too: tap to pick, hold for options.",
+                   tut.keys ? "Hold Tab anywhere for the wheel, point with the mouse or W A S D, then let go."
+                            : "Press " + tut.viewGlyph + " anywhere for the wheel, then push the stick to a place.",
+                   tut.thunderstore ? "It all happens in Turbine, from Thunderstore."
+                                    : "It all happens in Turbine. A free Nexus account is enough.",
+                   tut.keys ? "Hold Space for 3 seconds to choose how to play: with or without mods, or Seamless Co-op."
+                            : "Hold " + tut.startGlyph + " for 3 seconds to choose how to play: with or without mods, or Seamless Co-op.",
+                   "Turbine sets up what it can and asks only when it must."][tut.card] || ""
             color: tut.ui.c.soft
             font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18)
         }
@@ -120,83 +130,103 @@ Overlay {
             width: tut.ui.px(380); height: tut.ui.px(260)
             Face { k: "Y"; label: "Find"; anchors.horizontalCenter: parent.horizontalCenter; y: 0 }
             Face { k: "X"; label: "Options"; x: tut.ui.px(40); anchors.verticalCenter: parent.verticalCenter }
-            Face { k: "B"; label: "Goes back"; anchors.right: parent.right; anchors.rightMargin: tut.ui.px(30); anchors.verticalCenter: parent.verticalCenter }
-            Face { k: "A"; label: "Picks"; lit: true; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom }
+            Face { k: "B"; label: "Back"; anchors.right: parent.right; anchors.rightMargin: tut.ui.px(30); anchors.verticalCenter: parent.verticalCenter }
+            Face { k: "A"; label: "Pick"; lit: true; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom }
         }
-        // 2: View and the wheel's eight places.
+        // 2: View and the wheel's eight places, each inside its wedge.
         Row {
             visible: tut.card === 1
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(40)
             Pill { k: tut.viewGlyph; anchors.verticalCenter: parent.verticalCenter }
             Item {
-                width: tut.ui.px(250); height: width
+                id: wheelPic
+                width: tut.ui.px(300); height: width
                 Rectangle { anchors.fill: parent; radius: width / 2; color: tut.ui.c.card; border.color: tut.ui.c.line; border.width: Math.max(1, tut.ui.px(2)) }
-                Rectangle { anchors.centerIn: parent; width: tut.ui.px(54); height: width; radius: width / 2; color: tut.ui.c.raised }
+                // The wedges' borders, between the names.
+                Repeater {
+                    model: 8
+                    Rectangle {
+                        required property int index
+                        x: wheelPic.width / 2 - width / 2; y: wheelPic.height / 2 - height
+                        width: Math.max(1, tut.ui.px(2)); height: wheelPic.height / 2 - tut.ui.px(2)
+                        color: tut.ui.c.line
+                        transformOrigin: Item.Bottom
+                        rotation: index * 45 + 22.5
+                    }
+                }
+                Rectangle { anchors.centerIn: parent; width: tut.ui.px(70); height: width; radius: width / 2; color: tut.ui.c.raised; border.color: tut.ui.c.line; border.width: Math.max(1, tut.ui.px(2)) }
                 Repeater {
                     model: ["Find", "Updates", "Add from Downloads", "Play options", "Game menu", "Settings", "Games", "Loadouts"]
                     Text {
                         required property int index
                         required property string modelData
                         readonly property real a: (index * 45 - 90) * Math.PI / 180
-                        x: parent.width / 2 + Math.cos(a) * tut.ui.px(88) - width / 2
-                        y: parent.height / 2 + Math.sin(a) * tut.ui.px(88) - height / 2
+                        width: tut.ui.px(index % 2 === 1 ? 70 : 84)
+                        x: wheelPic.width / 2 + Math.cos(a) * tut.ui.px(98) - width / 2
+                        y: wheelPic.height / 2 + Math.sin(a) * tut.ui.px(98) - height / 2
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
                         text: modelData
                         color: index === 5 ? tut.ui.c.accentText : tut.ui.c.text
-                        font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(14); font.weight: Font.DemiBold
+                        font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(13); font.weight: Font.DemiBold
                     }
                 }
             }
         }
-        // 3: the five steps of getting a mod, all inside Turbine.
+        // 3: the steps of getting a mod, all inside Turbine.
         Row {
             visible: tut.card === 2
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(8)
-            Step { n: 1; tile: "Get mods"; words: "Open Get mods (RB)" }
-            Step { n: 2; tile: "A"; face: true; words: "A on a mod, then A on Get it on Nexus" }
-            Step { n: 3; tile: "Slow download"; words: "Sign in if it asks (free), press Slow download" }
-            Step { n: 4; tile: "Added"; words: "Turbine adds it; what it needs comes next" }
-            Step { n: 5; tile: "A"; face: true; words: "The ring is on Play: A plays" }
+            Repeater {
+                model: tut.thunderstore
+                       ? [["Get mods", false, "Open Get mods with RB"], ["A", true, "Pick a mod, then Install"], ["Added", false, "Turbine adds it and what it needs"], ["A", true, "Play is ready: press A"]]
+                       : [["Get mods", false, "Open Get mods with RB"], ["A", true, "Pick a mod, then Get it on Nexus"], ["Slow download", false, "Sign in if asked (free), then press Slow download"],
+                          ["Added", false, "Turbine adds it and what it needs"], ["A", true, "Play is ready: press A"]]
+                Step { required property int index; required property var modelData; n: index + 1; tile: modelData[0]; face: modelData[1]; words: modelData[2] }
+            }
         }
-        // 4: Start.
+        // 4: Start: a hold is Play options, a tap Settings.
         Column {
             visible: tut.card === 3
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: tut.ui.px(12)
             Pill { k: tut.startGlyph; anchors.horizontalCenter: parent.horizontalCenter; width: tut.ui.px(150); height: tut.ui.px(64) }
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Hold 3 seconds: Play options"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: "Tap: Settings"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18) }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: tut.keys ? "Esc on a game's first page: Settings" : "Tap: Settings"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(18) }
         }
-    }
-
-    // 5: what happens once, by itself or with one press.
-    Column {
-        visible: tut.card === 4
-        anchors.top: body.bottom
-        anchors.topMargin: -tut.ui.px(4)
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: body.width
-        spacing: tut.ui.px(10)
-        Repeater {
-            model: [
-                ["Steam's Play button", "To play with mods from Steam, pick Turbine (mods) once in the game's Properties, Compatibility. Turbine shows the steps when it is needed."],
-                ["SD card or second drive", "Games there are found by themselves, like the rest."],
-                ["Cyberpunk 2077", "Its frameworks need Microsoft's Visual C++ runtime. Before you play offers it in one press."],
-                ["Updates", "Turbine looks for a new version when it starts and installs it only when you say yes."]
-            ]
-            Row {
-                required property var modelData
-                width: parent.width
-                spacing: tut.ui.px(12)
-                Rectangle { width: tut.ui.px(10); height: width; radius: width / 2; color: tut.ui.c.accent; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                    width: parent.width - tut.ui.px(22)
-                    wrapMode: Text.WordWrap
-                    textFormat: Text.PlainText
-                    text: parent.modelData[0] + ": " + parent.modelData[1]
-                    color: tut.ui.c.text
-                    font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(17)
+        // 5: what happens once, automatically or with one press.
+        Column {
+            visible: tut.card === 4
+            width: parent.width
+            spacing: tut.ui.px(12)
+            Repeater {
+                model: [
+                    ["Steam's Play button", "to play with mods from Steam, pick Turbine (mods) once under Properties, Compatibility. Turbine walks you through it."],
+                    ["SD card or second drive", "games there show up like the rest."],
+                    ["Cyberpunk 2077", "its mod frameworks need Microsoft's Visual C++ runtime. Before you play installs it in one press."],
+                    ["Updates", "Turbine checks for a new version at startup and installs it only when you say yes."]
+                ]
+                Item {
+                    required property var modelData
+                    width: parent.width
+                    height: bullet.implicitHeight
+                    Rectangle {
+                        width: tut.ui.px(10); height: width; radius: width / 2; color: tut.ui.c.accent
+                        y: (bulletMetrics.height - height) / 2
+                    }
+                    Text {
+                        id: bullet
+                        x: tut.ui.px(22)
+                        width: parent.width - x
+                        wrapMode: Text.WordWrap
+                        textFormat: Text.StyledText
+                        text: "<b>" + parent.modelData[0] + ":</b> " + parent.modelData[1]
+                        color: tut.ui.c.text
+                        font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(17)
+                    }
+                    FontMetrics { id: bulletMetrics; font: bullet.font }
                 }
             }
         }
@@ -204,6 +234,7 @@ Overlay {
 
     // Where you are, and what A and B do here.
     Column {
+        id: footer
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: tut.ui.px(28)

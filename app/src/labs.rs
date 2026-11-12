@@ -128,7 +128,7 @@ pub fn mods_lines(store: &Store) -> Vec<String> {
     let mods = store.mods();
     let on = mods.iter().filter(|m| m.enabled).count();
     let mut out = vec![format!(
-        "{} installed, {} on, {} in Recently removed, {} saved setups, last build seen {}",
+        "{} installed, {} on, {} in Removed mods, {} saved setups, last build seen {}",
         mods.len(),
         on,
         store.removed().len(),

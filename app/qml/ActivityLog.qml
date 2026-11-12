@@ -16,6 +16,7 @@ Overlay {
     property bool full: false
     readonly property var buttons: [{ label: "Copy to clipboard" }, { label: "Save to Downloads" }, { label: full ? "Show what happened" : "Show the full log", key: "x" }, { label: "Close", key: "b" }]
     readonly property var shown: full ? lines : plain(lines)
+    readonly property bool empty: shown.length === 0
     function plain(raw) {
         let out = []
         for (const l of raw) {
@@ -27,7 +28,7 @@ Overlay {
             const h = parseInt(m[1]), mm = m[2]
             out.push((h % 12 === 0 ? 12 : h % 12) + ":" + mm + (h < 12 ? " AM" : " PM") + "  " + text)
         }
-        return out.length > 0 ? out : ["Nothing to tell yet. X shows the full log."]
+        return out
     }
 
     signal copyClicked()
@@ -83,7 +84,7 @@ Overlay {
             x: al.ui.px(22)
             width: parent.width - al.ui.px(44)
             wrapMode: Text.WordWrap
-            text: "The last " + al.lines.length + " lines, newest at the bottom. Scroll with Up and Down, the left stick, or a mouse wheel."
+            text: (al.full ? "The last " + al.lines.length + " lines" : "What Turbine did") + ", newest at the bottom." + (al.empty ? "" : " Scroll with Up and Down or the left stick.")
             color: al.ui.c.soft
             font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(14)
         }
@@ -115,6 +116,17 @@ Overlay {
                     lineHeight: 1.1
                 }
             }
+            // Nothing yet: said once, in the middle.
+            Text {
+                visible: al.empty
+                anchors.centerIn: parent
+                width: parent.width - al.ui.px(40)
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                text: al.full ? "The log is empty." : "Nothing to tell yet. " + al.ui.glyph("x") + " shows the full log."
+                color: al.ui.c.muted
+                font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(15)
+            }
             // More above: a fade under the top edge.
             Rectangle {
                 visible: !list.atYBeginning
@@ -136,32 +148,16 @@ Overlay {
             spacing: al.ui.px(10)
             Repeater {
                 model: al.buttons
-                Rectangle {
-                    id: btn
+                // The highlighted one shows A's cap; Show the full log X's, Close B's.
+                ActionButton {
                     required property int index
                     required property var modelData
-                    readonly property bool foc: al.focusAt === index
-                    width: inner.implicitWidth + al.ui.px(24); height: al.ui.tpx(44)
-                    radius: al.ui.px(6)
-                    color: foc ? al.ui.c.focusFill : al.ui.c.card
-                    border.color: foc ? al.ui.c.accent : al.ui.c.line
-                    border.width: foc ? al.ui.px(2) : Math.max(1, al.ui.px(1))
-                    Row {
-                        id: inner
-                        anchors.centerIn: parent
-                        spacing: al.ui.px(8)
-                        Rectangle {
-                            id: cap
-                            readonly property string k: btn.foc ? "a" : (btn.modelData.key || "")
-                            visible: k !== ""
-                            width: al.ui.px(24); height: width; radius: width / 2; color: al.ui.c.raised; border.color: al.ui.c.accentLo
-                            anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: al.ui.glyph(cap.k); color: al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(13); font.bold: true }
-                        }
-                        Text { text: btn.modelData.label; color: btn.foc ? al.ui.c.accentText : al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-                    }
-                    HoverHandler { onHoveredChanged: al.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: al.activate(btn.index) }
+                    ui: al.ui
+                    label: modelData.label
+                    focused: al.focusAt === index
+                    cap: focused ? "a" : (modelData.key || "")
+                    capRoom: true
+                    onClicked: al.activate(index)
                 }
             }
         }

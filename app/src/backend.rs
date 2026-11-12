@@ -1857,7 +1857,7 @@ fn applied_words(report: &turbine_engine::deploy::Report, game: &Game) -> String
         add(format!("{} stay in the backup folder; something else is in their place", count(report.left_in_backups.len(), "game file", "game files")));
     }
     if needs_reset(report) {
-        add("Some of Turbine's records for this game couldn't be read. Reset is in the game menu (View)".into());
+        add("Some of Turbine's records for this game couldn't be read. Reset game files is in the Game menu (VIEW)".into());
     }
     s
 }
@@ -2525,7 +2525,7 @@ impl qobject::Turbine {
 
     pub fn purge_all_removed(self: Pin<&mut Self>) {
         crate::log::line("action", "Empty Recently removed");
-        self.change(move |s| s.purge_all_removed().map(|_| ()).map_err(|e| format!("Couldn't empty Recently removed: {}", crate::log::plain(&e.to_string()))));
+        self.change(move |s| s.purge_all_removed().map(|_| ()).map_err(|e| format!("Couldn't empty Removed mods: {}", crate::log::plain(&e.to_string()))));
     }
 
     pub fn open_url(self: Pin<&mut Self>, url: &QString) -> QString {
@@ -2673,7 +2673,7 @@ impl qobject::Turbine {
                     return;
                 }
                 match turbine_engine::kcd::restore_mod_order(&game.install_dir, &keep) {
-                    Ok(true) => w.say("Your mod_order.txt is back as it was before Turbine. Turbine re-adds its own mods that are on at your next change or Play, so the file changes again then.", "ok"),
+                    Ok(true) => w.say("Your mod_order.txt is back as it was before Turbine. At your next change or Play, Turbine adds its mods that are on again, so the file changes.", "ok"),
                     Ok(false) => w.say("There is no earlier mod_order.txt to put back.", "warn"),
                     Err(e) => w.say(e, "error"),
                 }

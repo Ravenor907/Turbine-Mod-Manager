@@ -2,9 +2,11 @@ import QtQuick
 
 // Edit settings: a mod's (or the game's) config file as a page of plain controls. Up and Down pick a setting;
 // Left and Right change it (a toggle flips, a number steps, a list moves to the next choice); A flips a toggle,
-// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself; X opens the
-// options (the file as plain text, where A edits a line, or as a list; Reset to default); B goes back. Taps and
-// clicks work on every control. The file's comments are the help under each setting. Main.qml sends the keys.
+// moves a list on, or opens Steam's keyboard for a number or text; every change saves itself a moment later (so
+// there is no Save button; START saves at once, unsaid); X opens the options (the file as plain text, where A edits
+// a line, or as a list; Reset to default); B goes back. Taps and clicks work on every control. The file's comments
+// are the help under each setting, without the raw value legends ("0=FALSE 1=TRUE") the controls already say.
+// Main.qml sends the keys.
 Overlay {
     id: se
     closeOnOutside: false
@@ -70,6 +72,20 @@ Overlay {
         return w.charAt(0).toUpperCase() + w.slice(1)
     }
     readonly property bool coop: title.indexOf("Seamless Co-op") >= 0
+    // A setting's help from the file's comment: without a trailing legend of raw values ("0=FALSE 1=TRUE",
+    // "0 = Normal | 1 = None", "0 = MUTE 10 = MAX"; the toggle, list or slider shows those), and nothing when it only
+    // says the setting's name again.
+    function helpOf(f) {
+        const raw = String(f.help || "").trim()
+        let h = raw.replace(/(\s*[|,;]?\s*-?\d+(\.\d+)?\s*=\s*[A-Za-z][A-Za-z ]*?)+\.?\s*$/, "").replace(/[\s:,;|]+$/, "").trim()
+        if (h === "") h = f.kind === "number" ? "" : raw
+        if (h !== "" && !/[.!?)]$/.test(h)) h += "."
+        const bare = x => x.toLowerCase().replace(/[^a-z0-9]/g, "")
+        if (bare(h) === bare(nameOf(f.key)) || bare(h) === bare(f.key)) return ""
+        if (f.kind === "number" && f.min !== null && f.min !== undefined && f.max !== null && f.max !== undefined && h !== raw)
+            h += " From " + f.min + " to " + f.max + "."
+        return h
+    }
     function valueOf(f) { return edits[f.id] !== undefined ? edits[f.id] : f.value }
     function setValue(f, v) {
         let e = Object.assign({}, edits)
@@ -122,7 +138,7 @@ Overlay {
         if (!r || r.kind === "head") return ""
         if (r.kind === "line") return "Edit line"
         if (r.kind === "action") return r.label
-        return r.f.kind === "toggle" ? "Switch" : r.f.kind === "list" ? "Next" : "Type"
+        return r.f.kind === "toggle" ? (valueOf(r.f) === r.f.on ? "Turn off" : "Turn on") : r.f.kind === "list" ? "Next" : "Type"
     }
     function move(d) {
         let i = focusIndex
@@ -171,9 +187,10 @@ Overlay {
             x: se.ui.px(20)
             width: parent.width - se.ui.px(40)
             wrapMode: Text.Wrap
-            text: (se.coop ? "Every co-op player must use the same password and the same settings. " : "")
-                  + (se.changes > 0 ? "Saving..." : se.sub + " · changes save by themselves")
-                  + (se.plain && se.fields.length === 0 ? "  Turbine can't read this file as settings: here it is line by line." : "")
+            text: (se.coop ? "Every co-op player needs the same password and settings. " : "")
+                  + (se.changes > 0 ? "Saving..." : "Changes save automatically.")
+                  + (se.plain && se.fields.length === 0 ? " Turbine can't read this file as settings, so here it is line by line." : "")
+                  + (se.sub !== "" ? "\n" + se.sub : "")
             color: se.leaveArmed ? se.ui.c.warn : se.ui.c.soft
             font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14)
         }
@@ -207,7 +224,8 @@ Overlay {
                     visible: row.isHead
                     anchors.bottom: parent.bottom
                     x: se.ui.px(4)
-                    text: row.modelData.text || ""
+                    // A section's name as the file writes it, but "GAMEPLAY" or "boss_scaling" reads as "Gameplay", "Boss scaling".
+                    text: { const t = String(row.modelData.text || "").replace(/_/g, " ").trim(); return /[a-z]/.test(t) ? t : t.charAt(0) + t.slice(1).toLowerCase() }
                     color: se.ui.c.accentText
                     font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true
                 }
@@ -228,7 +246,7 @@ Overlay {
                     Text {
                         width: parent.width
                         visible: text !== ""
-                        text: row.f ? row.f.help : row.modelData.kind === "line" ? row.modelData.text : row.modelData.kind === "action" ? row.modelData.detail : ""
+                        text: row.f ? se.helpOf(row.f) : row.modelData.kind === "line" ? row.modelData.text : row.modelData.kind === "action" ? row.modelData.detail : ""
                         wrapMode: Text.Wrap
                         maximumLineCount: row.foc ? 6 : 2
                         elide: Text.ElideRight
@@ -326,14 +344,13 @@ Overlay {
             anchors.bottomMargin: se.ui.px(14)
             spacing: se.ui.px(10)
             Repeater {
-                model: [{ k: "start", label: "Save" }, { k: "x", label: "Options" }, { k: "b", label: "Back" }]
-                // Each with its key (Start saves, X options, B back); Save is the main one once there is a change.
+                model: [{ k: "x", label: "Options" }, { k: "b", label: "Back" }]
+                // Each with its key (X options, B back). Changes save themselves, so there is no Save button.
                 ActionButton {
                     required property var modelData
                     ui: se.ui
                     label: modelData.label
                     cap: modelData.k
-                    primary: modelData.k === "start" && se.changes > 0
                     onClicked: se.handleButton(modelData.k)
                 }
             }

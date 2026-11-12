@@ -15,7 +15,7 @@
     "level": "warn",
     "mode": "official",
     "officialChoice": "Play Halo: MCC Anti-Cheat Disabled (Mods and Limited Services)",
-    "note": "Halo has its own switch: matchmaking is off without anti-cheat, custom games still work."
+    "note": "The game has its own switch: matchmaking is off without anti-cheat, but custom games still work."
   },
   "notes": [
     "Steam 976730. Halo Support: How to Launch Halo: The Master Chief Collection with Easy Anti-Cheat (EAC) Disabled (support.halowaypoint.com, fetched 2026-11-09). Mods stay in the game folder only while they are on."

@@ -391,7 +391,7 @@ impl Kind {
     pub fn label(self) -> &'static str {
         match self {
             Kind::Solo => "Normal game (online)",
-            Kind::Modded => "With mods (me3, offline)",
+            Kind::Modded => "With mods (Mod Engine 3, offline)",
             Kind::Coop => "Seamless Co-op",
         }
     }

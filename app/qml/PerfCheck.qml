@@ -196,7 +196,7 @@ Overlay {
                 font.pixelSize: perf.ui.fpx(15)
                 text: perf.running ? (perf.phase === "still" ? "Measuring: standing still..." : perf.phase === "scroll" ? "Measuring: scrolling a long list..." : "Measuring: nothing to draw...")
                       : perf.verdict !== "" ? "Verdict: " + perf.verdict
-                      : "Run check measures for about 13 seconds. Leave the controller alone meanwhile."
+                      : "The check takes about 13 s. Don't touch the controller."
             }
             Row {
                 spacing: perf.ui.px(10)

@@ -57,7 +57,7 @@ Overlay {
             Text {
                 width: parent.width
                 wrapMode: Text.WordWrap
-                text: "Press Slow download on each page. Turbine adds each file by itself."
+                text: "Press Slow download on each page. Turbine adds each file automatically."
                 color: pg.ui.c.text
                 font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15)
             }

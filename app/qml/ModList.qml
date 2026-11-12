@@ -28,6 +28,13 @@ ListView {
     clip: true
     spacing: app.px(app.desktopLayout ? 3 : 6)
     model: app.listItems
+    // The load order numbers of the mods in the closed Dependencies group, said on its row ("load order 1, 4") so the
+    // numbers missing from the list above read clearly. Empty when numbers don't show or the group is open.
+    readonly property string depsOrderWords: {
+        if (!app.ordered || app.listSort !== "order" || app.depsOpen) return ""
+        const n = app.depMods.map(m => app.mods.findIndex(x => x.id === m.id) + 1).filter(x => x > 0).sort((a, b) => a - b)
+        return n.length > 0 ? "load order " + n.join(", ") : ""
+    }
     currentIndex: Math.max(0, app.modIndex)
     highlightFollowsCurrentItem: false
     onCurrentIndexChanged: app.glide(modList, () => app.reveal(modList, modList.currentIndex))
@@ -96,19 +103,54 @@ ListView {
             border.color: entry.foc ? c.accent : c.line
             border.width: entry.foc ? Math.max(1, app.px(2)) : Math.max(1, app.px(1))
             opacity: entry.kind === "ghost" && !entry.foc ? 0.6 : 1
+            // The groups (Dependencies, Removed mods) are folders: a folder icon and a chevron that turns open.
+            readonly property bool group: entry.kind === "deps" || entry.kind === "removed"
+            Icon {
+                id: groupIcon
+                win: app
+                visible: parent.group
+                x: app.px(12)
+                anchors.verticalCenter: parent.verticalCenter
+                d: kit.icons.folder
+                tint: entry.foc ? c.accentText : c.muted
+            }
             Label {
                 win: app
-                x: app.px(14)
+                x: parent.group ? groupIcon.x + groupIcon.width + app.px(10) : app.px(14)
                 anchors.verticalCenter: parent.verticalCenter
-                width: parent.width - app.px(28) - (heldButton.visible ? heldButton.width + app.px(12) : 0)
+                width: parent.width - x - app.px(14) - (heldButton.visible ? heldButton.width + app.px(12) : 0) - (groupChevron.visible ? groupChevron.width + app.px(8) : 0)
+                       - (depsOrder.visible ? depsOrder.implicitWidth + app.px(12) : 0)
                 elide: Text.ElideRight
                 text: entry.kind === "ghost" ? "Removed: " + entry.m.name + ". A puts it back."
                       : entry.kind === "held" ? app.heldWords
-                      : entry.kind === "deps" ? "Dependencies (" + app.depMods.length + ") · what your mods need" + (app.depsOpen ? "" : " · A opens it")
+                      : entry.kind === "deps" ? "Dependencies (" + app.depMods.length + ") · what your mods need"
                       : entry.kind === "needsq" && app.reqQ ? app.reqQ.forName + " still needs " + app.plural(app.reqQ.items.length - app.reqQ.index, "mod", "mods") + " · A goes on where you left off"
                       : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
-                color: entry.kind === "ghost" ? c.soft : entry.kind === "held" || entry.kind === "needsq" ? c.warn : entry.kind === "deps" ? c.soft : c.muted
+                color: entry.kind === "ghost" ? c.soft : entry.kind === "held" || entry.kind === "needsq" ? c.warn : parent.group ? c.text : c.muted
                 font.pixelSize: app.fpx(15)
+                font.weight: parent.group ? Font.DemiBold : Font.Normal
+            }
+            Label {
+                id: depsOrder
+                win: app
+                visible: entry.kind === "deps" && modList.depsOrderWords !== ""
+                anchors.right: groupChevron.left
+                anchors.rightMargin: app.px(10)
+                anchors.verticalCenter: parent.verticalCenter
+                text: modList.depsOrderWords
+                color: c.muted
+                font.pixelSize: app.fpx(14)
+            }
+            Icon {
+                id: groupChevron
+                win: app
+                visible: parent.group
+                anchors.right: parent.right
+                anchors.rightMargin: app.px(12)
+                anchors.verticalCenter: parent.verticalCenter
+                d: kit.icons.forward
+                rotation: entry.kind === "deps" && app.depsOpen ? 90 : 0
+                tint: entry.foc ? c.accentText : c.muted
             }
             // The held note's way back, on the row itself (a tap anywhere on the row does it too).
             Rectangle {

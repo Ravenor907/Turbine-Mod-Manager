@@ -135,7 +135,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     let Some(game) = slot.store.me3_game() else { return false };
     let me3 = ac::me3_dir(&w.data_home);
     if let Err(e) = ac::me3_ready(&me3) {
-        w.say(format!("{e}. Press Play again: Turbine gets me3 first."), "warn");
+        w.say(format!("{e}. Press Play again: Turbine gets Mod Engine 3 first."), "warn");
         return false;
     }
     if let Err(why) = coop_ready(slot, coop) {
@@ -145,7 +145,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     let (profile, natives) = match ac::write_profile_for(slot.store.root(), &game, coop) {
         Ok(p) => p,
         Err(e) => {
-            w.say(format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())), "error");
+            w.say(format!("Couldn't write the mod list for Mod Engine 3: {}", crate::log::plain(&e.to_string())), "error");
             return false;
         }
     };
@@ -158,7 +158,7 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     match std::process::Command::new(prog).args(rest).stdin(std::process::Stdio::null()).spawn() {
         Ok(_) => true,
         Err(e) => {
-            w.say(format!("Couldn't start me3: {}", crate::log::plain(&e.to_string())), "error");
+            w.say(format!("Couldn't start Mod Engine 3: {}", crate::log::plain(&e.to_string())), "error");
             false
         }
     }
@@ -310,7 +310,7 @@ pub(crate) fn not_armed_why(w: &Worker, slot: &Slot) -> Option<&'static str> {
 /// Play with mods (or Seamless Co-op, for this Play only) through Steam. Answers Ok(true) when Steam can start it
 /// now, Ok(false) when the Launch Options aren't set yet (nothing armed, logged), and Err with why it couldn't.
 pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, String> {
-    let game = slot.store.me3_game().ok_or("not a game me3 starts")?;
+    let game = slot.store.me3_game().ok_or("not a game Mod Engine 3 starts")?;
     let data = &w.data_home;
     let me3 = ac::me3_dir(data);
     ac::me3_ready(&me3)?;
@@ -350,7 +350,7 @@ pub(crate) fn arm_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> Result<bool, S
     sync_helper(w, slot);
     let _ = ac::clear_plain(data, &slot.game.store_id);
     coop_ready(slot, coop)?;
-    let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the me3 profile: {}", crate::log::plain(&e.to_string())))?;
+    let (profile, natives) = ac::write_profile_for(slot.store.root(), &game, coop).map_err(|e| format!("Couldn't write the mod list for Mod Engine 3: {}", crate::log::plain(&e.to_string())))?;
     let args = ac::helper_args_for(&me3, &profile, game_exe(slot).as_deref());
     let r = match coop {
         ac::Coop::Seamless => ac::arm_once(data, &slot.game.store_id, &args, "Seamless Co-op, this Play only"),
@@ -719,7 +719,7 @@ impl qobject::Turbine {
                 } else if !vcrun::installer_ok(code) {
                     fail(vcrun::installer_words(code));
                 } else {
-                    fail(format!("The installer finished, but {} The details are in the activity log.", after.words().to_lowercase()));
+                    fail(format!("The installer finished, but the runtime isn't ready yet: {} The details are in the activity log.", after.words()));
                 }
             }),
         );
@@ -728,7 +728,7 @@ impl qobject::Turbine {
     /// Gets me3 (pinned, checked), then plays when `then_play`.
     pub fn install_me3(mut self: Pin<&mut Self>, then_play: bool) {
         let Some(game) = self.current_game() else { return };
-        self.as_mut().say("Getting me3 from its GitHub release...", "work");
+        self.as_mut().say("Getting Mod Engine 3 from its GitHub release...", "work");
         let data = crate::backend::data_home();
         self.net_send(
             "Install me3",
@@ -736,7 +736,7 @@ impl qobject::Turbine {
                 let mut prog = crate::actions::progress(qt);
                 match net.fetch_me3(&data, &mut prog) {
                     Ok(_) => {
-                        crate::actions::say(qt, "me3 is installed.", "ok");
+                        crate::actions::say(qt, "Mod Engine 3 is installed.", "ok");
                         let id = game.id();
                         crate::actions::set(qt, move |t| {
                             if then_play {
@@ -744,7 +744,7 @@ impl qobject::Turbine {
                             }
                         });
                     }
-                    Err(e) => crate::actions::say(qt, format!("Couldn't get me3: {e}"), "error"),
+                    Err(e) => crate::actions::say(qt, format!("Couldn't get Mod Engine 3: {e}"), "error"),
                 }
             }),
         );

@@ -157,7 +157,7 @@ pub fn headers_public(app_version: &str) -> Vec<(String, String)> {
 }
 
 /// What a call that needs the key says when there is none.
-pub const NEEDS_KEY: &str = "This needs a Nexus Mods key (Settings, Getting mods).";
+pub const NEEDS_KEY: &str = "This needs a Nexus key (Settings, Getting mods).";
 
 /// A refusal from Nexus's API (401 or 403) that nothing more exact explains: here, and only here, the
 /// account or the key is what to look at. Refusals from other sites never say so.
@@ -1271,10 +1271,10 @@ impl Nexus {
     /// Checks the key and returns the account. A refused key gets a plain message.
     pub fn validate(&self) -> Result<Account, NetError> {
         if !self.key.as_deref().is_some_and(plausible_key) {
-            return Err(NetError::Failed("That doesn't look like a Nexus API key. Copy it again from your Nexus account page.".into()));
+            return Err(NetError::Failed("That doesn't look like a Nexus key. Copy it again from your Nexus account page.".into()));
         }
         let text = self.get("/v1/users/validate.json").map_err(|e| match e {
-            NetError::Denied(_) => NetError::Failed("Nexus didn't accept that API key. Copy it again from your Nexus account page.".into()),
+            NetError::Denied(_) => NetError::Failed("Nexus didn't accept that key. Copy it again from your Nexus account page.".into()),
             e => e,
         })?;
         parse_validate(&text).map_err(|e| NetError::Failed(format!("{e}.")))

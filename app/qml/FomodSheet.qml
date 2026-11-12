@@ -118,7 +118,7 @@ Overlay {
             }
             Text {
                 anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                text: fs.step ? "Step " + fs.step.number + (fs.groups.length > 1 ? ", question " + (fs.page + 1) + " of " + fs.groups.length : "") : ""
+                text: fs.step ? "Step " + fs.step.number + (fs.step.total > 1 ? " of " + fs.step.total : "") + (fs.groups.length > 1 ? ", question " + (fs.page + 1) + " of " + fs.groups.length : "") : ""
                 color: fs.ui.c.soft
                 font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15)
             }

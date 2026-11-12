@@ -493,7 +493,7 @@ impl Net {
     pub fn set_key(&mut self, key: &str) -> Result<String, String> {
         let key = key.trim().to_string();
         if !nexus::plausible_key(&key) {
-            return Err("That doesn't look like a Nexus API key. It's a long line of letters and numbers.".into());
+            return Err("That doesn't look like a Nexus key. It's a long line of letters and numbers.".into());
         }
         crate::log::secret(&key);
         let account = if let Some(t) = self.sample_text("nexus_validate.json") {
@@ -526,7 +526,7 @@ impl Net {
         let a = if let Some(t) = self.sample_text("nexus_validate.json") {
             nexus::parse_validate(&t?)?
         } else {
-            self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?.validate().map_err(err)?
+            self.nexus().ok_or("First add your Nexus key (Settings, Getting mods).")?.validate().map_err(err)?
         };
         self.account = Some(a.clone());
         Ok(a)
@@ -796,7 +796,7 @@ impl Net {
             quote(&needs_note),
             others.join(","),
             quote(&have.and_then(|f| files.file(f)).map(|f| f.version.clone()).unwrap_or_default()),
-            quote(if !files_note.is_empty() { files_note.as_str() } else if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it by itself." })
+            quote(if !files_note.is_empty() { files_note.as_str() } else if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it automatically." })
         );
         Ok(format!("{}{}}}", &out[..out.len() - 1], detail_json))
     }
@@ -838,7 +838,7 @@ impl Net {
     ) -> Result<Fetched, String> {
         self.no_downloads()?;
         let account = self.account()?;
-        let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
+        let nx = self.nexus().ok_or("First add your Nexus key (Settings, Getting mods).")?;
         let label = name.to_string();
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
@@ -863,14 +863,14 @@ impl Net {
             return self.pretend_nxm(link, into, progress);
         }
         if self.nexus().is_none() {
-            return Err("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.".into());
+            return Err("First add your Nexus key (Settings, Getting mods), then press Mod Manager Download again.".into());
         }
         // The link is for one account (its user_id): another account's link is refused before anything downloads.
         if link.user_id.is_some() {
             let me = self.account().map(|a| a.user_id).unwrap_or(0);
             crate::browse::user_matches(link.user_id, me)?;
         }
-        let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first, then press Mod Manager Download again.")?;
+        let nx = self.nexus().ok_or("First add your Nexus key (Settings, Getting mods), then press Mod Manager Download again.")?;
         let file = nx.file_info(&link.domain, link.mod_id, link.file_id).map_err(err)?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
         let mut cb = |got: u64, total: Option<u64>| {
@@ -918,7 +918,7 @@ impl Net {
         let file = if file_id == 0 { files.newest_main() } else { files.files.iter().find(|f| f.file_id == file_id) }
             .cloned()
             .ok_or("Nexus lists no file to download for that mod.")?;
-        let nx = self.nexus().ok_or("Add your Nexus Mods key in Settings, Accounts first.")?;
+        let nx = self.nexus().ok_or("First add your Nexus key (Settings, Getting mods).")?;
         let label = format!("{} {}", file.name, file.version).trim().to_string();
         let mut cb = |got: u64, total: Option<u64>| {
             progress(&label, got, total);
@@ -1182,7 +1182,7 @@ impl Net {
             game_name: game.name.clone(),
             game_store: store.to_string(),
             game_id: id.to_string(),
-            profile: if p.name.trim().is_empty() { "Shared profile".into() } else { p.name.clone() },
+            profile: if p.name.trim().is_empty() { "Shared loadout".into() } else { p.name.clone() },
             mods: p
                 .mods
                 .iter()

@@ -306,7 +306,7 @@ pub fn export(profiles: &Profiles, store: &Store, name: &str, home: &Path) -> Re
 
 /// Reads a share file's text.
 pub fn parse_share(text: &str) -> Result<Share, String> {
-    let bad = || "This isn't a Turbine profile share file.".to_string();
+    let bad = || "This isn't a Turbine loadout file.".to_string();
     let v = json::parse(text).map_err(|_| bad())?;
     let version = match v.get("turbineProfile") {
         Some(Json::Num(n)) => *n as u64,

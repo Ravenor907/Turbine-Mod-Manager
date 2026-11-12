@@ -175,7 +175,7 @@ fn online_only_games_take_no_mods() {
     let mut store = Store::open_at(&w.game, &w.root.join("store"), Box::new(Me3Rules(None, true))).unwrap();
     let zip = w.root.join("dl/Anything 1.0.zip");
     write_zip(&zip, &[("a.txt", "a")]);
-    assert!(store.import_zip(&zip).unwrap_err().contains("won't add mods"));
+    assert!(store.import_zip(&zip).unwrap_err().contains("doesn't add mods"));
     assert!(store.mods().is_empty());
     let _ = fs::remove_dir_all(&w.root);
 }

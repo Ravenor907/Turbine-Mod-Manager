@@ -83,7 +83,7 @@ fn a_mod_update_keeps_the_old_file_and_lists_what_to_check() {
     assert_eq!(look, ["s: k (number 2)"]);
     assert!(gone.is_empty());
     let words = settings::review_words("Seamless Co-op", &look, &gone).unwrap();
-    assert!(words.contains("Please check these settings again") && words.contains("s: k (number 2)") && words.contains("kept"), "{words}");
+    assert!(words.contains("so check these settings") && words.contains("s: k (number 2)") && words.contains("kept"), "{words}");
     settings::clear_review(&store, "m1", rel);
     assert_eq!(settings::review_notes(&store, "m1", rel), (vec![], vec![]));
     assert_eq!(settings::review_words("x", &[], &[]), None);

@@ -9,11 +9,11 @@ import QtQuick.Shapes
 Overlay {
     id: root
     onOutsideTapped: root.closed()
-    // Plain words as StyledText. Options that start with two hyphens ("--launcher-skip") get a thin space between
-    // the hyphens and show in bold: in Barlow the two hyphens otherwise touch and read as one long dash.
+    // Plain words as rich text. Options that start with two hyphens ("--launcher-skip") show as code, in a fixed-width
+    // font on a soft box: in Barlow the two hyphens touch and read as one long dash.
     function styled(t) {
         const esc = t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>")
-        return esc.replace(/(^|\s)--([A-Za-z0-9][A-Za-z0-9-]*)/g, "$1<b>-\u2009-$2</b>")
+        return esc.replace(/(^|\s)(--[A-Za-z0-9][A-Za-z0-9-]*)/g, "$1<span style=\"font-family: monospace; background-color: " + ui.c.raised + "; color: " + ui.c.text + ";\">&nbsp;$2&nbsp;</span>")
     }
 
     required property var ui
@@ -103,8 +103,8 @@ Overlay {
                     Text {
                         visible: (checkRow.modelData.detail || "") !== ""
                         width: parent.width
-                        // Options like --launcher-skip with their two hyphens shown apart.
-                        textFormat: Text.StyledText
+                        // Options like --launcher-skip as code.
+                        textFormat: Text.RichText
                         text: root.styled(checkRow.modelData.detail || "")
                         wrapMode: Text.WordWrap
                         color: checkRow.flagged ? root.ui.c.soft : root.ui.c.muted

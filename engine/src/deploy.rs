@@ -508,12 +508,12 @@ fn load_record(paths: &Paths, report: &mut Report) -> io::Result<Record> {
                     write_atomic(&paths.record, text.as_bytes())?;
                     Err(plain(
                         io::ErrorKind::InvalidData,
-                        "Turbine's list of the files it put in this game was damaged. It went back to its saved copy; try again.",
+                        "Turbine's list of the files it put in this game was damaged, so it went back to its saved copy. Try again.",
                     ))
                 }
                 _ => Err(plain(
                     io::ErrorKind::InvalidData,
-                    "Turbine's list of the files it put in this game is damaged, and so is its saved copy. Use Reset to put the game's own files back.",
+                    "Turbine's list of the files it put in this game is damaged, and so is its saved copy. To put the game's own files back: Game menu, Reset game files.",
                 )),
             }
         }

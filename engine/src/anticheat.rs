@@ -76,20 +76,22 @@ pub fn ask_title(game: &str) -> String {
 }
 
 pub fn ask_text(game: &str, ac: &AntiCheat) -> String {
-    let offline = ac.offline_setting.as_deref().map(|s| format!(" Also set the game to start offline: {s}.")).unwrap_or_default();
+    let offline = ac.offline_setting.as_deref().map(|s| format!("\n• Set the game to start offline too: {s}.")).unwrap_or_default();
     // Elden Ring: Seamless Co-op (game menu) brings its own co-op and keeps its own .co2 saves.
     let coop = ac.me3.as_deref() == Some("eldenring");
     let play = if coop {
-        "The game then plays offline only: no normal co-op, invasions or messages (Seamless Co-op, in the game menu, adds its own co-op)."
+        "It plays offline only: no normal co-op, invasions or messages. Seamless Co-op (in the Game menu) adds its own co-op."
     } else {
-        "The game then plays offline only: no co-op, invasions or messages."
+        "It plays offline only: no co-op, invasions or messages."
     };
     let save = if coop { "uses a separate save while mods are on (Seamless Co-op keeps its own .co2 saves)" } else { "uses a separate save while mods are on" };
     format!(
-        "{game}'s anti-cheat stops mods from loading. To play with mods, Turbine starts the game without it, through me3. \
-         {play} Playing online with changed game files can get your account banned, so Turbine never does that. Turbine \
-         saves a copy of your save files first, {save}, and never changes the game's own files. Play without mods starts it \
-         the normal way, with its anti-cheat.{offline} Change this later: View, then Game menu."
+        "{game}'s anti-cheat stops mods from loading. To play with mods, Turbine starts the game without it, through Mod Engine 3.\
+         \n• {play}\
+         \n• Playing online with changed game files can get your account banned, so Turbine never does that.\
+         \n• Turbine backs up your saves first, {save}, and never changes the game's own files.\
+         \n• Play without mods starts the game the normal way, with its anti-cheat.{offline}\
+         \n• To change your answer: VIEW, then Game menu."
     )
 }
 
@@ -100,8 +102,8 @@ pub fn needs_ask(ac: &AntiCheat) -> bool {
 
 pub const STATUS_ROW: &str = "Anti-cheat: off while mods are on (offline only)";
 pub const REFUSE_WORDS: &str =
-    "This game needs its anti-cheat to play at all. Changing its files can get your account banned, so Turbine won't add mods to it.";
-pub const VERIFY_WORDS: &str = "Use Steam's Verify integrity of game files to repair it: game page, gear, Properties, Installed Files.";
+    "This game needs its anti-cheat to play at all. Changing its files can get your account banned, so Turbine doesn't add mods to this game.";
+pub const VERIFY_WORDS: &str = "To repair it, use Steam's Verify integrity of game files: game page, gear, Properties, Installed Files.";
 /// Whose record it is: Turbine's own, from the first time it saw the game, not Steam's list of the game's files.
 pub const RECORD_WORDS: &str = "Turbine compares them with its own record from the first time it saw the game (not Steam's list of the game's files).";
 
@@ -127,7 +129,7 @@ pub fn official_guide(game: &str, ac: &AntiCheat) -> Vec<String> {
         format!("Press Play. Steam asks how to start {game}."),
         format!("Pick \"{}\".", ac.official_choice.as_deref().unwrap_or("Anti-Cheat Disabled")),
         "Play offline or in custom games. Matchmaking stays off without anti-cheat.".into(),
-        "To play online again, turn the mods off (or Play without mods) and pick the normal Play choice.".into(),
+        "To play online again, turn the mods off (or Play without mods) and pick the normal option when Steam asks.".into(),
     ]
 }
 
@@ -260,14 +262,14 @@ pub fn state_check(game: &str, s: &AcState) -> Option<Check> {
             level: "warn".into(),
             title: "Another tool's file is in the game folder".into(),
             detail: format!(
-                "{file} was left by another program that used to start {game} without its anti-cheat. The anti-cheat starter itself is fine. Steam's Verify doesn't remove extra files: game menu, Remove the leftover file (hold A) takes out only that one."
+                "{file} was left by another program that used to start {game} without its anti-cheat. The anti-cheat starter itself is fine. Steam's Verify doesn't remove extra files, so to take out only that one: Game menu, Remove the leftover file (hold A)."
             ),
         }),
         AcState::TurbineFilesLeft(n) => Some(Check {
             level: "stop".into(),
             title: "Mod files are still in the game folder".into(),
             detail: format!(
-                "Turbine couldn't take {n} {} out of {game}'s folder, so it won't start the game with its anti-cheat. Game menu, Reset game files, or {VERIFY_WORDS}",
+                "Turbine couldn't take {n} {} out of {game}'s folder, so it won't start the game with its anti-cheat. Use Game menu, Reset game files, or Steam's Verify integrity of game files (game page, gear, Properties, Installed Files).",
                 if *n == 1 { "file" } else { "files" }
             ),
         }),
@@ -948,13 +950,13 @@ pub fn helper_state_undone(mods_on: usize, consent: bool, held: bool, apply_fail
     if mods_on == 0 {
         Err("no mods on")
     } else if !consent {
-        Err("anti-cheat is on (the player hasn't turned it off for mods)")
+        Err("anti-cheat is on (you haven't turned it off for mods)")
     } else if held {
         Err("held without mods until they update")
     } else if apply_failed {
         Err("the last apply failed")
     } else if !me3_ok {
-        Err("me3 isn't installed")
+        Err("Mod Engine 3 isn't installed")
     } else {
         Ok(())
     }
@@ -1227,19 +1229,19 @@ pub fn write_profile_for(store_root: &Path, game: &str, coop: Coop) -> io::Resul
 
 /// Is me3 there and unchanged (each file's SHA-256 as recorded when it was unpacked)?
 pub fn me3_ready(dir: &Path) -> Result<(), String> {
-    let manifest = fs::read_to_string(dir.join("turbine-files.json")).map_err(|_| "me3 isn't installed yet".to_string())?;
-    let v = json::parse(&manifest).map_err(|_| "me3's file list can't be read".to_string())?;
+    let manifest = fs::read_to_string(dir.join("turbine-files.json")).map_err(|_| "Mod Engine 3 isn't installed yet".to_string())?;
+    let v = json::parse(&manifest).map_err(|_| "Mod Engine 3's file list can't be read".to_string())?;
     let mut n = 0;
     for f in v.get("files").map(Json::as_array).unwrap_or(&[]) {
         let (Some(rel), Some(want)) = (f.str_at("rel"), f.str_at("sha256")) else { continue };
-        let got = sha256::file_hex(&dir.join(rel)).map_err(|_| format!("me3's {rel} is missing"))?;
+        let got = sha256::file_hex(&dir.join(rel)).map_err(|_| format!("Mod Engine 3's {rel} is missing"))?;
         if !sha256::same_digest(want, &got) {
-            return Err(format!("me3's {rel} changed since Turbine installed it"));
+            return Err(format!("Mod Engine 3's {rel} changed since Turbine installed it"));
         }
         n += 1;
     }
     if n < ME3_FILES.len() {
-        return Err("me3's files aren't all there".into());
+        return Err("Mod Engine 3's files aren't all there".into());
     }
     Ok(())
 }
@@ -1247,9 +1249,9 @@ pub fn me3_ready(dir: &Path) -> Result<(), String> {
 /// Unpacks the checked me3 release (gzip, then tar) into `dir`: only `ME3_FILES`, regular files, safe names. Writes
 /// turbine-files.json with each file's SHA-256 and marks bin/me3 executable. Never runs anything.
 pub fn install_me3(tgz: &Path, dir: &Path) -> Result<Vec<(String, String)>, String> {
-    let gz = fs::read(tgz).map_err(|e| format!("The me3 download can't be read ({e})"))?;
+    let gz = fs::read(tgz).map_err(|e| format!("The Mod Engine 3 download can't be read ({e})"))?;
     if !sha256::same_digest(&sha256::digest_hex(&gz), ME3_SHA256) {
-        return Err("The me3 download isn't the pinned release (its SHA-256 is different)".into());
+        return Err("The Mod Engine 3 download isn't the release Turbine expects (its SHA-256 is different)".into());
     }
     let tar = gunzip(&gz, 64 << 20)?;
     let entries = tar_entries(&tar)?;
@@ -1261,7 +1263,7 @@ pub fn install_me3(tgz: &Path, dir: &Path) -> Result<Vec<(String, String)>, Stri
         let (_, data) = entries
             .iter()
             .find(|(name, _)| name == want)
-            .ok_or_else(|| format!("The me3 release has no {want}"))?;
+            .ok_or_else(|| format!("The Mod Engine 3 release has no {want}"))?;
         let out = tmp.join(want);
         fs::create_dir_all(out.parent().unwrap_or(&tmp)).map_err(|e| e.to_string())?;
         fs::write(&out, &tar[data.clone()]).map_err(|e| e.to_string())?;
@@ -1360,7 +1362,7 @@ pub fn checks(game: &str, ac: &AntiCheat, mods_on: bool, me3_ok: Option<&Result<
     match mode(ac) {
         // Without mods the game plays normally, with its anti-cheat.
         Mode::Refuse if mods_on => out.push(Check { level: "stop".into(), title: format!("{game} needs its anti-cheat"), detail: REFUSE_WORDS.into() }),
-        Mode::Official if mods_on => out.push(Check { level: "warn".into(), title: "Pick the Play choice without anti-cheat".into(), detail: official_words(game, ac) }),
+        Mode::Official if mods_on => out.push(Check { level: "warn".into(), title: format!("Start {game} without anti-cheat"), detail: official_words(game, ac) }),
         Mode::Offline if mods_on => out.push(Check {
             level: "warn".into(),
             title: "Play offline with mods".into(),
@@ -1370,7 +1372,7 @@ pub fn checks(game: &str, ac: &AntiCheat, mods_on: bool, me3_ok: Option<&Result<
             if needs_ask(ac) && !asked {
                 out.push(Check { level: "warn".into(), title: ask_title(game), detail: ask_text(game, ac) });
             } else if ac.starter.is_some() {
-                out.push(Check { level: "ok".into(), title: STATUS_ROW.into(), detail: "me3 starts it offline with your mods; your normal save is left alone.".into() });
+                out.push(Check { level: "ok".into(), title: STATUS_ROW.into(), detail: "Mod Engine 3 starts it offline with your mods. Your normal save stays untouched.".into() });
             }
             if let Some(w) = offline_words(ac) {
                 out.push(Check { level: "warn".into(), title: "Start offline".into(), detail: w });
@@ -1379,17 +1381,17 @@ pub fn checks(game: &str, ac: &AntiCheat, mods_on: bool, me3_ok: Option<&Result<
                 // Nothing to fix: Turbine fetches it at Play.
                 Some(Err(e)) if e.contains("isn't installed") => out.push(Check {
                     level: "ok".into(),
-                    title: "me3 downloads now".into(),
-                    detail: "me3 (the loader that starts the game offline) downloads now, about 10 MB.".into(),
+                    title: "Mod Engine 3 downloads now".into(),
+                    detail: "It's the loader that starts the game offline (about 10 MB).".into(),
                 }),
-                Some(Err(e)) => out.push(Check { level: "warn".into(), title: "me3 needs installing again".into(), detail: format!("{e}. Turbine gets it again before starting.") }),
+                Some(Err(e)) => out.push(Check { level: "warn".into(), title: "Mod Engine 3 needs installing again".into(), detail: format!("{e}. Turbine gets it again before the game starts.") }),
                 _ => {}
             }
             if build_changed {
                 out.push(Check {
                     level: "warn".into(),
                     title: format!("{game} updated"),
-                    detail: "me3 and your mods may need updates too. If it doesn't start, Play without mods works.".into(),
+                    detail: "Mod Engine 3 and your mods may need updates too. If the game doesn't start, Play without mods still works.".into(),
                 });
             }
         }
@@ -1399,7 +1401,7 @@ pub fn checks(game: &str, ac: &AntiCheat, mods_on: bool, me3_ok: Option<&Result<
             detail: if ac.level == "stop" {
                 format!("{game} doesn't allow changed game files. Play it without mods.")
             } else {
-                "Anti-cheat: online play with mods can get you banned. Use mods only in offline or single player modes.".into()
+                "Online play with mods can get you banned. Use mods only in offline or single-player modes.".into()
             },
         }),
         _ => {}
@@ -1589,7 +1591,7 @@ mod tests {
         let d = tmp("pinned");
         let f = d.join("me3.tar.gz");
         fs::write(&f, b"not the release").unwrap();
-        assert!(install_me3(&f, &d.join("me3")).unwrap_err().contains("pinned"));
+        assert!(install_me3(&f, &d.join("me3")).unwrap_err().contains("Turbine expects"));
         assert!(me3_ready(&d.join("me3")).unwrap_err().contains("isn't installed"));
         let _ = fs::remove_dir_all(&d);
     }
@@ -1599,7 +1601,7 @@ mod tests {
         let ac = er();
         let c = checks("Elden Ring", &ac, true, Some(&Err("me3 isn't installed yet".into())), false, false);
         assert!(c.iter().any(|x| x.title == "Play Elden Ring with mods?"));
-        assert!(c.iter().any(|x| x.title == "me3 downloads now" && x.level == "ok"));
+        assert!(c.iter().any(|x| x.title == "Mod Engine 3 downloads now" && x.level == "ok"));
         let c = checks("Elden Ring", &ac, true, Some(&Ok(())), true, true);
         assert!(c.iter().any(|x| x.title == STATUS_ROW) && c.iter().any(|x| x.title == "Elden Ring updated"));
         assert!(checks("Elden Ring", &ac, false, None, false, false).is_empty());

@@ -108,14 +108,14 @@ pub fn framework(key: &str) -> Option<&'static Framework> {
 pub const REDMOD_TOOL: &str = "tools/redmod/bin/redMod.exe";
 /// The title of the one-time REDmod explanation, so the app can tell it was seen.
 pub const REDMOD_TITLE: &str = "REDmod mods need the game's launcher";
-pub const REDMOD_HELP: &str = "Some of your mods are REDmod mods (they go in the game's mods folder). They only load \
-after Cyberpunk's own launcher sets them up, and Turbine can't do that part for it. When the launcher opens after \
-Play, press its Settings button, turn on Enable mods, then press Play there. It sets the mods up (a progress window \
-shows) and starts the game with them. You only turn this on once; the launcher sets them up again by itself when \
-they change. If you added --launcher-skip to the game's Launch Options in Steam, take it out.";
-pub const REDMOD_MISSING: &str = "REDmod isn't installed. It's a free add-on for the game: in Steam, open Cyberpunk \
-2077's page, find REDmod under its downloadable content and install it. On GOG it is a free add-on for the game \
-too; install it where you installed the game.";
+pub const REDMOD_HELP: &str = "Some of your mods are REDmod mods. They load only after Cyberpunk 2077's own launcher \
+sets them up, a step Turbine can't do.\
+\n• When the launcher opens after Play, press Settings there and turn on Enable mods.\
+\n• Then press Play in the launcher: it sets the mods up (a progress window shows) and starts the game.\
+\n• You do this once: the launcher redoes it automatically when your mods change.\
+\n• Remove --launcher-skip from the game's Launch Options in Steam if you added it there.";
+pub const REDMOD_MISSING: &str = "REDmod isn't installed. It's a free add-on: in Steam, open Cyberpunk 2077's page and \
+install REDmod from its downloadable content. On GOG, install it where you installed the game.";
 
 /// The frameworks these files (game-relative) are, by their detect file.
 pub fn provides(files: &[String]) -> Vec<&'static str> {

@@ -20,7 +20,7 @@ Overlay {
     property string sourceUrl: ""         // official home, e.g. "skse.silverlock.org"
     property bool canDownload: false
     property bool sourceShown: false
-    property string infoText: "Turbine can't get " + (loaderName || "it") + " by itself. Open its page, download it there, and Turbine adds it when it lands in Downloads."
+    property string infoText: "Turbine can't get " + (loaderName || "it") + " for you. Open its page and download it there: Turbine adds it when it lands in Downloads."
     // Buttons: { label }; the first is the main one.
     property var buttons: []
     property int focusIndex: 0

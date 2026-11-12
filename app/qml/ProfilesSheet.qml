@@ -57,7 +57,7 @@ Overlay {
             Text {
                 width: parent.width; wrapMode: Text.WordWrap
                 text: ps.plan ? (ps.plan.error ? ps.plan.error : "\"" + ps.plan.profile + "\" for " + ps.gameName)
-                              : ps.gameName + ": which mods are on and their order, saved by name. Switching puts that setup in the game."
+                              : ps.gameName + ": each loadout keeps which mods are on and their order. Switching puts it in the game right away."
                 color: ps.plan && ps.plan.error ? ps.ui.c.warn : ps.ui.c.soft
                 font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(15)
             }
@@ -79,9 +79,9 @@ Overlay {
             }
             Repeater {
                 id: rowRepeater
-                model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the loadout", detail: ps.plan.error ? "" : "Downloads what Turbine can get, then switches to it" },
+                model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the loadout", detail: ps.plan.error ? "" : "Gets what Turbine can, then switches to it" },
                                   { label: "Cancel", detail: "" }].slice(ps.plan.error ? 1 : 0)
-                         : ps.profiles.map(p => ({ label: p.name, detail: p.on + " of " + p.mods + " mods on" + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
+                         : ps.profiles.map(p => ({ label: p.name, detail: (p.mods === 0 ? "No mods yet" : p.on + " of " + p.mods + " mods on") + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
                            .concat(ps.actions)
                 Rectangle {
                     id: row

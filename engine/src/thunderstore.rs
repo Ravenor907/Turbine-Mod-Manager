@@ -842,7 +842,7 @@ pub fn base64_decode(text: &str) -> Result<Vec<u8>, String> {
 /// The zip inside a downloaded share: checks the marker line and decodes the rest.
 pub fn decode_profile_payload(text: &str) -> Result<Vec<u8>, String> {
     let t = text.trim_start_matches('\u{feff}').trim_start();
-    let rest = t.strip_prefix(PROFILE_PREFIX).ok_or("it isn't a Thunderstore profile share")?;
+    let rest = t.strip_prefix(PROFILE_PREFIX).ok_or("it isn't a Thunderstore share")?;
     let zip = base64_decode(rest)?;
     if !zip.starts_with(b"PK") {
         return Err("the share doesn't hold a zip".into());
@@ -1026,7 +1026,7 @@ fn version_text(v: Option<&Json>) -> Option<String> {
 /// Reads export.r2x: the profile's name and its mods.
 pub fn parse_export_r2x(text: &str) -> Result<SharedProfile, String> {
     let y = parse_yaml_subset(text)?;
-    let name = y.str_at("profileName").ok_or("the share has no profile name")?.to_string();
+    let name = y.str_at("profileName").ok_or("the share has no name")?.to_string();
     let mut mods = Vec::new();
     for m in y.get("mods").map(Json::as_array).unwrap_or(&[]) {
         let full_name = m.str_at("name").ok_or("a mod in the share has no name")?;
@@ -1069,10 +1069,10 @@ pub fn import_code(client: &Client, code: &str) -> Result<(SharedProfile, PathBu
             e => e,
         })?
         .take_text()?;
-    let zip = decode_profile_payload(&text).map_err(|e| NetError::Failed(format!("The profile couldn't be read: {e}.")))?;
+    let zip = decode_profile_payload(&text).map_err(|e| NetError::Failed(format!("The shared loadout couldn't be read: {e}.")))?;
     let path = client.temp_dir.join(format!("{}.r2z", code.trim().to_ascii_lowercase()));
-    fs::write(&path, zip).map_err(|e| NetError::Failed(format!("Couldn't save the profile ({e}).")))?;
-    let p = read_profile_zip(&path).map_err(|e| NetError::Failed(format!("The profile couldn't be read: {e}.")))?;
+    fs::write(&path, zip).map_err(|e| NetError::Failed(format!("Couldn't save the shared loadout ({e}).")))?;
+    let p = read_profile_zip(&path).map_err(|e| NetError::Failed(format!("The shared loadout couldn't be read: {e}.")))?;
     Ok((p, path))
 }
 
@@ -1118,7 +1118,7 @@ pub fn build_zip(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
     for (name, data) in files {
         zip::safe_relative(name).map_err(|_| format!("{name} isn't a safe path"))?;
         if data.len() > u32::MAX as usize - 1 || out.len() > u32::MAX as usize - 1 {
-            return Err("the profile is too big to share".into());
+            return Err("the loadout is too big to share".into());
         }
         let crc = zip::crc32(data);
         let offset = out.len() as u32;
@@ -1156,7 +1156,7 @@ pub fn build_zip(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
         central.extend_from_slice(n);
     }
     if files.len() > u16::MAX as usize {
-        return Err("the profile has too many files to share".into());
+        return Err("the loadout has too many files to share".into());
     }
     let cd_offset = out.len() as u32;
     out.extend_from_slice(&central);
@@ -1196,7 +1196,7 @@ pub fn export_code(client: &Client, profile: &SharedProfile, config_files: &[(St
     let zip = build_zip(&files).map_err(|e| NetError::Failed(format!("Couldn't make the share: {e}.")))?;
     if zip.len() > MAX_SHARE_BYTES {
         return Err(NetError::Failed(format!(
-            "The profile is {}, over the {} a code can hold. Leave out some config files.",
+            "The loadout is {}, over the {} a code can hold. Leave out some config files.",
             net::human_size(zip.len() as u64),
             net::human_size(MAX_SHARE_BYTES as u64)
         )));
@@ -1211,9 +1211,9 @@ pub fn export_code(client: &Client, profile: &SharedProfile, config_files: &[(St
     let _ = fs::remove_file(&body);
     let text = sent.map_err(|e| match e {
         NetError::RateLimited => {
-            NetError::Failed("Thunderstore only takes a few profile uploads a minute. Wait a minute and try again.".into())
+            NetError::Failed("Thunderstore makes only a few codes a minute. Try again in a minute.".into())
         }
-        NetError::Http(400) => NetError::Failed("Thunderstore didn't accept the profile upload. Try again later.".into()),
+        NetError::Http(400) => NetError::Failed("Thunderstore didn't take the upload. Try again later.".into()),
         e => e,
     })?
     .take_text()?;

@@ -502,7 +502,7 @@ impl qobject::Turbine {
             let qt = self.qt_thread();
             let show = |qt: &cxx_qt::CxxQtThread<qobject::Turbine>, page: &str| {
                 let json = format!(
-                    "[{{\"name\":\"Nexus's approval page\",\"url\":{},\"note\":\"Press Authorise. Turbine signs in by itself.\"}}]",
+                    "[{{\"name\":\"Nexus's approval page\",\"url\":{},\"note\":\"Press Authorise. Turbine then signs in automatically.\"}}]",
                     quote(page)
                 );
                 qt.queue(move |t| t.pages(QString::from("Sign in to Nexus Mods"), QString::from(json.as_str())))
@@ -516,7 +516,7 @@ impl qobject::Turbine {
                     if let Some(page) = page {
                         let _ = show(&qt, &page);
                     }
-                    return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine. Turbine signs in by itself.");
+                    return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine, then Turbine signs in automatically.");
                 }
             };
             crate::log::line("web", "Sign in: through Nexus's own approval page (single sign-on)");
@@ -544,7 +544,7 @@ impl qobject::Turbine {
                     }
                 });
             });
-            return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine. Turbine signs in by itself.");
+            return out("sso", crate::nexus_sso::AUTHORISE_PAGE, "", "Nexus asks you to approve Turbine, then Turbine signs in automatically.");
         }
         let url = crate::bridge::SIGNIN_URL;
         if !crate::bridge::paired() {
@@ -580,15 +580,15 @@ impl qobject::Turbine {
         if !*self.gamemode() {
             // A connected helper opens its own sign-in page; the browser needn't open Nexus as well.
             if crate::bridge::connected() {
-                return out("helper", url, "", "Sign in in your browser: it shows Turbine's sign-in page. Turbine signs in by itself when you're done.");
+                return out("helper", url, "", "Sign in in your browser (it shows Turbine's sign-in page). Turbine signs in automatically when you're done.");
             }
-            return out("desktop", url, "", "Sign in in your browser. Turbine signs in by itself when you're done.");
+            return out("desktop", url, "", "Sign in in your browser. Turbine signs in automatically when you're done.");
         }
         let r = turbine_engine::json::parse(&crate::launch::open_through_steam(url)).unwrap_or(Json::Null);
         match r.str_at("how") {
             Some("shortcut") => {
                 let name = r.str_at("browser").unwrap_or("your browser").to_string();
-                out("shortcut", url, r.str_at("steam").unwrap_or(""), &format!("Sign in in {name}. Turbine signs in by itself and comes back when you're done."))
+                out("shortcut", url, r.str_at("steam").unwrap_or(""), &format!("Sign in in {name}. Turbine signs in automatically and comes back when you're done."))
             }
             _ => {
                 let link = turbine_engine::browser::steam_browser_link(url).unwrap_or_default();
@@ -682,7 +682,7 @@ impl qobject::Turbine {
             Err(e) => {
                 crate::log::line("web", &format!("API key from the browser refused: {e}"));
                 if crate::bridge::signin_id_ok(&id) {
-                    crate::bridge::broadcast(&crate::bridge::signin_keydone_message(&id, false, "Turbine didn't take this key. Press Sign in with my browser in Turbine again, or paste the key in Turbine (Settings, Accounts)."));
+                    crate::bridge::broadcast(&crate::bridge::signin_keydone_message(&id, false, "Turbine didn't take this key. Press Sign in with my browser in Turbine again, or paste the key in Turbine (Settings, Getting mods)."));
                 }
             }
         }
@@ -796,9 +796,9 @@ impl qobject::Turbine {
 }
 
 /// A press while the sign-in already waits in the player's browser.
-pub const WAITING_IN_BROWSER: &str = "Waiting for you to sign in in your browser. Turbine signs in by itself when you're done.";
+pub const WAITING_IN_BROWSER: &str = "Waiting for you to sign in in your browser. Turbine signs in automatically when you're done.";
 /// The browser's sign-in page is up (the helper said so): what the pill says while Turbine waits.
-pub const SIGNIN_PAGE_UP: &str = "Waiting for your Nexus sign-in in the browser. Turbine signs in by itself when you're done.";
+pub const SIGNIN_PAGE_UP: &str = "Waiting for your Nexus sign-in in the browser. Turbine signs in automatically when you're done.";
 /// The helper's sign-in was refused (an old or broken answer).
 pub const SIGNIN_REFUSED: &str = "Turbine didn't take the sign-in from the browser. Press Google sign-in to try again.";
 /// The helper's sign-in had nothing Turbine's browser could use.

@@ -117,7 +117,7 @@ Rectangle {
             visible: !card.interactive && (card.asking || card.choosing)
             width: parent.width
             wrapMode: Text.WordWrap
-            text: card.asking ? "Switch to Turbine to answer (Steam button, then Turbine): A add it, X another game, B not a mod."
+            text: card.asking ? "Switch to Turbine to answer (Steam button, then Turbine): Add it, Other game, Not a mod or Not now."
                   : "Pick the installer's choices on the Nexus page, or in Turbine."
             color: ui.c.warn
             font.family: ui.bodyFont; font.pixelSize: ui.fpx(14)

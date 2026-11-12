@@ -399,7 +399,7 @@ Item {
                 anchors.centerIn: parent
                 spacing: nb.ui.px(4)
                 Text { visible: nb.signinShown; text: "Google sign-in (in Chrome)"; color: nb.ui.c.accentText; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold }
-                Text { text: nb.signinShown ? "Email and password work right here too." : "Email and password work here."; color: nb.signinShown ? nb.ui.c.soft : nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(nb.signinShown ? 13 : 15) }
+                Text { text: nb.signinShown ? "Or sign in here with your email and password." : "Sign in here with your email and password."; color: nb.signinShown ? nb.ui.c.soft : nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(nb.signinShown ? 13 : 15) }
             }
             HoverHandler { enabled: nb.signinShown; onHoveredChanged: nb.ui.hover(signinBig, hovered) }
             TapHandler { enabled: nb.signinShown; onTapped: nb.signinClicked() }

@@ -395,8 +395,8 @@
     sigs.conn = sig;
     secConn.replaceChildren();
     let text = null;
-    if (state.conn === "unpaired") text = "This browser is not paired with Turbine yet. In Turbine, open Settings, then Accounts, and choose Pair again.";
-    else if (state.conn === "refused") text = (state.error ? state.error + " " : "") + "In Turbine, open Settings, then Accounts, and choose Pair again.";
+    if (state.conn === "unpaired") text = "This browser is not paired with Turbine yet. In Turbine, open Settings, then Getting mods, and choose Pair again.";
+    else if (state.conn === "refused") text = (state.error ? state.error + " " : "") + "In Turbine, open Settings, then Getting mods, and choose Pair again.";
     else if (state.conn === "offline" || state.conn === "connecting") text = "Turbine is not running. Open Turbine and this panel connects by itself. Downloads still go to your Downloads folder.";
     if (text) {
       const box = el("div", "box");

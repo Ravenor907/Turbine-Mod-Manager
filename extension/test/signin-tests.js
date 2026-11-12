@@ -53,7 +53,7 @@ test("Only key-shaped text counts as an API key", () => {
 test("Sign-in key and status messages are checked both ways", () => {
   assert.deepEqual(P.validateIncoming({ type: "signin.request", id: SID, steam: true }), { type: "signin.request", id: SID, url: P.SIGNIN_URL, steam: true });
   assert.equal(P.validateIncoming({ type: "signin.request", id: SID, steam: "yes" }).steam, false);
-  assert.deepEqual(P.validateIncoming({ type: "signin.keydone", id: SID, ok: true, text: "Turbine has your API key." }), { type: "signin.keydone", id: SID, ok: true, text: "Turbine has your API key." });
+  assert.deepEqual(P.validateIncoming({ type: "signin.keydone", id: SID, ok: true, text: "Turbine has your Nexus key." }), { type: "signin.keydone", id: SID, ok: true, text: "Turbine has your Nexus key." });
   assert.equal(P.validateIncoming({ type: "signin.keydone", id: "x", ok: true }), null);
   assert.deepEqual(P.build.signinStatus(SID, "page"), { type: "signin.status", id: SID, step: "page" });
   assert.equal(P.build.signinStatus(SID, "anything"), null, "only the fixed words");
@@ -372,7 +372,7 @@ test("The API key: only on the player's press, only from the API Keys page, neve
   assert.deepEqual(x.br.updates[x.br.updates.length - 1], [10, { url: PAGE_URL, active: true }]);
   assert.ok(!JSON.stringify(x.br.session).includes(KEY), "the key is never kept");
   assert.ok(!JSON.stringify(x.f.view()).includes(KEY), "nor shown");
-  x.f.fromTurbine({ type: "signin.keydone", id: SID, ok: true, text: "Turbine has your API key." });
+  x.f.fromTurbine({ type: "signin.keydone", id: SID, ok: true, text: "Turbine has your Nexus key." });
   assert.equal(x.f.view().phase, "key-ok");
   // A second key.found after that is ignored.
   x.f.fromPage({ kind: "key.found", key: KEY }, { url: P.KEY_PAGE_URL, tab: { id: 10 } });

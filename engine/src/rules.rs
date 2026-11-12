@@ -1362,7 +1362,7 @@ impl GameRules {
                 let mapped = self.map_archive(archive_files, "mod").unwrap_or_default();
                 let dests: Vec<String> = mapped.into_iter().map(|(_, d)| d).collect();
                 if crate::cyberpunk::has_redmod(&dests) {
-                    vec!["This is a REDmod mod: it loads after Cyberpunk's own launcher sets it up (Enable mods in the launcher's settings).".into()]
+                    vec!["This is a REDmod mod: it loads after Cyberpunk 2077's own launcher sets it up (turn on Enable mods in the launcher's settings).".into()]
                 } else {
                     Vec::new()
                 }
@@ -1533,7 +1533,7 @@ pub fn pre_play_with(
             "Game is on an exFAT drive".into(),
             "exFAT drives can't link files, so Turbine copies mods there, which is slower and uses more space. Some \
              games and loaders also have trouble on exFAT. Formatting the card in Game Mode (Settings, Storage) fixes \
-             this, but erases it."
+             this, but erases the whole card."
                 .into(),
         ));
     }

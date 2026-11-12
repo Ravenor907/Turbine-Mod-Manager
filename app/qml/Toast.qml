@@ -1,7 +1,9 @@
 import QtQuick
 
-// A short message at the bottom, e.g. "Epic Loot deleted for good." It sizes and places
-// itself at the bottom center of its parent and hides itself after timeout milliseconds (0 keeps it up).
+// A short message at the bottom, e.g. "Epic Loot deleted permanently." It sizes and places
+// itself at the bottom center of its parent and hides itself after timeout milliseconds (0 keeps it up). As a
+// banner (over the bottom bar while a dialog is up) it is as wide as its area and bannerHeight tall, so it covers
+// the bar's hints whole for a moment instead of leaving a letter of one showing beside it.
 // Call show(...) to put up a message; it stays hidden until then.
 //
 // ui (required): Main.qml's kit (colors, sizes, fonts, motion and helpers; see COMPONENTS.md).
@@ -47,13 +49,15 @@ Rectangle {
     // The part of the window it is centred in (Main.qml leaves out the rail, the details panel and a side sheet).
     property real areaLeft: 0
     property real areaRight: parent ? parent.width : 0
-    readonly property real maxWidth: Math.max(ui.px(200), areaRight - areaLeft - ui.px(32))
+    property bool banner: false
+    property real bannerHeight: 0
+    readonly property real maxWidth: Math.max(ui.px(200), areaRight - areaLeft - ui.px(banner ? 16 : 32))
     x: Math.round(areaLeft + (areaRight - areaLeft - width) / 2)
     y: parent ? parent.height - height - bottomMargin : 0
     z: 50
-    width: Math.min(maxWidth, toastRow.implicitWidth + ui.px(28))
+    width: banner ? maxWidth : Math.min(maxWidth, toastRow.implicitWidth + ui.px(28))
     // Wraps to three lines rather than cutting a message off.
-    height: Math.max(ui.px(46), toastRow.implicitHeight + ui.px(20))
+    height: Math.max(banner ? bannerHeight : 0, ui.px(46), toastRow.implicitHeight + ui.px(20))
     radius: ui.radiusSmall
     border.width: Math.max(1, ui.px(1))
     border.color: ui.c.line
@@ -95,7 +99,7 @@ Rectangle {
     Row {
         id: toastRow
         anchors.verticalCenter: parent.verticalCenter
-        x: root.ui.px(18)
+        x: root.banner ? Math.max(root.ui.px(18), Math.round((root.width - implicitWidth) / 2)) : root.ui.px(18)
         spacing: root.ui.px(12)
 
         Rectangle {

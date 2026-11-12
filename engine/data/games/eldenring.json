@@ -17,7 +17,7 @@
     "me3": "eldenring",
     "starter": "Game/start_protected_game.exe",
     "gameExe": "Game/eldenring.exe",
-    "note": "Mods load through me3, which starts the game offline without its anti-cheat."
+    "note": "Mods load through Mod Engine 3, which starts the game offline without its anti-cheat."
   },
   "layout": [
     {

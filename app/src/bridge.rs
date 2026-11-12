@@ -202,7 +202,7 @@ html[data-turbine-paired="no"] #turbine-pair-no{display:block;color:#F0907A}
 <p id="turbine-pair-status" data-state="waiting">Waiting for the browser helper...</p>
 <p id="turbine-pair-yes">Paired with Turbine. You can close this tab.</p>
 <p id="turbine-pair-no">Pairing didn't work. In Turbine, press Pair again.</p>
-<p id="turbine-pair-help">If this still says Waiting after a few seconds, the helper isn't loaded in this browser yet. In Turbine, open Settings, Accounts, Set up the browser helper, follow the steps, then press Pair again.</p>
+<p id="turbine-pair-help">If this still says Waiting after a few seconds, the helper isn't loaded in this browser yet. In Turbine, open Settings, Getting mods, Browser helper (for signing in): press Set up, follow the steps, then press Pair again.</p>
 </main></body></html>
 "#
     .to_string()
@@ -879,7 +879,7 @@ fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
             let given = msg.str_at("token").unwrap_or("");
             let want = state().as_ref().map(|s| s.token.clone()).unwrap_or_default();
             if kind != "hello" || !same_token(given, &want) || started.elapsed() > HELLO_WAIT {
-                let why = "Turbine didn't accept this pairing. In Turbine, open Settings, Accounts and press Pair again.";
+                let why = "Turbine didn't accept this pairing. In Turbine, open Settings, Getting mods and press Pair again.";
                 send(&out, OP_TEXT, format!("{{\"type\":\"error\",\"text\":{}}}", quote(why)).as_bytes());
                 log(&format!("Browser helper {ext} refused: {}", if kind != "hello" { "no hello" } else { "wrong pairing token" }));
                 close(1008, "not paired");

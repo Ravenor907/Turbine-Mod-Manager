@@ -1,8 +1,8 @@
 import QtQuick
 
-// Recently removed: one row per mod ("<name> · removed Nov 6 · 6 days left"), then "Empty (delete all 2 for good)".
-// A (or Put back) puts the focused mod back, X (or Delete now) deletes it for good; both deletions ask first (Main.qml's
-// hold-to-confirm sheet).
+// Recently removed: one row per mod ("<name> · removed Nov 6 · 6 days left"), then "Delete all (2) permanently".
+// A (or Put back) puts the focused mod back, X (or Delete now) deletes it permanently; both deletions ask first
+// (Main.qml's hold-to-confirm sheet).
 // Main.qml handles the keys.
 Overlay {
     id: rs
@@ -55,14 +55,14 @@ Overlay {
             width: flick.width
             spacing: rs.ui.px(8)
             Text { text: "Removed mods"; color: rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(19); font.weight: Font.DemiBold }
-            Text { width: parent.width; wrapMode: Text.WordWrap; text: "Kept for 7 days, then deleted by themselves."; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14) }
+            Text { width: parent.width; wrapMode: Text.WordWrap; text: "Deleted automatically after 7 days."; color: rs.ui.c.soft; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14) }
             Column {
                 id: list
                 width: parent.width
                 spacing: rs.ui.px(8)
             Repeater {
                 id: rows
-                // The mods first, Empty (delete them all for good) last.
+                // The mods first, Delete all permanently last.
                 model: rs.mods.concat([{ empty: true }])
                 Rectangle {
                     id: row
@@ -86,7 +86,7 @@ Overlay {
                         Text {
                             width: parent.width
                             wrapMode: Text.WordWrap
-                            text: row.modelData.empty ? "Empty (delete all " + rs.mods.length + " for good)" : row.modelData.name
+                            text: row.modelData.empty ? "Delete all (" + rs.mods.length + ") permanently" : row.modelData.name
                             color: row.modelData.empty ? rs.ui.c.warn : rs.ui.c.text
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(16); font.weight: Font.DemiBold
                         }

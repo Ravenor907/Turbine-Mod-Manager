@@ -68,7 +68,7 @@ pub(crate) fn anti_cheat_check(slot: &Slot) -> Option<rules::Check> {
         detail: if a.level == "stop" {
             format!("{} doesn't allow changed game files. Play it without mods.", slot.game.name)
         } else {
-            "Anti-cheat: online play with mods can get you banned. Use mods only in offline or single player modes.".into()
+            "Online play with mods can get you banned. Use mods only in offline or single-player modes.".into()
         },
     })
 }

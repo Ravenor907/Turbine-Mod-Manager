@@ -32,12 +32,12 @@
     failed: "Turbine didn't take the sign-in.",
     expired: "This sign-in request is over (Turbine waits 15 minutes). Press Sign in with my browser in Turbine again.",
     keyReading: "Reading your Personal API Key on this page for Turbine...",
-    keyChecking: "Turbine is checking your API key with Nexus...",
+    keyChecking: "Turbine is checking your Nexus key...",
     keyNoLabel: "This page doesn't show a Personal API Key. Sign in to Nexus on it, then press Try again.",
     keyNoKey: "There's no Personal API Key on this page yet. Scroll to the bottom of the page and request one, then press Try again.",
-    backSteam: "Turbine comes back by itself. If it doesn't, press the Steam button, then pick Turbine at the top of the menu (it's still running).",
-    backDesktop: "Turbine comes to the front by itself. If it doesn't, switch to it in the taskbar.",
-    keyUnclear: "Turbine couldn't tell which key on this page is your Personal API Key. Copy it yourself, then in Turbine open Settings, Accounts and press Paste.",
+    backSteam: "Turbine comes back automatically. If it doesn't, press the Steam button, then pick Turbine at the top of the menu (it's still running).",
+    backDesktop: "Turbine comes to the front automatically. If it doesn't, switch to it in the taskbar.",
+    keyUnclear: "Turbine couldn't tell which key on this page is your Personal API Key. Copy it yourself, then in Turbine open Settings, Getting mods and press Paste.",
   };
 
   function createSigninFlow(o) {
@@ -248,7 +248,7 @@
         }
       } else if (msg.type === "signin.keydone") {
         if (s.phase !== "key-checking") return;
-        set(msg.ok ? "key-ok" : "key-failed", msg.text || (msg.ok ? "Turbine has your API key." : "Turbine didn't take the key."));
+        set(msg.ok ? "key-ok" : "key-failed", msg.text || (msg.ok ? "Turbine has your Nexus key." : "Turbine didn't take the key."));
       }
     }
 

@@ -16,7 +16,7 @@
     "mode": "me3",
     "me3": "sekiro",
     "gameExe": "sekiro.exe",
-    "note": "Single player only. Mods load through me3."
+    "note": "Single-player only. Mods load through Mod Engine 3."
   },
   "layout": [
     {

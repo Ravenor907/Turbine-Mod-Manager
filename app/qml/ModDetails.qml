@@ -3,7 +3,7 @@ import QtQuick
 // A mod's page, pushed over Get mods. Left (60%): the largest picture the source gives, name, author, version,
 // size, updated date, likes (Nexus endorsements) and downloads, then the summary. Right (40%): the main button with one line
 // under it ("Get it on Nexus", "Install", "Installed · On"), then "Also needs" (each requirement with Installed, Will
-// be added or Not yet; A on one opens its page). Other files are in X Options. On a narrow window the right column
+// be added or Missing; A on one opens its page). Other files are in X Options. On a narrow window the right column
 // goes under the picture. Main.qml moves the focus (focusIndex: 0 main button, 2 and on the requirements) and scrolls
 // with the D-pad (scroll()). No key caps on the page: the legend says what A and X do.
 Item {
@@ -33,7 +33,7 @@ Item {
         (needs.installed || []).map(r => ({ tag: "Installed", lvl: "ok", r: r }))
         .concat((needs.missing || []).map(r => {
             const st = stepFor(r.name)
-            return { tag: st && st.action === "download" ? "Will be added" : "Not yet", lvl: "", r: r }
+            return { tag: st && st.action === "download" ? "Will be added" : "Missing", lvl: "", r: r }
         }))
         .concat((needs.unchecked || []).map(r => ({ tag: r.isDlc ? "Game DLC" : "Outside Nexus", lvl: "", r: r })))
     // Thunderstore: what Install brings along.
@@ -121,7 +121,7 @@ Item {
                 color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {
-                text: !md.info || md.loading ? "" : md.ui.shortCount(md.info.rating) + (md.info.source === "nexus" ? " likes" : " ratings") + " · " + md.ui.shortCount(md.info.downloads) + " downloads"
+                text: !md.info || md.loading ? "" : md.ui.shortCount(md.info.rating) + (md.info.rating === 1 ? " like" : " likes") + " · " + md.ui.shortCount(md.info.downloads) + (md.info.downloads === 1 ? " download" : " downloads")
                 color: md.ui.c.muted; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(14)
             }
             Text {

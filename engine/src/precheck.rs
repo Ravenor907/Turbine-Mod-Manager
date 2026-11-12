@@ -238,7 +238,8 @@ fn replace_all(s: &[char], with: &str, at: impl Fn(&[char], usize) -> Option<usi
 }
 
 /// The check's words without web addresses: "Get it from <address>" says Turbine shows where it comes from (when
-/// there is an address), other addresses (with their brackets) go, and spaces are tidied.
+/// there is an address), other addresses (with their brackets) go, and spaces are tidied (a run of spaces with a
+/// line break in it stays one line break, so a list in the words keeps its lines).
 pub fn plain_words(text: &str, has_url: bool) -> String {
     let s: Vec<char> = text.chars().collect();
     let get_it = |s: &[char], j: usize| -> Option<usize> {
@@ -257,14 +258,17 @@ pub fn plain_words(text: &str, has_url: bool) -> String {
     let s = replace_all(&s, "", bracketed);
     let mut out = String::with_capacity(s.len());
     let mut space = false;
+    let mut line = false;
     for c in s {
         if is_space(c) {
             space = true;
+            line |= c == '\n';
         } else {
             if space && !out.is_empty() {
-                out.push(' ');
+                out.push(if line { '\n' } else { ' ' });
             }
             space = false;
+            line = false;
             out.push(c);
         }
     }

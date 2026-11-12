@@ -151,8 +151,8 @@ Item {
         id: checkView
         ui: kit
         visible: app.sheet === "check"
-        checks: app.checks
-        buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
+        checks: app.checksShown
+        buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === app.checkPlayWord }))
         focusIndex: app.checkIndex
         cancelIndex: app.checkChoices.indexOf("Not now")
         note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
@@ -272,7 +272,7 @@ Item {
               : app.sheet === "addbrowser" ? "Game Mode only shows apps Steam starts. Add your browser to Steam once, and Turbine opens Nexus in it right over Turbine. Once:"
               : app.sheet === "helper" ? "Optional. Skips the Save box and puts each download in the right game's folder. Turbine put it in Downloads, in the folder Turbine browser helper. Then, once:"
               : app.sheet === "found" && app.found ? "Found " + app.found.name + " (" + app.sizeWords(app.found.size) + ")."
-                    + (app.found.game ? " Add it to " + app.found.gameName + "?" : " Which game is it for?")
+                    + (app.found.game ? " Add it to " + app.fullGame(app.found.gameName) + "?" : " Which game is it for?")
               : app.sheet === "notes" ? "Something to know about this mod:"
               : app.sheet === "msg" && app.msgData ? (app.msgData.text || "")
               : ""
@@ -292,7 +292,7 @@ Item {
                   : app.sheet === "helper" ? "Then press Pair: the pairing page opens in the browser and links the helper to Turbine."
                   : app.sheet === "addbrowser" && app.addMode !== "helper" ? (app.bridge.paired ? "Until then, Steam's browser opens Nexus instead." : "Also set up the browser helper (Settings, Getting mods): without it the browser opens, but not on the mod's page. Until then, Steam's browser opens Nexus instead.")
                   : app.sheet === "addbrowser" ? "Steam's browser opens the mod's page without the helper."
-                  : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.found.gameName + ": " + app.found.why + ". " : "")
+                  : app.sheet === "found" && app.found ? (app.found.game ? "Why " + app.fullGame(app.found.gameName) + ": " + app.found.why + ". " : "")
                     + "The file stays in Downloads either way." + (app.found.more > 0 ? " " + app.plural(app.found.more, "more file waits", "more files wait") + " after this one." : "")
                   : ""
         buttons: app.infoButtons
@@ -314,7 +314,7 @@ Item {
         id: confirmSheet
         ui: kit
         visible: app.sheet === "confirm"
-        title: app.confirmVerb === "delete" ? "Delete for good?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
+        title: app.confirmVerb === "delete" ? "Delete permanently?" : app.confirmVerb === "remove it" ? "Remove the leftover file?" : "Replace your saves?"
         text: app.confirmText
         buttons: [{ key: "", label: app.pressTwice ? (app.armedKey === app.deleteKey() ? "Press A again to " + app.confirmVerb : "Press A twice to " + app.confirmVerb)
                                  : confirmHold.running ? "Keep holding A: " + Math.max(1, Math.ceil(app.holdNeeded - app.confirmHeld)) + "..." : "Hold A to " + app.confirmVerb },
@@ -386,7 +386,7 @@ Item {
                 if (!app.nxmAskQuiet()) app.menuIndex = 0
                 app.note("nxm", "Tap on the question: " + (app.nxmAskQuiet() ? "ignored (it just opened)" : "Get it picked; only A gets it"))
                 // Said on screen too (newbie M3): touch alone can't get it, on purpose.
-                if (!app.nxmAskQuiet()) toast.info("Get it is picked. Press A to get it: a tap only picks it, so a page can never get a mod by itself.")
+                if (!app.nxmAskQuiet()) toast.info("Get it is picked. Press A to get it: a tap only picks it, so a page can never get a mod without you.")
                 return
             }
             app.menuIndex = index; app.pickRun(index)

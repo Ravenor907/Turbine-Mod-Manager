@@ -16,6 +16,21 @@ Rectangle {
     readonly property real rs: Math.max(app.s, app.fit * 0.9)
     function rpx(v) { return Math.round(v * rs) }
     function rfpx(v) { return app.fpxAt(v, rs) }
+    // A name on a tile: on one line when it fits, else broken at the space that makes its two lines most even
+    // ("Risk of / Rain 2", never "Risk of Rain / 2").
+    function balanced(name, fm, w) {
+        if (w <= 0 || fm.advanceWidth(name) <= w) return name
+        const words = name.split(" ")
+        let best = name, most = Infinity
+        for (let i = 1; i < words.length; i++) {
+            const a = words.slice(0, i).join(" "), b = words.slice(i).join(" ")
+            const m = Math.max(fm.advanceWidth(a), fm.advanceWidth(b))
+            if (m < most) { most = m; best = a + "\n" + b }
+        }
+        return best
+    }
+    FontMetrics { id: artFm; font.family: app.bodyFont; font.pixelSize: rfpx(9); font.bold: true }
+    FontMetrics { id: plainFm; font.family: app.bodyFont; font.pixelSize: rfpx(10); font.bold: true }
     // What a rail index shows: a game's tile, then Show hidden games, then the gear.
     function itemAt(i) { return i < app.games.length ? railList.itemAtIndex(i) : i < app.games.length + app.railExtra ? hiddenTile : gear }
     // For the build's checks.
@@ -107,14 +122,14 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
-                        text: tileItem.g ? app.shortGame(tileItem.g.name) : ""
+                        text: tileItem.g ? rail.balanced(app.shortGame(tileItem.g.name), artFm, width) : ""
                         color: "#FFFFFF"
                         font.family: app.bodyFont
                         font.pixelSize: rfpx(9)
                         font.bold: true
                     }
                 }
-                // No art: the whole name (shrunk to fit, never cut, so "Deliverance II" keeps its II) and
+                // No art: the same short name as on art (shrunk to fit, never cut, so "KCD II" keeps its II) and
                 // the store under it, so two copies or two games with long names still look different.
                 Text {
                     visible: !art.visible
@@ -129,7 +144,7 @@ Rectangle {
                     // Long words ("Cyberpunk", "Deliverance") shrink to fit the tile instead of being cut.
                     fontSizeMode: Text.Fit
                     minimumPixelSize: Math.max(10, rpx(8))
-                    text: tileItem.g ? tileItem.g.name : ""
+                    text: tileItem.g ? rail.balanced(app.shortGame(tileItem.g.name), plainFm, width) : ""
                     color: c.soft
                     font.family: app.bodyFont
                     font.pixelSize: rfpx(10)

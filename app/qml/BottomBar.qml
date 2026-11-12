@@ -206,10 +206,11 @@ Rectangle {
         anchors.rightMargin: legend.edge
         anchors.verticalCenter: parent.verticalCenter
         spacing: legend.gap
-        // The quick wheel's button: View's cap and Wheel (a tap opens it too).
+        // The wheel's button: VIEW's cap and Wheel (a tap opens it too). While the wheel is open B's Close is the one
+        // close hint, so this steps aside.
         Item {
             id: wheelBtn
-            visible: app.sheet === "" || app.wheelOpen
+            visible: app.sheet === "" && !app.wheelOpen
             anchors.verticalCenter: parent.verticalCenter
             width: wheelRow.implicitWidth; height: Math.max(bw.tpx(44), wheelRow.implicitHeight)
             Row {
@@ -217,12 +218,12 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: bw.px(6)
                 Key { id: wheelKey; win: bw; k: "view"; anchors.verticalCenter: parent.verticalCenter }
-                Label { win: bw; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: legend.wordSize; color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+                Label { win: bw; text: "Wheel"; font.pixelSize: legend.wordSize; color: c.soft; anchors.verticalCenter: parent.verticalCenter }
             }
             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
             TapHandler { onTapped: app.wheelPress() }
         }
-        // What Start does: a tap is Settings, a 3 second hold plays (or shows the Play choice). A tap on
+        // What Start does: a tap is Settings, a 3 second hold plays (or shows Play options). A tap on
         // it is a tap of Start. The hold's words show only when the bar has room for them.
         Item {
             id: startHint
@@ -239,7 +240,7 @@ Rectangle {
                 Label { visible: legend.holdFits && !app.mouseLegend; win: bw; text: "· " + app.startHoldWords; color: c.muted; font.pixelSize: bw.fpx(13); anchors.verticalCenter: parent.verticalCenter }
             }
             Accessible.role: Accessible.Button
-            Accessible.name: "Settings. Hold Start for 3 seconds: " + (app.startHoldPlays ? "Play" : "Play choice")
+            Accessible.name: "Settings. Hold START for 3 seconds: " + (app.startHoldPlays ? "Play" : "Play options")
             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
             TapHandler { onTapped: { if (!app.gate(3, "Start hint")) return; app.note("touch", "Start hint tapped"); app.startTap() } }
         }
@@ -354,13 +355,13 @@ Rectangle {
     // ---- What fits, in priority order. Everything is measured from the words and caps, never from the items' own
     // sizes (which follow these answers).
     TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") }
-    TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: legend.wordSize; text: app.wheelOpen ? "Close" : "Wheel" }
+    TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: legend.wordSize; text: "Wheel" }
     TextMetrics { id: settingsMetrics; font.family: app.bodyFont; font.pixelSize: legend.wordSize; text: "Settings" }
     TextMetrics { id: holdMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(13); text: "· " + app.startHoldWords }
     TextMetrics { id: nameMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(15); font.bold: true; text: barName.text }
     readonly property bool tabsShown: app.barGame && !app.modPage
     readonly property bool nameAsked: app.barGame || app.barPlace !== ""
-    readonly property bool wheelShown: app.sheet === "" || app.wheelOpen
+    readonly property bool wheelShown: app.sheet === "" && !app.wheelOpen
     readonly property bool startShown: app.barGame && app.sheet === "" && !app.wheelOpen
     // The status in full. On a mod page: where it is ("Get mods > SkyUI", "Mod 3 of 30"); Settings: the section.
     readonly property string subFull: app.page === "settings" ? app.sec : app.page === "place" ? (app.placeData && app.placeData.pending ? app.placeData.pending.name : "")

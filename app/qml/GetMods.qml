@@ -86,7 +86,7 @@ Item {
                     width: parent.width - gm.ui.px(48)
                     spacing: gm.ui.px(10)
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(20); font.weight: Font.DemiBold }
-                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15) }
+                    Text { width: parent.width; wrapMode: Text.WordWrap; text: "Press Slow download on Nexus. Turbine adds the file when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15) }
                     Flow {
                         width: parent.width
                         spacing: gm.ui.px(14)
@@ -249,9 +249,9 @@ Item {
                             Text { width: parent.width; elide: Text.ElideRight; text: cell.modelData.summary || cell.modelData.owner || ""; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13) }
                             Text {
                                 width: parent.width; elide: Text.ElideRight
-                                text: (cell.modelData.source === "thunderstore" || gm.result && gm.result.source === "thunderstore"
-                                       ? gm.ui.shortCount(cell.modelData.rating) + " ratings" : gm.ui.shortCount(cell.modelData.rating) + " likes")
-                                      + " · " + gm.ui.shortCount(cell.modelData.downloads) + " downloads"
+                                // Nexus endorsements and Thunderstore ratings are both likes (COMPONENTS.md, Words).
+                                text: gm.ui.shortCount(cell.modelData.rating) + (cell.modelData.rating === 1 ? " like" : " likes")
+                                      + " · " + gm.ui.shortCount(cell.modelData.downloads) + (cell.modelData.downloads === 1 ? " download" : " downloads")
                                 color: gm.ui.c.muted; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(13)
                             }
                         }

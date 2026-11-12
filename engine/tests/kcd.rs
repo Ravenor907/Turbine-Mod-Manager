@@ -194,9 +194,9 @@ fn row_badges_say_what_the_check_says() {
     let good = list(&["Mods/HerbPicking/mod.manifest", "Mods/HerbPicking/Data/herbs.pak"]);
     let bare = list(&["Mods/FastTravel/Data/travel.pak"]);
     assert_eq!(kcd::mod_badge("Herb Picking II 1.5", &good, true, false), None);
-    assert_eq!(kcd::mod_badge("Fast Travel KCD1 2.0", &good, true, false).as_deref(), Some("Made for KCD"));
-    assert_eq!(kcd::mod_badge("Herb Picking", &good, true, true).as_deref(), Some("Made for KCD"));
-    assert_eq!(kcd::mod_badge("Better Saving KCD2", &good, false, false).as_deref(), Some("Made for KCD II"));
+    assert_eq!(kcd::mod_badge("Fast Travel KCD1 2.0", &good, true, false).as_deref(), Some("Made for the first Kingdom Come: Deliverance"));
+    assert_eq!(kcd::mod_badge("Herb Picking", &good, true, true).as_deref(), Some("Made for the first Kingdom Come: Deliverance"));
+    assert_eq!(kcd::mod_badge("Better Saving KCD2", &good, false, false).as_deref(), Some("Made for Kingdom Come: Deliverance II"));
     assert_eq!(kcd::mod_badge("Fast Travel", &bare, true, false).as_deref(), Some("May not load"));
     assert_eq!(kcd::mod_badge("Fast Travel", &bare, false, false), None, "the first game loads paks without a manifest");
     assert_eq!(kcd::mod_badge("Readme", &list(&["Mods/Readme/readme.txt"]), false, false).as_deref(), Some("May not load"));

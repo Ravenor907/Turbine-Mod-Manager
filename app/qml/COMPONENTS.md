@@ -1,5 +1,48 @@
 # QML components
 
+## Words
+
+Every player-facing word, in QML and in Rust (check results, toasts, notes, status lines), follows this list.
+Short and plain: say what happens, to "you", with Turbine as "Turbine". Full sentences end with a period; buttons,
+titles, chips, hints and menu rows don't. Never an em or en dash: a colon, a comma or parentheses instead.
+
+| Say | For | Not |
+| --- | --- | --- |
+| My mods, Get mods, Load order | the three tabs (that case) | Load Order, get mods |
+| Play options | the list START held or the wheel opens | Play choice |
+| Turn on, Turn off; On, Off | a mod, a setting | enable, disable, switch on |
+| Not now | a question or offer put off: it can come back (B) | Later, Not yet, Skip |
+| Close | closing a sheet, menu, page or message with nothing to decide (B) | Done, Dismiss |
+| Back | one level back (a page inside a page, the tutorial's last card, the browser's history) | Close |
+| Cancel | leaving typing or a form without keeping it | Back, Close |
+| Stop | ending something that runs (a download, getting requirements) | Cancel |
+| Done | finishing typing | OK |
+| Skip | passing one step of a series (the tutorial, a requirement) | Not now |
+| Uninstall | a mod leaves the game (it waits in Removed mods for 7 days) | Remove, Delete |
+| Delete | files gone for good ("Delete permanently") | Remove, for good |
+| Remove | off a list only; no file is deleted | Delete |
+| Add | a file into Turbine (Add from Downloads) | Import |
+| Get | a mod from Nexus or Thunderstore (Get mods, Get it) | Download (unless it is Nexus's button) |
+| Install | a runtime or tool into the game or Proton (the Visual C++ runtime) | Add |
+| Loadout | a named set of mods (Thunderstore's own "profile code" keeps its name) | profile |
+| Wheel | the eight-wedge menu VIEW opens ("the wheel" in sentences) | quick wheel |
+| Likes | Nexus endorsements and Thunderstore ratings alike: "1 like", "3K likes" | ratings, endorsements |
+| Nexus key | the personal API key from the Nexus account page | API key |
+| Slow download, Mod Manager Download | Nexus's own buttons, only where you press them | free download |
+| Missing | a requirement you don't have | Not yet |
+| Mod Engine 3 | the Elden Ring loader | me3 |
+| A, B, X, Y, LB, RB, LT, RT, L3, R3, VIEW, START | buttons in sentences, as their caps show them | Start, View, the Menu button |
+| Settings, Launch Options, Properties, Compatibility | Steam's and Turbine's own page names, as they are written there | settings page |
+
+Game names: one per place. Titles and sentences use the full name ("Skyrim Special Edition", "The Witcher 3",
+"Cyberpunk 2077", "Kingdom Come: Deliverance", "Elden Ring"; Main.qml's `gameTitle` and `fullGame(name)`); the rail
+and the bottom bar, where room is short, use the short name ("Skyrim SE", "Witcher 3", "Cyberpunk", "KCD";
+`shortGame(name)`). Never both styles in one line.
+
+Times and sizes: "about 13 s", "every 6 h", "24.0 MB" in rows and notes; "7 days" spelled out.
+
+## Files
+
 One component per file in this folder. Every .qml file here is part of the Turbine module (app/build.rs picks them
 up), so Main.qml uses them by name with no import. Components only draw and report taps: the controller and the
 keyboard go through Main.qml (`act()`, `binds()`), which moves each component's `focusIndex` and runs the actions.
@@ -37,7 +80,7 @@ calls its functions directly (taps ask `app.gate()` first). Inside, `c` and `mo`
 
 - **GameRail**: the game rail. `itemAt(i)` (a tile, Show hidden games or the gear); `railList`.
 - **ModList**: My mods' list and its rows (ModRow, and the removed, held, Dependencies and Removed rows). `look`.
-- **ModPanel**: the details panel beside My mods. `panelEdit`.
+- **ModPanel**: the details panel beside My mods (on a row that isn't a mod, a short summary of that row). `panelEdit`.
 - **NoModsCard**: the empty My mods card.
 - **SettingsPage**: the Settings page. `look`; `lookList`, `labsList`.
 - **ScrollTest**: the 2,000 row scrolling test.
@@ -161,8 +204,9 @@ All are Overlays that fill their parent and show with `visible`; Main.qml handle
 - **Tutorial**: the beginner cards. `card`, `count`, `viewGlyph`, `startGlyph`, `keys`, `thunderstore`; signals
   `next()`, `skip()`, `back()`.
 - **Toast**: a short message at the bottom, centred between `areaLeft` and `areaRight` (Main.qml leaves out the
-  rail, the details panel and a side sheet), `bottomMargin` over the bar. `kind` ("info", "done", "problem"),
-  `timeout`, `actionLabel`, `actionGlyph`; `show(text, strong, detail)`, `hide()`; signals `hidden()`,
+  rail, the details panel and a side sheet), `bottomMargin` over the bar; `banner` (as wide as the area and
+  `bannerHeight` tall: over the bottom bar while a dialog is up, covering its hints whole). `kind` ("info", "done",
+  "problem"), `timeout`, `actionLabel`, `actionGlyph`; `show(text, strong, detail)`, `hide()`; signals `hidden()`,
   `actionClicked()`, `pressedOn()`, `pressEnded()`.
 
 ## Labs

@@ -747,7 +747,7 @@ pub fn proton_used(lines: &[String]) -> Option<(String, String)> {
 }
 
 /// One plain sentence for the launch check: which Proton ran the game and why. When Turbine had no record and the
-/// tool chose by itself, the sentence says so.
+/// tool chose on its own, the sentence says so.
 pub fn proton_words(lines: &[String]) -> Option<String> {
     let (dir, why) = proton_used(lines)?;
     let name = Path::new(&dir).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(dir);
@@ -844,7 +844,7 @@ pub fn steps(game_name: &str, listed: bool) -> Vec<String> {
 // again at once. So the tile is added only where the file can be written safely: Desktop Mode. With Steam closed
 // Turbine writes it at once; with Steam running it is one Steam restart (which works on the desktop: Steam stays
 // closed until the script starts it again). In Game Mode it isn't offered as a button; the row says where it can be
-// added. Play Seamless Co-op is always in Turbine's Play choice, and in the Steam menu with Turbine's plugin.
+// added. Play Seamless Co-op is always in Turbine's Play options, and in the Steam menu with Turbine's plugin.
 
 /// Where the optional Seamless Co-op tile in Steam's library can come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -887,8 +887,8 @@ impl TileWay {
             (TileWay::DesktopSteamClosed, true) => "Steam is closed, so Turbine can add it now. It shows when Steam starts.",
             (TileWay::DesktopSteamClosed, false) => "Steam is closed, so Turbine can take it out now.",
             (TileWay::DesktopRestart, _) => "Steam has to restart once for this.",
-            (TileWay::GameModePlugin, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is already one press in the Steam menu (Turbine's plugin) and in Turbine's Play choice.",
-            (TileWay::GameMode, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is in Turbine's Play choice.",
+            (TileWay::GameModePlugin, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is already one press away: in the Steam menu (Turbine's plugin) and in Turbine's Play options.",
+            (TileWay::GameMode, true) => "The tile can be added in Desktop Mode (open Turbine there). Here in Game Mode, Play Seamless Co-op is in Turbine's Play options.",
             (TileWay::GameModePlugin | TileWay::GameMode, false) => "The tile can be taken out in Desktop Mode (open Turbine there), or in Steam: the tile's options, Manage, Remove non-Steam game.",
         }
     }

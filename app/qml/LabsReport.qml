@@ -237,7 +237,7 @@ Overlay {
                         width: parent.width - report.ui.px(24)
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
-                        text: report.text !== "" ? report.text : "What went wrong? (A to type)"
+                        text: report.text !== "" ? report.text : "What went wrong? Press A to type."
                         color: report.text !== "" ? report.ui.c.text : report.ui.c.muted
                         font.family: report.ui.bodyFont
                         font.pixelSize: report.ui.fpx(15)

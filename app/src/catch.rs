@@ -34,7 +34,7 @@ pub const HELPER_SOURCE: &str = "/app/share/turbine-mod-manager/extension";
 pub const HELPER_FOLDER: &str = "Turbine browser helper";
 /// What the status says while a Nexus file page is open for a free account.
 pub const SLOW_DOWNLOAD: &str =
-    "Sign in to Nexus if it asks (free), then press Slow download on this page. Turbine adds the mod by itself when the file lands.";
+    "Sign in to Nexus if it asks (free), then press Slow download on this page. Turbine adds the mod automatically when the file lands.";
 /// The most Nexus pages remembered at once (each one for 30 minutes).
 const MAX_WATCHES: usize = 8;
 /// How long a browser's report of a download holds the Downloads watcher back once the file is ready: past this,
@@ -1081,7 +1081,7 @@ impl qobject::Turbine {
                 let why = msg.str_at("error").unwrap_or("");
                 crate::log::line("bridge", &format!("Download of {} stopped: {why}", d.label));
                 let gname = d.game.as_ref().map(|g| g.name.clone()).unwrap_or_default();
-                let words = if why.eq_ignore_ascii_case("USER_CANCELED") { format!("{} was cancelled", d.label) } else { format!("The download of {} stopped. Try it again on the page.", d.label) };
+                let words = if why.eq_ignore_ascii_case("USER_CANCELED") { format!("{} was stopped", d.label) } else { format!("The download of {} stopped. Try it again on the page.", d.label) };
                 self.as_mut().set_status(&words, "warn", None, &gname, "", true, "");
             }
             "download.finished" => {
@@ -1097,7 +1097,7 @@ impl qobject::Turbine {
                         let held = self.rust().catching.deferred.iter().any(|(x, _)| label_of(&x.path) == label);
                         self.as_mut().fallback_to_watcher(&label, None);
                         if d.is_some() && !held && !e.contains("isn't in Downloads") {
-                            self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them from the game menu, Add from Downloads.", "warn", None, "", "", true, "");
+                            self.as_mut().set_status("Turbine can't read that download. Save mods to Downloads, then add them with Game menu, Add from Downloads.", "warn", None, "", "", true, "");
                         } else if d.is_some() && !held && !self.rust().catching.told_outside {
                             // Never silent (inapp-browser.md): once a run, where it went and the one setting that fixes it.
                             self.as_mut().rust_mut().catching.told_outside = true;
@@ -1127,7 +1127,7 @@ impl qobject::Turbine {
                         let label = label_of(&path);
                         crate::log::line("bridge", &format!("{label}: no game for it here"));
                         self.as_mut().set_status(
-                            &format!("Turbine doesn't know which game {label} is for. Open that game in Turbine, then the game menu, Add from Downloads."),
+                            &format!("Turbine doesn't know which game {label} is for. Open that game in Turbine, then Game menu, Add from Downloads."),
                             "warn",
                             None,
                             "",

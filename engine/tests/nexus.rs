@@ -227,7 +227,7 @@ fn bad_keys_and_free_accounts_get_plain_messages() {
     let u = "https://api.nexusmods.com/v1/users/validate.json";
     f.serve(u, b"{\"message\":\"Please provide a valid API Key\"}");
     f.status(u, 401);
-    assert_eq!(f.nx.validate().unwrap_err().to_string(), "Nexus didn't accept that API key. Copy it again from your Nexus account page.");
+    assert_eq!(f.nx.validate().unwrap_err().to_string(), "Nexus didn't accept that key. Copy it again from your Nexus account page.");
     let free = Account { user_id: 1, name: "x".into(), is_premium: false, is_supporter: false };
     let before = f.requests();
     let e = f.nx.download_links(&free, "skyrimspecialedition", 12604, 200).unwrap_err();

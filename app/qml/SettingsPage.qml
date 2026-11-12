@@ -233,18 +233,6 @@ Row {
         // Only in Game Mode; in Desktop Mode no controller is normal and nothing is said.
         Label { win: app; visible: !Turbine.pads && Turbine.gamemode; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.muted; font.pixelSize: app.fpx(14); text: "Using Steam's controller settings (no controller seen directly)." }
         Label { win: app; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "A mod manager for SteamOS handhelds. Free software under the GNU General Public License, version 3 or later. Licenses of the parts it uses are in the licenses folder of the project." }
-        // A test for the build's makers, so only with Labs on.
-        Rectangle {
-            visible: app.labsOn
-            readonly property bool foc: app.zone === "settings" && app.setRow === 1
-            width: perfRow.implicitWidth + app.px(28); height: app.px(40); radius: app.px(8)
-            color: foc ? c.focusFill : c.card
-            border.color: c.accent
-            border.width: foc ? app.px(2) : 0
-            Hint { id: perfRow; win: app; anchors.centerIn: parent; k: "a"; label: "Scrolling test (2,000 rows)" }
-            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { onTapped: { if (!app.gate(0, "page")) return; { app.page = "perf"; app.zone = "perf" } } }
-        }
     }
     // Labs: Report a bug, Performance check, and the checklist of things to confirm on the device.
     ListView {

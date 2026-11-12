@@ -253,7 +253,7 @@ fn play(r: &Request, game: &Game, w: &mut Worker) -> String {
             // Seamless Co-op from anywhere (known by its files), the copy the game loads.
             let id = slot.store.seamless().map(|m| m.id);
             let Some(id) = id else {
-                return q::answer_json(false, "Seamless Co-op isn't installed. Open Turbine to get it (game menu).", ",\"needsTurbine\":true");
+                return q::answer_json(false, "Seamless Co-op isn't installed. Open Turbine to get it (Game menu).", ",\"needsTurbine\":true");
             };
             if !slot.store.mods().iter().any(|m| m.id == id && m.enabled) && let Err(e) = slot.store.set_enabled(&id, true) {
                 return q::answer_json(false, &format!("Couldn't turn Seamless Co-op on: {e}"), "");

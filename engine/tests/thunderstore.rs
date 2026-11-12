@@ -434,10 +434,10 @@ fn imports_and_exports_share_codes() {
     };
     status(429);
     let e = ts::export_code(&client, &p, &[]).unwrap_err().to_string();
-    assert_eq!(e, "Thunderstore only takes a few profile uploads a minute. Wait a minute and try again.");
+    assert_eq!(e, "Thunderstore makes only a few codes a minute. Try again in a minute.");
     status(400);
     let e = ts::export_code(&client, &p, &[]).unwrap_err().to_string();
-    assert_eq!(e, "Thunderstore didn't accept the profile upload. Try again later.");
+    assert_eq!(e, "Thunderstore didn't take the upload. Try again later.");
     status(200);
     serve(&dir, ts::PROFILE_CREATE_URL, b"{\"detail\":\"nope\"}");
     assert_eq!(ts::export_code(&client, &p, &[]).unwrap_err().to_string(), "Thunderstore didn't send a code back.");

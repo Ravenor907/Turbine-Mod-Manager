@@ -275,7 +275,7 @@ need $s "Start: B goes back" "Start check: B from Settings goes back to My mods$
 need $s "Start: let go early does nothing, the ring was filling" "Start check: let go at 1.5 s: the ring was showing at [3-8][0-9]%, then page game, sheet \"\", Play asked 0 times$"
 need $s "Start: held 3 seconds shows the Play choice" "Start check: held 3 seconds: nothing at 2.3 s \(sheet \"\"\), then Play options, focus Play with mods, Play asked 0 times$"
 need $s "Start: B closes the Play choice" "Start check: B closes the Play choice: sheet \"\"$"
-need $s "Start: the setting in Settings, Look" "Start check: Hold Start does: row there, A changed it to last, the bar says hold: Play choice then hold: Play$"
+need $s "Start: the setting in Settings, Look" "Start check: Hold Start does: row there, A changed it to last, the bar says hold: Play options then hold: Play$"
 need $s "Start: Play my last choice plays after 3 seconds" "Start check: Play my last choice: held 3 seconds, Play asked 1 times$"
 need $s "Start: A on Play still plays" "Start check: A on Play: Play asked 1 times$"
 need $s "Start: Ctrl+Enter is the hold" "Start check: Ctrl\+Enter: Play options, setting choice$"
@@ -285,7 +285,7 @@ need $s "Start: the bar with the hint, nothing overlaps" "Bar check \(startcheck
 need $s "Start checks" "Start check done: 0 problems"
 # The keyboard and the mouse drive every screen, and the bar's hints follow the last input used.
 y=reqcheck-1280x800
-need $y "Requirements: one sheet after the add, Get them all" "Requirements check: after the add: This mod needs 2 others \| Get them all; Later"
+need $y "Requirements: one sheet after the add, Get them all" "Requirements check: after the add: This mod needs 2 others \| Get them all; Not now"
 need $y "Requirements: Get them all lines them up and turns the installed one on" "Requirements check: Get them all: Getting 1 of 1: Test Library, the installed one turned on$"
 need $y "Requirements: the queue's first step" "Requirements: getting 1 of 1: Test Library"
 need $y "Requirements: Stop keeps a row in My mods" "Requirements check: Stop: stopped; My mods rows: needsq,"
@@ -497,7 +497,7 @@ fi
 for size in $SIZES; do
   if ran "mods-kcd2-$size"; then
   log="$PWD/data/mods-kcd2-$size/turbine-mod-manager/activity.log"
-  if grep -q "Row warnings: .*Fast Travel KCD1: Made for KCD" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
+  if grep -q "Row warnings: .*Fast Travel KCD1: Made for the first Kingdom Come: Deliverance" "$log"; then echo "::notice title=KCD II row warning $size::$(grep -h 'Row warnings' "$log" | head -n1 | cut -c1-200)"
   else echo "::error title=KCD II row has no warning for the first game's mod ($size)::KCD II row has no warning for the first game's mod ($size)"; (grep -h "Row warnings\|Add " "$log" | tail -n 4 || true); fail=1; fi
   fi
   if ran "check-witcher-$size"; then
@@ -592,7 +592,7 @@ for size in $SIZES; do
   need "notstarted-$size" "Launch check: the Steam tool's words come first: nothing started, and which Proton ($size)" "Launch check with the tool's words: Turbine's Steam tool started nothing \(no Proton was found, so nothing started\); Proton at the last start \(Started with Proton 9.0 \(Beta\): Steam used it for this game last time.\); "
   need "notstarted-$size" "Why won't it start: the same words ($size)" "Why won't it start with the tool's words: .*Turbine's Steam tool started nothing: no Proton was found.*Proton at the last start: Started with Proton 9.0"
   need "notstarted-$size" "Launch check: a late start takes the sheet away ($size)" "Launch check, the game showed up late: sheet \"\"$"
-  need "notstarted-$size" "Launch check: started then closed says closed after N seconds, the cause and its buttons ($size)" "Launch check, it started then closed: sheet quick, .* closed after 24 seconds \| (It started, then closed by itself|Since it last worked).* Started with Proton 9.0 \(Beta\): Steam used it for this game last time. \| .*Play without mods; Keep my mods$"
+  need "notstarted-$size" "Launch check: started then closed says closed after N seconds, the cause and its buttons ($size)" "Launch check, it started then closed: sheet quick, .* closed after 24 seconds \| (It started, then closed unexpectedly|Since it last worked).* Started with Proton 9.0 \(Beta\): Steam used it for this game last time. \| .*Play without mods; Keep my mods$"
   need "notstarted-$size" "Launch check: didn't start, with the fixes ($size)" "Launch check sheet: .* didn't start \| Play without mods; Activity log; Why won't it start\?"
   rm -rf "$PWD/fh/modsempty-$size"; python3 tools/fake-home.py "$PWD/fh/modsempty-$size" > /dev/null; h="$PWD/fh/modsempty-$size"
   shoot "modsempty-$size" "$size" modsempty "$h" --game=$skyrim
@@ -910,7 +910,7 @@ PY
     echo "::error title=1: a link with no press got through::1: a link with no press got through"; fail=1; fi
   img=$(printf '%s\n' "$after" | grep -h "files/66" | head -n1 | cut -c1-200 || true)
   echo "::notice title=1: the frame's nxm image::${img:-never reached Turbine (Chromium blocked it)}"
-  pneed "10: closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added by itself."
+  pneed "10: closing midway says the download goes on, with Watch it" "Still downloading 1 mod. It.s added automatically."
   pneed "10: ... with Getting 1 mod at the top and Nexus downloads in the game menu" "Browser check: closed while downloading; at the top: Getting 1 mod; game menu has Nexus downloads: yes"
   pneed "10: ... and it lands" "Browser check: the download went on after the close: .*(added|asked)"
   pneed "10: ... and the screen doesn't jump to it when it lands" "New mod from a download that went on after Nexus closed: the focus stays where it is"
@@ -988,7 +988,7 @@ for size in $SIZES; do
   need "launchsetupgm-$size" "Steam tool in Game Mode: no Steam restart offered ($size)" "Tool steps sheet: msg \| One step before Elden Ring plays with mods \| [3-4] steps, .* \| buttons Check again; Set it up myself; Not now \| Game Mode true"
   need "launchsetup-$size" "Launch Options step: the exact text ($size)" "Launch Options step for Elden Ring: needs \"if \\[ -x .*/steam-launch/turbine-launch.sh.* %command%; else %command%; fi\""
   shoot "acdeploy-$size" "$size" acdeploy "$h" --game=$er "--selftest-import=$h/Downloads/Golden Armor 1.0.zip"
-  need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok me3 downloads now"
+  need "acdeploy-$size" "Anti-cheat: Before you play says me3 downloads now, not as a warning ($size)" "Check before Play: .*ok Anti-cheat: off while mods are on \\(offline only\\).*ok Mod Engine 3 downloads now"
   g="$h/.local/share/Steam/steamapps/common/ELDEN RING"
   if ran "acdeploy-$size"; then
   inprofile=$(find "$h" "$PWD/data/acdeploy-$size" -path "*me3-profile/mods/parts/am_f_9000.partsbnd.dcx" 2>/dev/null | head -n1)
@@ -1014,7 +1014,7 @@ for size in $SIZES; do
   shoot "coopcheck-$size" "$size" coopcheck "$hc" --game=$er "--selftest-import=$hc/Downloads/Seamless Co-op 2.0.1.zip|loader|seamless|2.0.1"
   n="coopcheck-$size"
   need $n "Play asks with, without, co-op and its settings ($size)" "Co-op choice: Play with mods; Play Seamless Co-op; Play without mods; Co-op settings \\| focus Play with mods \\| Y Co-op settings"
-  need $n "Seamless Co-op loads only with its own Play: said at the Play choice and on its row ($size)" "Co-op only: the Play choice says \"Seamless Co-op loads only with Play Seamless Co-op. A plays the highlighted one.\"; Play with mods: Solo, [0-9]+ mods? on. Seamless Co-op stays out.; its row in My mods: Loads only with Play Seamless Co-op$"
+  need $n "Seamless Co-op loads only with its own Play: said at the Play choice and on its row ($size)" "Co-op only: the Play choice says \"Seamless Co-op only loads in Co-op mode. A plays the highlighted one.\"; Play with mods: Solo, [0-9]+ mods? on. Seamless Co-op stays out.; its row in My mods: Only loads in Co-op mode$"
   need $n "No password: its settings open on it with the keyboard, nothing started ($size)" "Co-op password step: picked Play Seamless Co-op, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true, Play asked 0 times"
   need $n "With the password typed, co-op goes on ($size)" "Co-op after the password: sheet .*, waiting false, Play asked 1 times, co-op true"
   need $n "The choice is remembered ($size)" "Co-op choice remembered: focus Play Seamless Co-op, Play says Co-op"
@@ -1043,7 +1043,7 @@ for size in $SIZES; do
   n="tilecheckgm-$size"
   need $n "Co-op tile in Game Mode: later, words only ($size)" "Tile check: Game Mode true, how later, label \"\", words: The tile can be added in Desktop Mode"
   need $n "Co-op tile in Game Mode: not asked ($size)" "Tile check: asked once after the install: no \\(later\\)$"
-  need $n "Co-op tile in Game Mode: the row opens the words with OK only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| OK$"
+  need $n "Co-op tile in Game Mode: the row opens the words with Close only ($size)" "Tile check: the row opens: Add a Co-op tile to Steam \\| The tile can be added in Desktop Mode .* \\| Close$"
   # "Proton for modded play". Two made-up Protons in the Steam library: one the tool can start, and one whose
   # Steam Linux Runtime isn't installed (dimmed, with the reason). The row, the list, a pick, Automatic again, and
   # the same from the tool's steps sheet.
@@ -1087,7 +1087,7 @@ for size in $SIZES; do
   n="cooppw-$size"
   stop="nothing started, sheet settingsedit with the keyboard \\(ask\\), focus cooppassword, waiting true$"
   need $n "Co-op password: empty at the start ($size)" "Co-op password check: at the start the password is empty$"
-  need $n "Seamless Co-op from Nexus counts like Turbine's own ($size)" "Co-op password check: Seamless Co-op from nexus: marked seamless, its row says Loads only with Play Seamless Co-op, settings files [1-9]"
+  need $n "Seamless Co-op from Nexus counts like Turbine's own ($size)" "Co-op password check: Seamless Co-op from nexus: marked seamless, its row says Only loads in Co-op mode, settings files [1-9]"
   need $n "Co-op password: the Play choice stops for it ($size)" "Co-op password check: The Play choice: $stop"
   need $n "Co-op password: Start held stops for it ($size)" "Co-op password check: Start held \\(last choice coop\\): $stop"
   need $n "Co-op password: Play options stops for it ($size)" "Co-op password check: Play options \\(wheel slot Play options\\): $stop"
@@ -1169,9 +1169,9 @@ for size in $SIZES; do
   need "mmdguard-$size" "Left at about one second keeps Not now ($size)" "Guard Left at about 1 s: ring on Not now at [0-9]+ ms, A Not now"
   need "mmdguard-$size" "Then A gets nothing ($size)" "Guard A then: closed, nothing downloaded"
   need "mmdguard-$size" "An A made before the ring moved, handled after, is Not now ($size)" "Guard stalled A: made at 1100 ms, ring on Get it, handled at [0-9]+ ms: Not now, nothing downloaded"
-  need "mmdguard-$size" "A question with no names yet opens on Not now, and a second link at once is dropped ($size)" "Guard twice, the first: Get mod 1 \\(file 3\\) for .*\\?: ring on Not now, A Not now, B Not now, input off; a second link at once: ring on Not now, A Not now, B Not now, input off, dropped$"
+  need "mmdguard-$size" "A question with no names yet opens on Not now, and a second link at once is dropped ($size)" "Guard twice, the first: Download mod 1 \\(file 3\\)\\?: ring on Not now, A Not now, B Not now, input off; a second link at once: ring on Not now, A Not now, B Not now, input off, dropped$"
   need "mmdguard-$size" "The same at its first frame ($size)" "Guard twice, at its first frame: ring on Not now, A Not now, B Not now, input off$"
-  need "mmdguard-$size" "The names coming late change the title only ($size)" "Guard names late: Get SkyUI \\(SkyUI 5.2SE\\) for .*\\?, ring unchanged, the quiet second unchanged$"
+  need "mmdguard-$size" "The names coming late change the title only ($size)" "Guard names late: Download SkyUI 5.2SE\\?, ring unchanged, the quiet second unchanged$"
   need "mmdguard-$size" "An A after the names came is still ignored ($size)" "Guard names late, A made at 300 ms: ignored$"
   need "mmdguard-$size" "Asked again at once, it opens on Not now ($size)" "Guard again at once: asked: ring on Not now, A Not now, B Not now, input off$"
   need "mmdguard-$size" "An A in the turn it opens is ignored ($size)" "Guard again at once, A: ignored$"

@@ -259,12 +259,12 @@ pub fn checks(on: &[(&str, &[String])], second: bool, other_game: &[String]) -> 
 }
 
 /// A short word for a mod's row in My mods (shown on it the way the check before Play says it), or None:
-/// "Made for KCD" or "Made for KCD II" (named for, or downloaded from, the other game), "May not load" (no
-/// mod.manifest and no .pak files, or no mod.manifest in the second game). `from_other_game`: it came from the other
-/// game's Nexus pages.
+/// "Made for the first Kingdom Come: Deliverance" or "Made for Kingdom Come: Deliverance II" (named for, or
+/// downloaded from, the other game), "May not load" (no mod.manifest and no .pak files, or no mod.manifest in the
+/// second game). `from_other_game`: it came from the other game's Nexus pages.
 pub fn mod_badge(name: &str, files: &[String], second: bool, from_other_game: bool) -> Option<String> {
     if from_other_game || name_says_other(name, second) {
-        return Some(if second { "Made for KCD".into() } else { "Made for KCD II".into() });
+        return Some(if second { "Made for the first Kingdom Come: Deliverance".into() } else { "Made for Kingdom Come: Deliverance II".into() });
     }
     let folders = mod_folders(files);
     let mut flagged = folders.is_empty() && !files.is_empty() && files.iter().all(|f| lc(f).starts_with("mods/"));

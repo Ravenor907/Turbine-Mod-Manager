@@ -271,7 +271,8 @@ Item {
                 app.openNotStarted(app.game.id); app.quickExit(app.game.id, 24)
                 app.note("shot", "Launch check, it started then closed: sheet " + app.sheet + ", " + infoView.title + " | " + app.quickText + " | " + app.infoButtons.map(b => b.label).join("; "))
                 app.toolTest = null
-                app.quick = null; app.sheet = ""; app.openNotStarted(app.game.id)
+                // The picture is the sheet on its own: the late start's toast belongs to the step before.
+                app.quick = null; app.sheet = ""; toast.hide(); app.openNotStarted(app.game.id)
             }
             // A mod renamed, then the list scrolled down a row (the bars and the rail go; the row stays in view).
             else if (shot.page === "tucked" && app.mods.length > 1) {
@@ -1210,7 +1211,7 @@ Item {
                 () => { if (!app.seamlessIn || !app.modsLoaded) return false; app.sheet = ""; app.page = "game"; app.zone = "main"; app.tab = 0; app.acAnswered = ({ "steam:1245620": true }); m.asks = app.playAsks
                         say(Turbine.coopPasswordState(app.seamlessMod.id) === 0, "at the start the password is " + ["unknown", "empty", "set"][Turbine.coopPasswordState(app.seamlessMod.id) + 1])
                         // This copy came from Nexus, not Turbine's own download: it counts just the same.
-                        say(app.seamlessMod.seamless === true && app.seamlessMod.sourceKind === "nexus" && app.isSeamless(app.seamlessMod) && app.rowLine(app.seamlessMod).text === "Loads only with Play Seamless Co-op" && app.settingsFilesOf(app.seamlessMod.id).length > 0,
+                        say(app.seamlessMod.seamless === true && app.seamlessMod.sourceKind === "nexus" && app.isSeamless(app.seamlessMod) && app.rowLine(app.seamlessMod).text === "Only loads in Co-op mode" && app.settingsFilesOf(app.seamlessMod.id).length > 0,
                             "Seamless Co-op from " + app.seamlessMod.sourceKind + ": marked " + (app.seamlessMod.seamless === true ? "seamless" : "not seamless") + ", its row says " + app.rowLine(app.seamlessMod).text + ", settings files " + app.settingsFilesOf(app.seamlessMod.id).length) },
                 // 1: the Play choice (A on Play, then Play Seamless Co-op).
                 () => { app.zone = "play"; pad("a") },
@@ -1411,7 +1412,7 @@ Item {
                 // An add of a mod that needs one mod that isn't installed and one that is but is off.
                 () => { give(); app.reqArrived(app.mods[0].id, app.mods[0].name); m.t = Date.now() },
                 () => { if (app.sheet !== "msg" && Date.now() - m.t < 4000) return false
-                        say(app.sheet === "msg" && !!app.msgData && app.msgData.title === "This mod needs 2 others" && app.msgData.buttons.map(b => b.label).join("; ") === "Get them all; Later",
+                        say(app.sheet === "msg" && !!app.msgData && app.msgData.title === "This mod needs 2 others" && app.msgData.buttons.map(b => b.label).join("; ") === "Get them all; Not now",
                             "after the add: " + (app.sheet === "msg" && app.msgData ? app.msgData.title + " | " + app.msgData.buttons.map(b => b.label).join("; ") + " | " + (app.msgData.notes || []).join("; ") : "sheet \"" + app.sheet + "\""))
                         pad("a") },
                 () => { say(app.reqRunning && app.reqStripWords === "Getting 1 of 1: Test Library" && app.mods[1].enabled, "Get them all: " + (app.reqStripWords || "nothing running") + ", the installed one turned " + (app.mods[1].enabled ? "on" : "off"))
@@ -1680,7 +1681,7 @@ Item {
                 check("Browser check: two taps on Get it: " + (app.nxmAsking ? "still asking" : "got it"))
                 app.browserDialog({ type: 0, message: "Tap here twice", dialogAccept: () => {}, dialogReject: () => {} })
                 app.browserDialog({ type: 1, message: "OK?", dialogAccept: () => {}, dialogReject: () => {} })
-                check("Browser check: a page alert and confirm while asking: " + (app.nxmAsking && app.pickTitle.indexOf("Get ") === 0 ? "the question stays" : "replaced it")) } },
+                check("Browser check: a page alert and confirm while asking: " + (app.nxmAsking && app.pickTitle.indexOf("Download ") === 0 ? "the question stays" : "replaced it")) } },
             { name: "mmd get", after: 300, act: () => { pad("right"); pad("a"); check("Browser check: Right then A after a second gets it: " + (!app.nxmAsking ? "yes" : "no")) } },
             { name: "nxm", after: 2500, act: () => {
                 check("Browser check: after Mod Manager Download the page is still the file page: " + (pageIs(/tab=files/) ? "yes" : "no, " + (app.nexusView ? app.nexusView.url : "")))

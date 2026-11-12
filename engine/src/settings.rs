@@ -1225,7 +1225,7 @@ pub fn review_words(mod_name: &str, look: &[String], gone: &[String]) -> Option<
     }
     let mut t = format!("{mod_name} updated. Turbine kept your changes where it was sure.");
     if !look.is_empty() {
-        t.push_str(&format!(" Please check these settings again, the new version moved things around: {}.", look.join(", ")));
+        t.push_str(&format!(" The new version moved things around, so check these settings: {}.", look.join(", ")));
     }
     if !gone.is_empty() {
         t.push_str(&format!(" The new version no longer has: {}.", gone.join(", ")));

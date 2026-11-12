@@ -24,7 +24,7 @@ pub(crate) type Qt = CxxQtThread<qobject::Turbine>;
 pub(crate) type NetTask = Box<dyn FnOnce(&mut Net, &Qt) + Send>;
 
 /// Said when a Mod Manager Download link arrives and there is no Nexus key.
-pub const NO_KEY_NXM: &str = "Mod Manager Download needs your Nexus API key. Use Slow download (or Manual download) instead, Turbine picks it up from Downloads.";
+pub const NO_KEY_NXM: &str = "Mod Manager Download needs your Nexus key. Use Slow download (or Manual download) instead: Turbine picks it up from Downloads.";
 
 /// The Thunderstore community of a Steam game, when it has one.
 pub(crate) fn community(game: &Game) -> Option<&'static str> {
@@ -711,7 +711,7 @@ fn finish_share(w: &mut Worker, game: &Game) {
         let names = p.names();
         let mut name = share.profile.trim().to_string();
         if name.is_empty() {
-            name = "Shared profile".into();
+            name = "Shared loadout".into();
         }
         let base = name.clone();
         let mut n = 2;
@@ -816,7 +816,7 @@ impl qobject::Turbine {
                 let mut net = Net::new(crate::VERSION, &crate::cache_dir(), &crate::log::folder(&data_home()));
                 while let Ok(task) = rx.recv() {
                     if catch_unwind(AssertUnwindSafe(|| task(&mut net, &qt))).is_err() {
-                        say(&qt, "That download didn't finish. Press Get it again. If it fails twice: View, Game menu, Activity log says why.", "error");
+                        say(&qt, "That download didn't finish. Press Get it again. If it fails twice, the activity log says why (VIEW, Game menu, Activity log).", "error");
                     }
                     set(&qt, |mut t| {
                         let n = (*t.net_busy() - 1).max(0);
@@ -1381,7 +1381,7 @@ impl qobject::Turbine {
                     .collect();
                 let left = mods.iter().filter(|m| m.kind != "thunderstore" && m.kind != "loader").count();
                 if ts.is_empty() {
-                    let j = code_json("error", &name, "", left, 0, "This profile has no mods from Thunderstore, so there is nothing a code can hold.");
+                    let j = code_json("error", &name, "", left, 0, "This loadout has no mods from Thunderstore, so there is nothing a code can hold.");
                     return w.post(move |t| t.set_code_json(QString::from(j.as_str())));
                 }
                 let configs = config_files(&game);
@@ -1783,14 +1783,14 @@ impl qobject::Turbine {
             "Check the Nexus key from the browser",
             Box::new(move |net: &mut Net, qt: &Qt| {
                 let (j, ok, text) = match net.set_key(&key) {
-                    Ok(j) => (j, true, "Turbine has your API key.".to_string()),
+                    Ok(j) => (j, true, "Turbine has your Nexus key.".to_string()),
                     Err(e) => (net.account_json("error", &e), false, e),
                 };
                 crate::log::line("net", if ok { "API key from the browser: Nexus accepted it, kept" } else { "API key from the browser: not kept" });
                 crate::bridge::broadcast(&crate::bridge::signin_keydone_message(&id, ok, &text));
                 set(qt, move |mut t| {
                     t.as_mut().set_account_json(QString::from(j.as_str()));
-                    let words = if ok { "Turbine has your Nexus API key".to_string() } else { format!("The API key from the browser wasn't kept: {text}") };
+                    let words = if ok { "Turbine has your Nexus key".to_string() } else { format!("The Nexus key from the browser wasn't kept: {text}") };
                     t.as_mut().web_signin_note(QString::from(words.as_str()), QString::from(if ok { "ok" } else { "warn" }));
                 });
             }),

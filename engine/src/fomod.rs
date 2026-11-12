@@ -477,6 +477,9 @@ pub struct StepView {
     pub name: String,
     /// 1 for the first step shown, counting the steps visited so far.
     pub number: usize,
+    /// How many steps there are with the choices as they are now: this one, the ones before it and the ones still to
+    /// come ("Step 2 of 4"; a later choice can show or hide a step).
+    pub total: usize,
     pub groups: Vec<GroupView>,
     /// No more steps after this one (with the choices as they are now): the next press installs.
     pub is_last: bool,
@@ -646,6 +649,17 @@ impl Session {
             .find(|&i| self.config.steps[i].visible.as_ref().is_none_or(|c| met(c, &flags, &self.env)))
     }
 
+    /// The steps still to come after step si, with the choices as they are now.
+    fn steps_after(&self, si: usize) -> usize {
+        let mut n = 0;
+        let mut at = si + 1;
+        while let Some(i) = self.next_visible(at) {
+            n += 1;
+            at = i + 1;
+        }
+        n
+    }
+
     fn kind_of(&self, si: usize, gi: usize, pi: usize, flags: &HashMap<String, String>) -> PluginType {
         self.config.steps[si].groups[gi].plugins[pi].kind.resolve(flags, &self.env)
     }
@@ -738,6 +752,7 @@ impl Session {
             index: si,
             name: step.name.clone(),
             number: self.history.len() + 1,
+            total: self.history.len() + 1 + self.steps_after(si),
             groups,
             is_last: self.next_visible(si + 1).is_none(),
             can_go_back: !self.history.is_empty(),
@@ -982,7 +997,7 @@ impl Session {
     }
 
     /// The current step as JSON for the interface:
-    /// {"module":..,"step":{"index","name","number","isLast","canGoBack","groups":[{"name","kind","hint","options":
+    /// {"module":..,"step":{"index","name","number","total","isLast","canGoBack","groups":[{"name","kind","hint","options":
     /// [{"name","description","image","type","selected","canChange"}]}]} or null,"warning":..}
     pub fn to_json(&self) -> String {
         let opt = |s: &Option<String>| s.as_deref().map(quote).unwrap_or_else(|| "null".into());
@@ -1018,10 +1033,11 @@ impl Session {
                     })
                     .collect();
                 format!(
-                    "{{\"index\":{},\"name\":{},\"number\":{},\"isLast\":{},\"canGoBack\":{},\"groups\":[{}]}}",
+                    "{{\"index\":{},\"name\":{},\"number\":{},\"total\":{},\"isLast\":{},\"canGoBack\":{},\"groups\":[{}]}}",
                     v.index,
                     quote(&v.name),
                     v.number,
+                    v.total,
                     v.is_last,
                     v.can_go_back,
                     groups.join(",")

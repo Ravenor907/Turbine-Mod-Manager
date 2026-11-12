@@ -2,7 +2,8 @@ import QtQuick
 
 // The quick wheel (View): a pie of eight wedges in fixed places, the same on every screen. The left stick (or a
 // pointer over it) picks a wedge by its angle; the D-pad still works (Up then Right is Up-right). The picked wedge
-// fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name, dimmed.
+// fills with the accent and the middle says what it does. A wedge with nothing to do here keeps its name in grey,
+// and picked it fills grey too (never the accent).
 // The middle is neutral: with nothing picked (the stick at rest) it says Close and how to choose.
 // While it is open everything behind it is turned off (Main.qml's topLayer), and this backdrop takes every press,
 // scroll and hover; a tap outside the pie or in the middle closes it.
@@ -96,14 +97,14 @@ Overlay {
                     g.closePath()
                     g.fillStyle = String(qw.ui.c.raised)
                     g.fill()
-                    if (i === sel) { g.globalAlpha = selPart; g.fillStyle = String(qw.ui.c.accent); g.fill(); g.globalAlpha = 1 }
+                    if (i === sel) { g.globalAlpha = selPart; g.fillStyle = String(okList[i] ? qw.ui.c.accent : qw.ui.c.line); g.fill(); g.globalAlpha = 1 }
                     g.lineWidth = Math.max(2, qw.ui.px(4))
                     g.strokeStyle = String(qw.ui.c.ground)
                     g.stroke()
                 }
             }
         }
-        // The wedges' names (never empty: a wedge with nothing to do here keeps its name, dimmed).
+        // The wedges' names (never empty: a wedge with nothing to do here keeps its name, in grey).
         Repeater {
             model: qw.slots
             Text {
@@ -121,8 +122,7 @@ Overlay {
                 maximumLineCount: 2
                 elide: Text.ElideRight
                 text: modelData.label || ""
-                opacity: modelData.ok ? 1 : 0.45
-                color: foc ? qw.ui.c.onAccent : qw.ui.c.text
+                color: !modelData.ok ? qw.ui.c.muted : foc ? qw.ui.c.onAccent : qw.ui.c.text
                 font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(17); font.weight: Font.DemiBold
                 Accessible.role: Accessible.MenuItem
                 Accessible.name: (modelData.label || "") + (modelData.ok ? "" : ", not available here")
@@ -134,8 +134,8 @@ Overlay {
             anchors.centerIn: parent
             width: pie.inner * 2 - qw.ui.px(8); height: width; radius: width / 2
             color: qw.ui.c.panel
-            border.color: qw.ui.c.accent; border.width: Math.max(1, qw.ui.px(2))
             readonly property var s: qw.focusIndex >= 0 ? qw.slots[qw.focusIndex] : null
+            border.color: s && !s.ok ? qw.ui.c.line : qw.ui.c.accent; border.width: Math.max(1, qw.ui.px(2))
             Column {
                 anchors.centerIn: parent
                 width: parent.width - qw.ui.px(16)
@@ -143,7 +143,7 @@ Overlay {
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                     text: middle.s ? middle.s.label : "Close"
-                    color: qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(middle.s ? 16 : 19); font.bold: true
+                    color: middle.s && !middle.s.ok ? qw.ui.c.soft : qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(middle.s ? 16 : 19); font.bold: true
                 }
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight

@@ -95,7 +95,7 @@ fn web_addresses_come_out_of_the_words() {
     assert_eq!(at(0, "title"), "Needs a mod that isn't on");
     assert_eq!(at(0, "detail"), "Needs X. Turbine shows where it comes from. Then play.");
     assert_eq!(at(0, "url"), "https://www.nexusmods.com/skyrim/mods/1");
-    assert_eq!(at(1, "detail"), "See the page for more, and");
+    assert_eq!(at(1, "detail"), "See the page for more,\nand");
     assert_eq!(at(1, "url"), "https://example.com/a,b");
     assert_eq!(at(2, "detail"), "Get it from");
     assert_eq!(at(2, "url"), "");

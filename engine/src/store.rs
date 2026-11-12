@@ -2885,7 +2885,7 @@ impl Store {
         let setup_id = if setup_id.is_empty() {
             self.restore_target()
                 .map(|s| s.id.clone())
-                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "The game hasn't been played with mods yet, so there's no working setup to go back to."))?
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "The game hasn't been played with mods yet, so there's no working setup to restore."))?
         } else {
             setup_id.to_string()
         };
