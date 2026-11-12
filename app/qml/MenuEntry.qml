@@ -7,8 +7,9 @@ Rectangle {
     required property var ui
     property string label: ""
     property string detail: ""
-    property string icon: ""              // a name from icons below, or SVG path data on a 24 x 24 grid
-    readonly property string iconData: icon ? (icons[icon] || icon) : ""
+    property string icon: ""              // a name from the kit's icons, or SVG path data on a 24 x 24 grid
+    // The row's icon: the one its words call for (kit.iconFor), else the one it was given.
+    readonly property string iconData: ui.iconPath(ui.iconFor(icon, label))
     property bool available: true
     property bool danger: false
     property bool more: false
@@ -17,20 +18,6 @@ Rectangle {
     property bool iconShown: true
     signal clicked()
     signal held(bool down)                // a finger or the pointer pressed down on it (true) and let go (false)
-
-    readonly property var icons: ({
-        update: "M12 4v11M7 10l5 5 5-5M5 20h14",
-        power: "M12 3v8M6.5 6.5a8 8 0 1 0 11 0",
-        overlap: "M5 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M11 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
-        files: "M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z M14 3v5h5",
-        move: "M8 4v16M4 8l4-4 4 4M16 20V4M12 16l4 4 4-4",
-        remove: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
-        play: "M7 4l13 8-13 8z",
-        back: "M15 5l-7 7 7 7",
-        restore: "M4 4v6h6 M5 15a8 8 0 1 0 2-8.5L4 10",
-        profile: "M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M4 21c1-4 4-6 8-6s7 2 8 6",
-        info: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 11v6 M12 7.5v0.5"
-    })
 
     implicitHeight: Math.max(ui.px(48), entryText.implicitHeight + ui.px(14))
     radius: ui.px(6)

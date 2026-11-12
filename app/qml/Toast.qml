@@ -44,17 +44,30 @@ Rectangle {
 
     Timer { id: hideTimer; interval: Math.max(1, root.timeout); onTriggered: root.hide() }
 
-    readonly property real maxWidth: parent ? parent.width - ui.px(40) : ui.px(600)
-    x: parent ? (parent.width - width) / 2 : 0
+    // The part of the window it is centred in (Main.qml leaves out the rail, the details panel and a side sheet).
+    property real areaLeft: 0
+    property real areaRight: parent ? parent.width : 0
+    readonly property real maxWidth: Math.max(ui.px(200), areaRight - areaLeft - ui.px(32))
+    x: Math.round(areaLeft + (areaRight - areaLeft - width) / 2)
     y: parent ? parent.height - height - bottomMargin : 0
     z: 50
-    width: Math.min(maxWidth, toastRow.implicitWidth + ui.px(24))
+    width: Math.min(maxWidth, toastRow.implicitWidth + ui.px(28))
     // Wraps to three lines rather than cutting a message off.
     height: Math.max(ui.px(46), toastRow.implicitHeight + ui.px(20))
-    radius: ui.px(6)
-    color: Qt.tint(ui.c.raised, Qt.rgba(ui.c.accent.r, ui.c.accent.g, ui.c.accent.b, 0.06))
-    border.width: Math.max(1, ui.px(1.5))
-    border.color: ui.c.accentLo
+    radius: ui.radiusSmall
+    border.width: Math.max(1, ui.px(1))
+    border.color: ui.c.line
+    // The kind's color down the left edge, part of the fill so the rounded corners clip it.
+    readonly property color tone: kind === "done" ? ui.c.ok : kind === "problem" ? ui.c.warn : ui.c.accent
+    readonly property color fill: Qt.tint(ui.c.raised, Qt.rgba(ui.c.accent.r, ui.c.accent.g, ui.c.accent.b, 0.05))
+    readonly property real stripe: width > 0 ? Math.max(3, ui.px(4)) / width : 0
+    gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0; color: root.tone }
+        GradientStop { position: root.stripe; color: root.tone }
+        GradientStop { position: Math.min(1, root.stripe + 0.0005); color: root.fill }
+        GradientStop { position: 1; color: root.fill }
+    }
     opacity: shown ? 1 : 0
     visible: opacity > 0
     // It fades in and out, and at Full slides up a little as it comes and back down as it goes.
@@ -82,14 +95,14 @@ Rectangle {
     Row {
         id: toastRow
         anchors.verticalCenter: parent.verticalCenter
-        x: root.ui.px(16)
-        spacing: root.ui.px(14)
+        x: root.ui.px(18)
+        spacing: root.ui.px(12)
 
         Rectangle {
             id: mark
             anchors.verticalCenter: parent.verticalCenter
             width: root.ui.px(22); height: width; radius: width / 2
-            readonly property color tone: root.kind === "done" ? root.ui.c.ok : root.kind === "problem" ? root.ui.c.warn : root.ui.c.accentHi
+            readonly property color tone: root.kind === "done" ? root.ui.c.ok : root.kind === "problem" ? root.ui.c.warn : root.ui.c.accentText
             color: "transparent"
             border.color: tone
             border.width: Math.max(1, root.ui.px(1.5))

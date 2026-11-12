@@ -12,13 +12,13 @@ Rectangle {
     // leaves it out, so the words beside it close up.
     property bool off: false
     readonly property bool gone: win.mouseLegend || off
-    implicitWidth: gone ? 0 : Math.max(win.px(24), keyText.implicitWidth + win.px(12))
+    // Whole pixels, so the outline never falls between two and loses its right edge.
+    implicitWidth: gone ? 0 : Math.ceil(Math.max(win.px(24), keyText.implicitWidth + win.px(12)))
     implicitHeight: gone ? 0 : win.px(24)
-    clip: true
     radius: square ? win.px(5) : height / 2
-    color: win.colors.raised
+    color: gone ? "transparent" : win.colors.raised
     border.color: win.colors.accentLo
-    border.width: Math.max(1, win.px(1))
+    border.width: gone ? 0 : Math.max(1, win.px(1))
     Text {
         id: keyText
         anchors.centerIn: parent

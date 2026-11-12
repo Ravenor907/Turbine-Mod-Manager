@@ -59,19 +59,16 @@ Overlay {
         else closeClicked()
     }
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
-    Rectangle {
+    Scrim { ui: al.ui }
+    Card {
+        ui: al.ui
         id: box
         anchors.centerIn: parent
-        anchors.verticalCenterOffset: -al.ui.px(20)
         width: Math.min(parent.width - al.ui.px(40), al.ui.px(1100))
-        height: parent.height - al.ui.px(110)
-        radius: al.ui.px(10)
-        color: al.ui.c.panel
-        border.color: al.ui.c.line
+        // The sheet layer already ends above the bottom bar.
+        height: parent.height - al.ui.px(32)
         clip: true
         CardGuard {}
-        Rectangle { width: parent.width; height: al.ui.px(3); color: al.ui.c.accent; radius: al.ui.px(2) }
         Text {
             id: head
             x: al.ui.px(22); y: al.ui.px(18)
@@ -159,7 +156,7 @@ Overlay {
                             visible: k !== ""
                             width: al.ui.px(24); height: width; radius: width / 2; color: al.ui.c.raised; border.color: al.ui.c.accentLo
                             anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: cap.k.toUpperCase(); color: al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(13); font.bold: true }
+                            Text { anchors.centerIn: parent; text: al.ui.glyph(cap.k); color: al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(13); font.bold: true }
                         }
                         Text { text: btn.modelData.label; color: btn.foc ? al.ui.c.accentText : al.ui.c.text; font.family: al.ui.bodyFont; font.pixelSize: al.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                     }

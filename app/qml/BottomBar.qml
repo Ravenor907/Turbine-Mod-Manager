@@ -2,10 +2,14 @@ import QtQuick
 import QtQuick.Shapes
 import Turbine
 
-// The bottom bar (the only bar on the game screen). Left to right: the game's name with the tab and its status
-// under it (a warning there is tappable), LB RB and the tabs, then the legend (Main.qml's legendHints, the ones that
-// fit), the quick wheel's button, and Start's hint and Play on the right. Elsewhere it is the legend and View alone.
-// Scrolling down slides it away with the rail. Main.qml sets its left margin (the rail's width).
+// The bottom bar (the only bar on the game screen). One structure on every screen, left to right: the game's name
+// (or the page's) with a short status under it (a coloured dot when something needs a look; tappable then), LB RB and
+// the tabs ("My mods / Get mods / Load order", the one on screen bold), the legend (Main.qml's legendHints), then
+// View's Wheel, Start's Settings and Play on the right. Elsewhere it is the legend and View alone.
+// What shows when room is short goes by one priority order (fitted below): A and B, the LB RB caps, View's and
+// Start's caps with their short words, and Play always show; then the game's name and status, X, Y, the tab names,
+// the fifth hint, and last the words for holding Start. Scrolling down slides it away with the rail.
+// Main.qml sets its left margin (the rail's width).
 //
 // app (required): Main.qml's window. kit (required): Main.qml's kit (colors and motion, see COMPONENTS.md).
 Rectangle {
@@ -14,6 +18,24 @@ Rectangle {
     required property var kit
     readonly property var c: kit.c
     readonly property Motion mo: kit.motion
+    // The bar's own scale: it grows with the Interface size up to 115%, so that at 150% on a Steam Deck A, B, View,
+    // Start and Play still fit beside each other. Its hints, caps and words take sizes from bw instead of the window.
+    readonly property real bs: Math.min(app.s, app.fit * 1.15)
+    QtObject {
+        id: bw
+        readonly property var colors: app.colors
+        readonly property string bodyFont: app.bodyFont
+        readonly property bool mouseLegend: app.mouseLegend
+        function px(v) { return Math.round(v * legend.bs) }
+        function fpx(v) { return app.fpxAt(v, legend.bs) }
+        function tpx(v) { return Math.max(app.touchFloor, Math.round(v * legend.bs)) }
+        function glyph(k) { return app.glyph(k) }
+        function gate(layer, why) { return app.gate(layer, why) }
+        function note(kind, words) { app.note(kind, words) }
+        function act(b) { app.act(b) }
+        function r3Click() { app.r3Click() }
+        function hover(item, on) { app.hover(item, on) }
+    }
     // Main.qml (the focus ring) and the build's checks reach these.
     property alias barLb: barLb
     property alias barRb: barRb
@@ -25,6 +47,8 @@ Rectangle {
     // One hint of the legend from its entry in legendHints: [key, words, "hold", second key, its words].
     component LegendHint: Hint {
         required property var modelData
+        // Caps of every shape on one line with the round ones.
+        anchors.verticalCenter: parent ? parent.verticalCenter : undefined
         inBar: true
         k: modelData[0]
         label: modelData[1]
@@ -35,12 +59,12 @@ Rectangle {
     // Shown unless the content went full screen (a sheet or the wheel always brings it back).
     readonly property bool shown: visible && !(app.barsHidden && app.sheet === "" && !app.wheelOpen)
     anchors.bottom: parent.bottom
-    anchors.bottomMargin: shown ? 0 : -height - app.px(2)
+    anchors.bottomMargin: shown ? 0 : -height - bw.px(2)
     Behavior on anchors.bottomMargin { enabled: mo.moves; NumberAnimation { duration: mo.moveBase; easing.type: mo.enter } }
     anchors.left: parent.left
     anchors.right: parent.right
     // A taller bar with room between its groups.
-    height: Math.max(app.px(60), app.tpx(30) + app.px(10), barGameCol.implicitHeight + app.px(12))
+    height: Math.max(bw.px(60), bw.tpx(30) + bw.px(10), barGameCol.implicitHeight + bw.px(12))
     color: c.panel
     // Over the quick wheel's backdrop too (the wheel is z 70), so it never dims.
     z: app.wheelOpen ? 80 : 40
@@ -61,16 +85,17 @@ Rectangle {
         onReleased: app.coverEnd()
         onCanceled: app.coverEnd()
     }
-    Rectangle { width: parent.width; height: Math.max(1, app.px(1)); color: c.line }
-    readonly property real gap: app.px(18)
-    readonly property real edge: app.px(16)
+    Rectangle { width: parent.width; height: Math.max(1, bw.px(1)); color: c.line }
+    readonly property real gap: bw.px(16)
+    readonly property real edge: bw.px(16)
+    readonly property real wordSize: bw.fpx(15)
     // Touch: a sideways swipe on the bar is LB or RB.
     DragHandler {
         enabled: app.barGame && app.sheet === "" && !app.wheelOpen
         target: null
         xAxis.enabled: true; yAxis.enabled: false
         acceptedDevices: PointerDevice.TouchScreen
-        onActiveChanged: if (!active && Math.abs(activeTranslation.x) > app.px(60)) { app.note("touch", "Swipe on the bottom bar"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
+        onActiveChanged: if (!active && Math.abs(activeTranslation.x) > bw.px(60)) { app.note("touch", "Swipe on the bottom bar"); app.switchTab(activeTranslation.x < 0 ? 1 : -1) }
     }
     // ---- Left: the game (its whole name, wrapping to two lines before it is ever cut) and the tabs.
     Row {
@@ -80,15 +105,17 @@ Rectangle {
         spacing: legend.gap
         Column {
             id: barGameCol
-            visible: app.barGame || app.barPlace !== ""
+            visible: legend.nameAsked && legend.nameFits
             // Measured from the words themselves (never from the Texts' own sizes, which follow this width).
             TextMetrics { id: barNameMetrics; font: barName.font; text: barName.text }
-            TextMetrics { id: barSubMetrics; font: barSub.font; text: barSub.text }
-            // The name gets up to 34% of the bar; past that it wraps onto a second line.
-            readonly property real most: Math.max(app.px(150), legend.width * 0.34)
-            readonly property real want: Math.min(most, Math.ceil(Math.max(barNameMetrics.advanceWidth, Math.min(barSubMetrics.advanceWidth, most))) + app.px(2))
-            width: visible ? want : 0
+            // The name gets up to 30% of the bar; past that it wraps onto a second line.
+            readonly property real most: Math.max(bw.px(130), legend.width * 0.3)
+            readonly property real want: Math.min(most, Math.ceil(barNameMetrics.advanceWidth) + bw.px(2))
+            // The status line: a few words, as wide as the name or a little wider.
+            readonly property real subWant: legend.nameColW(legend.statusWide)
+            width: visible ? Math.max(want, barSub.visible ? subWant : 0) : 0
             anchors.verticalCenter: parent.verticalCenter
+            spacing: bw.px(1)
             Text {
                 id: barName
                 width: barGameCol.want
@@ -96,65 +123,71 @@ Rectangle {
                 maximumLineCount: 2
                 elide: Text.ElideRight
                 text: app.barPlace !== "" ? app.barPlace : app.game ? app.shortGame(app.game.name) : ""
-                color: c.accentText; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true
+                color: c.accentText; font.family: app.bodyFont; font.pixelSize: bw.fpx(15); font.bold: true
             }
-            Text {
-                id: barSub
-                width: barGameCol.want; elide: Text.ElideRight
-                // On a mod page: where it is ("Get mods > SkyUI", "Mod 3 of 30"); Settings: the section.
-                text: app.page === "settings" ? app.sec : app.page === "place" ? (app.placeData && app.placeData.pending ? app.placeData.pending.name : "")
-                      : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "") + app.pageResultWords : app.barStatus
-                color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.soft
-                font.family: app.bodyFont; font.pixelSize: app.fpx(12)
-                font.underline: app.barTappable && (app.statusNow.level === "warn" || app.statusNow.level === "stop")
+            // The status: plain words, and a dot in its color when it needs a look (a tap says why).
+            Row {
+                id: barSubRow
+                visible: legend.statusFits && legend.subFull !== ""
+                spacing: bw.px(6)
+                readonly property bool flagged: app.page === "game" && !app.modPage && app.barTappable
+                Rectangle {
+                    visible: barSubRow.flagged
+                    width: bw.px(7); height: width; radius: width / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: app.statusNow.level === "stop" ? c.stop : app.statusNow.level === "warn" ? c.warn : c.accentHi
+                }
+                Text {
+                    id: barSub
+                    readonly property real most: barGameCol.subWant - (barSubRow.flagged ? bw.px(13) : 0)
+                    width: Math.min(implicitWidth, most)
+                    elide: Text.ElideRight
+                    // As many of the status's parts ("1 mod on · Mods offline") as fit whole.
+                    text: legend.statusFit(legend.subFull, most)
+                    color: c.soft
+                    font.family: app.bodyFont; font.pixelSize: bw.fpx(13)
+                }
             }
             Accessible.role: app.barTappable ? Accessible.Button : Accessible.StaticText
             Accessible.name: barName.text + ", " + app.barStatus
             HoverHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onHoveredChanged: app.hover(parent, hovered) }
             TapHandler { enabled: app.barTappable && app.sheet === "" && !app.wheelOpen; onTapped: app.statusTap() }
         }
-        Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
-        // LB RB and the tabs (the one on screen brighter); a tap on a name opens that tab.
+        Rectangle { visible: barGameCol.visible && (barTabs.visible || legend.hintsFit > 0); width: Math.max(1, bw.px(1)); height: bw.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+        // LB RB and the tabs (the one on screen bold); a tap on a name opens that tab.
         Row {
             id: barTabs
             // On a mod page LB and RB step through the results (the line on the left says which).
             visible: app.barGame && !app.modPage
             anchors.verticalCenter: parent.verticalCenter
             // After the mouse the pages are buttons by name (My mods, Get mods, Load order), no caps.
-            spacing: app.mouseLegend ? app.px(22) : app.px(6)
-            leftPadding: app.mouseLegend ? app.px(10) : 0
+            spacing: app.mouseLegend ? bw.px(22) : bw.px(6)
+            leftPadding: app.mouseLegend ? bw.px(10) : 0
             rightPadding: leftPadding
             // Dimmed where they do nothing (one tab, or a sheet open).
-            Key { id: barLb; win: app; k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-            Key { id: barRb; win: app; k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
-            // No room for every name: only the tab LB or RB goes to (and nothing when even that doesn't fit).
-            Text {
-                visible: !legend.tabWordsFit && legend.tabShortFits && app.barTarget >= 0 && !app.mouseLegend
-                text: app.barTarget >= 0 ? (app.barTarget < app.tab ? "back to " : "") + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : ""
-                color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(14)
-                anchors.verticalCenter: parent.verticalCenter
-                TapHandler { enabled: app.sheet === "" && !app.wheelOpen; onTapped: { app.note("touch", "Tab tapped: " + app.tabs[app.barTarget]); app.modPage = false; app.tab = app.barTarget } }
-            }
+            Key { id: barLb; win: bw; k: "lb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab === 0 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+            Key { id: barRb; win: bw; k: "rb"; opacity: app.tabs.length < 2 || app.sheet !== "" || app.tab >= app.tabs.length - 1 ? 0.35 : 1; anchors.verticalCenter: parent.verticalCenter }
+            Item { visible: legend.tabWordsFit && !app.mouseLegend; width: bw.px(4); height: 1 }
             Repeater {
                 model: legend.tabWordsFit || app.mouseLegend ? app.tabs : []
                 Row {
                     required property int index
                     required property string modelData
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: app.px(6)
-                    Text { visible: parent.index > 0 && !app.mouseLegend; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
+                    spacing: bw.px(6)
+                    Text { visible: parent.index > 0 && !app.mouseLegend; text: "/"; color: c.muted; font.family: app.bodyFont; font.pixelSize: bw.fpx(14); anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         Rectangle {
                             visible: app.mouseLegend
                             z: -1
                             anchors.centerIn: parent
-                            width: parent.width + app.px(20); height: Math.max(app.px(32), app.tpx(26)); radius: app.px(6)
+                            width: parent.width + bw.px(20); height: Math.max(bw.px(32), bw.tpx(26)); radius: bw.px(6)
                             color: app.tab === parent.parent.index ? c.focusFill : c.raised
-                            border.color: app.tab === parent.parent.index ? c.accent : c.accentLo; border.width: Math.max(1, app.px(1))
+                            border.color: app.tab === parent.parent.index ? c.accent : c.accentLo; border.width: Math.max(1, bw.px(1))
                         }
                         text: parent.modelData.replace(/ \(\d+\)$/, "")
                         color: app.tab === parent.index ? c.text : c.muted
-                        font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: app.tab === parent.index
+                        font.family: app.bodyFont; font.pixelSize: bw.fpx(14); font.bold: app.tab === parent.index
                         anchors.verticalCenter: parent.verticalCenter
                         Accessible.role: Accessible.PageTab
                         Accessible.name: text + (app.tab === parent.index ? ", selected" : "") + ", " + (parent.index + 1) + " of " + app.tabs.length
@@ -164,35 +197,46 @@ Rectangle {
                 }
             }
         }
-        Rectangle { visible: app.barGame; width: Math.max(1, app.px(1)); height: app.px(34); color: c.line; anchors.verticalCenter: parent.verticalCenter }
+        Rectangle { visible: barTabs.visible && legend.hintsFit > 0; width: Math.max(1, bw.px(1)); height: bw.px(30); color: c.line; anchors.verticalCenter: parent.verticalCenter }
     }
-    // ---- Right: Play (and Seamless Co-op where it is on), always whole; the wheel's button just before them.
+    // ---- Right: View's Wheel, Start's Settings and Play (and Seamless Co-op where it is on), always whole.
     Row {
         id: playGroup
         anchors.right: parent.right
         anchors.rightMargin: legend.edge
         anchors.verticalCenter: parent.verticalCenter
-        spacing: app.px(10)
+        spacing: legend.gap
+        // The quick wheel's button: View's cap and Wheel (a tap opens it too).
+        Item {
+            id: wheelBtn
+            visible: app.sheet === "" || app.wheelOpen
+            anchors.verticalCenter: parent.verticalCenter
+            width: wheelRow.implicitWidth; height: Math.max(bw.tpx(44), wheelRow.implicitHeight)
+            Row {
+                id: wheelRow
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: bw.px(6)
+                Key { id: wheelKey; win: bw; k: "view"; anchors.verticalCenter: parent.verticalCenter }
+                Label { win: bw; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: legend.wordSize; color: c.soft; anchors.verticalCenter: parent.verticalCenter }
+            }
+            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
+            TapHandler { onTapped: app.wheelPress() }
+        }
         // What Start does: a tap is Settings, a 3 second hold plays (or shows the Play choice). A tap on
-        // it is a tap of Start. The words go when the bar has no room for them; the cap stays.
-        Rectangle {
+        // it is a tap of Start. The hold's words show only when the bar has room for them.
+        Item {
             id: startHint
             visible: app.barGame && app.sheet === "" && !app.wheelOpen
             anchors.verticalCenter: parent.verticalCenter
-            width: startHintRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
-            color: c.raised
+            width: startHintRow.implicitWidth; height: Math.max(bw.tpx(44), startHintRow.implicitHeight)
             Row {
                 id: startHintRow
-                anchors.centerIn: parent
-                spacing: app.px(6)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: bw.px(6)
                 // With the keyboard Settings is Esc, on a game's first page (elsewhere Esc goes back, so no cap).
-                Key { id: startHintKey; win: app; k: app.keysLegend ? "b" : "start"; off: app.keysLegend && !app.escTop; anchors.verticalCenter: parent.verticalCenter }
-                Column {
-                    visible: legend.startWords || startHintKey.gone
-                    anchors.verticalCenter: parent.verticalCenter
-                    Text { text: "Settings"; color: c.soft; font.family: app.bodyFont; font.pixelSize: app.fpx(13) }
-                    Text { visible: !app.mouseLegend; text: app.startHoldWords; color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(12) }
-                }
+                Key { id: startHintKey; win: bw; k: app.keysLegend ? "b" : "start"; off: app.keysLegend && !app.escTop; anchors.verticalCenter: parent.verticalCenter }
+                Label { text: "Settings"; win: bw; color: c.soft; font.pixelSize: legend.wordSize; anchors.verticalCenter: parent.verticalCenter }
+                Label { visible: legend.holdFits && !app.mouseLegend; win: bw; text: "· " + app.startHoldWords; color: c.muted; font.pixelSize: bw.fpx(13); anchors.verticalCenter: parent.verticalCenter }
             }
             Accessible.role: Accessible.Button
             Accessible.name: "Settings. Hold Start for 3 seconds: " + (app.startHoldPlays ? "Play" : "Play choice")
@@ -203,12 +247,20 @@ Rectangle {
             id: playBtn
             // A sheet whose own Start button is in the legend ("START Save"): Play steps aside.
             visible: app.barGame && !(app.sheet !== "" && app.legendHints.some(h => h[0] === "start"))
-            width: playRow.implicitWidth + app.px(28); height: Math.max(app.px(40), app.tpx(30)); radius: app.px(6)
+            anchors.verticalCenter: parent.verticalCenter
+            width: playRow.implicitWidth + bw.px(28); height: Math.max(bw.px(40), bw.tpx(30)); radius: kit.radiusSmall
             // Dimmed while a sheet or the wheel is open.
             opacity: Turbine.busy || app.sheet !== "" || app.wheelOpen ? 0.55 : 1
             // The focus ring when Play has the focus (a mod just arrived).
-            border.color: c.text
-            border.width: app.zone === "play" && app.sheet === "" && !app.wheelOpen ? app.px(3) : 0
+            Rectangle {
+                visible: app.zone === "play" && app.sheet === "" && !app.wheelOpen
+                anchors.fill: parent
+                anchors.margins: -bw.px(4)
+                radius: parent.radius + bw.px(4)
+                color: "transparent"
+                border.width: kit.ringWidth
+                border.color: kit.ring
+            }
             gradient: Gradient {
                 GradientStop { position: 0; color: c.accentHi }
                 GradientStop { position: 1; color: c.accent }
@@ -216,9 +268,9 @@ Rectangle {
             Row {
                 id: playRow
                 anchors.centerIn: parent
-                spacing: app.px(8)
+                spacing: bw.px(8)
                 // Play waits for changes being saved: it says so.
-                Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: app.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: (app.savingNow ? "Play (saving...)" : app.modHold && app.mods.some(m => m.enabled) ? "Play without mods" : "Play") + (app.seamlessIn && !app.savingNow ? (app.lastPlayChoice === "coop" ? " · Co-op" : " · Solo") : ""); color: app.onFill(c.accent); font.family: app.bodyFont; font.pixelSize: bw.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
             }
             // Start held: a brass ring fills here over 3 seconds (shown once the press is clearly a hold).
             Rectangle {
@@ -226,19 +278,19 @@ Rectangle {
                 readonly property bool shown: app.startHeld > 0.1
                 visible: shown
                 anchors.centerIn: parent
-                width: parent.height - app.px(6); height: width; radius: width / 2
+                width: parent.height - bw.px(6); height: width; radius: width / 2
                 color: c.ground
                 Shape {
                     anchors.fill: parent
                     preferredRendererType: Shape.CurveRenderer
                     ShapePath {
                         strokeColor: c.accentHi
-                        strokeWidth: Math.max(2, app.px(4))
+                        strokeWidth: Math.max(2, bw.px(4))
                         fillColor: "transparent"
                         capStyle: ShapePath.RoundCap
                         PathAngleArc {
                             centerX: startRing.width / 2; centerY: startRing.height / 2
-                            radiusX: startRing.width / 2 - app.px(5); radiusY: radiusX
+                            radiusX: startRing.width / 2 - bw.px(5); radiusY: radiusX
                             startAngle: -90
                             sweepAngle: 360 * app.startRingPart
                         }
@@ -253,31 +305,13 @@ Rectangle {
                          onLongPressed: { if (!app.gate(3, "Play")) return; app.note("touch", "Play held: Play options"); app.openPlayOptions() } }
         }
     }
-    // The quick wheel's button: View's cap (a tap opens it too).
-    Rectangle {
-        id: wheelBtn
-        anchors.right: playGroup.left
-        anchors.rightMargin: playGroup.width > 0 ? legend.gap : 0
-        anchors.verticalCenter: parent.verticalCenter
-        width: wheelRow.implicitWidth + app.px(16); height: Math.max(app.px(34), app.tpx(26)); radius: app.px(6)
-        color: app.wheelOpen ? c.focusFill : c.raised
-        visible: app.sheet === "" || app.wheelOpen
-        Row {
-            id: wheelRow
-            anchors.centerIn: parent
-            spacing: app.px(6)
-            Key { win: app; k: "view"; anchors.verticalCenter: parent.verticalCenter }
-            Label { win: app; visible: legend.wheelWord || app.wheelOpen || app.mouseLegend; text: app.wheelOpen ? "Close" : "Wheel"; font.pixelSize: app.fpx(14); color: c.soft; anchors.verticalCenter: parent.verticalCenter }
-        }
-        HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-        TapHandler { onTapped: app.wheelPress() }
-    }
-    // ---- Middle: the hints, at most 4 (3 beside the wheel's button), in priority order (A, B, X, Y, then the
-    // rest); the ones that don't fit are left out, never squeezed under Play or past the edge.
+    // ---- Middle: the hints in priority order (A, B, X, Y, then one more); the ones that don't fit are left out,
+    // never squeezed under Play or past the edge.
     Item {
         id: hintsBox
-        readonly property real rightEdge: wheelBtn.visible ? wheelBtn.x - legend.gap : playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
-        x: barRow.x + barRow.width
+        readonly property real rightEdge: playGroup.width > 0 ? playGroup.x - legend.gap : legend.width - legend.edge
+        // A fixed gap after the name and the tabs.
+        x: barRow.x + barRow.width + (barRow.width > 0 ? legend.gap : 0)
         width: Math.max(0, rightEdge - x)
         height: parent.height
         clip: true
@@ -289,10 +323,10 @@ Rectangle {
             onSaidChanged: if (mo.on && legend.visible) hintsFade.restart()
             NumberAnimation { id: hintsFade; target: legendRow; properties: "opacity"; from: 0.25; to: 1; duration: mo.base; easing.type: mo.enter }
             anchors.verticalCenter: parent.verticalCenter
-            spacing: app.px(16)
+            spacing: bw.px(16)
             Repeater {
                 model: app.legendHints.slice(0, legend.hintsFit)
-                LegendHint { win: app }
+                LegendHint { win: bw }
             }
         }
     }
@@ -308,44 +342,92 @@ Rectangle {
             model: app.legendHints
             onItemAdded: legend.measureTick++
             onItemRemoved: legend.measureTick++
-            LegendHint { win: app }
+            LegendHint { win: bw }
         }
     }
-    readonly property int hintsMost: wheelBtn.visible ? 3 : 4
     property int measureTick: 0
     function hintsWidth(n) {
         let w = measureTick * 0
         for (let i = 0; i < Math.min(n, measureRep.count); i++) { const it = measureRep.itemAt(i); if (it) w += it.implicitWidth + (i > 0 ? legendRow.spacing : 0) }
         return w
     }
-    readonly property int hintsFit: {
-        const most = Math.min(app.legendHints.length, hintsMost, measureRep.count)
-        let n = 0
-        for (let i = 1; i <= most; i++) if (hintsWidth(i) <= hintsBox.width) n = i
-        return n
+    // ---- What fits, in priority order. Everything is measured from the words and caps, never from the items' own
+    // sizes (which follow these answers).
+    TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") }
+    TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: legend.wordSize; text: app.wheelOpen ? "Close" : "Wheel" }
+    TextMetrics { id: settingsMetrics; font.family: app.bodyFont; font.pixelSize: legend.wordSize; text: "Settings" }
+    TextMetrics { id: holdMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(13); text: "· " + app.startHoldWords }
+    TextMetrics { id: nameMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(15); font.bold: true; text: barName.text }
+    readonly property bool tabsShown: app.barGame && !app.modPage
+    readonly property bool nameAsked: app.barGame || app.barPlace !== ""
+    readonly property bool wheelShown: app.sheet === "" || app.wheelOpen
+    readonly property bool startShown: app.barGame && app.sheet === "" && !app.wheelOpen
+    // The status in full. On a mod page: where it is ("Get mods > SkyUI", "Mod 3 of 30"); Settings: the section.
+    readonly property string subFull: app.page === "settings" ? app.sec : app.page === "place" ? (app.placeData && app.placeData.pending ? app.placeData.pending.name : "")
+                                      : app.modPage ? "Get mods > " + (app.detailsData && app.detailsData.name ? app.detailsData.name : app.detailsItem ? app.detailsItem.name : "") + app.pageResultWords : app.barStatus
+    TextMetrics { id: statusMetrics; font.family: app.bodyFont; font.pixelSize: bw.fpx(13); text: legend.subFull }
+    FontMetrics { id: statusFm; font.family: app.bodyFont; font.pixelSize: bw.fpx(13) }
+    // The status cut to whole parts that fit in w (the first part is kept, cut short if it has to be).
+    function statusFit(full, w) {
+        if (statusFm.advanceWidth(full) <= w) return full
+        const parts = full.split(" · ")
+        let out = parts[0]
+        for (let i = 1; i < parts.length; i++) { const t = out + " · " + parts[i]; if (statusFm.advanceWidth(t) > w) break; out = t }
+        return out
     }
-    // The tab names show when they fit beside two hints; otherwise LB and RB with the tab they go to; otherwise
-    // LB and RB alone (the status line names the tab).
-    TextMetrics { id: tabWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); font.bold: true; text: app.tabs.map(t => t.replace(/ \(\d+\)$/, "")).join(" / ") + "  " }
-    TextMetrics { id: wheelMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: "Wheel" }
-    TextMetrics { id: tabShortMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(14); text: app.barTarget >= 0 ? "back to " + app.tabs[app.barTarget].replace(/ \(\d+\)$/, "") : "" }
+    // The name's column: the name, and the status a few words wide (wide: all of the status, up to 30% of the bar).
+    function nameColW(wide) {
+        const most = Math.max(bw.px(130), width * 0.3)
+        const want = Math.min(most, Math.ceil(nameMetrics.advanceWidth) + bw.px(2))
+        const sub = wide ? Math.ceil(statusMetrics.advanceWidth) + bw.px(15) : bw.px(120)
+        return Math.max(want, Math.min(Math.max(want, sub), most))
+    }
     // (The keyboard's names for LB and RB are wider than the controller's.)
-    readonly property real capsW: Math.max(app.px(70), barLb.implicitWidth + barRb.implicitWidth + app.px(12))
-    // The Start hint's words ("Settings", "hold: Play choice") show when they fit beside the game, the
-    // caps, the wheel's cap, Play and two hints. Measured from the words, never from the hint's own size.
-    TextMetrics { id: startWordsMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(13); text: app.startHoldWords + "  " }
-    readonly property bool startWords: width - edge * 2 - barGameCol.width - capsW - playBtn.width - startHintKey.implicitWidth - app.px(16 + 50) - gap * 6
-                                       - hintsWidth(Math.min(2, app.legendHints.length)) >= startWordsMetrics.advanceWidth + app.px(6)
-    // Room for the tab words: the bar less the game, the caps, Play, the wheel's cap and two hints.
-    readonly property real barFree: width - edge * 2 - barGameCol.width - capsW - playGroup.width - app.px(50) - gap * 5 - hintsWidth(Math.min(2, app.legendHints.length))
-    readonly property real tabWordsNeed: tabWordsMetrics.advanceWidth + app.px(6) * app.tabs.length * 2
-    readonly property real wheelWordNeed: wheelMetrics.advanceWidth + app.px(6)
-    readonly property real tabShortNeed: tabShortMetrics.advanceWidth + app.px(6)
-    readonly property bool tabWordsFit: barFree >= tabWordsNeed
-    readonly property bool tabShortFits: barFree >= tabShortNeed
-    // The tab LB or RB goes to comes before the word Wheel.
-    readonly property bool wheelWord: !app.barGame ? barFreeNoGame >= wheelWordNeed : barFree >= tabWordsNeed + wheelWordNeed || (!tabWordsFit && barFree >= tabShortNeed + wheelWordNeed)
-    readonly property real barFreeNoGame: width - edge * 2 - app.px(50) - gap * 2 - hintsWidth(Math.min(hintsMost, app.legendHints.length))
+    readonly property real capsW: barLb.implicitWidth + barRb.implicitWidth + barTabs.spacing + barTabs.leftPadding * 2
+    readonly property real tabWordsW: bw.px(4) + barTabs.spacing + tabWordsMetrics.advanceWidth + bw.px(6) * Math.max(0, app.tabs.length - 1) * 2 + barTabs.spacing * Math.max(0, app.tabs.length - 1)
+    readonly property real playW: playBtn.visible ? playRow.implicitWidth + bw.px(28) : 0
+    function rightW(hold) {
+        let parts = []
+        if (wheelShown) parts.push(wheelKey.implicitWidth + bw.px(6) + wheelMetrics.advanceWidth)
+        if (startShown) parts.push(startHintKey.implicitWidth + bw.px(6) + settingsMetrics.advanceWidth + (hold ? bw.px(6) + holdMetrics.advanceWidth : 0))
+        if (playBtn.visible) parts.push(playW)
+        return parts.length ? parts.reduce((x, y) => x + y, 0) + gap * (parts.length - 1) : 0
+    }
+    // The bar's width a choice needs: h hints, the name (and status), the tab names, the hold words.
+    // After the mouse the tabs are buttons by name, always shown.
+    readonly property real tabButtonsW: tabWordsMetrics.advanceWidth + bw.px(20) * app.tabs.length + bw.px(22) * Math.max(0, app.tabs.length - 1) + bw.px(20)
+    function need(h, name, tabs, hold, wide) {
+        let left = []
+        if (name && nameAsked) left.push(nameColW(wide === true))
+        if (name && nameAsked && (tabsShown || h > 0)) left.push(Math.max(1, bw.px(1)))
+        if (tabsShown) left.push(app.mouseLegend ? tabButtonsW : capsW + (tabs ? tabWordsW : 0))
+        if (tabsShown && h > 0) left.push(Math.max(1, bw.px(1)))
+        const leftW = left.length ? left.reduce((x, y) => x + y, 0) + gap * left.length : 0
+        const r = rightW(hold)
+        return edge * 2 + leftW + hintsWidth(h) + (r > 0 ? gap + r : 0)
+    }
+    readonly property int hintCount: Math.min(app.legendHints.length, measureRep.count)
+    // The plan: [the hints shown, the name and status, the tab names, the hold words]. A and B always; then the
+    // name, X, Y, the tab names, the fifth hint, the words for holding Start.
+    readonly property var plan: {
+        const w = width + measureTick * 0
+        let h = Math.min(2, hintCount), name = false, tabs = false, hold = false
+        const fits = (hh, n, t, o) => need(hh, n, t, o) <= w
+        if (fits(h, true, tabs, hold)) name = true
+        if (h === 2 && h < hintCount && fits(h + 1, name, tabs, hold)) h++
+        if (h === 3 && h < hintCount && fits(h + 1, name, tabs, hold)) h++
+        if (tabsShown && !app.mouseLegend && fits(h, name, true, hold)) tabs = true
+        if (h === 4 && h < hintCount && fits(h + 1, name, tabs, hold)) h++
+        if (startShown && fits(h, name, tabs, true)) hold = true
+        const wide = name && need(h, name, tabs, hold, true) <= w
+        return [h, name, tabs, hold, wide]
+    }
+    readonly property int hintsFit: plan[0]
+    readonly property bool nameFits: plan[1]
+    readonly property bool statusFits: plan[1]
+    readonly property bool tabWordsFit: plan[2]
+    readonly property bool holdFits: plan[3]
+    readonly property bool statusWide: plan[4]
     // The build's check: nothing in the bar overlaps anything else, Play, or the edge, and the game's name is
     // whole. Logged as "Bar check (<size>): <n> items, <p> problems".
     function check(tag) {

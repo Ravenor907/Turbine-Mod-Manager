@@ -14,10 +14,17 @@ Most components take `required property var ui`, and Main.qml always passes `kit
 | --- | --- |
 | `c` | the colors: ground, rail, panel, card, raised, line, text, soft, muted, accent, accentHi, accentLo, accentText, onAccent, focusFill, ok, warn, stop, light (bool) |
 | `titleFont`, `bodyFont` | font families (both Barlow; Cinzel is Main.qml's own, for the wordmark) |
-| `px(n)`, `fpx(n)`, `tpx(n)` | design pixels to screen pixels; text (never under 12); touch targets (never under the touch floor) |
+| `px(n)`, `fpx(n)`, `tpx(n)` | design pixels to screen pixels; text (never under 12, nor under 90% of its design size); touch targets (never under the touch floor) |
+| `radius`, `radiusSmall` | the corners of cards and sheets; of buttons, rows and chips |
+| `ring`, `ringWidth` | the focus ring: focus is an outline around the thing, never a fill |
+| `scrim` | the backdrop color under everything that covers the window |
+| `edge`, `barTop` | the gap between the window's edges and a card; the bottom bar's top in the window |
+| `glyph(k)`, `capsShown` | a button's cap as the pad, keyboard or mouse names it; false after the mouse (no caps) |
+| `icons`, `iconFor(icon, label)`, `iconPath(name)` | line icons by kind of action; the icon a menu row's words call for |
 | `hover(item, on)` | the pointer's hover ring |
 | `motion` | the Motion object (durations and curves) |
 | `glide(view, jump)` | a list brought to its focused row, gliding at Full |
+| `reveal(view, i)` | a ListView brought to row i, fully in view and clear of its fades |
 | `follow(view, content, it)` | scrolls a Flickable so `it` is fully in view |
 | `readable(col, bg)`, `lum(col)` | a color made readable on a background (4.5:1) |
 | `fileSize(b)`, `niceDate(t)`, `shortCount(n)` | "24.0 MB", "Mar 4, 2025", "3.1M" |
@@ -36,8 +43,10 @@ calls its functions directly (taps ask `app.gate()` first). Inside, `c` and `mo`
 - **ScrollTest**: the 2,000 row scrolling test.
 - **SheetLayer**: every sheet, menu and prompt, wired to Main.qml. `toast`, `seen`, `shot`, `rail`, `resetHold`,
   `confirmHold`, `nxmRingMove`; the sheets Main.qml drives (`settingsView`, `askView` and the rest) as aliases.
-- **BottomBar**: the bottom bar and its legend. `check(tag)` (the build's bar check); `playBtn`, `startHint` and the
-  other items the checks reach.
+- **BottomBar**: the bottom bar and its legend, one structure on every screen and one priority order for what shows
+  when room is short (A and B, the LB RB caps, View's and Start's caps and short words, and Play always; then the
+  name and status, X, Y, the tab names, a fifth hint, the hold words). It has its own scale (`bs`, at most 115% of the
+  window's fit). `check(tag)` (the build's bar check); `playBtn`, `startHint` and the other items the checks reach.
 - **RequirementsStrip**: "Getting 2 of 3" with Skip and Stop.
 - **Splash**: the start-up splash. `shot`; `finish(why)`, `shown`, `splashIcon`.
 - **PointerLayer**: the controller pointer and its hover outline.
@@ -52,11 +61,27 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
 
 - **Overlay**: the root of everything that covers the window (sheets, menus, the wheel, the tutorial); a tap outside
   closes it. `closeOnOutside`, `motion`; signal `outsideTapped()`.
+- **Scrim**: an overlay's backdrop (the kit's `scrim`), its first child.
 - **CardGuard**: the first child of an overlay's card, so taps on the card never count as outside.
-- **SheetButtons**: the button row of every sheet with buttons. `labels`, `focusIndex`, `mainIndex`; signals
-  `activated(index)`, `held(index, down)`; `itemAt(i)`.
-- **MenuEntry**: one row of GameMenu and ModMenu. `label`, `detail`, `icon` (a name from its `icons`, or SVG path
-  data), `available`, `danger`, `more`, `focused`, `dangerColor`, `iconShown`; signals `clicked()`, `held(down)`.
+- **Card**: the card look of everything in the middle of the window: panel color, the kit's radius, a thin line and
+  the accent band along the top, clipped by the corners. `band`, `fill`.
+- **DialogCard**: the one centred dialog (a Card): title (`side`, a short word on its right; `subtitle`), the body
+  (the items written inside it) that scrolls with ScrollFade when it doesn't fit, and the buttons pinned under it.
+  `maxWidth` (design pixels), `buttons`, `focusIndex`, `mainIndex`, `cancelIndex`, `note`; signals `activated(i)`,
+  `held(i, down)`; `scrollBy(d)`, `follow(item)`, `toTop()`, `scrolls`, `buttonRow`.
+- **SideSheet**: the side sheet look (the mod menu, Add from Downloads, Other files, Loadouts, a plugin): flush with
+  the right edge down to the bottom bar, a line and a soft shadow on its left.
+- **ScrollFade**: scroll cues for any list, grid or sheet: fades where there is more and a chevron for more below. It
+  puts itself on its `view`; `color` (what the view sits on), `size`, `chevron`, `chevronBelow` (the chevron under the
+  view, for a dialog's body).
+- **ActionButton**: one button look: `primary` (accent fill) or neutral, `focused` (the ring), `dim`, and `cap` (the
+  key that presses it, drawn inside; `capRoom` keeps room for one); signals `clicked()`, `held(down)`; `want`.
+- **SheetButtons**: the button row of every sheet with buttons (ActionButtons; A's cap on the highlighted one, B's
+  on the cancel one). `labels`, `focusIndex`, `mainIndex`, `cancelIndex`; `cancelHidden` (no room for the cancel
+  button: B still does it and the D-pad passes it); signals `activated(index)`, `held(index, down)`; `itemAt(i)`.
+- **MenuEntry**: one row of GameMenu and ModMenu. `label`, `detail`, `icon` (a name from the kit's `icons`, or SVG
+  path data; the row's words choose first, `kit.iconFor`), `available`, `danger`, `more`, `focused`, `dangerColor`,
+  `iconShown`; signals `clicked()`, `held(down)`.
 - **KeyCap**: a controller button as a small cap. `k` ("a", "lb").
 - **Motion**: every duration and curve (tools/qml-check.js fails the build on one written elsewhere). `level`
   ("full", "reduced", "off"); read `on`, `moves`, `fast`, `base`, `moveFast`, `moveBase`, `page`, `enter`, `leave`,
@@ -83,7 +108,8 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
   `modRows`, `pane`, `twoPanes`, `gameIndex`, `modIndex`, `preview`, `active`, `moveOnly`; signals
   `rowClicked(pane, i)`, `rowHeld(pane, i)`, `swiped(dir)`.
 - **NexusBrowser**: Nexus inside Turbine, with its bar and Downloads tab. Main.qml owns the downloads, the legend
-  and what each button does; this draws and reports (`pageEvent(what, detail)` and the other signals in the file).
+  and what each button does; this draws and reports (`pageEvent(what, detail)`, `hintClicked(k)` for a tap on a
+  hint, and the other signals in the file).
 - **Seasonal**: falling leaves or snow behind the panels. `kind`, `amount`, `size`, `scale`, `moving`, `light`.
 
 ## Menus and sheets
@@ -101,13 +127,15 @@ All are Overlays that fill their parent and show with `visible`; Main.qml handle
 - **FindSheet**: Y's pop-up (Search or Find, Sort, Category or Show). `title`, `subtitle`, `fieldLabel`, `text`,
   `placeholder`, `sections`, `focusRow`, `focusCol`, `result`; signals `fieldClicked()`, `optionClicked(row, col)`,
   `doneClicked()`, `clearClicked()`, `closed()`, `typed(text)`, `entered(text)`.
-- **PrePlayCheck**: "Before you play". `title`, `checks` ({level, title, detail}), `buttons` ({label, main}),
-  `focusIndex`, `note`; signals `activated(index, key)`, `closed()`; `scroll(d)`.
-- **LoaderPrompt**: "These mods need SKSE". `title`, `loaderName`, `loaderFullName`, `explain`, `neededBy`,
-  `sourceUrl`, `canDownload`, `sourceShown`, `infoText`, `buttons` ({label}), `focusIndex`; signals
-  `activated(index, key)`, `closed()`.
-- **InfoSheet**: a plain sheet of words, steps or notes and its buttons. `title`, `text`, `steps`, `notes`,
-  `footnote`, `buttons`, `focusIndex`; signals `activated(i)`, `held(i, down)`, `closed()`; `scrollBy(d)`.
+- **PrePlayCheck**: "Before you play" (a DialogCard). `title`, `checks` ({level, title, detail}), `buttons` ({label,
+  main}), `focusIndex`, `cancelIndex`, `note`; signals `activated(index, key)`, `closed()`; `scroll(d)`,
+  `cancelHidden`.
+- **LoaderPrompt**: "These mods need SKSE" (a DialogCard). `title`, `loaderName`, `loaderFullName`, `explain`,
+  `neededBy`, `sourceUrl`, `canDownload`, `sourceShown`, `infoText`, `buttons` ({label}), `focusIndex`,
+  `cancelIndex`; signals `activated(index, key)`, `closed()`; `cancelHidden`.
+- **InfoSheet**: a plain sheet of words, steps or notes and its buttons (a DialogCard). `title`, `text`, `steps`,
+  `notes`, `footnote`, `buttons`, `focusIndex`; signals `activated(i)`, `held(i, down)`, `closed()`; `scrollBy(d)`,
+  `cancelHidden`, `buttonItem(i)`.
 - **AskText**: a line of text (search, names, codes, the key). `shown`, `title`, `note`, `placeholder`, `maxLength`,
   `secret`, `doneLabel`, `focusIndex`; signals `accepted(text)`, `cancelled()`, `edited(text)`, `fieldTapped()`;
   `open(...)`, `accept()`, `cancel()`, `clear()`.
@@ -132,9 +160,10 @@ All are Overlays that fill their parent and show with `visible`; Main.qml handle
   `actionClicked(key)`, `typeAsked(row, value, label)`; `handleButton(b)`.
 - **Tutorial**: the beginner cards. `card`, `count`, `viewGlyph`, `startGlyph`, `keys`, `thunderstore`; signals
   `next()`, `skip()`, `back()`.
-- **Toast**: a short message at the bottom. `kind` ("info", "done", "problem"), `timeout`, `bottomMargin`,
-  `actionLabel`, `actionGlyph`; `show(text, strong, detail)`, `hide()`; signals `hidden()`, `actionClicked()`,
-  `pressedOn()`, `pressEnded()`.
+- **Toast**: a short message at the bottom, centred between `areaLeft` and `areaRight` (Main.qml leaves out the
+  rail, the details panel and a side sheet), `bottomMargin` over the bar. `kind` ("info", "done", "problem"),
+  `timeout`, `actionLabel`, `actionGlyph`; `show(text, strong, detail)`, `hide()`; signals `hidden()`,
+  `actionClicked()`, `pressedOn()`, `pressEnded()`.
 
 ## Labs
 

@@ -2,67 +2,54 @@ import QtQuick
 
 // The row of buttons every sheet with buttons uses (Before you play, the loader prompt, the plain sheets, text
 // entry, Delete for good). One rule everywhere, kept in Main.qml (buttonSheet): the D-pad moves the highlight, A
-// presses the highlighted button, B is the cancel button (Start does nothing here). No key caps on the buttons:
-// the legend says what A and B do. A tap presses a button too.
+// presses the highlighted button, B is the cancel button (Start does nothing here). Each button carries its key:
+// A on the highlighted one, B on the cancel one (no caps after the mouse). The main button is filled with the accent;
+// the highlight is a ring around a button, never a fill. One row: when the buttons don't fit side by side, the cancel
+// button leaves the row (B still does it, and the D-pad passes it: cancelHidden). A tap presses a button too.
 Flow {
     id: sb
     required property var ui
     property var labels: []               // the buttons' words, in order
     property int focusIndex: 0            // the highlighted one (-1: none, the focus is elsewhere on the sheet)
-    property int mainIndex: -1            // the main button: drawn a little stronger
+    property int mainIndex: -1            // the main button: filled with the accent
+    property int cancelIndex: -1          // the one B presses (it shows B's cap)
     signal activated(int index)
     // Pressed down (true) and let go or slid off (false): the hold buttons (Delete for good).
     signal held(int index, bool down)
 
     spacing: ui.px(10)
     function itemAt(i) { return rep.itemAt(i) }
+    // Every button side by side, at its own width.
+    property int measureTick: 0
+    readonly property real naturalWidth: {
+        let w = measureTick * 0
+        for (let i = 0; i < rep.count; i++) { const it = rep.itemAt(i); if (it) w += it.want + (i > 0 ? spacing : 0) }
+        return w
+    }
+    readonly property bool cancelHidden: cancelIndex >= 0 && cancelIndex < labels.length && labels.length > 1 && focusIndex !== cancelIndex
+                                         && width > 0 && naturalWidth > width + 0.5
     Repeater {
         id: rep
         // By count, so a label that changes (Keep holding A: 2...) updates in place: a rebuilt button would lose
         // the finger or the pointer pressing it, and with it the release that stops a hold.
         model: sb.labels.length
-        Rectangle {
+        onItemAdded: sb.measureTick++
+        onItemRemoved: sb.measureTick++
+        ActionButton {
             id: btn
             required property int index
-            readonly property string modelData: sb.labels[index] || ""
-            readonly property bool foc: index === sb.focusIndex
-            width: btnText.implicitWidth + sb.ui.px(36)
-            height: sb.ui.tpx(44)
-            radius: sb.ui.px(6)
-            color: sb.ui.c.raised
-            border.width: Math.max(1, sb.ui.px(1.5))
-            border.color: foc ? sb.ui.c.accentHi : index === sb.mainIndex ? sb.ui.c.accent : sb.ui.c.line
-            // The highlight: brass, with a soft ring around it.
-            Rectangle {
-                visible: btn.foc
-                anchors.fill: parent
-                anchors.margins: -sb.ui.px(3)
-                radius: btn.radius + sb.ui.px(3)
-                color: "transparent"
-                border.width: sb.ui.px(3)
-                border.color: Qt.rgba(sb.ui.c.accent.r, sb.ui.c.accent.g, sb.ui.c.accent.b, 0.22)
-            }
-            Rectangle {
-                visible: btn.foc
-                anchors.fill: parent
-                radius: btn.radius
-                gradient: Gradient {
-                    GradientStop { position: 0; color: sb.ui.c.accentHi }
-                    GradientStop { position: 0.5; color: sb.ui.c.accent }
-                    GradientStop { position: 1; color: sb.ui.c.accentLo }
-                }
-            }
-            Text {
-                id: btnText
-                anchors.centerIn: parent
-                text: btn.modelData
-                color: btn.foc ? sb.ui.c.onAccent : sb.ui.c.text
-                font.family: sb.ui.bodyFont
-                font.pixelSize: sb.ui.fpx(16)
-                font.weight: Font.DemiBold
-            }
-            HoverHandler { onHoveredChanged: sb.ui.hover(btn, hovered) }
-            TapHandler { onTapped: sb.activated(btn.index); onPressedChanged: sb.held(btn.index, pressed) }
+            ui: sb.ui
+            label: sb.labels[index] || ""
+            focused: index === sb.focusIndex
+            primary: index === sb.mainIndex
+            cap: focused ? "a" : index === sb.cancelIndex ? "b" : ""
+            capRoom: true
+            readonly property bool gone: sb.cancelHidden && index === sb.cancelIndex
+            onWantChanged: sb.measureTick++
+            visible: !gone
+            width: gone ? 0 : want
+            onClicked: sb.activated(btn.index)
+            onHeld: (down) => sb.held(btn.index, down)
         }
     }
 }

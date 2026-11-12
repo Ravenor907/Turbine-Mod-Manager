@@ -34,19 +34,16 @@ Overlay {
 
     readonly property int rows: plan ? (plan.error ? 1 : 2) : profiles.length + actions.length
 
-    Rectangle { anchors.fill: parent; color: "#B0000000" }
-    Rectangle {
-        anchors.right: parent.right
-        anchors.top: parent.top
+    Scrim { ui: ps.ui }
+    SideSheet {
+        ui: ps.ui
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: ps.ui.px(8)
         width: Math.min(parent.width * 0.55, ps.ui.px(520))
-        color: ps.ui.c.panel
-        border.color: ps.ui.c.line
         CardGuard {}
         // Scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
         Flickable {
             id: scroller
+            ScrollFade { ui: ps.ui; view: scroller; color: ps.ui.c.panel }
             anchors.fill: parent
             anchors.margins: ps.ui.px(18)
             contentHeight: scrollCol.implicitHeight

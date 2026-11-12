@@ -1219,6 +1219,67 @@ if [ -n "$bars" ]; then
   echo "$bars" | head -n 20
   fail=1
 else echo "::notice title=Bottom bar::$nbars pictures checked, no overlaps"; fi
+# Every picture's layout (SelfCheck.qml's layout checks, just before the picture): text cut or broken inside a word,
+# boxes past their card or the window, a sheet's form cut by its edge, A or B dropped from the bar, text under 12 px,
+# texts drawn over each other. Reported as a warning with the count and the most common problems, and in full in
+# shots/layout-<part>-<shard>.txt (it goes up with the pictures). LAYOUT_STRICT=1 (an env of the checks job in
+# .github/workflows/build.yml) makes any problem fail the build.
+LAYOUT_STRICT=${LAYOUT_STRICT:-0}
+layout="shots/layout-$MODE-$SHARD.txt"
+python3 - "$PWD/data" "$layout" "$MODE $SHARD/$SHARDS" > shots/layout-annotation.txt <<'PY' || echo "::warning title=Layout checks::the summary wasn't made"
+import collections, glob, os, re, sys
+data, out, part = sys.argv[1:4]
+pics, lines, kinds, common, allowed, missing = 0, [], collections.Counter(), collections.Counter(), 0, []
+example = {}
+bad_pics = 0
+for log in sorted(glob.glob(os.path.join(data, "*", "turbine-mod-manager", "activity.log"))):
+    name = log.split(os.sep)[-3]
+    text = open(log, encoding="utf-8", errors="replace").read().splitlines()
+    summary = [l.split("check   ", 1)[1] for l in text if "check   Layout (" in l]
+    problems = [re.sub(r"^Layout problem \([^)]*\): ", "", l.split("check   ", 1)[1]) for l in text if "check   Layout problem (" in l]
+    if not summary:
+        missing.append(name)
+        continue
+    pics += 1
+    m = re.search(r"\| (\d+) allowed", summary[-1])
+    allowed += int(m.group(1)) if m else 0
+    if problems:
+        bad_pics += 1
+    lines.append(name + ": " + summary[-1])
+    for p in problems:
+        lines.append("  " + p)
+        if re.match(r"^\w+: ", p):
+            kinds[p.split(":", 1)[0]] += 1
+            # The same problem on other pictures, whatever item it named first: kind, path and what is wrong.
+            key = re.sub(r' "[^"]*"( and \d+ more like it)?', "", re.sub(r" \[[^\]]*\]$", "", p))
+            common[key] += 1
+            m = re.search(r' ("[^"]*")', p)
+            example.setdefault(key, " (" + m.group(1) + ")" if m else "")
+total = sum(kinds.values())
+head = "Layout checks, %s: %d pictures, %d with problems, %d problems%s; %d allowed" % (
+    part, pics, bad_pics, total, " (" + ", ".join("%s %d" % kv for kv in kinds.most_common()) + ")" if total else "", allowed)
+top = ["%3d  %s%s" % (n, p[:200], example[p][:60]) for p, n in common.most_common(15)]
+with open(out, "w", encoding="utf-8") as f:
+    f.write(head + "\n")
+    if top:
+        f.write("\nMost common (count over this shard's pictures):\n" + "\n".join(top) + "\n")
+    f.write("\nEvery picture:\n" + "\n".join(lines) + "\n")
+    if missing:
+        f.write("\nNo layout line (no picture, or another window's check): " + " ".join(missing) + "\n")
+print(total)
+print(head)
+for t in top[:5]:
+    print(t.strip())
+PY
+if [ -s shots/layout-annotation.txt ]; then
+  nlayout=$(head -n1 shots/layout-annotation.txt)
+  words=$(tail -n +2 shots/layout-annotation.txt | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+  if [ "$nlayout" -gt 0 ] && [ "$LAYOUT_STRICT" = 1 ]; then echo "::error title=Layout problems ($nlayout)::$words"; fail=1
+  elif [ "$nlayout" -gt 0 ]; then echo "::warning title=Layout problems ($nlayout, report only)::$words"
+  else echo "::notice title=Layout::$(sed -n 2p shots/layout-annotation.txt)"; fi
+  head -n 60 "$layout"
+fi
+rm -f shots/layout-annotation.txt
 ls -la shots
 # Also into the log, so the pictures can be checked where artifacts can't be downloaded.
 for f in shots/*.png; do echo "SHOT $(basename "$f") $(base64 -w0 "$f")"; done

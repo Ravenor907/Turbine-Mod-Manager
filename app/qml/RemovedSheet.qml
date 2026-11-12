@@ -24,7 +24,7 @@ Overlay {
         return Qt.formatDate(at, "MMM d") + " · " + (left === 1 ? "1 day left" : left + " days left")
     }
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
+    Scrim { ui: rs.ui }
     onFocusIndexChanged: Qt.callLater(showFocused)
     onVisibleChanged: if (visible) { flick.contentY = 0; Qt.callLater(showFocused) }
     function showFocused() {
@@ -34,18 +34,17 @@ Overlay {
         if (y < flick.contentY) flick.contentY = y
         else if (y + it.height > flick.contentY + flick.height) flick.contentY = y + it.height - flick.height
     }
-    Rectangle {
+    Card {
+        ui: rs.ui
         anchors.centerIn: parent
         width: Math.min(parent.width - rs.ui.px(40), rs.ui.px(620))
         height: Math.min(parent.height - rs.ui.px(60), col.implicitHeight + rs.ui.px(40))
-        radius: rs.ui.px(10)
-        color: rs.ui.c.panel
-        border.color: rs.ui.c.line
         clip: true
         CardGuard {}
         // Scrolls by touch and follows the focus (a long list at 150% runs past the card).
         Flickable {
             id: flick
+            ScrollFade { ui: rs.ui; view: flick; color: rs.ui.c.panel }
             anchors.fill: parent
             anchors.margins: rs.ui.px(20)
             contentHeight: col.implicitHeight

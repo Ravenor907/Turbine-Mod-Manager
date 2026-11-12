@@ -18,18 +18,19 @@ ListView {
     z: app.turnTo === 0 ? 3 : 0
     transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
     // The bars sliding away or back change the list's height: the focused row stays fully in view.
-    onHeightChanged: if (app.modIndex >= 0) positionViewAtIndex(app.modIndex, ListView.Contain)
+    onHeightChanged: if (app.modIndex >= 0) app.reveal(modList, app.modIndex)
     // A touch or wheel scroll hides the bars going down and brings them back going up or at the top.
     property real lastY: 0
     onContentYChanged: { if (moving) app.scrollFollow(contentY + topMargin, lastY + topMargin, contentHeight > height + app.px(40)); lastY = contentY }
     topMargin: app.px(4)
     bottomMargin: app.px(4)
+    ScrollFade { ui: modList.kit; view: modList; color: modList.c.ground }
     clip: true
     spacing: app.px(app.desktopLayout ? 3 : 6)
     model: app.listItems
     currentIndex: Math.max(0, app.modIndex)
     highlightFollowsCurrentItem: false
-    onCurrentIndexChanged: app.glide(modList, () => modList.positionViewAtIndex(modList.currentIndex, ListView.Contain))
+    onCurrentIndexChanged: app.glide(modList, () => app.reveal(modList, modList.currentIndex))
     // After the left stick scrolls, focus the nearest row still in view.
     onMovementEnded: {
         const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
@@ -108,7 +109,6 @@ ListView {
                       : "Removed mods (" + app.removedMods.length + ") · kept 7 days"
                 color: entry.kind === "ghost" ? c.soft : entry.kind === "held" || entry.kind === "needsq" ? c.warn : entry.kind === "deps" ? c.soft : c.muted
                 font.pixelSize: app.fpx(15)
-                font.italic: entry.kind === "ghost"
             }
             // The held note's way back, on the row itself (a tap anywhere on the row does it too).
             Rectangle {

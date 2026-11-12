@@ -18,7 +18,7 @@ Overlay {
     // 24 x 24 grid), danger (bool, label in the warning color), more (bool, shows › for a next step) }
     property var items: []
     property int focusIndex: 0
-    property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar
+    property real bottomInset: 0          // the sheet layer already ends above the bottom bar
 
     signal activated(int index)
     signal closed()
@@ -26,9 +26,12 @@ Overlay {
     // Keep the focused item in view when the list is taller than the sheet.
     function showFocused() {
         const it = itemRepeater.itemAt(focusIndex)
-        if (!it) return
-        if (it.y < flick.contentY) flick.contentY = it.y
-        else if (it.y + it.height > flick.contentY + flick.height) flick.contentY = it.y + it.height - flick.height
+        // (Not laid out yet: flick.height changing calls this again.)
+        if (!it || flick.height <= it.height) return
+        // A little room around the row clears the fades.
+        const m = Math.min(root.ui.px(20), (flick.height - it.height) / 2)
+        if (it.y - m < flick.contentY) flick.contentY = Math.max(0, it.y - m)
+        else if (it.y + it.height + m > flick.contentY + flick.height) flick.contentY = Math.min(Math.max(0, flick.contentHeight - flick.height), it.y + it.height + m - flick.height)
         // The last row scrolls all the way, past the fade.
         if (focusIndex === itemRepeater.count - 1) flick.contentY = Math.max(0, flick.contentHeight - flick.height)
     }
@@ -37,24 +40,14 @@ Overlay {
 
     anchors.fill: parent
 
-    Rectangle {
-        anchors.fill: parent
-        color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-    }
+    Scrim { ui: root.ui }
 
-    Rectangle {
+    // A side sheet (SideSheet.qml): full height down to the bottom bar, flush with the right edge.
+    SideSheet {
         id: sheet
-        // The top and right edges sit just outside the parent, so only the left and bottom lines show.
-        anchors.right: parent.right
-        anchors.rightMargin: -border.width
-        anchors.top: parent.top
-        anchors.topMargin: -border.width
-        border.width: Math.max(1, root.ui.px(1.5))
-        border.color: root.ui.c.line
+        ui: root.ui
         width: Math.min(parent.width - root.ui.px(40), root.ui.px(392))
-        height: Math.max(root.ui.px(120), parent.height - root.bottomInset + border.width)
-        color: root.ui.c.panel
-        bottomLeftRadius: root.ui.px(6)
+        height: Math.max(root.ui.px(120), parent.height - root.bottomInset)
 
         CardGuard {}   // taps on the sheet don't close it
 
@@ -67,10 +60,12 @@ Overlay {
             Text {
                 width: parent.width
                 text: root.title || ""
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.fpx(17)
+                font.pixelSize: root.ui.fpx(18)
                 font.bold: true
             }
             Text {
@@ -99,6 +94,7 @@ Overlay {
             // A little room under the last row, so it never sits against the sheet's edge.
             contentHeight: body.height + root.ui.px(6)
             boundsBehavior: Flickable.StopAtBounds
+            onHeightChanged: if (root.visible) Qt.callLater(root.showFocused)
 
             Column {
                 id: body
@@ -131,17 +127,6 @@ Overlay {
                 }
             }
         }
-        // More rows below: a fade over the bottom edge of the list.
-        Rectangle {
-            visible: flick.contentY < flick.contentHeight - flick.height - 1
-            anchors.left: flick.left
-            anchors.right: flick.right
-            anchors.bottom: flick.bottom
-            height: root.ui.px(26)
-            gradient: Gradient {
-                GradientStop { position: 0; color: "transparent" }
-                GradientStop { position: 1; color: root.ui.c.panel }
-            }
-        }
+        ScrollFade { ui: root.ui; view: flick; color: root.ui.c.panel }
     }
 }

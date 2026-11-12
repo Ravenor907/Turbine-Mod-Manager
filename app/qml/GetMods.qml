@@ -71,28 +71,30 @@ Item {
                 id: fallbackCard
                 visible: gm.fallback
                 readonly property bool foc: gm.active && gm.focusArea === "fallback"
-                anchors.horizontalCenter: parent.horizontalCenter
-                y: gm.ui.px(10)
+                // In the middle of the page, like the other cards that stand in for a list.
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: -gm.ui.px(20)
                 width: Math.min(parent.width, gm.ui.px(620))
-                height: fbCol.implicitHeight + gm.ui.px(36)
-                radius: gm.ui.px(10)
-                color: foc ? gm.ui.c.focusFill : gm.ui.c.card
-                border.color: gm.ui.c.accent
-                border.width: foc ? gm.ui.px(2) : Math.max(1, gm.ui.px(1))
+                height: fbCol.implicitHeight + gm.ui.px(44)
+                radius: gm.ui.radius
+                color: gm.ui.c.card
+                border.color: gm.ui.c.line
+                border.width: Math.max(1, gm.ui.px(1))
                 Column {
                     id: fbCol
-                    x: gm.ui.px(20); y: gm.ui.px(18)
-                    width: parent.width - gm.ui.px(40)
+                    x: gm.ui.px(24); y: gm.ui.px(22)
+                    width: parent.width - gm.ui.px(48)
                     spacing: gm.ui.px(10)
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: gm.fallbackTitle; color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(20); font.weight: Font.DemiBold }
                     Text { width: parent.width; wrapMode: Text.WordWrap; text: "Download with Slow download. Turbine adds it when it lands in Downloads."; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15) }
                     Flow {
                         width: parent.width
                         spacing: gm.ui.px(14)
-                        ActionKey { label: "Open on Nexus"; strong: true; onClicked: gm.fallbackClicked("a") }
-                        ActionKey { label: "Try again here"; onClicked: gm.fallbackClicked("x") }
+                        // A opens Nexus and X tries again; the card has the focus as a whole, so A's button has the ring.
+                        ActionButton { ui: gm.ui; label: "Open on Nexus"; cap: "a"; primary: true; focused: fallbackCard.foc; onClicked: gm.fallbackClicked("a") }
+                        ActionButton { ui: gm.ui; label: "Try again here"; cap: "x"; onClicked: gm.fallbackClicked("x") }
                         // A file that landed but wasn't caught can still be added from here.
-                        ActionKey { label: "Add from Downloads"; onClicked: gm.fallbackClicked("add") }
+                        ActionButton { ui: gm.ui; label: "Add from Downloads"; onClicked: gm.fallbackClicked("add") }
                     }
                 }
                 HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
@@ -110,11 +112,13 @@ Item {
             }
             GridView {
                 id: grid
+                ScrollFade { ui: gm.ui; view: grid; color: gm.ui.c.ground }
                 visible: !gm.fallback
                 anchors.fill: parent
                 clip: true
                 cellWidth: width / gm.columns
-                cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + gm.ui.px(76)
+                // The picture, then three lines of words (taller than the design when text keeps its size at 50%).
+                cellHeight: (cellWidth - gm.ui.px(8)) * 9 / 16 + Math.max(gm.ui.px(76), gm.ui.fpx(15) * 1.3 + gm.ui.fpx(13) * 2.6 + gm.ui.px(22))
                 model: gm.items
                 onMovementEnded: gm.scrolled(indexAt(gm.ui.px(10), contentY + gm.ui.px(10)), indexAt(width - gm.ui.px(10), contentY + height - gm.ui.px(10)))
                 // A touch or wheel scroll (not the focus moving): Main.qml hides or shows the bars.
@@ -302,25 +306,5 @@ Item {
             color: gm.ui.c.muted
             font.family: gm.ui.bodyFont; font.pixelSize: Math.max(gm.ui.px(16), th.height * 0.4); font.bold: true
         }
-    }
-    component ActionKey: Rectangle {
-        id: ak
-        property string label: ""
-        property bool strong: false
-        signal clicked()
-        width: akRow.implicitWidth + gm.ui.px(24); height: gm.ui.px(40); radius: gm.ui.px(8)
-        gradient: Gradient {
-            GradientStop { position: 0; color: ak.strong ? gm.ui.c.accentHi : gm.ui.c.raised }
-            GradientStop { position: 1; color: ak.strong ? gm.ui.c.accent : gm.ui.c.raised }
-        }
-        Row {
-            id: akRow
-            anchors.centerIn: parent
-            spacing: gm.ui.px(8)
-            // No key caps on cards: the legend says what A and X do.
-            Text { text: ak.label; color: ak.strong ? gm.ui.c.onAccent : gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(16); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-        }
-        HoverHandler { onHoveredChanged: gm.ui.hover(parent, hovered) }
-        TapHandler { onTapped: ak.clicked() }
     }
 }

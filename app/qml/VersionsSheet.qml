@@ -20,15 +20,11 @@ Overlay {
 
     onFocusIndexChanged: list.positionViewAtIndex(focusIndex, ListView.Contain)
 
-    Rectangle { anchors.fill: parent; color: "#B0000000" }
-    Rectangle {
-        anchors.right: parent.right
-        anchors.top: parent.top
+    Scrim { ui: vs.ui }
+    SideSheet {
+        ui: vs.ui
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: vs.ui.px(8)
         width: Math.min(parent.width * 0.6, vs.ui.px(560))
-        color: vs.ui.c.panel
-        border.color: vs.ui.c.line
         CardGuard {}
         Column {
             id: head
@@ -45,6 +41,7 @@ Overlay {
         }
         ListView {
             id: list
+            ScrollFade { ui: vs.ui; view: list; color: vs.ui.c.panel }
             anchors.top: head.bottom
             anchors.topMargin: vs.ui.px(10)
             anchors.bottom: parent.bottom

@@ -26,16 +26,16 @@ Overlay {
     property var buttons: []
     property int focusIndex: 0
     property string note: ""              // e.g. "Wait checks again every few hours."
-    readonly property bool scrolls: checkList.contentHeight > checkList.height + 1
+    property int cancelIndex: -1          // the button B presses (Not now)
+    readonly property bool scrolls: card.scrolls
+    readonly property bool cancelHidden: card.buttonRow.cancelHidden
 
     signal activated(int index, string key)
     signal closed()
 
     // Up and Down scroll the lines when they don't all fit (the buttons always stay in view).
-    function scroll(d) {
-        checkList.contentY = Math.max(0, Math.min(checkList.contentHeight - checkList.height, checkList.contentY + d * ui.px(80)))
-    }
-    onChecksChanged: checkList.contentY = 0
+    function scroll(d) { card.scrollBy(d) }
+    onChecksChanged: card.toTop()
 
     function levelColor(level) {
         if (level === "ok") return ui.c.ok
@@ -45,134 +45,73 @@ Overlay {
 
     anchors.fill: parent
 
-    Rectangle {
-        anchors.fill: parent
-        color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-    }
+    Scrim { ui: root.ui }
 
-    Rectangle {
+    DialogCard {
         id: card
-        anchors.centerIn: parent
-        width: Math.min(parent.width - root.ui.px(40), root.ui.px(560))
-        // Clear of the controls legend at the bottom of the window.
-        height: Math.min(content.implicitHeight + root.ui.px(34), parent.height - root.ui.px(112))
-        radius: root.ui.px(6)
-        color: root.ui.c.panel
-        border.width: Math.max(1, root.ui.px(1.5))
-        border.color: root.ui.c.accentLo
-        clip: true
+        ui: root.ui
+        maxWidth: 600
+        title: root.title || ""
+        buttons: (root.buttons || []).slice(0, 4).map(b => b.label || "")
+        focusIndex: root.focusIndex
+        // The main button: the one marked, else the first (what the check recommends).
+        mainIndex: Math.max(0, (root.buttons || []).findIndex(b => b.main === true))
+        cancelIndex: root.cancelIndex
+        note: root.note || ""
+        onActivated: (i) => root.activated(i, "")
+        Repeater {
+            model: root.checks || []
+            Rectangle {
+                id: checkRow
+                required property var modelData
+                readonly property string level: modelData.level || "ok"
+                readonly property bool flagged: level !== "ok"
+                readonly property color hue: root.levelColor(level)
+                readonly property color tone: root.ui.readable(hue, color)
+                width: card.bodyColumn.width
+                height: Math.max(root.ui.px(44), checkText.implicitHeight + root.ui.px(18))
+                radius: root.ui.radiusSmall
+                color: flagged ? Qt.tint(root.ui.c.card, Qt.rgba(hue.r, hue.g, hue.b, 0.1)) : root.ui.c.card
+                border.width: flagged ? Math.max(1, root.ui.px(1)) : 0
+                border.color: Qt.tint(root.ui.c.card, Qt.rgba(hue.r, hue.g, hue.b, 0.45))
 
-        CardGuard {}   // taps on the card don't close it
-
-        Column {
-            id: content
-            x: root.ui.px(20)
-            y: root.ui.px(18)
-            width: parent.width - root.ui.px(40)
-            spacing: root.ui.px(8)
-
-            Text {
-                id: titleText
-                width: parent.width
-                text: root.title || ""
-                elide: Text.ElideRight
-                color: root.ui.c.text
-                font.family: root.ui.titleFont
-                font.pixelSize: root.ui.fpx(18)
-                font.bold: true
-            }
-
-            Flickable {
-                id: checkList
-                width: parent.width
-                // What's left of the screen after the title, the buttons and the note.
-                height: Math.min(checkCol.implicitHeight, root.height - root.ui.px(112) - root.ui.px(34) - titleText.height
-                                 - buttonFlow.height - (noteText.visible ? noteText.height + content.spacing : 0) - content.spacing * 2)
-                contentHeight: checkCol.implicitHeight
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
+                StateDot {
+                    id: checkDot
+                    ui: root.ui
+                    level: checkRow.level
+                    tone: checkRow.tone
+                    x: root.ui.px(12)
+                    anchors.verticalCenter: parent.verticalCenter
+                }
                 Column {
-                    id: checkCol
-                    width: checkList.width
-                    spacing: content.spacing
-            Repeater {
-                model: root.checks || []
-                Rectangle {
-                    id: checkRow
-                    required property var modelData
-                    readonly property string level: modelData.level || "ok"
-                    readonly property bool flagged: level !== "ok"
-                    readonly property color hue: root.levelColor(level)
-                    readonly property color tone: root.ui.readable(hue, color)
-                    width: content.width
-                    height: Math.max(root.ui.px(44), checkText.implicitHeight + root.ui.px(16))
-                    radius: root.ui.px(6)
-                    color: flagged ? Qt.tint(root.ui.c.card, Qt.rgba(hue.r, hue.g, hue.b, 0.1)) : root.ui.c.card
-                    border.width: flagged ? Math.max(1, root.ui.px(1.5)) : 0
-                    border.color: Qt.tint(root.ui.c.card, Qt.rgba(hue.r, hue.g, hue.b, 0.45))
-
-                    StateDot {
-                        id: checkDot
-                        ui: root.ui
-                        level: checkRow.level
-                        tone: checkRow.tone
-                        x: root.ui.px(12)
-                        anchors.verticalCenter: parent.verticalCenter
+                    id: checkText
+                    anchors.left: checkDot.right
+                    anchors.leftMargin: root.ui.px(12)
+                    anchors.right: parent.right
+                    anchors.rightMargin: root.ui.px(12)
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: root.ui.px(2)
+                    Text {
+                        width: parent.width
+                        text: checkRow.modelData.title || ""
+                        wrapMode: Text.WordWrap
+                        color: checkRow.flagged ? checkRow.tone : root.ui.c.text
+                        font.family: root.ui.bodyFont
+                        font.pixelSize: root.ui.fpx(16)
+                        font.weight: Font.DemiBold
                     }
-                    Column {
-                        id: checkText
-                        anchors.left: checkDot.right
-                        anchors.leftMargin: root.ui.px(12)
-                        anchors.right: parent.right
-                        anchors.rightMargin: root.ui.px(12)
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: root.ui.px(1)
-                        Text {
-                            width: parent.width
-                            text: checkRow.modelData.title || ""
-                            wrapMode: Text.WordWrap
-                            color: checkRow.flagged ? checkRow.tone : root.ui.c.text
-                            font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.fpx(16)
-                            font.weight: Font.DemiBold
-                        }
-                        Text {
-                            visible: (checkRow.modelData.detail || "") !== ""
-                            width: parent.width
-                            // Options like --launcher-skip with their two hyphens shown apart.
-                            textFormat: Text.StyledText
-                            text: root.styled(checkRow.modelData.detail || "")
-                            wrapMode: Text.WordWrap
-                            color: checkRow.flagged ? root.ui.c.soft : root.ui.c.muted
-                            font.family: root.ui.bodyFont
-                            font.pixelSize: root.ui.fpx(14)
-                        }
+                    Text {
+                        visible: (checkRow.modelData.detail || "") !== ""
+                        width: parent.width
+                        // Options like --launcher-skip with their two hyphens shown apart.
+                        textFormat: Text.StyledText
+                        text: root.styled(checkRow.modelData.detail || "")
+                        wrapMode: Text.WordWrap
+                        color: checkRow.flagged ? root.ui.c.soft : root.ui.c.muted
+                        font.family: root.ui.bodyFont
+                        font.pixelSize: root.ui.fpx(14)
                     }
                 }
-            }
-                }
-            }
-
-            SheetButtons {
-                id: buttonFlow
-                ui: root.ui
-                width: parent.width
-                topPadding: root.ui.px(6)
-                labels: (root.buttons || []).slice(0, 4).map(b => b.label || "")
-                focusIndex: root.focusIndex
-                mainIndex: (root.buttons || []).findIndex(b => b.main === true)
-                onActivated: (i) => root.activated(i, "")
-            }
-
-            Text {
-                id: noteText
-                visible: text !== ""
-                width: parent.width
-                text: root.note || ""
-                wrapMode: Text.WordWrap
-                color: root.ui.c.soft
-                font.family: root.ui.bodyFont
-                font.pixelSize: root.ui.fpx(14)
             }
         }
     }

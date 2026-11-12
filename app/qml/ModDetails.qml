@@ -258,19 +258,6 @@ Item {
         }
     }
 
-    // More below: a fade at the bottom and how to scroll.
-    Rectangle {
-        visible: view.visible && view.contentHeight > view.height + 2 && !view.atYEnd
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: md.ui.px(46)
-        gradient: Gradient {
-            GradientStop { position: 0; color: "transparent" }
-            GradientStop { position: 1; color: md.ui.c.ground }
-        }
-        Text {
-            anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: md.ui.px(4)
-            text: "Left stick: scroll"
-            color: md.ui.c.soft; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(13)
-        }
-    }
+    // More below (or above): the shared fades and the chevron, never a hint over the words.
+    ScrollFade { ui: md.ui; view: view; color: md.ui.c.ground }
 }

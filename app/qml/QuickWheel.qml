@@ -26,7 +26,7 @@ Overlay {
     z: 70
 
     // The backdrop takes every press, scroll and hover, so the page behind never sees one.
-    Rectangle { anchors.fill: parent; color: "#D0050403" }
+    Scrim { ui: qw.ui }
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true

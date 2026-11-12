@@ -18,17 +18,14 @@ Overlay {
 
     onFocusIndexChanged: list.positionViewAtIndex(focusIndex, ListView.Contain)
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
-    Rectangle {
+    Scrim { ui: gp.ui }
+    Card {
+        ui: gp.ui
         anchors.centerIn: parent
         width: Math.min(parent.width - gp.ui.px(40), gp.ui.px(620))
         height: Math.min(parent.height - gp.ui.px(80), head.implicitHeight + gp.games.length * gp.ui.px(56) + gp.ui.px(56))
-        radius: gp.ui.px(10)
-        color: gp.ui.c.panel
-        border.color: gp.ui.c.line
         clip: true
         CardGuard {}
-        Rectangle { width: parent.width; height: gp.ui.px(3); color: gp.ui.c.accent; radius: gp.ui.px(2) }
         Column {
             id: head
             x: gp.ui.px(22); y: gp.ui.px(20)
@@ -50,6 +47,7 @@ Overlay {
         }
         ListView {
             id: list
+            ScrollFade { ui: gp.ui; view: list; color: gp.ui.c.panel }
             x: gp.ui.px(22)
             anchors.top: head.bottom
             anchors.topMargin: gp.ui.px(12)

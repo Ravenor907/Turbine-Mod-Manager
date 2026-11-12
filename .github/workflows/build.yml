@@ -494,6 +494,9 @@ jobs:
         shell: bash
         env:
           KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
+          # The layout checks only report (a warning per shard) until the repo variable LAYOUT_STRICT is 1; then any
+          # layout problem fails the build.
+          LAYOUT_STRICT: ${{ vars.LAYOUT_STRICT == '1' && '1' || '0' }}
         run: |
           # 0.65: on the owner's PC each runner keeps its own Flatpak user folder between runs.
           if [ -n "$KEEP" ]; then export FLATPAK_USER_DIR="$KEEP/flatpak-user"; fi
@@ -511,6 +514,74 @@ jobs:
         with:
           name: screenshots-${{ matrix.part }}-${{ matrix.shard }}
           path: shots
+          retention-days: 14
+
+  # This run's pictures against the last green build's on main (the commit before this one, or the newest commit
+  # before it with a green build that still has its pictures): the counts and the changed pages in the job's
+  # summary, before | after | diff for each in the screenshot-diff artifact. A report only: it never fails the build.
+  shotdiff:
+    name: Pictures against the last green build
+    needs: [checks]
+    if: ${{ !cancelled() && needs.checks.result != 'skipped' }}
+    continue-on-error: true
+    runs-on: ${{ vars.TURBINE_RUNNER == 'local' && fromJSON('["self-hosted", "turbine"]') || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        continue-on-error: true
+        with:
+          pattern: screenshots-*
+          path: shots-after
+      - name: The last green build's pictures
+        id: base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN: ${{ github.run_id }}
+        run: |
+          # The commits before this one (newest first) and main's green runs of this workflow (newest first).
+          parents=$(gh api "repos/$REPO/commits?sha=$SHA&per_page=30" --jq '.[1:][].sha' 2>/dev/null || true)
+          green_runs=$(gh api "repos/$REPO/actions/workflows/build.yml/runs?branch=main&status=success&per_page=100" \
+                         --jq '.workflow_runs[] | "\(.head_sha) \(.id)"' 2>/dev/null || true)
+          base="" base_sha=""
+          for p in $parents; do
+            for r in $(echo "$green_runs" | awk -v s="$p" '$1 == s {print $2}'); do
+              [ "$r" = "$RUN" ] && continue
+              n=$(gh api "repos/$REPO/actions/runs/$r/artifacts?per_page=100" \
+                    --jq '[.artifacts[] | select(.expired == false and (.name | startswith("screenshots-")))] | length' 2>/dev/null || true)
+              case "$n" in ''|*[!0-9]*) n=0 ;; esac
+              if [ "$n" -gt 0 ]; then base=$r; base_sha=$p; break 2; fi
+            done
+          done
+          if [ -z "$base" ]; then
+            echo "::notice title=Screenshot diff::no green build on main before this commit still has its pictures, so nothing is compared"
+            exit 0
+          fi
+          if ! gh run download "$base" -R "$REPO" -p 'screenshots-*' -D shots-before; then
+            echo "::warning title=Screenshot diff::the pictures of run $base didn't download, so nothing is compared"
+            exit 0
+          fi
+          echo "run=$base" >> "$GITHUB_OUTPUT"
+          echo "name=run $base (commit ${base_sha:0:9})" >> "$GITHUB_OUTPUT"
+      - name: Compare (pixels that moved past 2%)
+        if: steps.base.outputs.run != ''
+        shell: bash
+        env:
+          BEFORE_NAME: ${{ steps.base.outputs.name }}
+        run: |
+          python3 tools/shot-diff.py shots-before shots-after screenshot-diff --summary "$GITHUB_STEP_SUMMARY" --before-name "$BEFORE_NAME" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: steps.base.outputs.run != ''
+        continue-on-error: true
+        with:
+          name: screenshot-diff
+          path: screenshot-diff
+          if-no-files-found: ignore
           retention-days: 14
 
   release:

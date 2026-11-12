@@ -72,13 +72,14 @@ Item {
                 elide: Text.ElideRight
                 text: lo.error !== "" ? lo.error : lo.note !== "" ? lo.note
                       : "Sort automatically puts these in a safe order. Lower in the list wins."
-                color: lo.error !== "" ? lo.ui.c.warn : lo.note.indexOf("Sorted with the community") === 0 ? lo.ui.c.ok : lo.ui.c.soft
+                color: lo.error !== "" ? lo.ui.c.warn : lo.ui.c.soft
                 font.family: lo.ui.bodyFont
                 font.pixelSize: lo.ui.fpx(14)
             }
         }
         ListView {
             id: list
+            ScrollFade { ui: lo.ui; view: list; color: lo.ui.c.ground }
             width: parent.width
             height: parent.height - lo.ui.px(50)
             clip: true

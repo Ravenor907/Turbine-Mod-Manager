@@ -31,7 +31,7 @@ Overlay {
     // Y's action as a button too (touch has no Y): "Find", the pop-up that chooses which files show.
     property string otherLabel: ""
     signal otherClicked()
-    property real bottomInset: ui.px(8)   // the sheet layer already ends above the bottom bar
+    property real bottomInset: 0          // the sheet layer already ends above the bottom bar
 
     signal activated(int index)
     signal closed()
@@ -40,24 +40,13 @@ Overlay {
 
     anchors.fill: parent
 
-    Rectangle {
-        anchors.fill: parent
-        color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-    }
+    Scrim { ui: root.ui }
 
-    Rectangle {
+    SideSheet {
         id: sheet
-        // The top and right edges sit just outside the parent, so only the left and bottom lines show.
-        anchors.right: parent.right
-        anchors.rightMargin: -border.width
-        anchors.top: parent.top
-        anchors.topMargin: -border.width
-        border.width: Math.max(1, root.ui.px(1.5))
-        border.color: root.ui.c.line
+        ui: root.ui
         width: Math.min(parent.width - root.ui.px(40), root.ui.px(420))
-        height: Math.max(root.ui.px(160), parent.height - root.bottomInset + border.width)
-        color: root.ui.c.panel
-        bottomLeftRadius: root.ui.px(6)
+        height: Math.max(root.ui.px(160), parent.height - root.bottomInset)
 
         CardGuard {}   // taps on the sheet don't close it
 
@@ -100,6 +89,7 @@ Overlay {
 
         ListView {
             id: fileList
+            ScrollFade { ui: root.ui; view: fileList; color: root.ui.c.panel }
             visible: root.count > 0
             anchors.top: head.bottom
             anchors.topMargin: root.ui.px(8)

@@ -145,68 +145,45 @@ Overlay {
         HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
         TapHandler { onTapped: srow.toggled() }
     }
-    component Button: Rectangle {
-        id: btn
-        property string label: ""
+    component Button: ActionButton {
         property string key: ""
-        property bool primary: false
-        property bool focused: false
-        property bool dim: false
-        signal clicked()
-        width: btnRow.implicitWidth + report.ui.px(28)
-        height: report.ui.tpx(44)
-        radius: report.ui.px(8)
-        opacity: dim ? 0.55 : 1
-        color: primary ? report.ui.c.accent : (focused ? report.ui.c.focusFill : report.ui.c.raised)
-        border.color: focused ? report.ui.c.text : report.ui.c.line
-        border.width: focused ? report.ui.px(2) : Math.max(1, report.ui.px(1))
-        Row {
-            id: btnRow
-            anchors.centerIn: parent
-            spacing: report.ui.px(8)
-            Rectangle {
-                visible: btn.key !== ""
-                width: report.ui.px(24); height: width; radius: width / 2
-                anchors.verticalCenter: parent.verticalCenter
-                color: report.ui.c.raised
-                border.color: report.ui.c.accentLo
-                Text { anchors.centerIn: parent; text: btn.key.toUpperCase(); color: report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.fpx(13); font.bold: true }
-            }
-            Text { text: btn.label; color: btn.primary ? report.ui.c.onAccent : report.ui.c.text; font.family: report.ui.bodyFont; font.pixelSize: report.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-        }
-        HoverHandler { onHoveredChanged: report.ui.hover(parent, hovered) }
-        TapHandler { onTapped: btn.clicked() }
+        ui: report.ui
+        cap: key
     }
 
-    Rectangle { anchors.fill: parent; color: "#C8000000" }
+    Scrim { ui: report.ui }
     // A tap beside it closes it (Main.qml asks first when something was typed).
 
-    Rectangle {
+    Card {
+        ui: report.ui
         id: box
         anchors.centerIn: parent
         width: Math.min(parent.width - report.ui.px(32), report.ui.px(620))
-        height: Math.min(parent.height - report.ui.px(24), col.implicitHeight + report.ui.px(36))
-        radius: report.ui.px(10)
-        color: report.ui.c.panel
-        border.color: report.ui.c.line
-        clip: true
+        // Sized to the words, up to the room there is; then they scroll and the buttons stay at the bottom.
+        height: Math.min(parent.height - report.ui.px(24), col.implicitHeight + buttons.height + report.ui.px(22 * 2 + 14))
         CardGuard {}   // taps inside don't close it
         Flickable {
             id: view
-            anchors.fill: parent
-            anchors.margins: report.ui.px(18)
+            // Scrolls on purpose when it doesn't fit, with ScrollFade's fades and chevron as the cue.
+            property string layoutOk: "scroll"
+            x: report.ui.px(22)
+            width: parent.width - report.ui.px(44)
+            anchors.top: parent.top
+            anchors.topMargin: report.ui.px(22)
+            anchors.bottom: buttons.top
+            anchors.bottomMargin: report.ui.px(14)
             contentHeight: col.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
             Column {
                 id: col
                 width: view.width
-                spacing: report.ui.px(10)
+                spacing: report.ui.px(8)
                 Text {
                     text: "Report a bug"
                     color: report.ui.c.text
                     font.family: report.ui.titleFont
-                    font.pixelSize: report.ui.fpx(18)
+                    font.pixelSize: report.ui.fpx(19)
                     font.bold: true
                 }
                 Text {
@@ -222,7 +199,7 @@ Overlay {
                 Rectangle {
                     visible: report.shotUrl !== ""
                     width: parent.width
-                    height: Math.min(Math.round(width * 10 / 16), report.ui.px(170))
+                    height: Math.min(Math.round(width * 10 / 16), report.ui.px(96))
                     radius: report.ui.px(6)
                     color: report.ui.c.ground
                     border.color: report.ui.c.line
@@ -248,7 +225,7 @@ Overlay {
                 Rectangle {
                     id: textBox
                     width: parent.width
-                    height: Math.max(report.ui.px(90), (report.editing ? editor.contentHeight : body.implicitHeight) + report.ui.px(24))
+                    height: Math.max(report.ui.px(72), (report.editing ? editor.contentHeight : body.implicitHeight) + report.ui.px(24))
                     radius: report.ui.px(6)
                     color: report.ui.c.ground
                     border.width: report.focusAt === 1 ? report.ui.px(2) : Math.max(1, report.ui.px(1))
@@ -321,18 +298,22 @@ Overlay {
                     font.family: report.ui.bodyFont
                     font.pixelSize: report.ui.fpx(14)
                 }
-                Row {
-                    id: buttons
-                    anchors.right: parent.right
-                    spacing: report.ui.px(10)
-                    Button { label: "Not now"; focused: report.focusAt === 3 && !report.editing; onClicked: report.closeClicked() }
-                    Button {
-                        label: "Save report"; key: "a"; primary: true
-                        dim: report.text.trim() === ""
-                        focused: report.focusAt === 2 && !report.editing
-                        onClicked: report.sendClicked()
-                    }
-                }
+            }
+        }
+        ScrollFade { ui: report.ui; view: view; color: report.ui.c.panel; chevronBelow: true }
+        Row {
+            id: buttons
+            anchors.right: parent.right
+            anchors.rightMargin: report.ui.px(22)
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: report.ui.px(22)
+            spacing: report.ui.px(10)
+            Button { label: "Not now"; focused: report.focusAt === 3 && !report.editing; onClicked: report.closeClicked() }
+            Button {
+                label: "Save report"; key: "a"; primary: true
+                dim: report.text.trim() === ""
+                focused: report.focusAt === 2 && !report.editing
+                onClicked: report.sendClicked()
             }
         }
     }

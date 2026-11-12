@@ -147,18 +147,15 @@ Overlay {
     }
     onShownChanged: if (focusIndex >= shown.length) focusIndex = Math.max(0, shown.length - 1)
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
-    Rectangle {
+    Scrim { ui: se.ui }
+    Card {
+        ui: se.ui
         id: box
         anchors.centerIn: parent
-        anchors.verticalCenterOffset: -se.ui.px(24)
         width: Math.min(parent.width - se.ui.px(32), se.ui.px(980))
-        height: parent.height - se.ui.px(120)
-        radius: se.ui.px(10)
-        color: se.ui.c.panel
-        border.color: se.ui.c.line
+        // The sheet layer already ends above the bottom bar.
+        height: parent.height - se.ui.px(32)
         clip: true
-        Rectangle { width: parent.width; height: se.ui.px(3); color: se.ui.c.accent; radius: se.ui.px(2) }
         Text {
             id: head
             x: se.ui.px(20); y: se.ui.px(16)
@@ -182,6 +179,7 @@ Overlay {
         }
         ListView {
             id: list
+            ScrollFade { ui: se.ui; view: list; color: se.ui.c.panel }
             anchors.top: subText.bottom; anchors.topMargin: se.ui.px(10)
             anchors.bottom: btnRow.top; anchors.bottomMargin: se.ui.px(10)
             x: se.ui.px(16)
@@ -211,7 +209,7 @@ Overlay {
                     x: se.ui.px(4)
                     text: row.modelData.text || ""
                     color: se.ui.c.accentText
-                    font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(13); font.bold: true; font.capitalization: Font.AllUppercase
+                    font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true
                 }
                 Column {
                     id: rowCol
@@ -329,18 +327,14 @@ Overlay {
             spacing: se.ui.px(10)
             Repeater {
                 model: [{ k: "start", label: "Save" }, { k: "x", label: "Options" }, { k: "b", label: "Back" }]
-                Rectangle {
+                // Each with its key (Start saves, X options, B back); Save is the main one once there is a change.
+                ActionButton {
                     required property var modelData
-                    width: bRow.implicitWidth + se.ui.px(24); height: se.ui.tpx(38); radius: se.ui.px(6)
-                    color: modelData.k === "start" && se.changes > 0 ? se.ui.c.accent : se.ui.c.card
-                    border.color: se.ui.c.line
-                    Row {
-                        id: bRow
-                        anchors.centerIn: parent
-                        spacing: se.ui.px(6)
-                        Text { text: parent.parent.modelData.label; color: parent.parent.modelData.k === "start" && se.changes > 0 ? se.ui.c.onAccent : se.ui.c.text; font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true }
-                    }
-                    TapHandler { onTapped: se.handleButton(parent.modelData.k) }
+                    ui: se.ui
+                    label: modelData.label
+                    cap: modelData.k
+                    primary: modelData.k === "start" && se.changes > 0
+                    onClicked: se.handleButton(modelData.k)
                 }
             }
         }

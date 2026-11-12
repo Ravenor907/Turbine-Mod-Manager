@@ -26,7 +26,8 @@ Overlay {
     anchors.fill: parent
     z: 100
 
-    Rectangle { anchors.fill: parent; color: tut.ui.c.ground; opacity: 0.97 }
+    // The cards cover the window entirely: nothing behind them competes with their words.
+    Rectangle { anchors.fill: parent; color: tut.ui.c.ground }
 
     // A face button as it looks on the pad: round, its letter in the middle.
     component Face: Column {

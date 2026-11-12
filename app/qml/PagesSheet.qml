@@ -26,19 +26,18 @@ Overlay {
     signal activated(int index)
     signal closed()
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
-    Rectangle {
+    Scrim { ui: pg.ui }
+    Card {
+        ui: pg.ui
         anchors.centerIn: parent
         width: Math.min(parent.width - pg.ui.px(40), pg.ui.px(680))
         height: Math.min(parent.height - pg.ui.px(80), col.implicitHeight + pg.ui.px(40))
-        radius: pg.ui.px(10)
-        color: pg.ui.c.panel
-        border.color: pg.ui.c.line
         clip: true
         CardGuard {}
         // Scrolls by touch and follows the focus when the rows don't fit (150%, a long list).
         Flickable {
             id: scroller
+            ScrollFade { ui: pg.ui; view: scroller; color: pg.ui.c.panel }
             anchors.fill: parent
             anchors.margins: pg.ui.px(20)
             contentHeight: col.implicitHeight

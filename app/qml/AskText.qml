@@ -38,15 +38,13 @@ Overlay {
     function cancel() { shown = false; cancelled() }
     function clear() { field.text = "" }
 
-    Rectangle { anchors.fill: parent; color: "#C8000000" }
-    Rectangle {
+    Scrim { ui: ask.ui }
+    Card {
+        ui: ask.ui
         anchors.horizontalCenter: parent.horizontalCenter
         y: ask.ui.px(40)
         width: Math.min(parent.width - ask.ui.px(32), ask.ui.px(640))
         height: col.implicitHeight + ask.ui.px(36)
-        radius: ask.ui.px(10)
-        color: ask.ui.c.panel
-        border.color: ask.ui.c.line
         CardGuard {}
         Column {
             id: col

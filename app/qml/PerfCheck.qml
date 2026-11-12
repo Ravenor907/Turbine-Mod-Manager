@@ -167,15 +167,13 @@ Overlay {
     }
 
     // ------------------------------------------------------------- the screen
-    Rectangle { anchors.fill: parent; color: "#C8000000" }
-    Rectangle {
+    Scrim { ui: perf.ui }
+    Card {
+        ui: perf.ui
         id: box
         anchors.centerIn: parent
         width: Math.min(parent.width - perf.ui.px(32), perf.ui.px(660))
         height: Math.min(parent.height - perf.ui.px(24), col.implicitHeight + perf.ui.px(36))
-        radius: perf.ui.px(10)
-        color: perf.ui.c.panel
-        border.color: perf.ui.c.line
         clip: true
         CardGuard {}
         Column {

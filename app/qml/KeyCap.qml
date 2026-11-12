@@ -14,7 +14,7 @@ Rectangle {
     Text {
         id: capLabel
         anchors.centerIn: parent
-        text: cap.k.toUpperCase()
+        text: cap.ui.glyph(cap.k)
         color: cap.ui.c.text
         font.family: cap.ui.bodyFont
         font.pixelSize: cap.ui.fpx(14)

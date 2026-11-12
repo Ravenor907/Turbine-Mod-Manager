@@ -16,19 +16,18 @@ Overlay {
 
     readonly property string state_: info ? info.state : ""
 
-    Rectangle { anchors.fill: parent; color: "#C8000000" }
-    Rectangle {
+    Scrim { ui: cs.ui }
+    Card {
+        ui: cs.ui
         anchors.centerIn: parent
         width: Math.min(parent.width - cs.ui.px(40), cs.ui.px(720))
         height: Math.min(col.implicitHeight + cs.ui.px(40), parent.height - cs.ui.px(40))
         clip: true
-        radius: cs.ui.px(10)
-        color: cs.ui.c.panel
-        border.color: cs.ui.c.line
         CardGuard {}
         // Scrolls by touch when the words don't fit (150%).
         Flickable {
             id: scroller
+            ScrollFade { ui: cs.ui; view: scroller; color: cs.ui.c.panel }
             anchors.fill: parent
             anchors.margins: cs.ui.px(20)
             contentHeight: col.implicitHeight
@@ -41,7 +40,7 @@ Overlay {
             Text {
                 text: "Thunderstore profile code"
                 color: cs.ui.c.text
-                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.fpx(18); font.bold: true
+                font.family: cs.ui.titleFont; font.pixelSize: cs.ui.fpx(19); font.bold: true
             }
             Text {
                 width: parent.width
@@ -94,33 +93,12 @@ Overlay {
                 color: cs.ui.c.soft
                 font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(14)
             }
+            // A copies again, B closes: buttons with their keys.
             Row {
-                spacing: cs.ui.px(18)
-                Row {
-                    visible: cs.state_ === "ready"
-                    height: cs.ui.tpx(44)
-                    spacing: cs.ui.px(6)
-                    Rectangle {
-                        width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "A"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(13); font.bold: true }
-                    }
-                    Text { text: "Copy again"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
-                    HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: cs.copyClicked() }
-                }
-                Row {
-                    height: cs.ui.tpx(44)
-                    spacing: cs.ui.px(6)
-                    Rectangle {
-                        width: cs.ui.px(24); height: width; radius: width / 2; color: cs.ui.c.raised; border.color: cs.ui.c.accentLo
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "B"; color: cs.ui.c.text; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(13); font.bold: true }
-                    }
-                    Text { text: "Close"; color: cs.ui.c.soft; font.family: cs.ui.bodyFont; font.pixelSize: cs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
-                    HoverHandler { onHoveredChanged: cs.ui.hover(parent, hovered) }
-                    TapHandler { onTapped: cs.closed() }
-                }
+                spacing: cs.ui.px(10)
+                topPadding: cs.ui.px(4)
+                ActionButton { ui: cs.ui; visible: cs.state_ === "ready"; label: "Copy again"; cap: "a"; primary: true; focused: true; onClicked: cs.copyClicked() }
+                ActionButton { ui: cs.ui; label: "Close"; cap: "b"; onClicked: cs.closed() }
             }
         }
         }

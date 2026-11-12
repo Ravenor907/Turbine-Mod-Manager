@@ -30,10 +30,12 @@ Overlay {
 
     function showFocused() {
         const it = itemRepeater.itemAt(focusIndex)
-        if (!it) return
-        // The section head comes into view with its first row.
-        if (it.y < flick.contentY) flick.contentY = it.y
-        else if (it.y + it.height > flick.contentY + flick.height) flick.contentY = it.y + it.height - flick.height
+        // (Not laid out yet: flick.height changing calls this again.)
+        if (!it || flick.height <= it.height) return
+        // The section head comes into view with its first row; a little room around the row clears the fades.
+        const m = Math.min(root.ui.px(20), (flick.height - it.height) / 2)
+        if (it.y - m < flick.contentY) flick.contentY = Math.max(0, it.y - m)
+        else if (it.y + it.height + m > flick.contentY + flick.height) flick.contentY = Math.min(Math.max(0, flick.contentHeight - flick.height), it.y + it.height + m - flick.height)
         // The last row scrolls all the way, past the fade.
         if (focusIndex === itemRepeater.count - 1) flick.contentY = Math.max(0, flick.contentHeight - flick.height)
     }
@@ -42,30 +44,24 @@ Overlay {
 
     anchors.fill: parent
 
-    Rectangle {
-        anchors.fill: parent
-        color: Qt.rgba(0.02, 0.016, 0.012, 0.74)
-    }
+    Scrim { ui: root.ui }
 
-    Rectangle {
+    Card {
         id: card
-        readonly property real fullHeight: head.implicitHeight + body.height + root.ui.px(16 + 8 + 16)
-        width: Math.min(parent.width - root.ui.px(40), root.ui.px(500))
-        height: Math.min(fullHeight, parent.height - root.ui.px(40))
+        ui: root.ui
+        readonly property real fullHeight: head.implicitHeight + body.height + root.ui.px(20 + 10 + 16 + 6)
+        width: Math.min(parent.width - root.ui.px(40), root.ui.px(520))
+        height: Math.min(fullHeight, parent.height - root.ui.px(24))
         x: (parent.width - width) / 2
         y: (parent.height - height) / 2
-        color: root.ui.c.panel
-        radius: root.ui.px(6)
-        border.width: Math.max(1, root.ui.px(1.5))
-        border.color: root.ui.c.accentLo
 
         CardGuard {}   // taps on the card don't close it
 
         Column {
             id: head
-            x: root.ui.px(18)
-            y: root.ui.px(16)
-            width: parent.width - root.ui.px(36)
+            x: root.ui.px(20)
+            y: root.ui.px(20)
+            width: parent.width - root.ui.px(40)
             spacing: root.ui.px(3)
             Text {
                 width: parent.width
@@ -73,14 +69,14 @@ Overlay {
                 elide: Text.ElideRight
                 color: root.ui.c.text
                 font.family: root.ui.titleFont
-                font.pixelSize: root.ui.fpx(18)
+                font.pixelSize: root.ui.fpx(19)
                 font.bold: true
             }
             Text {
                 visible: text !== ""
                 width: parent.width
                 text: root.subtitle || ""
-                color: root.ui.c.soft
+                color: root.ui.c.muted
                 font.family: root.ui.bodyFont
                 font.pixelSize: root.ui.fpx(14)
             }
@@ -89,7 +85,7 @@ Overlay {
         Flickable {
             id: flick
             anchors.top: head.bottom
-            anchors.topMargin: root.ui.px(8)
+            anchors.topMargin: root.ui.px(10)
             anchors.bottom: parent.bottom
             anchors.bottomMargin: root.ui.px(16)
             x: root.ui.px(14)
@@ -99,6 +95,7 @@ Overlay {
             // A little room under the last row, so it never sits against the sheet's edge.
             contentHeight: body.height + root.ui.px(6)
             boundsBehavior: Flickable.StopAtBounds
+            onHeightChanged: if (root.visible) Qt.callLater(root.showFocused)
 
             Column {
                 id: body
@@ -123,7 +120,7 @@ Overlay {
                             topPadding: slot.index === 0 ? 0 : root.ui.px(8)
                             leftPadding: root.ui.px(4)
                             text: slot.head
-                            color: root.ui.c.muted
+                            color: root.ui.c.accentText
                             font.family: root.ui.bodyFont; font.pixelSize: root.ui.fpx(13); font.bold: true
                         }
                     MenuEntry {
@@ -152,17 +149,6 @@ Overlay {
                 }
             }
         }
-        // More rows below: a fade over the bottom edge of the list.
-        Rectangle {
-            visible: flick.contentY < flick.contentHeight - flick.height - 1
-            anchors.left: flick.left
-            anchors.right: flick.right
-            anchors.bottom: flick.bottom
-            height: root.ui.px(26)
-            gradient: Gradient {
-                GradientStop { position: 0; color: "transparent" }
-                GradientStop { position: 1; color: root.ui.c.panel }
-            }
-        }
+        ScrollFade { ui: root.ui; view: flick; color: root.ui.c.panel; chevronBelow: true }
     }
 }

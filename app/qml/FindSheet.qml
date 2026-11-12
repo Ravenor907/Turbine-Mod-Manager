@@ -36,23 +36,22 @@ Overlay {
     function stopTyping() { if (input.activeFocus) input.focus = false }
     readonly property string fieldText: input.activeFocus ? input.text : fs.text
 
-    Rectangle { anchors.fill: parent; color: "#C0000000" }
-    Rectangle {
+    Scrim { ui: fs.ui }
+    Card {
+        ui: fs.ui
         id: box
         anchors.horizontalCenter: parent.horizontalCenter
         y: Math.max(fs.ui.px(16), (parent.height - height) / 2)
         width: Math.min(parent.width - fs.ui.px(40), fs.ui.px(560))
-        height: Math.min(parent.height - fs.ui.px(80), col.implicitHeight + fs.ui.px(40))
-        radius: fs.ui.px(8)
-        color: fs.ui.c.panel
-        border.color: fs.ui.c.line
-        border.width: Math.max(1, fs.ui.px(1))
+        height: Math.min(parent.height - fs.ui.px(32), col.implicitHeight + fs.ui.px(44))
         clip: true
         CardGuard {}
         Flickable {
             id: flick
+            // Scrolls on purpose on a small window, with ScrollFade's fades and chevron as the cue.
+            property string layoutOk: "scroll"
             anchors.fill: parent
-            anchors.margins: fs.ui.px(20)
+            anchors.margins: fs.ui.px(22)
             contentHeight: col.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -69,7 +68,7 @@ Overlay {
                     elide: Text.ElideRight
                     text: fs.title
                     color: fs.ui.c.text
-                    font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(18); font.bold: true
+                    font.family: fs.ui.titleFont; font.pixelSize: fs.ui.fpx(19); font.bold: true
                 }
                 // What the choices found, live.
                 Text {
@@ -147,17 +146,28 @@ Overlay {
                                     required property string modelData
                                     readonly property bool chosen: index === secCol.modelData.chosen
                                     readonly property bool foc: fs.focusRow === secCol.index + 1 && fs.focusCol === index
+                                    // Chosen: an accent outline, accent words and a check mark. The highlight: a ring
+                                    // around the chip (never a fill).
                                     width: optText.implicitWidth + fs.ui.px(28)
                                     height: fs.ui.tpx(40)
-                                    radius: fs.ui.px(6)
-                                    color: chosen ? fs.ui.c.accent : fs.ui.c.card
-                                    border.color: foc ? fs.ui.c.text : fs.ui.c.line
-                                    border.width: foc ? fs.ui.px(3) : Math.max(1, fs.ui.px(1))
+                                    radius: fs.ui.radiusSmall
+                                    color: chosen ? Qt.tint(fs.ui.c.card, Qt.rgba(fs.ui.c.accent.r, fs.ui.c.accent.g, fs.ui.c.accent.b, 0.12)) : fs.ui.c.card
+                                    border.color: chosen ? fs.ui.c.accent : fs.ui.c.line
+                                    border.width: chosen ? Math.max(1, fs.ui.px(1.5)) : Math.max(1, fs.ui.px(1))
+                                    Rectangle {
+                                        visible: opt.foc
+                                        anchors.fill: parent
+                                        anchors.margins: -fs.ui.px(4)
+                                        radius: parent.radius + fs.ui.px(4)
+                                        color: "transparent"
+                                        border.width: fs.ui.ringWidth
+                                        border.color: fs.ui.ring
+                                    }
                                     Text {
                                         id: optText
                                         anchors.centerIn: parent
-                                        text: opt.modelData
-                                        color: opt.chosen ? fs.ui.c.onAccent : fs.ui.c.text
+                                        text: (opt.chosen ? "\u2713 " : "") + opt.modelData
+                                        color: opt.chosen ? fs.ui.c.accentText : fs.ui.c.text
                                         font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: opt.chosen
                                     }
                                     Accessible.role: Accessible.RadioButton
@@ -174,31 +184,24 @@ Overlay {
                     topPadding: fs.ui.px(4)
                     Repeater {
                         model: ["Done", "Clear all"]
-                        Rectangle {
+                        // Done is B anywhere, Clear all X; A presses the highlighted one.
+                        ActionButton {
                             required property int index
                             required property string modelData
-                            readonly property bool foc: fs.focusRow === fs.buttonsRow && fs.focusCol === index
-                            width: bt.implicitWidth + fs.ui.px(32)
-                            height: fs.ui.tpx(44)
-                            radius: fs.ui.px(6)
-                            color: index === 0 ? fs.ui.c.accent : fs.ui.c.raised
-                            border.color: foc ? fs.ui.c.text : fs.ui.c.line
-                            border.width: foc ? fs.ui.px(3) : index === 0 ? 0 : Math.max(1, fs.ui.px(1))
-                            Text {
-                                id: bt
-                                anchors.centerIn: parent
-                                text: parent.modelData
-                                color: parent.index === 0 ? fs.ui.c.onAccent : fs.ui.c.text
-                                font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); font.bold: true
-                            }
+                            ui: fs.ui
+                            label: modelData
+                            focused: fs.focusRow === fs.buttonsRow && fs.focusCol === index
+                            primary: index === 0
+                            cap: focused ? "a" : index === 0 ? "b" : "x"
                             Accessible.role: Accessible.Button
                             Accessible.name: modelData
-                            TapHandler { onTapped: parent.index === 0 ? fs.doneClicked() : fs.clearClicked() }
+                            onClicked: index === 0 ? fs.doneClicked() : fs.clearClicked()
                         }
                     }
                 }
             }
         }
+        ScrollFade { ui: fs.ui; view: flick; color: fs.ui.c.panel }
     }
     // The focused row stays in view on a small window.
     onFocusRowChanged: {

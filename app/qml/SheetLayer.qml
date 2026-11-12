@@ -40,81 +40,66 @@ Item {
     enabled: app.topLayer <= 2
     Overlay {
         visible: app.sheet === "details" || app.sheet === "notice"
+        motion: kit.motion
         onOutsideTapped: { if (!app.gate(2, "sheet onOutsideTapped")) return; app.act("b") }
-        Rectangle { anchors.fill: parent; color: "#B0000000" }
+        Scrim { ui: kit }
 
         // Game details: what Turbine found, so the owner can check detection on the device.
-        Rectangle {
+        DialogCard {
             visible: app.sheet === "details" && app.game !== null
-            anchors.centerIn: parent
-            width: Math.min(parent.width - app.px(40), app.px(600))
-            height: detailCol.implicitHeight + app.px(32)
-            radius: app.px(10)
-            color: c.panel
-            border.color: c.line
-            CardGuard {}
-            Column {
-                id: detailCol
-                x: app.px(18); y: app.px(16)
-                width: parent.width - app.px(36)
-                spacing: app.px(8)
-                Label { win: app; text: app.game ? app.game.name : ""; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold; width: parent.width }
-                Repeater {
-                    model: app.game ? [
-                        ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
-                        ["Runs as", app.runtimeWords(app.game)],
-                        ["Stored on", (app.game.launcher === "Steam" ? "Steam library, " : "") + app.game.drive],
-                        ["Folder", String(app.game.installDir || "").split("/").filter(x => x !== "").slice(-1)[0] || ""],
-                        // A Steam build number means nothing to people; the number stays for reports, in Labs.
-                        // "Reported by Steam" said nothing: a Steam game's build is for reports (Labs), so no row.
-                        ["Game version", app.game.launcher === "Steam" ? "" : (app.game.build || "Not reported")],
-                    ].concat(app.labsOn ? [["Store ID", app.game.storeId], ["Build", app.game.build || "none"], ["Full folder", app.game.installDir]] : []).concat([
+            ui: kit
+            maxWidth: 620
+            title: app.game ? app.game.name : ""
+            buttons: ["Close"]
+            focusIndex: 0
+            mainIndex: -1
+            onActivated: { if (!app.gate(2, "details Close")) return; app.act("a") }
+            Repeater {
+                model: app.game ? [
+                    ["Store", app.game.storeLabel + (app.game.launcher !== "Steam" ? " (through Heroic)" : "")],
+                    ["Runs as", app.runtimeWords(app.game)],
+                    ["Stored on", (app.game.launcher === "Steam" ? "Steam library, " : "") + app.game.drive],
+                    ["Folder", String(app.game.installDir || "").split("/").filter(x => x !== "").slice(-1)[0] || ""],
+                    // A Steam build number means nothing to people; the number stays for reports, in Labs.
+                    ["Game version", app.game.launcher === "Steam" ? "" : (app.game.build || "Not reported")],
+                ].concat(app.labsOn ? [["Store ID", app.game.storeId], ["Build", app.game.build || "none"], ["Full folder", app.game.installDir]] : []).concat([
 
-                        ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
-                        ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
-                                    : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
-                    ]).concat(app.rules && app.rules.supportLevel !== "full" ? [
-                        ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
-                    ] : []).concat(app.rules && app.rules.antiCheat ? [
-                        ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
-                    ] : []).concat(app.checkPaths.length > 0 ? [
-                        ["Also checks", app.checkPaths.join("; ")]
-                    ] : []).concat(app.rules && app.rules.launchOption ? [
-                        ["Loader setup", app.rules.launchHelp || ""],
-                        ["Launch Option", app.rules.launchOption]
-                    ] : []) : []
-                    Row {
-                        required property var modelData
-                        visible: modelData[1] !== ""
-                        width: detailCol.width
-                        spacing: app.px(12)
-                        Label { win: app; width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
-                        Label { win: app; width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.WrapAnywhere; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
-                    }
+                    ["Cover art", app.game.cover || app.game.header ? "Found on the device" : "None cached"],
+                    ["Support", !app.rules ? "" : app.rules.supportLevel === "basic" ? "Basic support. Turbine has no rules of its own for this game yet. It puts each mod where its files show they belong, or asks you once."
+                                : app.rules.supportLevel === "custom" ? "Added by you (from your games folder)" : "Full support"]
+                ]).concat(app.rules && app.rules.supportLevel !== "full" ? [
+                    ["Nexus game", app.rules.domain ? (app.rules.nexusName || app.rules.domain) + (app.rules.nexusHow ? " (" + app.rules.nexusHow + ")" : "") : app.rules.domainState === "none" ? "Not on Nexus (your pick)" : "Not found yet"]
+                ] : []).concat(app.rules && app.rules.antiCheat ? [
+                    ["Anti-cheat", app.rules.antiCheat.name + ". Mods only in offline or single player modes."]
+                ] : []).concat(app.checkPaths.length > 0 ? [
+                    ["Also checks", app.checkPaths.join("; ")]
+                ] : []).concat(app.rules && app.rules.launchOption ? [
+                    ["Loader setup", app.rules.launchHelp || ""],
+                    ["Launch Option", app.rules.launchOption]
+                ] : []) : []
+                Row {
+                    required property var modelData
+                    visible: modelData[1] !== ""
+                    width: parent.width
+                    spacing: app.px(12)
+                    Label { win: app; width: app.px(110); text: parent.modelData[0]; color: c.muted; font.pixelSize: app.fpx(14) }
+                    // Words wrap between words; a folder path with no spaces still breaks.
+                    Label { win: app; width: parent.width - app.px(122); text: parent.modelData[1]; wrapMode: Text.Wrap; elide: Text.ElideNone; font.pixelSize: app.fpx(15) }
                 }
-                Hint { win: app; k: "b"; label: "Close" }
             }
         }
 
         // Not SteamOS: said once, then Turbine runs as it is.
-        Rectangle {
+        DialogCard {
             visible: app.sheet === "notice"
-            anchors.centerIn: parent
-            width: Math.min(parent.width - app.px(40), app.px(520))
-            height: noticeCol.implicitHeight + app.px(36)
-            radius: app.px(10)
-            color: c.panel
-            border.color: c.line
-            CardGuard {}
-            Column {
-                id: noticeCol
-                x: app.px(20); y: app.px(18)
-                width: parent.width - app.px(40)
-                spacing: app.px(10)
-                Label { win: app; text: "Made for SteamOS"; font.pixelSize: app.fpx(19); font.weight: Font.DemiBold }
-                Label { win: app; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
-                Hint { win: app; k: "a"; label: "OK" }
-            }
+            ui: kit
+            maxWidth: 540
+            title: "Made for SteamOS"
+            buttons: ["OK"]
+            focusIndex: 0
+            mainIndex: 0
+            onActivated: { if (!app.gate(2, "notice OK")) return; app.act("a") }
+            Label { win: app; width: parent.width; wrapMode: Text.WordWrap; elide: Text.ElideNone; color: c.soft; text: "This system isn't supported. Turbine Mod Manager is built and tested for SteamOS handhelds only, so some things may not work here." }
         }
     }
 
@@ -169,6 +154,7 @@ Item {
         checks: app.checks
         buttons: app.checkChoices.map(label => ({ key: "", label: label, main: !app.checkStops && label === "Play anyway" }))
         focusIndex: app.checkIndex
+        cancelIndex: app.checkChoices.indexOf("Not now")
         note: app.checkStops ? "Play without mods starts the game with no mods. Nothing is deleted." : ""
         onActivated: (index, key) => { if (!app.gate(2, "sheet onActivated")) return; app.checkIndex = index; app.checkChoose(index) }
         onClosed: { if (!app.gate(2, "sheet onClosed")) return; app.act("b") }
@@ -415,11 +401,18 @@ Item {
         readonly property bool hint: !seen.railHintDone || shot.page === "rail"
         visible: on && app.sheet === ""
         z: 20
-        x: rail.width + app.px(4)
-        y: app.px(6)
+        // Beside the focused tile, like a tooltip (never over the top of the page).
+        x: rail.width + app.px(8)
+        y: {
+            const moved = rail.railList.contentY + app.railIndex + rail.width
+            const it = rail.itemAt(app.railIndex)
+            if (!it || !on) return app.px(6)
+            const p = it.mapToItem(sheetLayer, 0, it.height / 2)
+            return Math.max(app.px(6), Math.min(sheetLayer.height - height - app.px(6), p.y - height / 2 + moved * 0))
+        }
         width: Math.max(railLabelText.implicitWidth, railHintText.visible ? railHintText.implicitWidth : 0) + app.px(24)
         height: railLabelText.implicitHeight + (railHintText.visible ? railHintText.implicitHeight + app.px(2) : 0) + app.px(12)
-        radius: app.px(6)
+        radius: kit.radiusSmall
         color: c.raised
         border.color: c.accent
         border.width: Math.max(1, app.px(1))

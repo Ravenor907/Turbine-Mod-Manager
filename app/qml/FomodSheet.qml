@@ -269,7 +269,7 @@ Overlay {
         preventStealing: true
         onWheel: (w) => { w.accepted = true }
         onClicked: fs.answerStop(0)
-        Rectangle { anchors.fill: parent; color: "#A0000000" }
+        Scrim { ui: fs.ui }
     }
     Rectangle {
         visible: fs.askStop

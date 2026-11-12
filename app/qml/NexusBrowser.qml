@@ -57,6 +57,8 @@ Item {
     signal pageDown()
     signal googleChrome()
     signal closeClicked()
+    // A tap on one of the bar's hints: that button's press ("b" closes or goes back).
+    signal hintClicked(string k)
     signal menuWanted()
     signal tabClicked(int index)
     signal downloadClicked(int index)
@@ -103,12 +105,12 @@ Item {
     // Nothing under the page reacts to the pointer, a tap or the wheel while it is on screen.
     MouseArea { anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.AllButtons; onWheel: (w) => { w.accepted = true } }  // overlay-check: the page itself (layer 0), not an overlay
 
-    // ---------------------------------------------------------------- the bar (40 design pixels)
+    // ---------------------------------------------------------------- the bar (48 design pixels)
     // At the bottom, like every other screen's bar (no top bar anywhere); the page fills the rest.
     Rectangle {
         id: bar
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: nb.ui.px(40)
+        height: Math.max(nb.ui.px(48), nb.ui.tpx(36))
         color: nb.ui.c.panel
         z: 2
         Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: Math.max(1, nb.ui.px(1)); color: nb.ui.c.accentLo }
@@ -170,11 +172,11 @@ Item {
                     id: tb
                     required property int index
                     required property string modelData
-                    width: tbText.implicitWidth + nb.ui.px(16); height: nb.ui.px(28); radius: nb.ui.px(5)
+                    width: tbText.implicitWidth + nb.ui.px(16); height: nb.ui.px(30); radius: nb.ui.radiusSmall
                     color: nb.tab === index ? nb.ui.c.focusFill : "transparent"
                     border.color: nb.tab === index ? nb.ui.c.accent : "transparent"
                     border.width: Math.max(1, nb.ui.px(1))
-                    Text { id: tbText; anchors.centerIn: parent; text: tb.modelData; color: nb.tab === tb.index ? nb.ui.c.accentText : nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14) }
+                    Text { id: tbText; anchors.centerIn: parent; text: tb.modelData; color: nb.tab === tb.index ? nb.ui.c.accentText : nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15); font.bold: nb.tab === tb.index }
                     anchors.verticalCenter: parent.verticalCenter
                     HoverHandler { onHoveredChanged: nb.ui.hover(tb, hovered) }
                     // A touch target of at least 44 design pixels around the 28 drawn.
@@ -208,6 +210,8 @@ Item {
                 Text { id: hostText; anchors.centerIn: parent; text: hostChip.nexus ? "nexusmods.com" : hostChip.host; color: hostChip.nexus ? nb.ui.c.soft : nb.ui.c.warn; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
             }
             Text {
+                // A page's title is cut short in the bar when the legend needs the room.
+                property string layoutOk: "cut"
                 text: nb.loading ? "Loading..." : nb.title
                 color: nb.ui.c.text
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14)
@@ -258,36 +262,66 @@ Item {
                 elide: Text.ElideRight
             }
         }
-        // The legend lives in the bar (the page needs the height).
+        // The legend lives in the bar (the page needs the height), in the main bar's sizes. A hint for one button is
+        // a button too (B closes or goes back, so there is no separate close button).
         Row {
             id: legendRow
-            anchors.right: closeBtn.left; anchors.rightMargin: nb.ui.px(8)
+            anchors.right: parent.right; anchors.rightMargin: nb.ui.px(12)
             anchors.verticalCenter: parent.verticalCenter
-            spacing: nb.ui.px(10)
+            spacing: nb.ui.px(14)
             Repeater {
-                model: nb.legend
-                Row {
+                // As many as fit, in order (A and B first).
+                model: nb.legend.slice(0, bar.legendFit)
+                Item {
                     id: lh
                     required property var modelData
-                    spacing: nb.ui.px(4)
-                    Text { visible: (lh.modelData[2] || "") !== ""; text: lh.modelData[2] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
+                    readonly property bool clickable: ["a", "b", "x", "y"].indexOf(lh.modelData[0]) >= 0 && (lh.modelData[3] || "") === ""
+                    implicitWidth: lhRow.implicitWidth; implicitHeight: lhRow.implicitHeight
+                    anchors.verticalCenter: parent ? parent.verticalCenter : undefined
+                    HoverHandler { enabled: lh.clickable; onHoveredChanged: nb.ui.hover(lh, hovered) }
+                    Item { objectName: "tap:" + lh.modelData[0]; enabled: lh.clickable; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.hintClicked(lh.modelData[0]) } }
+                Row {
+                    id: lhRow
+                    spacing: nb.ui.px(6)
+                    Text { visible: (lh.modelData[2] || "") !== ""; text: lh.modelData[2] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     Cap { k: lh.modelData[0]; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: lh.modelData[1] + ((lh.modelData[3] || "") !== "" ? "," : ""); color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
+                    Text { text: lh.modelData[1] + ((lh.modelData[3] || "") !== "" ? "," : ""); color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     Cap { visible: (lh.modelData[3] || "") !== ""; k: lh.modelData[3] || ""; anchors.verticalCenter: parent.verticalCenter }
-                    Text { visible: (lh.modelData[4] || "") !== ""; text: lh.modelData[4] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13); anchors.verticalCenter: parent.verticalCenter }
+                    Text { visible: (lh.modelData[4] || "") !== ""; text: lh.modelData[4] || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
+                }
                 }
             }
         }
-        // Close: B on the first page does the same.
-        Rectangle {
-            id: closeBtn
-            anchors.right: parent.right; anchors.rightMargin: nb.ui.px(6)
-            anchors.verticalCenter: parent.verticalCenter
-            width: nb.ui.px(32); height: nb.ui.px(28); radius: nb.ui.px(5)
-            color: nb.ui.c.raised
-            Text { anchors.centerIn: parent; text: "×"; color: nb.ui.c.text; font.pixelSize: nb.ui.fpx(18); font.family: nb.ui.bodyFont }
-            HoverHandler { onHoveredChanged: nb.ui.hover(closeBtn, hovered) }
-            Item { objectName: "tap:Close"; anchors.fill: parent; anchors.margins: -nb.ui.px(8); TapHandler { onTapped: nb.closeClicked() } }
+        // Every hint measured where nobody sees it: the legend keeps what fits beside the tabs and the pill.
+        Row {
+            id: legendMeasure
+            x: -100000; opacity: 0; enabled: false
+            spacing: legendRow.spacing
+            Repeater {
+                id: legendMeasureRep
+                model: nb.legend
+                Row {
+                    required property var modelData
+                    spacing: nb.ui.px(6)
+                    Text { visible: (modelData[2] || "") !== ""; text: modelData[2] || ""; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15) }
+                    Cap { k: modelData[0] }
+                    Text { text: modelData[1] + ((modelData[3] || "") !== "" ? "," : ""); font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15) }
+                    Cap { visible: (modelData[3] || "") !== ""; k: modelData[3] || "" }
+                    Text { visible: (modelData[4] || "") !== ""; text: modelData[4] || ""; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(15) }
+                }
+            }
+        }
+        readonly property int legendFit: {
+            const room = width - nb.ui.px(12) - tabsEnd - nb.ui.px(10) - titleMin
+            let w = 0, n = 0
+            for (let i = 0; i < legendMeasureRep.count; i++) {
+                const it = legendMeasureRep.itemAt(i)
+                if (!it) break
+                const add = it.implicitWidth + (i > 0 ? legendRow.spacing : 0)
+                if (w + add > room && i >= 2) break
+                w += add; n++
+            }
+            return n
         }
     }
 
@@ -317,14 +351,15 @@ Item {
         }
     }
 
+    // A button's cap, as in the main bar (Key.qml): the same size for round and long caps, on one line.
     component Cap: Rectangle {
         property string k: ""
-        implicitWidth: Math.max(nb.ui.px(22), capText.implicitWidth + nb.ui.px(10))
-        implicitHeight: nb.ui.px(22)
+        implicitWidth: Math.ceil(Math.max(nb.ui.px(24), capText.implicitWidth + nb.ui.px(12)))
+        implicitHeight: nb.ui.px(24)
         radius: k.length > 1 ? nb.ui.px(5) : height / 2
         color: nb.ui.c.raised
         border.color: nb.ui.c.accentLo; border.width: Math.max(1, nb.ui.px(1))
-        Text { id: capText; anchors.centerIn: parent; text: nb.glyph(parent.k); color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(12); font.bold: true }
+        Text { id: capText; anchors.centerIn: parent; text: nb.glyph(parent.k); color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14); font.bold: true }
     }
 
     // ---------------------------------------------------------------- the page

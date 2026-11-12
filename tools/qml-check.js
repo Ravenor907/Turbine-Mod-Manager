@@ -280,16 +280,51 @@ function finalNames(file) {
 // backdrop allowed is Overlay's (which also never closes while another layer is on top; Main.qml turns the layers
 // beneath off). In Main.qml every overlay sits in the sheet layer (the quick wheel and the tutorial above it), and
 // every tap wired from the page layer, the browser and the sheets asks app.gate() first.
+// Main.qml is in parts: a file whose root takes Main.qml's window as app (required property var app) is one. The
+// same rules hold in the parts: an overlay only in the parts Main.qml puts in the sheet layer, and a gate() on every
+// tap in the parts it puts between mainRow and the bar (the page layer and the sheet layer, with the parts inside
+// those), the same lines the rules read when they were all in Main.qml.
 function overlays(files) {
   const fs = require("fs");
   const out = [];
   const rootOf = {};
+  const fileOf = {};
+  const isPart = {};
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     const m = /^([A-Z][\w.]*)\s*\{/m.exec(src.replace(/^\s*(import|pragma)[^\n]*$/gm, "").replace(/^\s*\/\/[^\n]*$/gm, ""));
-    rootOf[f.split("/").pop().replace(/\.qml$/, "")] = m ? m[1] : "";
+    const name = f.split("/").pop().replace(/\.qml$/, "");
+    rootOf[name] = m ? m[1] : "";
+    fileOf[name] = f;
+    isPart[name] = name !== "Main" && /^ {4}required property var app\b/m.test(src);
   }
   const overlayTypes = new Set(Object.keys(rootOf).filter(k => rootOf[k] === "Overlay").concat(["Overlay"]));
+  const made = (l) => { const m = /^\s*([A-Z]\w*) \{/.exec(l); return m ? m[1] : "" };
+  // The parts placed in these lines, and the parts placed inside those.
+  const partsIn = (lines) => {
+    const found = new Set();
+    const todo = lines.map(made).filter(t => isPart[t]);
+    while (todo.length) {
+      const t = todo.pop();
+      if (found.has(t)) continue;
+      found.add(t);
+      for (const l of fs.readFileSync(fileOf[t], "utf8").split("\n")) if (isPart[made(l)]) todo.push(made(l));
+    }
+    return found;
+  };
+  // A tap with no app.gate() first, in lines from..to of a file (the status card's own windows, over other apps,
+  // aren't under any layer of this window).
+  const gateRule = (f, lines, from, to) => {
+    for (let k = from; k < to; k++) {
+      const l = lines[k];
+      if (!/^\s*on(Tapped|[A-Z]\w*Clicked|Activated|ItemMenu|RowMenu|RowHeld|Swiped|Closed|OutsideTapped|Choose|Next|Back|Stop)\s*:/.test(l)) continue;
+      if (/gate\(/.test(l) || /gate\(/.test(lines[k + 1] || "")) continue;
+      let j = k; while (j > 0 && !/^ {4}[A-Z]/.test(lines[j])) j--;
+      if (/^ {4}StatusOverlay\b/.test(lines[j])) continue;
+      out.push(f + ":" + (k + 1) + ": a tap with no app.gate() first: " + l.trim().slice(0, 80));
+    }
+  };
+  let pageParts = new Set(), sheetParts = new Set();
   for (const f of files) {
     const name = f.split("/").pop().replace(/\.qml$/, "");
     if (name === "Overlay" || name === "CardGuard") continue;
@@ -316,27 +351,45 @@ function overlays(files) {
     const sheetsFrom = at(/^ {8}id: sheetLayer$/), barFrom = at(/^ {8}id: legend$/);
     const pageFrom = at(/^ {8}id: mainRow$/), pageTo = at(/^ {8}id: sheetLayer$/);
     if (sheetsFrom < 0 || barFrom < 0 || pageFrom < 0) { out.push(f + ": no mainRow, sheetLayer or legend"); continue; }
+    // From the object whose id is sheetLayer (or mainRow) to the bar's: an object's opening line is above its id.
+    const opening = (k) => { while (k > 0 && !made(lines[k])) k--; return k };
+    sheetParts = partsIn(lines.slice(opening(sheetsFrom), opening(barFrom)));
+    pageParts = partsIn(lines.slice(opening(pageFrom), opening(barFrom)));
+    if (!sheetParts.size) out.push(f + ": no part (a file with required property var app) in the sheet layer");
     for (let k = 0; k < lines.length; k++) {
       const m = /^\s*([A-Z]\w*) \{/.exec(lines[k]);
       if (m && overlayTypes.has(m[1]) && !(k > sheetsFrom && k < barFrom) && ["QuickWheel", "Tutorial"].indexOf(m[1]) < 0)
         out.push(f + ":" + (k + 1) + ": " + m[1] + " is an overlay outside the sheet layer");
     }
     // Taps from the page (main row and the Nexus page) and the sheets ask app.gate() first.
-    for (let k = pageFrom; k < barFrom; k++) {
-      const l = lines[k];
-      if (!/^\s*on(Tapped|[A-Z]\w*Clicked|Activated|ItemMenu|RowMenu|RowHeld|Swiped|Closed|OutsideTapped|Choose|Next|Back|Stop)\s*:/.test(l)) continue;
-      if (/gate\(/.test(l) || /gate\(/.test(lines[k + 1] || "")) continue;
-      // The status card's own windows (over other apps) aren't under any layer of this window.
-      let j = k; while (j > 0 && !/^ {4}[A-Z]/.test(lines[j])) j--;
-      if (/^ {4}StatusOverlay\b/.test(lines[j])) continue;
-      out.push(f + ":" + (k + 1) + ": a tap with no app.gate() first: " + l.trim().slice(0, 80));
+    gateRule(f, lines, pageFrom, barFrom);
+  }
+  // The parts: overlays only in the sheet layer's, a gate() on every tap in the page layer's and the sheet layer's.
+  // (Only with Main.qml in the files, which places them.)
+  for (const name of Object.keys(isPart).filter(k => isPart[k] && fileOf.Main).sort()) {
+    const f = fileOf[name];
+    const lines = fs.readFileSync(f, "utf8").split("\n");
+    if (!sheetParts.has(name)) {
+      for (let k = 0; k < lines.length; k++) {
+        const t = made(lines[k]);
+        if (overlayTypes.has(t) && ["QuickWheel", "Tutorial"].indexOf(t) < 0)
+          out.push(f + ":" + (k + 1) + ": " + t + " is an overlay outside the sheet layer (Main.qml doesn't put " + name + " in it)");
+      }
     }
+    if (pageParts.has(name)) gateRule(f, lines, 0, lines.length);
+  }
+  // The Nexus page's own taps, wherever its Connections are (Main.qml or a part).
+  for (const name of ["Main"].concat(Object.keys(isPart).filter(k => isPart[k]))) {
+    if (!fileOf[name]) continue;
+    const f = fileOf[name];
+    const lines = fs.readFileSync(f, "utf8").split("\n");
     for (const fn of ["onSigninClicked", "onGooglePassword", "onGoogleChrome", "onCloseClicked", "onTabClicked", "onDownloadClicked"]) {
       const k = lines.findIndex(x => x.indexOf("function " + fn + "(") >= 0);
       if (k >= 0 && !/gate\(/.test(lines[k])) out.push(f + ":" + (k + 1) + ": the Nexus page's " + fn + " has no app.gate() first");
     }
   }
-  console.log("Overlay check: " + [...overlayTypes].filter(t => t !== "Overlay").length + " overlays on Overlay.qml, " + out.length + " problems");
+  console.log("Overlay check: " + [...overlayTypes].filter(t => t !== "Overlay").length + " overlays on Overlay.qml, taps checked in Main.qml and " +
+    pageParts.size + " parts (" + [...pageParts].sort().join(", ") + "), " + out.length + " problems");
   return out;
 }
 

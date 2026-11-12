@@ -5,16 +5,18 @@ import QtQuick
 //
 // app (required): Main.qml's window. kit (required): Main.qml's kit (colors, see COMPONENTS.md).
 Rectangle {
+    id: card
     required property var app
     required property var kit
     readonly property var c: kit.c
+    readonly property bool cardFocus: app.zone === "main" && app.listItems.length === 0
     visible: app.emptyMods
     z: app.turnTo === 0 ? 3 : 0
     transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
     anchors.centerIn: parent
     width: Math.min(parent.width - app.px(32), app.px(520))
     height: emptyCol.implicitHeight + app.px(48)
-    radius: app.px(12)
+    radius: kit.radius
     color: c.card
     border.color: c.line
     Column {
@@ -36,30 +38,28 @@ Rectangle {
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(parent.width, emptyGet.width + emptyAdd.width + spacing + 1)
             spacing: app.px(14)
-            Rectangle {
+            // Get mods is the main button; the ring shows only while A is for the card (not for a row above it,
+            // like Removed mods).
+            ActionButton {
                 id: emptyGet
+                ui: kit
                 visible: app.canGetMods
-                width: emptyGetRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
-                color: app.zone === "main" ? c.focusFill : c.raised
-                border.color: c.accent; border.width: app.px(app.zone === "main" ? 2 : 1)
-                Row { id: emptyGetRow; anchors.centerIn: parent; spacing: app.px(10)
-                    Key { win: app; k: "a"; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: "Get mods"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
+                label: "Get mods"
+                cap: "a"
+                primary: true
+                focused: card.cardFocus
                 Accessible.role: Accessible.Button; Accessible.name: "Get mods"
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } } }
+                onClicked: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Get mods (tap)"); app.tab = 1 } }
             }
-            Rectangle {
+            ActionButton {
                 id: emptyAdd
-                width: emptyAddRow.implicitWidth + app.px(36); height: Math.max(app.px(52), app.tpx(44)); radius: app.px(8)
-                color: !app.canGetMods && app.zone === "main" ? c.focusFill : c.raised
-                border.color: c.line; border.width: Math.max(1, app.px(1))
-                Row { id: emptyAddRow; anchors.centerIn: parent; spacing: app.px(10)
-                    Key { win: app; k: app.canGetMods ? "x" : "a"; anchors.verticalCenter: parent.verticalCenter }
-                    Text { text: "Add from Downloads"; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(18); font.bold: true; anchors.verticalCenter: parent.verticalCenter } }
+                ui: kit
+                label: "Add from Downloads"
+                cap: app.canGetMods ? "x" : "a"
+                primary: !app.canGetMods
+                focused: !app.canGetMods && card.cardFocus
                 Accessible.role: Accessible.Button; Accessible.name: "Add from Downloads"
-                HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-                TapHandler { onTapped: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } } }
+                onClicked: { if (!app.gate(0, "note")) return; { app.note("action", "No mods yet: Add a file (tap)"); app.openAdd() } }
             }
         }
     }

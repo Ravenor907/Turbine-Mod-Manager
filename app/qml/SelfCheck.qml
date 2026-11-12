@@ -1799,4 +1799,246 @@ Item {
     // The build's picture of the end of the check before Play: wheel steps over it.
     Timer { id: checkEndShot; interval: 900; onTriggered: Turbine.selftestPointer(app.width / 2, app.height * 0.45, false, 40) }
     Timer { id: scrollCheckNote; interval: 1500; onTriggered: app.note("pad", "Scroll check: the list moved " + Math.round(perfList.contentY) + " px") }
+
+    // ---------------------------------------------------------------- layout checks
+    // Just before each picture is saved (on shotTimer and btFinal, beside their own handlers) a walk over the visible
+    // items of the window in the picture logs one line per layout problem, then a summary (tools/ci-shots.sh collects
+    // both):
+    //   check   Layout problem (<page>): <kind>: <path> "<text>" [and <n> more like it]: <what> [<numbers>]
+    //   check   Layout (<page>, <WxH>, size <n>%): <k> problems | <kind> <count>, ... | <a> allowed, <t> texts
+    // <path> is the item's components from the window down ("SheetLayer > InfoSheet > Label"); the same problem on
+    // several items with one path is one line. The kinds:
+    //   cut       text elided or past its maximum lines (Text.truncated), or cut by a clip that isn't a scrolling list
+    //   midword   prose broken inside a word (WrapAnywhere on more than one word, or a word wider than its line)
+    //   overflow  text or a filled box past the box it sits in (a rounded Rectangle with a fill or a border), or past
+    //             the window
+    //   scroll    a sheet's form (a Flickable that isn't a list) with words or boxes cut or hidden by its edge
+    //   bar       the bottom bar drops the A or B hint while the page or sheet binds that button (legendProblems)
+    //   small     text drawn under layoutMinText pixels (fpx() never goes under 12)
+    //   overlap   two sibling texts drawn over each other
+    // An intentional case is allowed one of two ways. On the item, or any item above it, in its own QML file:
+    // `property bool layoutOk: true` (every kind) or `property string layoutOk: "cut overflow"` (those kinds). Or
+    // here in layoutAllow: the kind, a pattern for the path, optional patterns for the text and for what is wrong,
+    // least (for an elided line: the share of it that must still show), and why. Allowed problems are counted in the
+    // summary; --layoutall=1 lists them too ("Layout allowed (<page>): ...").
+    readonly property int layoutMinText: 12
+    readonly property int layoutMostLines: 30
+    readonly property var layoutAllow: [
+        { kind: "cut", path: /(^|> )GetMods >/, what: /^elided$/, why: "Get mods cards elide long names and summaries; the mod page shows them whole" },
+        { kind: "cut", path: /(^|> )GameRail >/, what: /^elided$/, why: "the rail's names on the art elide; the bar and the game menu name the game whole" },
+        { kind: "cut", path: /(^|> )(AddMods|ModDetails|ModPanel|ModRow|LoadOrderList) >/, what: /^elided$/, least: 0.5,
+          why: "a long mod or file name on one line elides in its row, most of it still showing" },
+        { kind: "cut", path: /^BottomBar > Text$/, what: /^elided$/, least: 0.5, why: "the bar's status line elides, most of it still showing; a tap or the toast says it whole" },
+        { kind: "midword", path: /(^|> )ActivityLog >/, why: "log lines break anywhere so long paths fit" },
+        { kind: "scroll", path: /(^|> )(GameMenu|ModMenu) >/, why: "a menu of rows scrolls with the focus, its last row fading as the cue" }
+    ]
+    FontMetrics { id: layoutFont }
+    Connections { target: shotTimer; function onTriggered() { sc.layoutCheck() } }
+    Connections { target: btFinal; function onTriggered() { sc.layoutCheck() } }
+
+    // The type of an item: a component's file name, or the QtQuick type without its QQuick.
+    function layoutType(it) {
+        const m = /^(\w+?)((?:_QMLTYPE_\d+|_QML_\d+)*)\(/.exec(String(it))
+        const n = m ? m[1] : "Item"
+        return { name: n.replace(/^QQuick/, ""), component: !!(m && m[2]) && !/^QQuick|^QQml/.test(n) }
+    }
+    // An item's box in window coordinates (rotation and scale included): {x, y, r, b}.
+    function layoutBox(it, x, y, w, h) {
+        const a = it.mapToItem(null, x, y), b = it.mapToItem(null, x + w, y), c = it.mapToItem(null, x, y + h), d = it.mapToItem(null, x + w, y + h)
+        return { x: Math.min(a.x, b.x, c.x, d.x), y: Math.min(a.y, b.y, c.y, d.y), r: Math.max(a.x, b.x, c.x, d.x), b: Math.max(a.y, b.y, c.y, d.y) }
+    }
+    function layoutCut(a, b) { return { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y), r: Math.min(a.r, b.r), b: Math.min(a.b, b.b) } }
+    function layoutEmpty(a) { return a.r - a.x < 0.5 || a.b - a.y < 0.5 }
+    // How far a goes past b on each side, worst first ("12 px at the bottom"), or "" within tol px (1.5).
+    function layoutPast(a, b, tol) {
+        const sides = [["left", b.x - a.x], ["right", a.r - b.r], ["top", b.y - a.y], ["bottom", a.b - b.b]].filter(s => s[1] > (tol || 1.5))
+        sides.sort((p, q) => q[1] - p[1])
+        return sides.map(s => Math.round(s[1]) + " px at the " + s[0]).join(", ")
+    }
+    function layoutPlain(s) { return String(s).replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim() }
+    // A Text's drawn words in its own coordinates (alignment and padding taken in).
+    function layoutTextArea(t) {
+        const w = t.contentWidth, h = t.contentHeight
+        const l = t.leftPadding || 0, r = t.rightPadding || 0, top = t.topPadding || 0, bot = t.bottomPadding || 0
+        const ha = t.effectiveHorizontalAlignment !== undefined ? t.effectiveHorizontalAlignment : t.horizontalAlignment
+        const x = ha === Text.AlignRight ? t.width - r - w : ha === Text.AlignHCenter ? l + (t.width - l - r - w) / 2 : l
+        const y = t.verticalAlignment === Text.AlignBottom ? t.height - bot - h : t.verticalAlignment === Text.AlignVCenter ? top + (t.height - top - bot - h) / 2 : top
+        return { x: x, y: y, w: w, h: h }
+    }
+    // Where a wrapped Text breaks inside a word ("It p|uts"), or "": its lines laid out again with its font.
+    function layoutMidWord(t, s) {
+        layoutFont.font = t.font
+        const width = t.width - (t.leftPadding || 0) - (t.rightPadding || 0)
+        if (width <= 0) return ""
+        if (t.wrapMode === Text.Wrap) {
+            // Only a word longer than a whole line breaks inside itself.
+            for (const w of s.split(" ")) if (layoutFont.advanceWidth(w) > width + 0.5) return w.slice(0, 24) + "| (wider than its line)"
+            return ""
+        }
+        let pos = 0
+        for (let line = 0; pos < s.length && line < 60; line++) {
+            let lo = pos + 1, hi = s.length
+            while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (layoutFont.advanceWidth(s.substring(pos, mid)) <= width + 0.5) lo = mid; else hi = mid - 1 }
+            if (lo < s.length && /\S/.test(s[lo - 1]) && /\S/.test(s[lo])) return s.substring(Math.max(pos, lo - 12), lo) + "|" + s.substring(lo, lo + 6)
+            pos = lo
+            while (s[pos] === " ") pos++
+        }
+        return ""
+    }
+
+    function layoutCheck() {
+        const page = shot.page
+        const win = page === "overlay" || page === "overlaywait" ? panelWin : page === "overlaygm" || page === "caughtgm" ? hudWin : app
+        if (!win || !win.contentItem) return
+        const W = win.width, H = win.height
+        const whole = { x: 0, y: 0, r: W, b: H }
+        let problems = [], allowed = 0, texts = 0
+        const okFor = (ok, kind) => ok === true || (typeof ok === "string" && ok.split(/[\s,]+/).indexOf(kind) >= 0)
+        const quote = (text) => text !== "" ? " \"" + text.slice(0, 40).replace(/"/g, "'") + (text.length > 40 ? "..." : "") + "\"" : ""
+        const add = (kind, path, text, what, numbers, ok, share) => {
+            const line = kind + ": " + path + quote(text) + ": " + what + (numbers ? " [" + numbers + "]" : "")
+            if (okFor(ok, kind) || layoutAllow.some(a => a.kind === kind && a.path.test(path) && (!a.text || a.text.test(text)) && (!a.what || a.what.test(what))
+                                                    && (!a.least || (share !== undefined && share >= a.least)))) {
+                allowed++
+                if (shot.arg("layoutall") !== "") app.note("check", "Layout allowed (" + page + "): " + line)
+                return
+            }
+            // The same problem on several items of one kind (every name on the rail) is one line.
+            const same = problems.find(p => p.kind === kind && p.path === path && p.what === what)
+            if (same) { same.more++; return }
+            problems.push({ kind: kind, path: path, text: text, what: what, numbers: numbers, more: 0 })
+        }
+        const at = (a) => Math.round(a.r - a.x) + "x" + Math.round(a.b - a.y) + " at " + Math.round(a.x) + "," + Math.round(a.y)
+        // The clip that cuts a box: the innermost whose own rect it goes past ({rect, kind, by}), or null.
+        const cutBy = (a, clips, tol) => { for (let i = clips.length - 1; i >= 0; i--) if (layoutPast(a, clips[i].rect, i === 0 ? tol : 1.5) !== "") return clips[i]; return null }
+        // ctx: op (opacity so far), clip (what is still seen), clips (each clip on the way down: the window, then
+        // "box", "list" or "form" ones), box (the nearest rounded box: rect, path, clips), form (the sheet's form
+        // around it, counting what its edge cuts), sheet (inside the sheet layer), path, ok (layoutOk from above).
+        const walk = (it, ctx) => {
+            if (!it || !it.visible || it === sc) return
+            const op = ctx.op * it.opacity
+            if (op < 0.05) return
+            const ty = layoutType(it)
+            const path = ty.component && it !== win.contentItem ? ctx.path.concat([ty.name]) : ctx.path
+            const where = path.concat(ty.component ? [] : [ty.name]).join(" > ") + (it.objectName ? " \"" + it.objectName + "\"" : "")
+            const ok = it.layoutOk === undefined ? ctx.ok : ctx.ok === true || it.layoutOk === true ? true : ((ctx.ok || "") + " " + (it.layoutOk || "")).trim()
+            const r = layoutBox(it, 0, 0, it.width, it.height)
+            const isText = typeof it.truncated === "boolean" && typeof it.elide === "number" && typeof it.text === "string"
+            const isRect = ty.name === "Rectangle" && it.border !== undefined
+            const filled = isRect && it.color.a > 0.1
+            const isBox = isRect && it.radius > 0 && (filled || (it.border.width > 0 && it.border.color.a > 0.1)) && it.width >= 24 && it.height >= 16 && (r.r - r.x < W - 1 || r.b - r.y < H - 1)
+            const flick = it.contentY !== undefined && it.contentHeight !== undefined && it.flicking !== undefined
+            const list = flick && it.model !== undefined
+            if (isText && it.color.a > 0.05 && layoutPlain(it.text) !== "") {
+                texts++
+                const s = layoutPlain(it.text)
+                const ta = layoutTextArea(it)
+                const drawn = layoutBox(it, ta.x, ta.y, ta.w, ta.h)
+                if (ctx.form && layoutPast(drawn, ctx.form.rect) !== "" && ctx.form.cut++ === 0) ctx.form.first = "\"" + s.slice(0, 30) + "\""
+                const seen = layoutCut(drawn, ctx.clip)
+                if (!layoutEmpty(seen)) {
+                    const share = it.wrapMode === Text.NoWrap && it.implicitWidth > 0 ? Math.min(1, it.width / it.implicitWidth) : undefined
+                    if (it.truncated) add("cut", where, s, it.elide !== Text.ElideNone ? "elided" : "more than " + it.maximumLineCount + " lines",
+                                          (share !== undefined ? "shows " + Math.round(share * 100) + "%, " : "") + at(r), ok, share)
+                    else if (it.clip && (it.contentWidth > it.width + 1 || it.contentHeight > it.height + 1)) add("cut", where, s, "cut by its own clip", "words " + Math.round(it.contentWidth) + "x" + Math.round(it.contentHeight) + ", box " + at(r), ok)
+                    const by = cutBy(drawn, ctx.clips, 1.5)
+                    const past = by ? layoutPast(drawn, by.rect) : ""
+                    if (by && (by.kind === "box" || by.kind === "window"))
+                        add(by.kind === "window" ? "overflow" : "cut", where, s, by.kind === "window" ? "past the window" : "cut by " + by.by + "'s clip", past, ok)
+                    else if (past === "" && ctx.box && !ctx.box.clips) {
+                        const pb = layoutPast(drawn, ctx.box.rect)
+                        if (pb !== "") add("overflow", where, s, "past its box (" + ctx.box.path + ")", pb, ok)
+                    }
+                    if ((it.wrapMode === Text.WrapAnywhere || it.wrapMode === Text.Wrap) && it.lineCount > 1 && (it.wrapMode === Text.Wrap || / \S/.test(s))) {
+                        const m = layoutMidWord(it, s)
+                        if (m !== "") add("midword", where, s, "breaks inside a word: " + m, (it.wrapMode === Text.WrapAnywhere ? "WrapAnywhere, " : "Wrap, ") + it.lineCount + " lines", ok)
+                    }
+                    const a = it.mapToItem(null, 0, 0), b = it.mapToItem(null, 100, 0)
+                    const px = (it.font.pixelSize > 0 ? it.font.pixelSize : it.font.pointSize * 4 / 3) * Math.hypot(b.x - a.x, b.y - a.y) / 100
+                    if (px < layoutMinText - 0.25) add("small", where, s, Math.round(px * 10) / 10 + " px, under " + layoutMinText, "", ok)
+                }
+            } else if (filled && it !== win.contentItem) {
+                if (ctx.form && layoutPast(r, ctx.form.rect) !== "" && ctx.form.cut++ === 0) ctx.form.first = "a box " + at(r)
+                const seen = layoutCut(r, ctx.clip)
+                if (!layoutEmpty(seen)) {
+                    // A side sheet may put its border and round corners past the window's edge.
+                    const by = cutBy(r, ctx.clips, Math.max(it.border.width, it.radius) + 1.5)
+                    const past = by ? layoutPast(r, by.rect, by.kind === "window" ? Math.max(it.border.width, it.radius) + 1.5 : 1.5) : ""
+                    if (by && (by.kind === "box" || by.kind === "window"))
+                        add(by.kind === "window" ? "overflow" : "cut", where, "", by.kind === "window" ? "a box past the window" : "a box cut by " + by.by + "'s clip", past + ", " + at(r), ok)
+                    else if (past === "" && ctx.box && !ctx.box.clips) {
+                        const pb = layoutPast(r, ctx.box.rect)
+                        if (pb !== "") add("overflow", where, "", "a box past its box (" + ctx.box.path + ")", pb + ", " + at(r), ok)
+                    }
+                }
+            }
+            // Sibling texts drawn over each other.
+            let sib = []
+            for (let i = 0; i < it.children.length; i++) {
+                const c = it.children[i]
+                if (!c.visible || op * c.opacity < 0.05 || typeof c.truncated !== "boolean" || typeof c.text !== "string" || layoutPlain(c.text) === "" || c.color.a <= 0.05) continue
+                const ca = layoutTextArea(c)
+                const cr = layoutCut(layoutBox(c, ca.x, ca.y, ca.w, ca.h), ctx.clip)
+                if (!layoutEmpty(cr)) sib.push({ t: c, r: cr })
+            }
+            for (let i = 0; i < sib.length; i++) for (let j = i + 1; j < sib.length; j++) {
+                const o = layoutCut(sib[i].r, sib[j].r)
+                if (o.r - o.x > 2 && o.b - o.y > 2) {
+                    const cok = sib[i].t.layoutOk !== undefined ? sib[i].t.layoutOk : sib[j].t.layoutOk !== undefined ? sib[j].t.layoutOk : ok
+                    add("overlap", where, layoutPlain(sib[i].t.text), "drawn over \"" + layoutPlain(sib[j].t.text).slice(0, 30) + "\"", Math.round(o.r - o.x) + "x" + Math.round(o.b - o.y) + " px", cok)
+                }
+            }
+            // What the children see.
+            let next = { op: op, clip: ctx.clip, clips: ctx.clips, box: ctx.box, form: ctx.form, sheet: ctx.sheet || it === sheetLayer, path: path, ok: ok }
+            if (it.clip) {
+                next.clip = layoutCut(ctx.clip, r)
+                next.clips = ctx.clips.concat([{ rect: r, kind: list ? "list" : flick ? "form" : "box", by: where }])
+                if (layoutEmpty(next.clip)) return
+            }
+            if (isBox) next.box = { rect: r, path: where, clips: !!it.clip }
+            // A sheet's form: what its edge cuts or hides is counted on the way down.
+            const form = flick && !list && ctx.sheet && it.interactive !== false ? { rect: r, cut: 0, first: "" } : null
+            if (form) next.form = form
+            for (let i = 0; i < it.children.length; i++) walk(it.children[i], next)
+            if (form && form.cut > 0)
+                add("scroll", where, "", form.cut + (form.cut === 1 ? " item" : " items") + " cut or hidden by its edge, first " + form.first,
+                    "content " + Math.round(it.contentWidth) + "x" + Math.round(it.contentHeight) + ", box " + at(r) + ", scrolled to " + Math.round(it.contentY), ok)
+        }
+        walk(win.contentItem, { op: 1, clip: whole, clips: [{ rect: whole, kind: "window", by: "the window" }], box: null, form: null, sheet: false, path: [], ok: undefined })
+        // The bottom bar: the hints on screen, checked by the legend checks' own rule (A and B only).
+        if (win === app && legend && legend.visible && legend.shown) {
+            let shown = []
+            const hints = (it, op) => {
+                for (let i = 0; i < it.children.length; i++) {
+                    const c = it.children[i]
+                    if (!c.visible || op * c.opacity < 0.05) continue
+                    if (c.inBar === true && typeof c.k === "string") {
+                        // Shown when whole inside the bar and every clip between them.
+                        const cr = layoutBox(c, 0, 0, c.width, c.height)
+                        let whole = true
+                        for (let p = c.parent; p && whole; p = p === legend ? null : p.parent)
+                            if (p.clip || p === legend) whole = layoutPast(cr, layoutBox(p, 0, 0, p.width, p.height)) === ""
+                        if (whole) shown.push([c.k, c.label])
+                    } else hints(c, op * c.opacity)
+                }
+            }
+            hints(legend, legend.opacity)
+            const o = app.binds()
+            for (const x of sc.legendProblems(o, shown).filter(x => /^[AB] missing$/.test(x))) {
+                const k = x[0].toLowerCase()
+                add("bar", "BottomBar", "", "drops the " + x[0] + " hint (" + o[k].label + ") that " + (app.sheet !== "" ? "the sheet \"" + app.sheet + "\"" : "the page") + " binds",
+                    "shown: " + (shown.map(h => h[0].toUpperCase()).join(" ") || "none") + " of " + app.legendHints.map(h => h[0].toUpperCase()).join(" "), undefined)
+            }
+        }
+        const tag = page + ", " + W + "x" + H + ", size " + app.sizeNow + "%"
+        for (let i = 0; i < Math.min(problems.length, layoutMostLines); i++) {
+            const p = problems[i]
+            app.note("check", "Layout problem (" + page + "): " + p.kind + ": " + p.path + quote(p.text) + (p.more ? " and " + p.more + " more like it" : "") + ": " + p.what + (p.numbers ? " [" + p.numbers + "]" : ""))
+        }
+        if (problems.length > layoutMostLines) app.note("check", "Layout problem (" + page + "): and " + (problems.length - layoutMostLines) + " more")
+        let kinds = {}
+        for (const p of problems) kinds[p.kind] = (kinds[p.kind] || 0) + 1
+        app.note("check", "Layout (" + tag + "): " + problems.length + " problems" + (problems.length ? " | " + Object.keys(kinds).map(k => k + " " + kinds[k]).join(", ") : "")
+                 + " | " + allowed + " allowed, " + texts + " texts")
+    }
 }

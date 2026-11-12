@@ -53,7 +53,8 @@ Row {
         model: app.lookRows
         currentIndex: app.sec === "Look" ? app.setRow : 0
         highlightFollowsCurrentItem: false
-        onCurrentIndexChanged: app.glide(lookList, () => lookList.positionViewAtIndex(lookList.currentIndex, ListView.Contain))
+        onCurrentIndexChanged: app.glide(lookList, () => app.reveal(lookList, lookList.currentIndex))
+        ScrollFade { ui: page.kit; view: lookList; color: page.c.ground }
         delegate: Rectangle {
             id: srow
             required property int index
@@ -70,9 +71,9 @@ Row {
             border.color: c.accent
             border.width: foc ? app.px(2) : 0
             opacity: srow.modelData.dim ? 0.6 : 1
-            Label { win: app; x: app.px(14); width: app.px(140); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.fpx(16); font.bold: true }
+            Label { win: app; x: app.px(14); width: app.px(146); anchors.verticalCenter: parent.verticalCenter; text: srow.modelData.label; font.pixelSize: app.fpx(16); font.bold: true; wrapMode: Text.WordWrap; elide: Text.ElideNone; maximumLineCount: 2 }
             Item {
-                x: app.px(160); width: parent.width - app.px(174); height: parent.height
+                x: app.px(166); width: parent.width - app.px(180); height: parent.height
                 // Choices
                 Row {
                     visible: !srow.modelData.swatch && !srow.modelData.slider
@@ -85,12 +86,14 @@ Row {
                             required property int index
                             required property string modelData
                             readonly property bool on: srow.now === srow.modelData.options[index]
+                            // The one chosen: an accent outline and accent words (the same chips as the other sections).
                             width: (parent.width - app.px(4) * ((srow.modelData.names || []).length - 1)) / (srow.modelData.names || [1]).length
-                            height: app.px(32); radius: app.px(5)
-                            color: on ? c.raised : c.ground
+                            height: app.px(32); radius: kit.radiusSmall
+                            color: on ? Qt.tint(c.card, Qt.rgba(c.accent.r, c.accent.g, c.accent.b, 0.12)) : c.ground
+                            border.color: on ? c.accent : c.line
+                            border.width: Math.max(1, app.px(on ? 1.5 : 1))
                             Behavior on color { enabled: mo.on; ColorAnimation { duration: mo.fast; easing.type: mo.enter } }
-                            Rectangle { visible: parent.on; anchors.bottom: parent.bottom; width: parent.width; height: app.px(2); color: c.accent }
-                            Label { win: app; anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.text : c.muted }
+                            Label { win: app; anchors.centerIn: parent; text: parent.modelData; font.pixelSize: app.fpx(14); font.bold: parent.on; color: parent.on ? c.accentText : c.muted }
                             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                             TapHandler {
                                 onTapped: {
@@ -150,9 +153,12 @@ Row {
                     Rectangle {
                         id: track
                         readonly property real part: srow.modelData.slider ? (srow.now - srow.modelData.min) / (srow.modelData.max - srow.modelData.min) : 0
-                        width: Math.max(app.px(40), parent.width - app.tpx(36) * 2 - app.px(90)); height: app.px(6); radius: height / 2
+                        // What the buttons and the value leave (the value's widest, "150%", measured).
+                        width: Math.max(app.px(40), parent.width - minusBtn.width - plusBtn.width - valueMetrics.advanceWidth - parent.spacing * 3 - app.px(4))
+                        height: app.px(6); radius: height / 2
                         anchors.verticalCenter: parent.verticalCenter
-                        color: c.line
+                        color: Qt.rgba(c.muted.r, c.muted.g, c.muted.b, 0.35)
+                        TextMetrics { id: valueMetrics; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true; text: srow.modelData.max + (srow.modelData.unit || "") }
                         // The slider's fill and knob glide to the new value.
                         Rectangle {
                             width: parent.width * track.part; height: parent.height; radius: parent.radius; color: c.accent
@@ -251,14 +257,20 @@ Row {
         model: app.rowsNow
         currentIndex: visible ? app.setRow : 0
         highlightFollowsCurrentItem: false
-        onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+        // The focused row comes fully into view: when it changes, and once the rows are laid out (a new model resets
+        // the list's own currentIndex, so the row is read from Main.qml).
+        readonly property int focusRow: visible ? app.setRow : -1
+        onFocusRowChanged: { app.reveal(labsList, focusRow); Qt.callLater(() => app.reveal(labsList, labsList.focusRow)) }
+        onHeightChanged: if (visible) Qt.callLater(() => app.reveal(labsList, labsList.focusRow))
+        onContentHeightChanged: if (visible && !moving) Qt.callLater(() => app.reveal(labsList, labsList.focusRow))
+        ScrollFade { ui: page.kit; view: labsList; color: page.c.ground }
         // After the left stick's wheel: the focus comes into view (a row with only words is passed).
         onMovementEnded: {
             const top = indexAt(10, contentY + app.px(10)), bottom = indexAt(10, contentY + height - app.px(10))
             if (top >= 0 && app.setRow < top) app.setRow = app.settingsLand(top, 1, app.rowsNow.length)
             else if (bottom >= 0 && app.setRow > bottom) app.setRow = app.settingsLand(bottom, -1, app.rowsNow.length)
         }
-        onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); positionViewAtIndex(currentIndex, ListView.Contain) })
+        onVisibleChanged: if (visible) Qt.callLater(() => { positionViewAtBeginning(); app.reveal(labsList, focusRow) })
         delegate: Item {
             id: lrow
             required property int index
@@ -278,16 +290,19 @@ Row {
                 verticalAlignment: Text.AlignBottom
                 bottomPadding: app.px(6)
                 text: (lrow.modelData.head || "") + (lrow.modelData.head && lrow.isItem ? " · " + app.labsDone : "")
-                color: c.muted
+                color: c.accentText
                 font.pixelSize: app.fpx(14)
                 font.bold: true
-                font.letterSpacing: app.px(1)
             }
             Rectangle {
                 id: box
                 y: labsHead.height
                 width: parent.width
-                height: Math.max(lrow.isItem ? app.px(66) : app.px(50), labsWords.implicitHeight + app.px(18))
+                // The chips or the action go under the words when they would take too much of the row (a large
+                // Interface size): the words are never cut.
+                readonly property real ctlW: lrow.hasChips ? chips.implicitWidth : actionHint.visible ? actionHint.width : 0
+                readonly property bool stacked: ctlW > 0 && ctlW > (width - app.px(28)) * 0.4
+                height: Math.max(lrow.isItem ? app.px(66) : app.px(50), labsWords.implicitHeight + app.px(18) + (stacked ? app.px(32) + app.px(8) : 0))
                 radius: app.px(6)
                 color: lrow.foc ? c.focusFill : c.card
                 border.color: c.accent
@@ -295,26 +310,35 @@ Row {
                 Column {
                     id: labsWords
                     x: app.px(14)
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: parent.width - app.px(28) - (lrow.hasChips ? chips.width + app.px(10) : actionHint.width + app.px(10))
+                    y: box.stacked ? app.px(9) : (parent.height - height) / 2
+                    width: parent.width - app.px(28) - (box.stacked || box.ctlW === 0 ? 0 : box.ctlW + app.px(10))
                     spacing: app.px(2)
-                    Label { win: app; width: parent.width; text: lrow.modelData.title; font.pixelSize: app.fpx(16); font.bold: true }
-                    Label { win: app; width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.fpx(14); wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
+                    Label { win: app; width: parent.width; text: lrow.modelData.title; font.pixelSize: app.fpx(16); font.bold: true; wrapMode: Text.WordWrap; elide: Text.ElideNone }
+                    Label { win: app; width: parent.width; text: lrow.modelData.how; color: c.soft; font.pixelSize: app.fpx(14); wrapMode: Text.WordWrap; elide: Text.ElideNone }
                 }
-                Hint {
+                // The row's action as a chip (like -10% and +10%), with A's cap on it while the row is highlighted.
+                Rectangle {
                     id: actionHint
-                    win: app
-                    visible: lrow.modelData.kind === "action"
-                    anchors.right: parent.right; anchors.rightMargin: app.px(12)
-                    anchors.verticalCenter: parent.verticalCenter
-                    k: lrow.foc ? "a" : ""
-                    label: lrow.modelData.action || ""
+                    visible: lrow.modelData.kind === "action" && (lrow.modelData.action || "") !== ""
+                    x: box.stacked ? app.px(14) : parent.width - width - app.px(10)
+                    y: box.stacked ? labsWords.y + labsWords.height + app.px(8) : (parent.height - height) / 2
+                    width: actionRow.implicitWidth + app.px(20); height: app.px(32); radius: kit.radiusSmall
+                    color: c.ground
+                    border.color: lrow.foc ? c.accent : c.line
+                    border.width: Math.max(1, app.px(1))
+                    Row {
+                        id: actionRow
+                        anchors.centerIn: parent
+                        spacing: app.px(6)
+                        Key { win: app; k: "a"; visible: lrow.foc; anchors.verticalCenter: parent.verticalCenter }
+                        Label { win: app; text: lrow.modelData.action || ""; font.pixelSize: app.fpx(14); font.bold: lrow.foc; color: lrow.foc ? c.text : c.soft; anchors.verticalCenter: parent.verticalCenter }
+                    }
                 }
                 Row {
                     id: chips
                     visible: lrow.hasChips
-                    anchors.right: parent.right; anchors.rightMargin: app.px(10)
-                    anchors.verticalCenter: parent.verticalCenter
+                    x: box.stacked ? app.px(14) : parent.width - width - app.px(10)
+                    y: box.stacked ? labsWords.y + labsWords.height + app.px(8) : (parent.height - height) / 2
                     spacing: app.px(4)
                     Repeater {
                         model: lrow.isItem ? [["works", "Works"], ["problem", "Problem"], ["", "Not tested"]]
@@ -324,10 +348,20 @@ Row {
                             required property var modelData
                             readonly property bool on: lrow.isItem ? lrow.answer === modelData[0] : lrow.modelData.value === modelData[0]
                             readonly property bool cursor: lrow.isItem && lrow.foc && app.labsChip === index
-                            width: chipText.implicitWidth + app.px(18); height: app.px(32); radius: app.px(5)
-                            color: on ? c.raised : c.ground
-                            border.color: cursor ? c.text : on ? c.accent : c.line
-                            border.width: cursor ? app.px(2) : Math.max(1, app.px(1))
+                            width: chipText.implicitWidth + app.px(18); height: app.px(32); radius: kit.radiusSmall
+                            color: on ? Qt.tint(c.card, Qt.rgba(c.accent.r, c.accent.g, c.accent.b, 0.12)) : c.ground
+                            border.color: on ? c.accent : c.line
+                            border.width: Math.max(1, app.px(on ? 1.5 : 1))
+                            // The chip the D-pad is on (Labs' checklist): a ring around it.
+                            Rectangle {
+                                visible: parent.cursor
+                                anchors.fill: parent
+                                anchors.margins: -app.px(3)
+                                radius: parent.radius + app.px(3)
+                                color: "transparent"
+                                border.width: kit.ringWidth
+                                border.color: kit.ring
+                            }
                             Label {
                                 id: chipText
                                 win: app
@@ -335,7 +369,7 @@ Row {
                                 text: parent.modelData[1]
                                 font.pixelSize: app.fpx(14)
                                 font.bold: parent.on
-                                color: !parent.on ? c.muted : !lrow.isItem ? c.text : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
+                                color: !parent.on ? c.muted : !lrow.isItem ? c.accentText : parent.index === 0 ? c.ok : parent.index === 1 ? c.stop : c.text
                             }
                             HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
                             TapHandler {

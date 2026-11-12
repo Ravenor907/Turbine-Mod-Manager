@@ -90,7 +90,7 @@ Item {
                     x: pf.ui.px(12); y: pf.ui.px(10)
                     width: parent.width - pf.ui.px(24)
                     spacing: pf.ui.px(2)
-                    Text { text: paneBox.index === 0 ? "GAME FOLDER" : "MOD FILES"; color: pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(12); font.bold: true }
+                    Text { text: paneBox.index === 0 ? "Game folder" : "Mod files"; color: pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(13); font.bold: true }
                     Text {
                         width: parent.width
                         elide: Text.ElideLeft

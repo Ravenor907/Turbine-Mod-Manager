@@ -77,26 +77,28 @@ Rectangle {
         // Edit settings right on the mod, for a mod with a settings file
         // (Seamless Co-op: its settings, password first). Right from the list, or a tap; nothing when
         // the mod has none.
-        Rectangle {
+        // The shared button look: neutral, with the focus ring when Right has moved onto it.
+        ActionButton {
             id: panelEdit
             objectName: "panelEdit"
+            ui: kit
             readonly property bool foc: app.zone === "panel" && app.sheet === ""
             visible: app.panelHasSettings
-            width: Math.min(parent.width, panelEditText.implicitWidth + app.px(28)); height: app.tpx(44); radius: app.px(6)
-            color: foc ? c.focusFill : c.raised
-            border.color: foc ? c.accentHi : c.accent; border.width: foc ? app.px(2) : Math.max(1, app.px(1.5))
-            Text { id: panelEditText; anchors.centerIn: parent; text: app.panelSettingsLabel; color: c.text; font.family: app.bodyFont; font.pixelSize: app.fpx(15); font.bold: true }
-            HoverHandler { onHoveredChanged: app.hover(parent, hovered) }
-            TapHandler { onTapped: { if (!app.gate(0, "panel Edit settings")) return; app.zone = "panel"; app.panelEditOpen() } }
+            width: Math.min(parent.width, want)
+            label: app.panelSettingsLabel
+            focused: foc
+            cap: foc ? "a" : ""
+            onClicked: { if (!app.gate(0, "panel Edit settings")) return; app.zone = "panel"; app.panelEditOpen() }
         }
     }
-    Text {
-        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+    // What X offers, on one line: X's cap and "More options (9)". A tap opens them too (touch has every action).
+    Row {
+        visible: modPanel.m !== null
+        anchors.left: parent.left; anchors.bottom: parent.bottom
         anchors.margins: app.px(14)
-        wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight
-        text: modPanel.m ? app.glyph("x") + " Options: " + app.optionsLine() : ""
-        color: c.muted; font.family: app.bodyFont; font.pixelSize: app.fpx(13)
-        // A tap opens the options too (touch has every action).
+        spacing: app.px(8)
+        Key { win: app; k: "x"; anchors.verticalCenter: parent.verticalCenter }
+        Label { win: app; text: "More options (" + app.optionsCount() + ")"; color: c.soft; font.pixelSize: app.fpx(14); anchors.verticalCenter: parent.verticalCenter }
         TapHandler { onTapped: { if (!app.gate(0, "panel options")) return; if (app.menuMod) { app.menuIndex = 0; app.sheet = "modmenu" } } }
     }
 }

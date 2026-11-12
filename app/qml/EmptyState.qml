@@ -51,32 +51,16 @@ Item {
             lineHeight: 1.15
         }
         Item { visible: button.visible; width: 1; height: root.ui.px(2) }
-        Rectangle {
+        ActionButton {
             id: button
+            ui: root.ui
             visible: root.buttonKey !== "" || root.buttonLabel !== ""
             anchors.horizontalCenter: parent.horizontalCenter
-            width: buttonRow.implicitWidth + root.ui.px(28)
-            height: root.ui.px(44)
-            radius: root.ui.px(6)
-            color: root.buttonFocused ? root.ui.c.focusFill : root.ui.c.card
-            border.width: Math.max(1, root.ui.px(root.buttonFocused ? 2 : 1.5))
-            border.color: root.buttonFocused ? root.ui.c.accent : root.ui.c.line
-            Row {
-                id: buttonRow
-                anchors.centerIn: parent
-                spacing: root.ui.px(8)
-                KeyCap { visible: root.buttonKey !== ""; ui: root.ui; k: root.buttonKey; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.buttonLabel || ""
-                    color: root.ui.c.text
-                    font.family: root.ui.bodyFont
-                    font.pixelSize: root.ui.fpx(16)
-                    font.weight: Font.DemiBold
-                }
-            }
-            HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
-            TapHandler { onTapped: root.activated() }
+            label: root.buttonLabel || ""
+            cap: root.buttonKey
+            primary: true
+            focused: root.buttonFocused
+            onClicked: root.activated()
         }
         Text {
             visible: text !== ""

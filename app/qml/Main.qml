@@ -165,8 +165,10 @@ Window {
     }
     readonly property real s: Math.max(0.35, fit * sizeNow / 100)
     function px(v) { return Math.round(v * s) }
-    // Text: never under 12 pixels, so 50% stays readable.
-    function fpx(v) { return Math.max(12, Math.round(v * s)) }
+    // Text: never under 12 pixels, and never smaller than 90% of its design size, so 50% stays readable (body text
+    // keeps 14 pixels on a Steam Deck). fpxAt(v, scale): the same at another scale (the bottom bar's own).
+    function fpxAt(v, sc) { return Math.max(12, Math.round(v * Math.max(sc, 0.9))) }
+    function fpx(v) { return fpxAt(v, s) }
     // Something to press. Touch targets never shrink under a finger, whatever the Interface size: 44 pixels, or 6 mm on a dense
     // screen (the Ally X's 7 inch 1080p panel is about 12 pixels a millimetre).
     readonly property int touchFloor: Math.max(44, Math.round(Screen.pixelDensity * 6))
@@ -251,6 +253,20 @@ Window {
         glideJump = jump
         glides++
         glideAnim.start()
+    }
+    // A list brought to row i: the row fully in view with a little room around it, so it is never against an edge
+    // or under a fade (the bottom bar is outside every list).
+    function reveal(view, i) {
+        if (!view || i < 0) return
+        view.positionViewAtIndex(i, ListView.Contain)
+        const it = view.itemAtIndex(i)
+        // (Not laid out yet: the list has no height of its own.)
+        if (!it || view.height <= it.height) return
+        // Clear of the list's fades (ScrollFade, 26 design pixels).
+        const m = Math.min(px(28), Math.max(0, (view.height - it.height) / 2))
+        const lo = view.originY - view.topMargin, hi = Math.max(lo, view.originY + view.contentHeight + view.bottomMargin - view.height)
+        if (it.y - m < view.contentY) view.contentY = Math.max(lo, it.y - m)
+        else if (it.y + it.height + m > view.contentY + view.height) view.contentY = Math.min(hi, it.y + it.height + m - view.height)
     }
     onBarsHiddenChanged: { barsChangedAt = Date.now(); note("page", "Bars " + (barsHidden ? "hidden (full screen)" : "shown")) }
     // They only hide when there is more than a screen to see: the list is taller than its view and the focused row
@@ -419,9 +435,89 @@ Window {
         function fpx(v) { return app.fpx(v) }
         function tpx(v) { return app.tpx(v) }
         function hover(item, on) { app.hover(item, on) }
+        // One look everywhere (COMPONENTS.md, "The shared looks"): corner radii, the focus ring (focus is an outline,
+        // never a fill), the backdrop under everything that covers the window, and the gap between the window's
+        // edges and a card.
+        readonly property real radius: app.px(10)
+        readonly property real radiusSmall: app.px(6)
+        readonly property real ringWidth: Math.max(2, app.px(2))
+        readonly property color ring: c.accentHi
+        readonly property color scrim: Qt.rgba(c.ground.r * 0.6, c.ground.g * 0.6, c.ground.b * 0.6, c.light ? 0.82 : 0.9)
+        readonly property real edge: app.px(16)
+        // The bottom bar's top in the window (the toast sits above it).
+        readonly property real barTop: legend.shown ? app.height - legend.height : app.height
+        // A button's cap as the pad, the keyboard or the mouse names it ("A", "Enter"); no caps after the mouse.
+        function glyph(k) { return app.glyph(k) }
+        readonly property bool capsShown: !app.mouseLegend
+        // Line icons on a 24 x 24 grid, one per kind of action, and the icon a menu row gets from its words.
+        readonly property var icons: ({
+            update: "M12 4v11M7 10l5 5 5-5M5 20h14",
+            download: "M12 4v11M7 10l5 5 5-5M5 20h14",
+            refresh: "M20 11a8 8 0 0 0-14.9-3.9L4 9 M4 4v5h5 M4 13a8 8 0 0 0 14.9 3.9L20 15 M20 20v-5h-5",
+            power: "M12 3v8M6.5 6.5a8 8 0 1 0 11 0",
+            overlap: "M5 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M11 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z",
+            files: "M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z M14 3v5h5",
+            move: "M8 4v16M4 8l4-4 4 4M16 20V4M12 16l4 4 4-4",
+            remove: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
+            close: "M6 6l12 12 M18 6L6 18",
+            play: "M7 4l13 8-13 8z",
+            back: "M15 5l-7 7 7 7",
+            forward: "M9 5l7 7-7 7",
+            restore: "M4 4v6h6 M5 15a8 8 0 1 0 2-8.5L4 10",
+            profile: "M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M4 21c1-4 4-6 8-6s7 2 8 6",
+            info: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M12 11v6 M12 7.5v0.5",
+            help: "M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M9.5 9.2a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.7v.5 M12 16.8v.4",
+            pencil: "M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4",
+            more: "M5 11a1 1 0 1 0 0 2 1 1 0 1 0 0-2z M12 11a1 1 0 1 0 0 2 1 1 0 1 0 0-2z M19 11a1 1 0 1 0 0 2 1 1 0 1 0 0-2z",
+            list: "M9 6h11 M9 12h11 M9 18h11 M4.5 6v.2 M4.5 12v.2 M4.5 18v.2",
+            sliders: "M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M2 14h4 M10 8h4 M18 16h4",
+            search: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z M20 20l-4-4",
+            checkbox: "M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z M8.5 12l2.5 2.5 4.5-5",
+            eyeoff: "M3 3l18 18 M10.6 6.1A9 9 0 0 1 12 6c5 0 9 6 9 6a16 16 0 0 1-3 3.6 M6.6 6.7C4.3 8.2 3 12 3 12s4 6 9 6a9 9 0 0 0 4.3-1.1 M9.9 9.9a3 3 0 0 0 4.2 4.2",
+            pin: "M12 16v5 M9 3h6l-1 6 4 4v2H6v-2l4-4z",
+            external: "M14 4h6v6 M20 4l-9 9 M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+            folder: "M3 7a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z",
+            copy: "M9 9h11v11H9z M5 15H4V4h11v1",
+            zoom: "M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14z M20 20l-4-4 M8 11h6 M11 8v6",
+            save: "M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M7 3v5h8 M7 21v-7h10v7",
+            sort: "M4 6h16 M7 12h10 M10 18h4",
+            shield: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z M9 12l2 2 4-4",
+            log: "M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M8 11h8 M8 15h8 M8 7h4"
+        })
+        // A menu row's icon: what its words say it does (the first match), else the icon it was given.
+        readonly property var iconWords: [
+            [/^(uninstall|delete)\b|^remove (it|the|this|from)/i, "remove"],
+            [/^(not now|cancel|stay|forget|stop|close|keep it on|it isn't on|none of)/i, "close"],
+            [/^rename\b/i, "pencil"],
+            [/^(more|and \d+ more)\b/i, "more"],
+            [/settings\b/i, "sliders"],
+            [/^(search|find)\b/i, "search"],
+            [/activity log/i, "log"],
+            [/^select several/i, "checkbox"],
+            [/^hide\b/i, "eyeoff"],
+            [/^(pin|unpin)\b/i, "pin"],
+            [/^check game folder/i, "shield"],
+            [/^(check for updates|check again|look again)/i, "refresh"],
+            [/on nexus$|nexus page|^browse\b|^open (it )?on nexus/i, "external"],
+            [/^(install|get |download)/i, "download"],
+            [/^(why|help|how to)\b/i, "help"],
+            [/folder\b/i, "folder"],
+            [/^copy\b/i, "copy"],
+            [/^zoom\b/i, "zoom"],
+            [/^(forward|go to|show in)\b/i, "forward"],
+            [/^save\b/i, "save"],
+            [/^(sort|show as)\b/i, "sort"],
+            [/^(game )?details$/i, "list"]
+        ]
+        function iconFor(icon, label) {
+            for (const w of iconWords) if (w[0].test(label || "")) return w[1]
+            return icon || ""
+        }
+        function iconPath(name) { return name ? (icons[name] || name) : "" }
         // The motion system, and the glide to a focused row.
         readonly property Motion motion: mo
         function glide(view, jump) { app.glide(view, jump) }
+        function reveal(view, i) { app.reveal(view, i) }
         // Words for the mod pages: "24.0 MB" ("" for none), "Mar 4, 2025" from "2025-03-04" (anything else stays as it
         // is), "3.1M" and "12K".
         function fileSize(b) {
@@ -1989,7 +2085,11 @@ Window {
             if (text.length > 80 && sheet === "" && !shot.strictSheets) openMsg({ title: "That didn't work", text: text, steps: [], notes: [], footnote: "", buttons: [{ key: "a", label: "OK" }] })
             else toast.problem(text)
         } else if (page === "settings" && (level === "ok" || level === "warn") && text !== "") toast.info(text)
+        // The bar's status is a few words: a longer result is a toast, and the status says it shortly (msgShort).
+        else if ((level === "ok" || level === "warn") && text.length > msgMost) toast.info(text)
     }
+    readonly property int msgMost: 40
+    readonly property string msgShort: msgText.length <= msgMost || msgLevel === "error" ? msgText : msgLevel === "work" ? "Working..." : msgLevel === "warn" ? "Something to check" : "Done"
     readonly property bool msgShown: msgText !== "" && (msgLevel === "work" || msgTimer.running)
     readonly property bool savingNow: Turbine.busy && msgShown && msgLevel === "work" && msgText.indexOf("Saving ") === 0
     function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
@@ -2007,7 +2107,7 @@ Window {
         if (acRefused) return { level: "warn", words: "Needs its anti-cheat: no mods", detail: "" }
         // Mods held after a game update are never a hidden state.
         if (modHold && mods.some(m => m.enabled)) return { level: "warn", words: "Mods paused: " + gameTitle + " updated", detail: "", hold: true }
-        if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgText, detail: "" }
+        if (msgShown) return { level: ({ work: "busy", ok: "ok", warn: "warn", error: "stop" })[msgLevel] || "ok", words: msgShort, detail: "" }
         if (needLoader.length > 0)
             return { level: "warn", words: plural(needLoader.length, "mod needs ", "mods need ") + loaderShort, detail: "The game still plays, without " + (needLoader.length === 1 ? "that one" : "those") }
         const warned = mods.filter(m => m.enabled && !!modWarns[m.id])
@@ -3062,7 +3162,6 @@ Window {
         sheet = ""
         modMenuDo(item, m)
     }
-    // The details panel's "X Options:" line: the first row (often a fix), Rename, Uninstall, and how many more.
     // The menu's rows for the activity log, with what More holds.
     // The highlighted mod's settings (My mods' panel and the mod page): its files, the button's words, and the way in.
     readonly property var panelCfgs: menuMod && tab === 0 ? settingsFilesOf(menuMod.id) : []
@@ -3071,15 +3170,12 @@ Window {
     function panelEditOpen() { if (!menuMod) return; note("action", "Panel: " + panelSettingsLabel + " for " + menuMod.name); openModSettings(menuMod) }
     onPanelHasSettingsChanged: if (!panelHasSettings && zone === "panel") zone = "main"
     function modMenuTitles() { return modMenuItems.map(x => x.act === "more" ? "More (" + x.rest.map(r => r.title).join(", ") + ")" : x.act === "details" ? "Details (" + modMenuFacts.map(f => f.title).join(", ") + ")" : x.title).join("; ") }
-    function optionsLine() {
+    // How many things X offers for the highlighted mod (the More row's own rows counted, Details left out): the
+    // details panel's "More options (9)".
+    function optionsCount() {
         let all = []
         for (const x of modMenuItems) all = all.concat(x.act === "more" ? x.rest : [x])
-        all = all.filter(x => x.act !== "details")
-        const pick = []
-        if (all.length > 0 && all[0].act !== "rename" && all[0].act !== "remove") pick.push(all[0])
-        for (const a of ["rename", "remove"]) { const r = all.find(x => x.act === a); if (r) pick.push(r) }
-        const rest = all.length - pick.length
-        return pick.map(x => x.title).join(" · ") + (rest > 0 ? " and " + rest + " more" : "")
+        return all.filter(x => x.act !== "details").length
     }
     function modMenuDo(item, m) {
         if (item.act === "more") openPick(m.name, "More options", item.rest.map(x => ({ icon: x.icon, title: x.title, detail: x.detail, run: () => modMenuDo(x, m) })), "modmenu")
@@ -4194,11 +4290,12 @@ Window {
     function buttonSheet() {
         const s = sheet
         if (s === "check") return { labels: checkChoices, index: checkIndex, main: checkStops ? -1 : checkChoices.indexOf("Play anyway"), cancel: checkChoices.indexOf("Not now"),
+                                    skip: checkView.cancelHidden ? checkChoices.indexOf("Not now") : -1,
                                     set: i => { checkIndex = i }, run: i => checkChoose(i), scrolls: checkView.scrolls, scroll: d => checkView.scroll(d) }
-        if (s === "loader") return { labels: loaderLabels, index: loaderIndex, main: 0, cancel: 1, set: i => { loaderIndex = i }, run: i => loaderRun(i), scrolls: false }
+        if (s === "loader") return { labels: loaderLabels, index: loaderIndex, main: 0, cancel: 1, skip: -1, set: i => { loaderIndex = i }, run: i => loaderRun(i), scrolls: false }
         if (infoSheets.indexOf(s) >= 0) {
             const cancel = infoButtons.findIndex(x => x.key === "b")
-            return { labels: infoButtons.map(x => x.label), index: infoIndex, main: 0, cancel: cancel, set: i => { infoIndex = i }, run: i => infoRun(i),
+            return { labels: infoButtons.map(x => x.label), index: infoIndex, main: 0, cancel: cancel, skip: infoView.cancelHidden ? cancel : -1, set: i => { infoIndex = i }, run: i => infoRun(i),
                      scrolls: infoView.scrolls, scroll: d => infoView.scrollBy(d) }
         }
         if (s === "ask") return { labels: ["Clear", "Cancel", askView.doneLabel], index: askIndex, main: 2, cancel: 1, set: i => { askIndex = i }, run: i => askRun(i), scrolls: false }
@@ -4218,9 +4315,11 @@ Window {
             if (sheetDry) { lastDry = bs.labels[i]; note("check", "Sheet " + sheet + " " + b.toUpperCase() + ": " + bs.labels[i]); return }
             bs.run(i)
         }
+        // A cancel button with no room in the row (B does it) is passed over.
+        const step = d => { let i = bs.index + d; if (i === bs.skip) i += d; if (i >= 0 && i < n) bs.set(i) }
         if ((b === "up" || b === "down") && bs.scrolls) bs.scroll(b === "down" ? 1 : -1)
-        else if (b === "left" || b === "up") bs.set(Math.max(0, bs.index - 1))
-        else if (b === "right" || b === "down") bs.set(Math.min(n - 1, bs.index + 1))
+        else if (b === "left" || b === "up") step(-1)
+        else if (b === "right" || b === "down") step(1)
         else if (b === "a") {
             if (sheet === "ask" && askIndex < 0) askKeyboard()
             else if (sheet !== "confirm" || bs.index === 1) runIt(Math.min(bs.index, n - 1))
@@ -4234,7 +4333,10 @@ Window {
         const bs = buttonSheet()
         if (bs) {
             const hl = sheet === "ask" && askIndex < 0 ? (Turbine.gamemode ? "Keyboard" : "") : sheet === "confirm" && confirmIndex === 0 ? "Delete" : bs.labels[bs.index] || ""
-            let o = { a: bind(hl, () => sheetAct("a"), sheet === "confirm" && confirmIndex === 0 ? "hold" : ""), b: bind(bs.cancel >= 0 ? bs.labels[bs.cancel] : "Close", () => sheetAct("b")) }
+            let o = { a: bind(hl, () => sheetAct("a"), sheet === "confirm" && confirmIndex === 0 ? "hold" : "") }
+            // B says nothing new when the highlighted button is the cancel one ("A Not now", not "A Not now B Not now").
+            if (!(bs.cancel >= 0 && bs.index === bs.cancel && hl === bs.labels[bs.cancel])) o.b = bind(bs.cancel >= 0 ? bs.labels[bs.cancel] : "Close", () => sheetAct("b"))
+            else o.b = bind("", () => sheetAct("b"))
             return o
         }
         const s = sheet
@@ -4270,6 +4372,9 @@ Window {
         if (s === "activity") return { a: bind("", k("a")), b: bind("Close", k("b")), x: bind(activityView.full ? "What happened" : "Full log", k("x")) }
         if (s === "settingsedit") return { a: bind(settingsView.aWord, k("a")), b: bind(settingsView.leaveArmed ? "Leave" : "Back", k("b")),
                                            x: bind("Options", k("x")), start: bind("Save", k("start")) }
+        // One button on the card (OK, Close): A says it, and B (the same) isn't said twice.
+        if (s === "notice") return { a: bind("OK", k("a")), b: bind("", k("b")) }
+        if (s === "details") return { a: bind("Close", k("a")), b: bind("", k("b")) }
         return { a: bind("", k("a")), b: bind("Close", k("b")) }
     }
     function sheetAct(b) {
@@ -5910,6 +6015,7 @@ Window {
         function onPagePressed() { Turbine.browserPressed() }
         function onPageDown() { Turbine.browserPointerDown() }
         function onCloseClicked() { if (!app.gate(0, "browser onCloseClicked")) return; app.closeBrowser("back") }
+        function onHintClicked(k) { if (!app.gate(0, "browser onHintClicked")) return; app.note("action", "Legend " + k + " (the Nexus page's bar)"); app.act(k) }
         function onTabClicked(i) { if (!app.gate(0, "browser onTabClicked")) return; app.browserTab = i }
         function onDownloadClicked(i) { if (!app.gate(0, "browser onDownloadClicked")) return; app.browserDlIndex = i; app.browserRowAct(i) }
     }
@@ -7170,6 +7276,8 @@ Window {
             Column {
                 id: mainCol
                 anchors.fill: parent
+                // Every page starts a little down from the window's top edge.
+                anchors.topMargin: app.px(12)
                 anchors.leftMargin: app.px(14)
                 anchors.rightMargin: app.px(14)
                 anchors.bottomMargin: legend.shown ? legend.height + app.px(8) : app.px(8)
@@ -7222,19 +7330,28 @@ Window {
 
                     // My mods: the mods, then the collapsed Removed row (Find, Show, Sort and Select several are in
                     // the Y pop-up).
-                    Label {
+                    // My mods' head: the page's name and how many, or what Move, Select several or a filter is doing.
+                    Row {
                         id: moveLine
-                        win: app
                         z: app.turnTo === 0 ? 3 : 0
                         transform: Translate { x: app.turnTo === 0 ? app.turnX : 0 }
-                        visible: app.page === "game" && app.tab === 0 && (app.moving || app.selecting || app.listFiltered)
-                        height: visible ? app.px(26) : 0
+                        visible: app.page === "game" && app.tab === 0 && !app.modPage && app.game !== null && app.modsLoaded && (app.mods.length > 0 || app.moving || app.selecting || app.listFiltered)
+                        height: visible ? app.px(30) : 0
                         x: app.px(6)
-                        text: app.moving ? "Lower in the list wins when two mods change the same file."
-                              : app.selecting ? app.plural(app.tickedCount, "mod", "mods") + " ticked. A ticks, X acts on them, B done."
-                              : "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + (app.listSort !== "order" ? " · " + app.sortNames2[app.listSort] : "") + " · Y changes it"
-                        color: c.soft
-                        font.pixelSize: app.fpx(14)
+                        width: parent.width - app.px(12)
+                        spacing: app.px(10)
+                        Label { id: moveHead; win: app; anchors.verticalCenter: parent.verticalCenter; text: "My mods"; font.pixelSize: app.fpx(17); font.bold: true }
+                        Label {
+                            win: app
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - moveHead.width - parent.spacing
+                            text: app.moving ? "Lower in the list wins when two mods change the same file."
+                                  : app.selecting ? app.plural(app.tickedCount, "mod", "mods") + " ticked. A ticks, X acts on them, B done."
+                                  : app.listFiltered ? "Showing " + app.plural(app.shownMods.length, "mod", "mods") + (app.findText !== "" ? " with \"" + app.findText + "\"" : "") + (app.listShow !== "all" ? " · " + app.showNames[app.listShow] : "") + (app.listSort !== "order" ? " · " + app.sortNames2[app.listSort] : "") + " · Y changes it"
+                                  : app.plural(app.mods.length, "mod", "mods") + " · " + app.mods.filter(m => m.enabled).length + " on"
+                            color: app.moving || app.selecting || app.listFiltered ? c.soft : c.muted
+                            font.pixelSize: app.fpx(14)
+                        }
                     }
                     // The details panel (ModPanel.qml): the highlighted mod, on the right of My mods when there is room.
                     ModPanel {
@@ -7455,7 +7572,8 @@ Window {
                 tab: app.browserTab
                 downloads: app.browserRows
                 dlIndex: app.browserDlIndex
-                pillText: app.browserPill.text
+                // Words a toast already says aren't said again in the pill.
+                pillText: toast.shown && toast.text === app.browserPill.text ? "" : app.browserPill.text
                 pillLevel: app.browserPill.level
                 pillProgress: app.browserPill.progress
                 legend: app.sheet === "" && !app.wheelOpen ? app.legendHints : []
@@ -7655,9 +7773,21 @@ Window {
     Toast {
         id: toast
         ui: kit
-        // With the details panel open, over the list column (not the panel's edge).
-        x: app.page === "game" && app.showModPanel && modPanel.visible
-           ? Math.max(app.px(10), (rail.width + parent.width - modPanel.width - app.px(20)) / 2 - width / 2) : (parent.width - width) / 2
+        // Centred in the content: right of the rail, left of the details panel or a side sheet; 14 px over the bar.
+        areaLeft: rail.visible ? rail.width : 0
+        // The side sheets' widths (SideSheet.qml's users), to stay left of them.
+        readonly property real sideWidth: ["modmenu", "cardmenu", "pick"].indexOf(app.sheet) >= 0 ? Math.min(app.width - app.px(40), app.px(392))
+                                          : ["add", "shares"].indexOf(app.sheet) >= 0 ? Math.min(app.width - app.px(40), app.px(420))
+                                          : ["versions", "plugin"].indexOf(app.sheet) >= 0 ? Math.min(app.width * 0.6, app.px(560))
+                                          : app.sheet === "profiles" ? Math.min(app.width * 0.55, app.px(520)) : 0
+        // A dialog in the middle of the window, or a side sheet that leaves too little room beside it: the toast goes
+        // over the bottom bar (the sheet's buttons carry their keys meanwhile), never over the sheet.
+        readonly property bool overBar: app.sheet !== "" && app.sheet !== "fomod" && app.sheet !== "tutorial" && legend.shown
+                                        && (sideWidth === 0 || app.width - sideWidth - areaLeft < app.px(380))
+        areaRight: app.width - (overBar ? 0 : app.sheet === "" && app.page === "game" && app.showModPanel && modPanel.visible ? modPanel.width + app.px(24) : sideWidth)
+        // (The Nexus page's own bar is at the bottom while the bottom bar is away.)
+        bottomMargin: overBar ? Math.max(app.px(4), (legend.height - height) / 2)
+                      : (app.page === "browser" && !legend.visible ? app.px(48) : app.height - kit.barTop) + app.px(14)
         function put(kind, m) {
             if (m === app.lastToast && Date.now() - app.lastToastAt < 6000 && shown) return
             app.lastToast = m; app.lastToastAt = Date.now()

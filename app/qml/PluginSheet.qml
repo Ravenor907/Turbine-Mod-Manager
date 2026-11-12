@@ -17,18 +17,15 @@ Overlay {
 
     function levelWord(l) { return l === "error" ? "Problem" : l === "warn" ? "Warning" : "Note" }
 
-    Rectangle { anchors.fill: parent; color: "#B0000000" }
-    Rectangle {
-        anchors.right: parent.right
-        anchors.top: parent.top
+    Scrim { ui: sheet.ui }
+    SideSheet {
+        ui: sheet.ui
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: sheet.ui.px(8)
         width: Math.min(parent.width * 0.6, sheet.ui.px(560))
-        color: sheet.ui.c.panel
-        border.color: sheet.ui.c.line
         CardGuard {}
         Flickable {
             id: view
+            ScrollFade { ui: sheet.ui; view: view; color: sheet.ui.c.panel }
             anchors.fill: parent
             anchors.margins: sheet.ui.px(18)
             contentHeight: col.implicitHeight
@@ -40,7 +37,8 @@ Overlay {
                 spacing: sheet.ui.px(8)
                 Text {
                     width: parent.width
-                    wrapMode: Text.WrapAnywhere
+                    // A plugin's file name: breaks between words, and inside one only when it has to.
+                    wrapMode: Text.Wrap
                     text: sheet.plugin ? sheet.plugin.name : ""
                     color: sheet.ui.c.text
                     font.family: sheet.ui.titleFont; font.pixelSize: sheet.ui.fpx(18); font.bold: true
@@ -76,9 +74,9 @@ Overlay {
                 }
                 Text {
                     topPadding: sheet.ui.px(6)
-                    text: "NOTES"
-                    color: sheet.ui.c.muted
-                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(14); font.bold: true; font.letterSpacing: sheet.ui.px(1)
+                    text: "Notes"
+                    color: sheet.ui.c.accentText
+                    font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(14); font.bold: true
                 }
                 Text {
                     visible: sheet.notes.length === 0
