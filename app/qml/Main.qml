@@ -2121,7 +2121,9 @@ Window {
         else if ((level === "ok" || level === "warn") && text.length > msgMost) toast.info(text)
     }
     readonly property int msgMost: 40
-    readonly property string msgShort: msgText.length <= msgMost || msgLevel === "error" ? msgText : msgLevel === "work" ? "Working..." : msgLevel === "warn" ? "Something to check" : "Done"
+    // A longer error says what failed in a few words; the toast or the sheet above has the whole message.
+    readonly property string msgShort: msgText.length <= msgMost ? msgText : msgLevel === "work" ? "Working..." : msgLevel === "warn" ? "Something to check"
+                                       : msgLevel === "error" ? (/couldn't be added|^Couldn't add /.test(msgText) ? "Couldn't add a mod" : "Something went wrong") : "Done"
     readonly property bool msgShown: msgText !== "" && (msgLevel === "work" || msgTimer.running)
     readonly property bool savingNow: Turbine.busy && msgShown && msgLevel === "work" && msgText.indexOf("Saving ") === 0
     function plural(n, one, many) { return n + " " + (n === 1 ? one : many) }
@@ -5910,31 +5912,38 @@ Window {
         }
     }
     function logUrl(u) { return Turbine.browserLogUrl(u) }
-    function browserSay(text, level) {
-        browserNoteNow = { text: text, level: level, at: Date.now() }
+    // short: the pill's few words when the whole note doesn't fit in the bar (NexusBrowser.qml's pillShort).
+    function browserSay(text, level, short) {
+        browserNoteNow = { text: text, level: level, short: short || "", at: Date.now() }
         note("browser", "Pill: " + text)
     }
-    // The pill's words: downloads first, then what just happened, then what to press.
+    // The pill's words: downloads first, then what just happened, then what to press. short: a few words for a
+    // narrow bar (the whole text shows over the page for its first 6 seconds).
     readonly property var browserPill: {
         webDlTick
         // Waiting for the player's answer (A the file's page, B OK) comes first.
-        if (browserNoKeyPage !== "" && browserNoteNow) return { text: browserNoteNow.text, level: "warn", progress: -1 }
+        if (browserNoKeyPage !== "" && browserNoteNow) return { text: browserNoteNow.text, short: browserNoteNow.short || "", level: "warn", progress: -1 }
         const run = webDls.filter(x => isRunning(x))
         if (run.length > 1) return { text: run.length + " downloading", level: "busy", progress: -1 }
-        if (dl.active && run.length === 0) return { text: "Downloading " + dl.label + (dl.total > 0 ? " " + Math.min(99, Math.floor(dl.got * 100 / dl.total)) + "%" : ""), level: "busy", progress: dl.total > 0 ? dl.got / dl.total : -1 }
+        if (dl.active && run.length === 0) {
+            const pct = dl.total > 0 ? " " + Math.min(99, Math.floor(dl.got * 100 / dl.total)) + "%" : ""
+            return { text: "Downloading " + dl.label + pct, short: "Downloading" + pct, level: "busy", progress: dl.total > 0 ? dl.got / dl.total : -1 }
+        }
         if (run.length === 1) {
             const x = run[0]
             const pct = x.total > 0 ? Math.min(99, Math.floor(x.got * 100 / x.total)) : -1
-            return { text: "Downloading " + x.name + (pct >= 0 ? " " + pct + "%" : ""), level: "busy", progress: pct >= 0 ? pct / 100 : -1 }
+            return { text: "Downloading " + x.name + (pct >= 0 ? " " + pct + "%" : ""), short: "Downloading" + (pct >= 0 ? " " + pct + "%" : ""), level: "busy", progress: pct >= 0 ? pct / 100 : -1 }
         }
         if (webDls.some(x => x.state === "done")) return { text: "Adding...", level: "busy", progress: -1 }
         const n = browserNoteNow
-        if (n) return { text: n.text, level: n.level, progress: -1 }
-        if (signinWaitSince > 0 && signinWaitText !== "") return { text: signinWaitText, level: "busy", progress: -1 }
+        if (n) return { text: n.text, short: n.short || "", level: n.level, progress: -1 }
+        if (signinWaitSince > 0 && signinWaitText !== "") return { text: signinWaitText, short: "Waiting for sign-in", level: "busy", progress: -1 }
         const stopped = webDls.filter(x => x.state === "interrupted")
-        if (stopped.length > 0) return { text: stopped[stopped.length - 1].server ? "Press Slow download on the page again" : stopped[stopped.length - 1].name + " stopped. Downloads: Try again", level: "warn", progress: -1 }
+        if (stopped.length > 0) return { text: stopped[stopped.length - 1].server ? "Press Slow download on the page again" : stopped[stopped.length - 1].name + " stopped. Downloads: Try again",
+                                         short: "Download stopped", level: "warn", progress: -1 }
         if (browserIsFilePage && account.premium !== true)
-            return { text: browserSignedIn ? "Press Slow download (free). Mod Manager Download needs a Nexus key." : "Sign in first (free), then press Slow download", level: "hint", progress: -1 }
+            return { text: browserSignedIn ? "Press Slow download (free). Mod Manager Download needs a Nexus key." : "Sign in first (free), then press Slow download",
+                     short: browserSignedIn ? "Press Slow download" : "Sign in first", level: "hint", progress: -1 }
         return { text: "", level: "ok", progress: -1 }
     }
     // Signed in to Nexus in Turbine's browser (its sign-in cookie), looked at while the page is open.
@@ -6118,12 +6127,12 @@ Window {
         // at the next click. Only a file page somewhere else takes A over (A goes there, B not now).
         if (target === "" || (here !== "" && Turbine.browserSamePage(browserAddress(target), here))) {
             browserNoKeyPage = ""
-            browserSay("Mod Manager Download needs a Nexus key (Settings, Getting mods, Faster downloads). Press Slow download here instead. It's free.", "warn")
+            browserSay("Mod Manager Download needs a Nexus key (Settings, Getting mods, Faster downloads). Press Slow download here instead. It's free.", "warn", "Needs a Nexus key")
             noKeyNoteClear.restart()
             return
         }
         browserNoKeyPage = target
-        browserSay("Mod Manager Download needs a Nexus key (Settings, Getting mods, Faster downloads). A opens this file's page, where Slow download is free.", "warn")
+        browserSay("Mod Manager Download needs a Nexus key (Settings, Getting mods, Faster downloads). A opens this file's page, where Slow download is free.", "warn", "Needs a Nexus key")
     }
     Timer { id: noKeyNoteClear; interval: 8000; onTriggered: if (app.browserNoteNow && app.browserNoKeyPage === "" && /needs a Nexus key/.test(app.browserNoteNow.text)) app.browserNoteNow = null }
     // A on that message: the file's own page, where Slow download is.
@@ -6175,7 +6184,7 @@ Window {
         const r = parse(Turbine.signinStart(), { how: "error", text: "Turbine couldn't start the sign-in." })
         note("browser", "Sign in with my browser: " + r.how)
         if (r.how === "nohelper" || r.how === "error") { browserSay(r.text, "warn"); toast.info(r.text); return }
-        if (r.how === "guarded") { if (signinWaitSince === 0) signinWaitSince = Date.now(); signinWaitText = r.text; browserSay(r.text, "hint"); return }
+        if (r.how === "guarded") { if (signinWaitSince === 0) signinWaitSince = Date.now(); signinWaitText = r.text; browserSay(r.text, "hint", "Waiting for sign-in"); return }
         if (r.how === "desktop" || r.how === "shortcut" || r.how === "helper") { signinWaitSince = Date.now(); signinWaitText = r.text }
         browserSay(r.text, r.how === "steam" ? "warn" : "hint")
         if (shot.on) return
@@ -7649,6 +7658,7 @@ Window {
                 dlIndex: app.browserDlIndex
                 // Words a toast already says aren't said again in the pill.
                 pillText: toast.shown && toast.text === app.browserPill.text ? "" : app.browserPill.text
+                pillShort: app.browserPill.short || ""
                 pillLevel: app.browserPill.level
                 pillProgress: app.browserPill.progress
                 legend: app.sheet === "" && !app.wheelOpen ? app.legendHints : []

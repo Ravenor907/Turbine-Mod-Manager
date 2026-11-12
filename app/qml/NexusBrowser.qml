@@ -25,6 +25,8 @@ Item {
     property var downloads: []            // [{name, game, state, got, total, speed, words}]
     property int dlIndex: 0
     property string pillText: ""
+    // The pill's few words ("Sign in first") for a bar too narrow for pillText; "" cuts pillText short instead.
+    property string pillShort: ""
     property string pillLevel: "ok"       // ok, busy, hint, warn
     property real pillProgress: -1
     property var legend: []               // [[key, label, pre, key2, label2]]
@@ -124,10 +126,15 @@ Item {
         readonly property real signinRoom: pill.x - nb.ui.px(8) - tabsEnd
         // The pill takes what it needs up to the room left of the legend, never over the tabs; its whole words show
         // over the bar when they don't fit (pillFull).
-        readonly property real pillWant: pillMetrics.advanceWidth + nb.ui.px(24)
+        readonly property real pillWant: Math.ceil(pillMetrics.advanceWidth) + nb.ui.px(24)
+        readonly property real pillShortWant: Math.ceil(pillShortMetrics.advanceWidth) + nb.ui.px(24)
         // The page's title keeps a little room too, so a long hint in the pill can't take it all.
         readonly property real titleMin: nb.width * 0.09
         readonly property real pillRoom: legendRow.x - nb.ui.px(10) - tabsEnd - signinNeed - titleMin
+        // What the pill shows: "whole" (it fits), "short" (pillShort, which may take the title's room too), "cut"
+        // (no short words: pillText cut short), or "" (hidden: not even the short words fit).
+        readonly property string pillShows: nb.pillText === "" ? "" : pillWant <= pillRoom ? "whole" : nb.pillShort === "" ? "cut"
+                                            : pillShortWant <= pillRoom + titleMin ? "short" : ""
         readonly property real nameW: Math.min(nameText.implicitWidth, nb.width * 0.16)
         readonly property int signinFit: {
             if (!nb.signinShown) return 0
@@ -235,11 +242,12 @@ Item {
         // The download pill.
         Rectangle {
             id: pill
-            visible: nb.pillText !== ""
+            visible: bar.pillShows !== ""
             anchors.right: legendRow.left; anchors.rightMargin: nb.ui.px(10)
             anchors.verticalCenter: parent.verticalCenter
-            width: visible ? Math.max(0, Math.min(bar.pillWant, bar.pillRoom)) : 0
+            width: bar.pillShows === "whole" ? bar.pillWant : bar.pillShows === "short" ? bar.pillShortWant : bar.pillShows === "cut" ? Math.max(0, Math.min(bar.pillWant, bar.pillRoom)) : 0
             TextMetrics { id: pillMetrics; font: pillText.font; text: nb.pillText }
+            TextMetrics { id: pillShortMetrics; font: pillText.font; text: nb.pillShort }
             height: nb.ui.px(28); radius: height / 2
             color: nb.pillLevel === "warn" ? nb.ui.c.focusFill : nb.ui.c.card
             border.color: nb.pillLevel === "ok" ? nb.ui.c.ok : nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.accent
@@ -256,7 +264,7 @@ Item {
                 id: pillText
                 anchors.verticalCenter: parent.verticalCenter
                 x: nb.ui.px(12); width: parent.width - nb.ui.px(24)
-                text: nb.pillText
+                text: bar.pillShows === "short" ? nb.pillShort : nb.pillText
                 color: nb.pillLevel === "warn" ? nb.ui.c.warn : nb.ui.c.text
                 font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13)
                 elide: Text.ElideRight
@@ -325,14 +333,15 @@ Item {
         }
     }
 
-    // The pill's whole words under the bar when they are cut short there (a message to read: done, a warning or what
-    // to press), for their first 6 seconds; then only the pill keeps them, so nothing stays over the page's corner.
+    // The pill's whole words over the bar when the pill shows less (its short words, cut short, or hidden) and they
+    // are a message to read (done, a warning or what to press), for their first 6 seconds; then only the pill keeps
+    // them, so nothing stays over the page's corner.
     property bool fullFresh: false
     onPillTextChanged: { fullFresh = pillText !== ""; fullTimer.restart() }
     Timer { id: fullTimer; interval: 6000; onTriggered: nb.fullFresh = false }
     Rectangle {
         id: pillFull
-        visible: pill.visible && nb.noteFresh && nb.fullFresh && bar.pillWant > pill.width + 1 && (nb.pillLevel === "warn" || nb.pillLevel === "ok" || nb.pillLevel === "hint")
+        visible: nb.pillText !== "" && bar.pillShows !== "whole" && nb.noteFresh && nb.fullFresh && (nb.pillLevel === "warn" || nb.pillLevel === "ok" || nb.pillLevel === "hint")
         anchors.bottom: bar.top; anchors.bottomMargin: nb.ui.px(4)
         anchors.right: parent.right; anchors.rightMargin: nb.ui.px(10)
         width: Math.min(bar.pillWant, nb.width - nb.ui.px(20)); height: fullText.implicitHeight + nb.ui.px(12)

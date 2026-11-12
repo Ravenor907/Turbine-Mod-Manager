@@ -494,9 +494,9 @@ jobs:
         shell: bash
         env:
           KEEP: ${{ runner.environment == 'self-hosted' && '/__w/_keep' || '' }}
-          # The layout checks only report (a warning per shard) until the repo variable LAYOUT_STRICT is 1; then any
-          # layout problem fails the build.
-          LAYOUT_STRICT: ${{ vars.LAYOUT_STRICT == '1' && '1' || '0' }}
+          # Any layout problem fails the build. The repo variable LAYOUT_STRICT set to 0 makes the layout checks only
+          # report (a warning per shard), as a way out while a fix is on its way.
+          LAYOUT_STRICT: ${{ vars.LAYOUT_STRICT == '0' && '0' || '1' }}
         run: |
           # 0.65: on the owner's PC each runner keeps its own Flatpak user folder between runs.
           if [ -n "$KEEP" ]; then export FLATPAK_USER_DIR="$KEEP/flatpak-user"; fi

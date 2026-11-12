@@ -119,8 +119,11 @@ settled() {   # settled <picture with animations off> <page> <home> [more argume
   local still="$base-still" n="$base-full"
   ASSIGN[$still]=$SHARD; ASSIGN[$n]=$SHARD
   for c in "$still" "$n"; do rm -rf "$PWD/fh/$c" && mkdir -p "$PWD/fh" && cp -a "$home" "$PWD/fh/$c"; done
-  shoot "$still" "${base##*-}" "$page" "$PWD/fh/$still" "$@" --motion=off
-  shoot "$n" "${base##*-}" "$page" "$PWD/fh/$n" "$@" --motion=full
+  # Paths into the home (files to import) point into each copy: the app only sees the copy it runs with.
+  local a args_still=() args_full=()
+  for a in "$@"; do args_still+=("${a//$home/$PWD/fh/$still}"); args_full+=("${a//$home/$PWD/fh/$n}"); done
+  shoot "$still" "${base##*-}" "$page" "$PWD/fh/$still" "${args_still[@]}" --motion=off
+  shoot "$n" "${base##*-}" "$page" "$PWD/fh/$n" "${args_full[@]}" --motion=full
   need "$n" "Motion check: $page settled at Full" "Motion check: $page settled \(animations full\)$"
   [ -s "shots/$n.png" ] && [ -s "shots/$still.png" ] || return 0
   cmp -s "shots/$still.png" "shots/$n.png" && return 0
@@ -1248,10 +1251,10 @@ if [ -n "$bars" ]; then
 else echo "::notice title=Bottom bar::$nbars pictures checked, no overlaps"; fi
 # Every picture's layout (SelfCheck.qml's layout checks, just before the picture): text cut or broken inside a word,
 # boxes past their card or the window, a sheet's form cut by its edge, A or B dropped from the bar, text under 12 px,
-# texts drawn over each other. Reported as a warning with the count and the most common problems, and in full in
-# shots/layout-<part>-<shard>.txt (it goes up with the pictures). LAYOUT_STRICT=1 (an env of the checks job in
-# .github/workflows/build.yml) makes any problem fail the build.
-LAYOUT_STRICT=${LAYOUT_STRICT:-0}
+# texts drawn over each other. Any problem fails the build, with the count and the most common problems, and the
+# whole list in shots/layout-<part>-<shard>.txt (it goes up with the pictures). LAYOUT_STRICT=0 (an env of the checks
+# job in .github/workflows/build.yml, from the repo variable LAYOUT_STRICT) only reports them, as a warning.
+LAYOUT_STRICT=${LAYOUT_STRICT:-1}
 layout="shots/layout-$MODE-$SHARD.txt"
 python3 - "$PWD/data" "$layout" "$MODE $SHARD/$SHARDS" > shots/layout-annotation.txt <<'PY' || echo "::warning title=Layout checks::the summary wasn't made"
 import collections, glob, os, re, sys
@@ -1301,7 +1304,7 @@ PY
 if [ -s shots/layout-annotation.txt ]; then
   nlayout=$(head -n1 shots/layout-annotation.txt)
   words=$(tail -n +2 shots/layout-annotation.txt | cut -c1-300 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
-  if [ "$nlayout" -gt 0 ] && [ "$LAYOUT_STRICT" = 1 ]; then echo "::error title=Layout problems ($nlayout)::$words"; fail=1
+  if [ "$nlayout" -gt 0 ] && [ "$LAYOUT_STRICT" != 0 ]; then echo "::error title=Layout problems ($nlayout)::$words"; fail=1
   elif [ "$nlayout" -gt 0 ]; then echo "::warning title=Layout problems ($nlayout, report only)::$words"
   else echo "::notice title=Layout::$(sed -n 2p shots/layout-annotation.txt)"; fi
   head -n 60 "$layout"
