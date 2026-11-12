@@ -108,23 +108,26 @@ need() {   # need <shot> <title> <grep -E pattern>
   if grep -Eq "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null; then echo "::notice title=$2::$(grep -Eh "$3" "$PWD/data/$1/turbine-mod-manager/activity.log" | head -n1 | cut -c1-200)"
   else echo "::error title=$2::not found: $3"; (grep -h "check\|shot\|Sheet\|focus\|Rail " "$PWD/data/$1/turbine-mod-manager/activity.log" 2>/dev/null | tail -n 60 || true); fail=1; fi
 }
-# Animations at Full end where none would have put them: the same page once more with --motion=full, right after its
-# picture with animations off (the same home), says everything settled and gives the same picture (up to 200 pixels
+# Animations at Full end where none would have put them: the page is shot twice from two copies of the same home, once
+# with animations off and once with --motion=full; the second says everything settled and gives the same picture (up to 200 pixels
 # may move by more than 3%: a large letter's edges are not always drawn the same way twice, with animations or not;
 # anything more is a page that ended somewhere else).
 settled() {   # settled <picture with animations off> <page> <home> [more arguments]
   local base=$1 page=$2 home=$3; shift 3
   ran "$base" || return 0
-  local n="$base-full"
-  ASSIGN[$n]=$SHARD
-  shoot "$n" "${base##*-}" "$page" "$home" "$@" --motion=full
+  # Both pictures start from the same copy of the home: earlier pictures may have added mods to the shared one.
+  local still="$base-still" n="$base-full"
+  ASSIGN[$still]=$SHARD; ASSIGN[$n]=$SHARD
+  for c in "$still" "$n"; do rm -rf "$PWD/fh/$c" && mkdir -p "$PWD/fh" && cp -a "$home" "$PWD/fh/$c"; done
+  shoot "$still" "${base##*-}" "$page" "$PWD/fh/$still" "$@" --motion=off
+  shoot "$n" "${base##*-}" "$page" "$PWD/fh/$n" "$@" --motion=full
   need "$n" "Motion check: $page settled at Full" "Motion check: $page settled \(animations full\)$"
-  [ -s "shots/$n.png" ] && [ -s "shots/$base.png" ] || return 0
-  cmp -s "shots/$base.png" "shots/$n.png" && return 0
+  [ -s "shots/$n.png" ] && [ -s "shots/$still.png" ] || return 0
+  cmp -s "shots/$still.png" "shots/$n.png" && return 0
   local d
-  d=$(python3 -c 'import runpy, sys; m = runpy.run_path("tools/shot-diff.py"); c, box, _ = m["compare"](m["read_png"](sys.argv[1]), m["read_png"](sys.argv[2]), 3); print(c, box)' "shots/$base.png" "shots/$n.png" || echo "999999 unreadable")
+  d=$(python3 -c 'import runpy, sys; m = runpy.run_path("tools/shot-diff.py"); c, box, _ = m["compare"](m["read_png"](sys.argv[1]), m["read_png"](sys.argv[2]), 3); print(c, box)' "shots/$still.png" "shots/$n.png" || echo "999999 unreadable")
   if [ "${d%% *}" -le 200 ]; then echo "::notice title=Motion check: $page ends in the same picture::$n ($d)"
-  else echo "::error title=Motion check: $page ends elsewhere at Full::$n differs from $base: $d (pixels, box)"; fail=1; fi
+  else echo "::error title=Motion check: $page ends elsewhere at Full::$n differs from $still: $d (pixels, box)"; fail=1; fi
 }
 dl="$PWD/home/Downloads"
 skyrim=steam:489830
