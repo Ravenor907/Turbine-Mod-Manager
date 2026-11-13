@@ -507,7 +507,7 @@ pub fn mark_undone(data: &Path, app_id: &str, set_now: &str) -> io::Result<()> {
     fs::create_dir_all(launch_dir(data))?;
     remove_if(&once_file(data, app_id))?;
     remove_if(&armed_file(data, app_id))?;
-    fs::write(undone_file(data, app_id), set_now)
+    crate::write_atomic(&undone_file(data, app_id), set_now.as_bytes())
 }
 
 /// Is the game still undone? Not once the Launch Options were set again (changed since Undo, and set right); that
@@ -536,7 +536,8 @@ pub fn remember_original(data: &Path, app_id: &str, set: &str) -> io::Result<()>
         return Ok(());
     }
     fs::create_dir_all(launch_dir(data))?;
-    fs::write(original_file(data, app_id), set)
+    // Whole or not at all: a write cut short (a full drive, the power going) must not leave Undo with half a line.
+    crate::write_atomic(&original_file(data, app_id), set.as_bytes())
 }
 
 /// What to paste back to undo Turbine's line: the player's earlier Launch Options ("" when they were empty).

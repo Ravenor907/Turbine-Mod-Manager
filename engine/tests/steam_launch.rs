@@ -640,3 +640,23 @@ fn undo_sticks_until_the_line_is_set_again() {
     assert_eq!(anticheat::original_options(&data, "1245620"), "");
     let _ = fs::remove_dir_all(&d);
 }
+
+/// The Launch Options kept for Undo are written whole or not at all: a write that fails leaves the ones kept
+/// before, and no half-written file takes their place.
+#[test]
+fn a_failed_write_keeps_the_launch_options_kept_for_undo() {
+    let d = tmp("orig-atomic");
+    let data = d.join("data");
+    anticheat::remember_original(&data, "1245620", "A %command%").unwrap();
+    assert_eq!(anticheat::original_options(&data, "1245620"), "A %command%");
+    // Something is in the way of the new copy: the write fails before the kept file is touched.
+    let f = anticheat::original_file(&data, "1245620");
+    let blocker = f.with_file_name(".1245620.original.turbine-new");
+    std::fs::create_dir_all(&blocker).unwrap();
+    assert!(anticheat::remember_original(&data, "1245620", "B %command%").is_err());
+    assert_eq!(anticheat::original_options(&data, "1245620"), "A %command%");
+    std::fs::remove_dir(&blocker).unwrap();
+    anticheat::remember_original(&data, "1245620", "B %command%").unwrap();
+    assert_eq!(anticheat::original_options(&data, "1245620"), "B %command%");
+    assert!(!blocker.exists(), "nothing left beside it");
+}
