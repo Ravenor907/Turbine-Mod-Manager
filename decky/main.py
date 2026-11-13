@@ -151,11 +151,21 @@ class Plugin:
             )
         except FileNotFoundError:
             return 127, "", "%s not found" % argv[0]
+        except (OSError, ValueError) as e:
+            decky.logger.warning("Couldn't start %s: %s", argv[0], e)
+            return 126, "", "%s couldn't be started" % argv[0]
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout)
         except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            # Reaped, but never waited on for ever: one stuck program must not hold every later request.
+            try:
+                await asyncio.wait_for(proc.wait(), 10)
+            except asyncio.TimeoutError:
+                decky.logger.warning("%s didn't stop after its time was up", argv[0])
             return 124, "", "it took longer than %d seconds" % timeout
         return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
@@ -182,8 +192,9 @@ class Plugin:
         if answer.get("ok") and answer.get("found") is False and clean_game(name):
             answer = await self._turbine("status", name, timeout=STATUS_TIMEOUT)
         if answer.get("found"):
-            gid = (answer.get("game") or {}).get("id", "")
-            answer["pluginLaunch"] = self._read_launches().get(gid)
+            found = answer.get("game")
+            gid = found.get("id", "") if isinstance(found, dict) else ""
+            answer["pluginLaunch"] = self._read_launches().get(gid) if isinstance(gid, str) else None
         return answer
 
     async def mods(self, game, on):
@@ -200,10 +211,10 @@ class Plugin:
 
     async def note_launch(self, game_id, how, result, seconds=None):
         """The panel saw a game it started run or close: kept for "last launch"."""
-        store = launch_record(self._read_launches(), game_id, how, result, seconds, time.time())
         try:
+            store = launch_record(self._read_launches(), game_id, how, result, seconds, time.time())
             self._write_launches(store)
-        except OSError as e:
+        except (OSError, TypeError, ValueError) as e:
             decky.logger.warning("Couldn't keep the last launch: %s", e)
             return False
         return True

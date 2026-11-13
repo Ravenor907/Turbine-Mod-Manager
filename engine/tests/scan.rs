@@ -148,3 +148,37 @@ fn launch_options_read_from_localconfig() {
     assert_eq!(turbine_engine::steam::launch_options_in(text, "413150").as_deref(), Some(""), "listed, none set");
     assert_eq!(turbine_engine::steam::launch_options_in(text, "1"), None, "not listed");
 }
+
+/// A Windows game on the SD card whose Proton prefix Steam keeps in its own folder on the internal drive: the
+/// prefix is still found, so the game counts as a Windows game with a prefix.
+#[test]
+fn a_prefix_kept_on_the_internal_drive_is_found() {
+    let home = fake_home();
+    let steam = home.0.join(".local/share/Steam");
+    let dapps = home.0.join("media/SD Card/steamapps");
+    write(&dapps.join("appmanifest_1091500.acf"), &manifest("1091500", "Cyberpunk 2077 (Steam)", "Cyberpunk 2077", 4));
+    write(&dapps.join("common/Cyberpunk 2077/readme.txt"), "");
+    fs::create_dir_all(steam.join("steamapps/compatdata/1091500/pfx")).unwrap();
+    let scan = scan_games(&home.0);
+    let g = scan.games.iter().find(|g| g.store_id == "1091500").unwrap();
+    assert_eq!(g.runtime, Runtime::Windows);
+    assert!(g.prefix.as_ref().unwrap().ends_with(".local/share/Steam/steamapps/compatdata/1091500/pfx"), "{:?}", g.prefix);
+    // The game's own library still comes first when it has one.
+    fs::create_dir_all(dapps.join("compatdata/1091500/pfx")).unwrap();
+    let scan = scan_games(&home.0);
+    let g = scan.games.iter().find(|g| g.store_id == "1091500").unwrap();
+    assert!(g.prefix.as_ref().unwrap().ends_with("SD Card/steamapps/compatdata/1091500/pfx"), "{:?}", g.prefix);
+}
+
+/// A localconfig.vdf with a byte that isn't valid text still gives the game's Launch Options.
+#[test]
+fn launch_options_survive_an_odd_byte() {
+    let home = fake_home();
+    let f = home.0.join(".local/share/Steam/userdata/1/config/localconfig.vdf");
+    fs::create_dir_all(f.parent().unwrap()).unwrap();
+    let mut bytes = b"\"UserLocalConfigStore\"\n{\n\"friends\" { \"name\" \"".to_vec();
+    bytes.push(0xFF);
+    bytes.extend_from_slice(b"\" }\n\"Software\" { \"Valve\" { \"Steam\" { \"apps\" { \"489830\" { \"LaunchOptions\" \"%command% -x\" } } } } }\n}\n");
+    fs::write(&f, bytes).unwrap();
+    assert_eq!(turbine_engine::steam::launch_options(&home.0, "489830").as_deref(), Some("%command% -x"));
+}

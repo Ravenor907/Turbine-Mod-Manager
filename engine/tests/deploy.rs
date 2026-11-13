@@ -425,3 +425,19 @@ fn in_place_write_does_not_change_staging() {
     fs::write(w.paths.game.join("BepInEx/config/BepInEx.cfg"), "rewritten by the loader").unwrap();
     assert_eq!(read(&cfg.1), "shipped config", "the staged mod file changed through the hard link");
 }
+
+/// A mod file that is gone from Turbine's own folder (deleted, or its drive is out) is named in the error, with
+/// what to do, and the game's folder comes back as it was.
+#[test]
+fn a_missing_mod_file_is_named_in_the_error() {
+    let w = world("gone-source");
+    let before = snapshot(&w.paths.game);
+    let gone = w.staged.join("A/Data/meshes/never-there.nif");
+    let e = apply(&w.paths, &[("Data/meshes/never-there.nif".to_string(), gone.clone())], None).unwrap_err();
+    assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+    let said = e.to_string();
+    assert!(said.contains("never-there.nif") && said.contains(&gone.display().to_string()), "{said}");
+    assert!(said.contains("add it again") && !said.contains("os error"), "{said}");
+    apply(&w.paths, &[], None).unwrap();
+    assert_eq!(snapshot(&w.paths.game), before);
+}

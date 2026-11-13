@@ -324,3 +324,15 @@ fn select_all_and_at_most_one_groups() {
     assert!(!s.current().unwrap().groups[1].options[0].selected);
     let _ = FileState::Active;
 }
+
+/// A folder whose name changes length when lowercased (a letter outside English) must not stop the installer,
+/// and the files below it keep their full names.
+#[test]
+fn a_folder_name_that_changes_length_in_lowercase() {
+    let xml = "<config><requiredInstallFiles><folder source=\"\u{130}\" destination=\"out\"/></requiredInstallFiles></config>";
+    let s = Session::new(fomod::parse(xml.as_bytes()).unwrap(), Env::default(), &list(&["\u{130}/\u{e9}.esp", "\u{130}/sub/b.esp"]), "");
+    assert_eq!(sorted(s.finish().unwrap().files), sorted(vec![
+        ("\u{130}/\u{e9}.esp".to_string(), "out/\u{e9}.esp".to_string()),
+        ("\u{130}/sub/b.esp".to_string(), "out/sub/b.esp".to_string()),
+    ]));
+}

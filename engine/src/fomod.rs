@@ -545,6 +545,20 @@ fn join(a: &str, b: &str) -> String {
     }
 }
 
+
+/// What is left of `real` after the start whose lowercase form is `prefix_lc`; None when it doesn't start that way.
+fn below_folder<'a>(real: &'a str, prefix_lc: &str) -> Option<&'a str> {
+    let mut left = prefix_lc;
+    let mut rest = real;
+    while !left.is_empty() {
+        let c = rest.chars().next()?;
+        let low: String = c.to_lowercase().collect();
+        left = left.strip_prefix(low.as_str())?;
+        rest = &rest[c.len_utf8()..];
+    }
+    Some(rest)
+}
+
 impl Session {
     /// Starts an installer. `archive_files` are the archive's file paths ('/' separated); `root` is `Found::root`.
     pub fn new(config: Config, env: Env, archive_files: &[String], root: &str) -> Session {
@@ -983,7 +997,10 @@ impl Session {
             let prefix = if base.is_empty() { String::new() } else { format!("{}/", base.to_lowercase()) };
             for (lc, real) in &self.sorted {
                 if lc.starts_with(&prefix) && !(src.is_empty() && lc.starts_with(&fomod_dir)) {
-                    found.push((real.clone(), join(&dest, &real[prefix.len()..])));
+                    // The lowercase form of a name can be longer or shorter than the name (some letters outside
+                    // English), so the part below the folder is found letter by letter, never by length.
+                    let Some(below) = below_folder(real, &prefix) else { continue };
+                    found.push((real.clone(), join(&dest, below)));
                 }
             }
             if !found.is_empty() || self.root.is_empty() {

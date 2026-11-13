@@ -120,3 +120,36 @@ fn the_queue_goes_one_after_another() {
     assert_eq!(back, q);
     assert!(ReqQueue::from_json(&json::parse(r#"{"game":"g"}"#).unwrap()).is_none(), "no list: no queue");
 }
+
+#[test]
+fn a_wild_saved_place_never_starts_the_queue_over() {
+    let item = |name: &str, id: u64| GetItem { name: name.into(), mod_id: id, domain: "d".into() };
+    // A damaged saved list: the place is far past the end.
+    let mut q = ReqQueue::from_json(&json::parse(r#"{"game":"g","forName":"A","items":[{"name":"A","modId":1,"domain":"d"}],"index":1e300}"#).unwrap()).unwrap();
+    assert_eq!(q.current(), None);
+    assert_eq!(q.advance(), None);
+    assert_eq!(q.current(), None, "it must not wrap around to the first one");
+    // What comes in still goes on the end, each requirement once even when it is named twice.
+    assert_eq!(q.insert_next(&[item("B", 2), item("B again", 2)]), [item("B", 2)]);
+    assert_eq!(q.items.iter().map(|i| i.mod_id).collect::<Vec<_>>(), [1, 2]);
+}
+
+#[test]
+fn two_requirements_with_one_name_are_both_kept() {
+    let mods = vec![
+        ("a".to_string(), src("nexus", "skyrimspecialedition:1:1", &[
+            &needs::nexus_need("skyrimspecialedition", 10, "Patch"),
+            &needs::nexus_need("skyrimspecialedition", 11, "Patch"),
+            // The same mod named a second time, under another name: once.
+            &needs::nexus_need("skyrimspecialedition", 10, "Patch (again)"),
+        ])),
+        ("p".to_string(), src("nexus", "skyrimspecialedition:11:5", &[])),
+        ("t".to_string(), src("thunderstore", "x-Mod", &["OwnerA-Lib-1.0.0", "OwnerB-Lib-2.0.0", "OwnerA-Lib-1.1.0"])),
+    ];
+    let l = needs::links(&mods);
+    assert_eq!(l[0].1, vec![
+        Need { name: "Patch".into(), id: None, domain: "skyrimspecialedition".into(), mod_id: 10 },
+        Need { name: "Patch".into(), id: Some("p".into()), domain: "skyrimspecialedition".into(), mod_id: 11 },
+    ]);
+    assert_eq!(l[2].1.len(), 2, "OwnerA's and OwnerB's Lib are different mods: {:?}", l[2].1);
+}

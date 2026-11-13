@@ -5,7 +5,7 @@
 
 import { ButtonItem, Field, PanelSection, PanelSectionRow, Router, staticClasses, ToggleField } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ICON } from "./icon";
 import { BRASS, describeLaunch, gameFromPath, newestLaunch, statusLine, type Launch, type Status } from "./words";
 
@@ -90,11 +90,18 @@ async function startLink(url: string): Promise<boolean> {
 let watching: { appid: number; gameId: string; how: string; at: number; running: boolean } | null = null;
 let lifetime: { unregister: () => void } | null = null;
 
+/** Keeps the last launch; a failure to keep it only goes to the log (the panel still works without it). */
+function keepLaunch(gameId: string, how: string, result: string, seconds: number | null) {
+  noteLaunch(gameId, how, result, seconds).catch((e) => console.warn("Turbine: the last launch wasn't kept", e));
+}
+
+const NO_ANSWER = "Turbine's panel couldn't reach Turbine. Close this menu and open it again; if it stays, restart Steam.";
+
 function watchLaunch(appid: string, gameId: string, how: string) {
   const n = Number(appid);
   if (!Number.isFinite(n) || n <= 0) return;
   watching = { appid: n, gameId, how, at: Date.now(), running: false };
-  void noteLaunch(gameId, how, "started", null);
+  keepLaunch(gameId, how, "started", null);
 }
 
 function onLifetime(n: { unAppID: number; bRunning: boolean }) {
@@ -103,11 +110,11 @@ function onLifetime(n: { unAppID: number; bRunning: boolean }) {
   if (n.bRunning && !w.running) {
     w.running = true;
     w.at = Date.now();
-    void noteLaunch(w.gameId, w.how, "running", null);
+    keepLaunch(w.gameId, w.how, "running", null);
   } else if (!n.bRunning && w.running) {
     const secs = Math.round((Date.now() - w.at) / 1000);
     watching = null;
-    void noteLaunch(w.gameId, w.how, "closed", secs);
+    keepLaunch(w.gameId, w.how, "closed", secs);
     if (w.how !== "plain" && secs < 60) {
       toaster.toast({ title: "Turbine", body: "The game closed after " + secs + " seconds. A mod may have stopped it: open Turbine's panel for Play without mods or Report a problem." });
     }
@@ -123,19 +130,32 @@ function Content() {
   const [words, setWords] = useState<string>("");
   const [checks, setChecks] = useState<{ how: string; list: NonNullable<Answer["checks"]> } | null>(null);
 
+  // The panel closes while a request is still out: nothing is set on it after that, and its timer is dropped.
+  const live = useRef(true);
+  const later = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const refresh = async (g = game) => {
     if (!g) return;
     try {
-      setStatus(await getStatus(g.id, g.name));
+      const s = await getStatus(g.id, g.name);
+      if (!live.current) return;
+      setStatus(s && typeof s === "object" ? s : { ok: false, words: NO_ANSWER });
     } catch (e) {
-      setStatus({ ok: false, words: "Turbine's panel couldn't ask Turbine: " + String(e) });
+      console.warn("Turbine: status", e);
+      if (live.current) setStatus({ ok: false, words: NO_ANSWER });
     }
   };
 
   useEffect(() => {
+    live.current = true;
     const g = currentGame();
     setGame(g);
     void refresh(g);
+    return () => {
+      live.current = false;
+      if (later.current) clearTimeout(later.current);
+      later.current = null;
+    };
   }, []);
 
   const gid = status?.found && status.game ? status.game.id : "";
@@ -151,19 +171,31 @@ function Content() {
     setChecks(null);
     try {
       const a = await run();
-      if (a.missing) {
+      if (!live.current) return;
+      if (!a || typeof a !== "object") {
+        setWords(NO_ANSWER);
+      } else if (a.missing) {
         setWords(a.words || "Turbine Mod Manager isn't installed.");
       } else {
         setWords(a.words || "");
         if (after) await after(a);
         // Turbine is open and does it there: read again once it has had time to.
-        if (a.sent) setTimeout(() => void refresh(), 4000);
+        if (a.sent && live.current) {
+          if (later.current) clearTimeout(later.current);
+          later.current = setTimeout(() => {
+            later.current = null;
+            void refresh();
+          }, 4000);
+        }
       }
     } catch (e) {
-      setWords("Turbine's panel couldn't ask Turbine: " + String(e));
+      console.warn("Turbine: " + what, e);
+      if (live.current) setWords(NO_ANSWER);
     } finally {
-      setBusy("");
-      void refresh();
+      if (live.current) {
+        setBusy("");
+        void refresh();
+      }
     }
   };
 

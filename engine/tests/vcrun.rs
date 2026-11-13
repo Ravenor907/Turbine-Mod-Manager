@@ -145,3 +145,34 @@ fn runs_through_the_games_proton_and_its_runtime() {
     assert!(vcrun::installer_ok(0) && vcrun::installer_ok(3010) && vcrun::installer_ok(1638) && !vcrun::installer_ok(1618));
     assert!(vcrun::installer_words(1618).contains("Close the game"));
 }
+
+/// A prefix set up with protontricks or winetricks (`vcrun2022`) has its overrides as "*name": that is the runtime
+/// in use, not a reason to install it again.
+#[test]
+fn overrides_written_by_protontricks_count() {
+    let p = prefix("starred", Some(dll(14, 42, 34433, false)));
+    let reg = format!("{REG}\"*msvcp140\"=\"native,builtin\"\n\"*vcruntime140\"=\"native,builtin\"\n");
+    fs::write(p.join("user.reg"), reg).unwrap();
+    assert_eq!(vcrun::state(Some(&p)), State::Ready("14.42.34433".into()));
+    // The plain name is the one Wine reads first for a DLL in system32.
+    let reg = format!("{REG}\"*msvcp140\"=\"native,builtin\"\n\"*vcruntime140\"=\"native,builtin\"\n\"vcruntime140\"=\"builtin\"\n");
+    fs::write(p.join("user.reg"), reg).unwrap();
+    assert_eq!(vcrun::state(Some(&p)), State::NotUsed("14.42.34433".into()));
+}
+
+/// A runtime whose command is written without the leading slash still names the file inside its folder.
+#[test]
+fn a_runtime_command_without_a_leading_slash() {
+    let lib = scratch("noslash");
+    let common = lib.join("steamapps/common");
+    let proton = common.join("Proton 10.0");
+    fs::create_dir_all(&proton).unwrap();
+    fs::write(proton.join("toolmanifest.vdf"), "\"manifest\"\n{\n  \"require_tool_appid\" \"1628350\"\n}\n").unwrap();
+    let sniper = common.join("SteamLinuxRuntime_sniper");
+    fs::create_dir_all(&sniper).unwrap();
+    fs::write(lib.join("steamapps/appmanifest_1628350.acf"), "\"AppState\"\n{\n\t\"installdir\"\t\t\"SteamLinuxRuntime_sniper\"\n}\n").unwrap();
+    fs::write(sniper.join("toolmanifest.vdf"), "\"manifest\"\n{\n  \"commandline\" \"_v2-entry-point --verb=%verb% --\"\n}\n").unwrap();
+    fs::write(sniper.join("_v2-entry-point"), "").unwrap();
+    let rt = vcrun::runtime_command(std::slice::from_ref(&lib), &proton).unwrap();
+    assert_eq!(rt[0], format!("{}/_v2-entry-point", sniper.display()));
+}

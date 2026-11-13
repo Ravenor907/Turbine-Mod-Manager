@@ -928,7 +928,7 @@ fn do_add(paths: &Paths, rel: &str, source: &Path, copy: bool, backup: &Option<P
         Ok(_) => match backup {
             Some(b) => move_file(&target, b)?,
             // Something appeared here after planning. Never overwrite a file Turbine didn't plan for.
-            None => return Err(plain(io::ErrorKind::AlreadyExists, format!("{rel} appeared while applying changes"))),
+            None => return Err(plain(io::ErrorKind::AlreadyExists, format!("{rel} appeared in the game's folder while Turbine was applying changes, so Turbine left it alone. Try again."))),
         },
         Err(_) => {}
     }
@@ -947,8 +947,22 @@ fn do_add(paths: &Paths, rel: &str, source: &Path, copy: bool, backup: &Option<P
     }
 }
 
+/// A mod's own file that is gone says which file and what to do, not just "No such file or directory".
+fn missing_source(rel: &str, source: &Path, e: io::Error) -> io::Error {
+    if e.kind() != io::ErrorKind::NotFound {
+        return e;
+    }
+    plain(
+        io::ErrorKind::NotFound,
+        format!(
+            "{rel} couldn't go in: the mod's own copy of it is gone ({}). If Turbine's mods are on an SD card or another drive, put it back in; otherwise remove the mod and add it again.",
+            source.display()
+        ),
+    )
+}
+
 fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, report: &mut Report) -> io::Result<Placed> {
-    let src_meta = fs::metadata(source)?;
+    let src_meta = fs::metadata(source).map_err(|e| missing_source(rel, source, e))?;
     // The player's own version of this settings file, kept from last time.
     let saved = changes_path(paths, source).filter(|p| is_file(p));
     let from = saved.as_deref().unwrap_or(source);
@@ -966,7 +980,7 @@ fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, rep
             f.set_modified(fs::metadata(from)?.modified().unwrap_or(SystemTime::now()))?;
             f.sync_all()?;
             if exists(target) {
-                return Err(plain(io::ErrorKind::AlreadyExists, format!("{rel} appeared while applying changes")));
+                return Err(plain(io::ErrorKind::AlreadyExists, format!("{rel} appeared in the game's folder while Turbine was applying changes, so Turbine left it alone. Try again.")));
             }
             fs::rename(&tmp, target)
         })();

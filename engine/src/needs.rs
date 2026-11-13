@@ -58,11 +58,15 @@ pub fn links(mods: &[(String, SourceInfo)]) -> Vec<(String, Vec<Need>, Vec<Strin
     let keys: Vec<Option<String>> = mods.iter().map(|(_, s)| key_of(s)).collect();
     let mut out: Vec<(String, Vec<Need>, Vec<String>)> = mods.iter().map(|(id, _)| (id.clone(), Vec::new(), Vec::new())).collect();
     for (i, (id, src)) in mods.iter().enumerate() {
+        // Each requirement once, told apart by what it is and not by its name: two different mods that happen to
+        // share a name are both needed.
+        let mut had: Vec<String> = Vec::new();
         for n in &src.needs {
             let Some((key, name, domain, mod_id)) = parse_need(n) else { continue };
-            if out[i].1.iter().any(|x: &Need| x.name == name) {
+            if had.contains(&key) {
                 continue;
             }
+            had.push(key.clone());
             let provider = keys.iter().position(|k| k.as_deref() == Some(key.as_str())).filter(|&j| j != i);
             out[i].1.push(Need { name, id: provider.map(|j| mods[j].0.clone()), domain, mod_id });
             if let Some(j) = provider && !out[j].2.contains(id) {
@@ -336,7 +340,13 @@ impl ReqQueue {
     /// What a mod got along the way needs: the ones not already in the list go right after the current place,
     /// before the rest. Returns the ones added.
     pub fn insert_next(&mut self, got: &[GetItem]) -> Vec<GetItem> {
-        let fresh: Vec<GetItem> = got.iter().filter(|x| !self.items.iter().any(|y| y.mod_id == x.mod_id)).cloned().collect();
+        let mut fresh: Vec<GetItem> = Vec::new();
+        for x in got {
+            // Each one once, even when the same requirement is named twice in what came in.
+            if !self.items.iter().chain(fresh.iter()).any(|y| y.mod_id == x.mod_id) {
+                fresh.push(x.clone());
+            }
+        }
         let at = self.index.min(self.items.len());
         self.items.splice(at..at, fresh.iter().cloned());
         fresh
@@ -345,19 +355,17 @@ impl ReqQueue {
     /// Moves on to the next one. Returns the one that was current.
     pub fn advance(&mut self) -> Option<GetItem> {
         let done = self.current().cloned();
-        self.index += 1;
+        // A saved list with a wild index must not wrap around to the start and get everything again.
+        self.index = self.index.saturating_add(1);
         done
     }
 
     /// Reads a saved list; None without an "items" list.
     pub fn from_json(j: &Json) -> Option<ReqQueue> {
         let items = j.get("items").filter(|i| matches!(i, Json::Arr(_)))?;
-        Some(ReqQueue {
-            game: text_at(j, "game"),
-            for_name: text_at(j, "forName"),
-            items: items_from(Some(items)),
-            index: j.get("index").and_then(Json::as_f64).filter(|i| *i > 0.0).map(|i| i as usize).unwrap_or(0),
-        })
+        let items = items_from(Some(items));
+        let index = j.get("index").and_then(Json::as_f64).filter(|i| *i > 0.0).map(|i| i as usize).unwrap_or(0);
+        Some(ReqQueue { game: text_at(j, "game"), for_name: text_at(j, "forName"), items, index })
     }
 
     pub fn to_json(&self) -> String {

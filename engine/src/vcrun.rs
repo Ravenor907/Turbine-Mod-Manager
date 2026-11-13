@@ -119,8 +119,11 @@ pub fn state(prefix: Option<&Path>) -> State {
     if (v.0, v.1) < FIRST_2022 {
         return State::Old(words);
     }
+    // winecfg and Turbine write the override under the DLL's plain name; winetricks and protontricks write it as
+    // "*name" (any folder). Wine reads the plain name first for a DLL in system32, then the starred one.
     let used = ["vcruntime140", "msvcp140"].iter().all(|d| {
-        proton::read_override(prefix, d).ok().flatten().is_some_and(|o| o.replace(' ', "").to_ascii_lowercase().starts_with("native"))
+        let set = proton::read_override(prefix, d).ok().flatten().or_else(|| proton::read_override(prefix, &format!("*{d}")).ok().flatten());
+        set.is_some_and(|o| o.replace(' ', "").to_ascii_lowercase().starts_with("native"))
     });
     if used {
         State::Ready(words)
@@ -205,7 +208,9 @@ pub fn runtime_command(libs: &[PathBuf], proton: &Path) -> Option<Vec<String>> {
         if parts.is_empty() {
             continue;
         }
-        parts[0] = format!("{}{}", runtime.display(), parts[0]);
+        // The command is written from the runtime's folder ("/_v2-entry-point"); one without the leading slash
+        // means the same file.
+        parts[0] = runtime.join(parts[0].trim_start_matches('/')).display().to_string();
         if Path::new(&parts[0]).is_file() {
             return Some(parts);
         }

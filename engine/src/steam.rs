@@ -51,7 +51,6 @@ fn read_vdf(path: &Path, scan: &mut Scan) -> Option<Vdf> {
     }
 }
 
-/// Library folders listed by Steam, with Steam's own folder first. Missing ones (an SD card that's out) are skipped.
 /// The start of the scan problem for a Steam library Turbine isn't allowed to read (the app offers to allow it).
 pub const UNSEEN_LIBRARY: &str = "Can't see the Steam library at ";
 pub const UNSEEN_WHY: &str = "Turbine isn't allowed to read that folder";
@@ -64,6 +63,7 @@ pub fn outside_allowed(p: &Path) -> bool {
     !allowed.iter().any(|a| p.starts_with(a))
 }
 
+/// Library folders listed by Steam, with Steam's own folder first. Missing ones (an SD card that's out) are skipped.
 pub fn libraries(root: &Path, scan: &mut Scan) -> Vec<PathBuf> {
     let mut out = vec![root.to_path_buf()];
     let file = root.join("steamapps/libraryfolders.vdf");
@@ -345,8 +345,9 @@ pub fn scan(home: &Path, scan: &mut Scan) {
                     scan.problems.push(format!("Skipped {name}: its folder links to {}, which isn't a game folder.", install_dir.display()));
                     continue;
                 }
-                let pfx = steamapps.join("compatdata").join(app_id).join("pfx");
-                let prefix = pfx.is_dir().then_some(pfx);
+                // The Proton prefix is in the game's own library, or, for a game on an SD card or another drive,
+                // often in Steam's own folder on the internal drive.
+                let prefix = [&steamapps, &root.join("steamapps")].into_iter().map(|s| s.join("compatdata").join(app_id).join("pfx")).find(|p| p.is_dir());
                 let runtime = runtime_of(&install_dir, prefix.as_deref());
                 scan.games.push(Game {
                     store: Store::Steam,
@@ -374,8 +375,9 @@ pub fn launch_options(home: &Path, app_id: &str) -> Option<String> {
         let mut users: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
         users.sort();
         for u in users {
-            let Ok(text) = fs::read_to_string(u.join("config").join("localconfig.vdf")) else { continue };
-            if let Some(o) = launch_options_in(&text, app_id) {
+            // Read like every other Steam file: one odd byte (a friend's name, say) must not hide the whole file.
+            let Ok(bytes) = fs::read(u.join("config").join("localconfig.vdf")) else { continue };
+            if let Some(o) = launch_options_in(&String::from_utf8_lossy(&bytes), app_id) {
                 return Some(o);
             }
         }

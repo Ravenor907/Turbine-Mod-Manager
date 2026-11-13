@@ -709,7 +709,10 @@ impl qobject::Turbine {
                 let args = vcrun::install_args(&compat, &root, &runtime, &proton, &exe);
                 crate::log::line("vcrun", &format!("Running: {}", args.join(" ")));
                 let out = crate::system::output_limited(std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()), crate::system::INSTALL_WAIT);
-                let _ = std::fs::remove_file(&exe);
+                // After the time limit the installer may still be reading its file: it stays (the next try replaces it).
+                if !matches!(&out, Err(e) if e.kind() == std::io::ErrorKind::TimedOut) {
+                    let _ = std::fs::remove_file(&exe);
+                }
                 let code = match out {
                     Ok(o) => {
                         let tail = String::from_utf8_lossy(&o.stderr).lines().rev().take(8).collect::<Vec<_>>().join(" | ");

@@ -1042,7 +1042,12 @@ impl qobject::Turbine {
                 } else {
                     net.details_ts(&info, &id)
                 };
-                let j = r.unwrap_or_else(|e| err_json(&e));
+                // Every answer says which id it was asked for, so a page opened meanwhile never shows another's.
+                let mut j = r.unwrap_or_else(|e| err_json(&e));
+                if j.ends_with('}') {
+                    j.pop();
+                    j.push_str(&format!(",\"asked\":{}}}", quote(&id)));
+                }
                 set(qt, move |t| t.set_details_json(QString::from(j.as_str())));
             }),
         );

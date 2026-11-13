@@ -1784,7 +1784,8 @@ Window {
             app.downloads = app.parse(Turbine.downloadsJson, [])
             app.addIndex = Math.max(0, Math.min(app.addIndex, app.addList.length - 1))
         }
-        function onMessage(text, level) { app.say(text, level) }
+        // An install that failed says so here (the download lane or the add): the mod page's button is free again.
+        function onMessage(text, level) { if (level === "error" && app.busyHere && !app.dl.active) app.busyHere = false; app.say(text, level) }
         // Putting saves back couldn't keep the saves as they are now: ask before replacing them for good.
         function onSavesKeepFailed(id, why) {
             app.note("action", "Saves: " + why)
@@ -1887,6 +1888,8 @@ Window {
         }
         function onDetailsJsonChanged() {
             let d = app.parse(Turbine.detailsJson, null)
+            // An answer for a page left meanwhile ("asked" is the id it was asked for): the page now open waits for its own.
+            if (d && d.asked !== undefined && app.detailsItem && String(d.asked) !== String(app.detailsItem.id)) return
             // A page that couldn't be read still shows: what the card knew, the reason in one line, Open on Nexus.
             if (d && d.error && app.detailsItem) d = app.partialPage(app.detailsItem, d.error)
             app.detailsData = d

@@ -36,7 +36,7 @@ const bridge = TurbineBridge.createBridge({
 const tracker = TurbineDownloads.createDownloadTracker({
   search: (q) => chrome.downloads.search(q),
   send: (msg) => bridge.send(msg),
-  save: (list) => chrome.storage.session.set({ trackedDownloads: list }),
+  save: (list) => chrome.storage.session.set({ trackedDownloads: list }).catch(() => {}),
 });
 
 function handleTurbine(msg) {
@@ -75,7 +75,7 @@ function handleTurbine(msg) {
     default:
       break;
   }
-  chrome.storage.session.set({ view });
+  chrome.storage.session.set({ view }).catch(() => {});
   updateBadge();
   broadcast();
 }
@@ -122,6 +122,15 @@ function snapshot() {
     lastError: view.lastError,
     signin: signinFlow.view(),
   };
+}
+
+// One page gets the state now; a page that closed in the meantime is dropped, not an error.
+function tell(port) {
+  try {
+    port.postMessage(snapshot());
+  } catch (e) {
+    ports.delete(port);
+  }
 }
 
 function broadcast() {
@@ -178,7 +187,7 @@ function handlePanel(msg, port) {
   switch (msg.kind) {
     case "hello":
       bridge.nudge();
-      port.postMessage(snapshot());
+      tell(port);
       break;
     case "page": {
       const m = P.build.page(msg.url);
@@ -215,7 +224,7 @@ function handlePanel(msg, port) {
     case "dismiss":
       view.added = null;
       view.lastError = null;
-      chrome.storage.session.set({ view });
+      chrome.storage.session.set({ view }).catch(() => {});
       broadcast();
       break;
     default:
@@ -244,7 +253,7 @@ chrome.runtime.onConnect.addListener((port) => {
     if (port.name === "turbine-panel") handlePanel(msg, port);
     else if (port.name === "turbine-signin") handleSigninPage(msg, port);
     else if (msg && msg.kind === "reconnect") bridge.reconnect();
-    else if (msg && msg.kind === "hello") port.postMessage(snapshot());
+    else if (msg && msg.kind === "hello") tell(port);
   });
 });
 
@@ -254,7 +263,7 @@ function handleSigninPage(msg, port) {
   if (msg.kind === "hello") {
     bridge.nudge();
     signinFlow.pageShown(port.sender);
-    port.postMessage(snapshot());
+    tell(port);
   } else if (msg.kind === "reconnect") bridge.reconnect();
   else if (["signin.send", "signin.go", "key.start"].includes(msg.kind)) signinFlow.fromPage(msg, port.sender);
 }
@@ -274,10 +283,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     reply({ ok: false });
     return false;
   }
-  chrome.storage.local.set({ turbinePort: fromUrl.port, turbineToken: fromUrl.token }).then(() => {
-    bridge.reconnect();
-    reply({ ok: true });
-  });
+  chrome.storage.local.set({ turbinePort: fromUrl.port, turbineToken: fromUrl.token }).then(
+    () => {
+      bridge.reconnect();
+      reply({ ok: true });
+    },
+    // The browser couldn't keep the pairing: the page says pairing did not work, not nothing for ever.
+    () => reply({ ok: false })
+  );
   return true;
 });
 
@@ -312,12 +325,19 @@ chrome.downloads.onErased.addListener((id) => tracker.onErased(id));
 chrome.runtime.onStartup.addListener(() => bridge.nudge());
 chrome.runtime.onInstalled.addListener(() => bridge.nudge());
 
-chrome.storage.session.get(["view", "trackedDownloads", "signin"]).then((s) => {
-  if (s.view) view = Object.assign(view, s.view, { choices: null });
-  signinFlow.restore(s.signin);
-  tracker.restore(s.trackedDownloads);
-  updateBadge();
-  broadcast();
-});
+chrome.storage.session
+  .get(["view", "trackedDownloads", "signin"])
+  .then((s) => {
+    if (s.view) view = Object.assign(view, s.view, { choices: null });
+    signinFlow.restore(s.signin);
+    tracker.restore(s.trackedDownloads);
+  })
+  .catch(() => {
+    /* nothing kept from before: the worker starts fresh */
+  })
+  .then(() => {
+    updateBadge();
+    broadcast();
+  });
 
 bridge.start();

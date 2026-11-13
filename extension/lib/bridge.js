@@ -73,7 +73,16 @@
       dropSocket();
       clearTimers();
       const gen = generation;
-      const pairing = await opts.loadPairing();
+      let pairing;
+      try {
+        pairing = await opts.loadPairing();
+      } catch (e) {
+        // The browser couldn't read the stored pairing: try again, not "Connecting" for ever.
+        if (stopped || gen !== generation) return;
+        setState("offline", "The browser could not read the pairing with Turbine");
+        scheduleRetry();
+        return;
+      }
       if (stopped || gen !== generation) return;
       if (!pairing || !P.isPort(pairing.port) || !P.isToken(pairing.token)) {
         welcome = null;
@@ -85,7 +94,7 @@
       try {
         sock = new WS("ws://127.0.0.1:" + pairing.port + "/bridge");
       } catch (e) {
-        setState("offline", String(e && e.message ? e.message : e));
+        setState("offline", "The browser could not open the link to Turbine");
         scheduleRetry();
         return;
       }
@@ -96,7 +105,11 @@
       sock.onopen = () => {
         if (gen !== generation) return;
         opened = true;
-        sock.send(JSON.stringify(P.build.hello(pairing.token, opts.extVersion || "0")));
+        try {
+          sock.send(JSON.stringify(P.build.hello(pairing.token, opts.extVersion || "0")));
+        } catch (e) {
+          /* the socket closed under us; onclose follows and retries */
+        }
         welcomeTimer = t.setTimeout(() => {
           welcomeTimer = null;
           if (gen === generation && !welcomed) {
