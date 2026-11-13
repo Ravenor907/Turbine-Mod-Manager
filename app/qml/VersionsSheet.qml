@@ -19,6 +19,7 @@ Overlay {
     signal closed()
 
     onFocusIndexChanged: list.positionViewAtIndex(focusIndex, ListView.Contain)
+    onVisibleChanged: if (visible) Qt.callLater(() => list.positionViewAtIndex(vs.focusIndex, ListView.Contain))
 
     Scrim { ui: vs.ui }
     SideSheet {
@@ -56,7 +57,7 @@ Overlay {
                 required property int index
                 required property var modelData
                 readonly property bool foc: vs.focusIndex === index
-                readonly property bool newGroup: index === 0 || vs.versions[index - 1].group !== modelData.group
+                readonly property bool newGroup: index === 0 || ((vs.versions || [])[index - 1] || {}).group !== modelData.group
                 width: list.width
                 height: box.height + (newGroup ? groupHead.height : 0)
                 Text {
@@ -73,17 +74,18 @@ Overlay {
                     id: box
                     y: groupHead.height
                     width: parent.width
-                    height: vs.ui.px(row.modelData.note ? 66 : 52)
+                    height: Math.max(vs.ui.px(row.modelData.note ? 66 : 52), vs.ui.tpx(44), boxText.implicitHeight + vs.ui.px(12))
                     radius: vs.ui.px(6)
                     color: row.foc ? vs.ui.c.focusFill : vs.ui.c.card
                     border.color: vs.ui.c.accent
                     border.width: row.foc ? vs.ui.px(2) : 0
                     Column {
+                        id: boxText
                         x: vs.ui.px(14)
                         width: parent.width - vs.ui.px(120)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: vs.ui.px(2)
-                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.fpx(16); font.bold: true }
+                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name || ""; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.fpx(16); font.bold: true }
                         Text {
                             width: parent.width; elide: Text.ElideRight
                             text: [row.modelData.version ? "Version " + row.modelData.version : "", vs.ui.niceDate(row.modelData.date), vs.ui.fileSize(row.modelData.size)].filter(s => s !== "").join(" · ")
@@ -102,13 +104,12 @@ Overlay {
                         visible: row.foc && row.modelData.installed !== true
                         anchors.right: parent.right; anchors.rightMargin: vs.ui.px(12); anchors.verticalCenter: parent.verticalCenter
                         spacing: vs.ui.px(6)
-                        Rectangle {
-                            width: vs.ui.px(24); height: width; radius: width / 2; color: vs.ui.c.raised; border.color: vs.ui.c.accentLo
-                            anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: "A"; color: vs.ui.c.text; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.fpx(13); font.bold: true }
-                        }
+                        KeyCap { ui: vs.ui; k: "a"; visible: vs.ui.capsShown; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: "Install"; color: vs.ui.c.soft; font.family: vs.ui.bodyFont; font.pixelSize: vs.ui.fpx(15); anchors.verticalCenter: parent.verticalCenter }
                     }
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: (row.modelData.name || "") + (row.modelData.version ? ", version " + row.modelData.version : "") + (row.modelData.installed === true ? ", you have this" : "")
+                    Accessible.focused: row.foc
                     HoverHandler { onHoveredChanged: vs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: vs.activated(row.index) }
                 }

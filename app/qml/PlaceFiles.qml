@@ -55,7 +55,8 @@ Item {
                     Text { id: tabText; anchors.centerIn: parent; text: parent.modelData; color: pf.pane === parent.index ? pf.ui.c.text : pf.ui.c.muted; font.family: pf.ui.bodyFont; font.pixelSize: pf.ui.fpx(14); font.bold: true }
                     Accessible.role: Accessible.PageTab
                     Accessible.name: modelData
-                    TapHandler { onTapped: pf.swiped(parent.index === 0 ? -1 : 1) }
+                    HoverHandler { onHoveredChanged: pf.ui.hover(parent, hovered) }
+                    TapHandler { margin: Math.max(0, (pf.ui.tpx(44) - parent.height) / 2); onTapped: pf.swiped(parent.index === 0 ? -1 : 1) }
                 }
             }
         }

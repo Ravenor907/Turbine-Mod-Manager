@@ -62,7 +62,7 @@ pub fn accept_download(path: &str) -> Result<PathBuf, String> {
     if !turbine_engine::archives::is_archive_name(&name) {
         return Err("it isn't a zip, 7z or rar file".into());
     }
-    let real = p.canonicalize().map_err(|e| e.to_string())?;
+    let real = p.canonicalize().map_err(|e| crate::log::plain(&e.to_string()))?;
     let parent = real.parent().map(Path::to_path_buf).unwrap_or_default();
     let ok = watch_folders().iter().any(|f| f.canonicalize().map(|c| c == parent).unwrap_or(false));
     if !ok {

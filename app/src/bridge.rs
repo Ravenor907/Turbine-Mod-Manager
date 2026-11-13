@@ -782,6 +782,9 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// One connection: the HTTP request, then (for /bridge) the WebSocket until it closes.
 fn serve(mut stream: TcpStream, port: u16, handler: Handler) {
     let _ = stream.set_read_timeout(Some(HELLO_WAIT));
+    // A helper that stopped reading can't hold up whoever sends to it (the interface among them): the write gives
+    // up and the connection is dropped.
+    let _ = stream.set_write_timeout(Some(HELLO_WAIT));
     let _ = stream.set_nodelay(true);
     let Some(head) = read_head(&mut stream) else { return };
     let req = match parse_request(&head) {

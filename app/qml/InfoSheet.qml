@@ -35,10 +35,10 @@ Overlay {
         ui: sh.ui
         maxWidth: 660
         title: sh.title
-        buttons: sh.buttons.map(b => b.label)
+        buttons: (sh.buttons || []).map(b => b.label)
         focusIndex: sh.focusIndex
         mainIndex: 0
-        cancelIndex: sh.buttons.findIndex(b => b.key === "b")
+        cancelIndex: (sh.buttons || []).findIndex(b => b.key === "b")
         onActivated: (i) => sh.activated(i)
         onHeld: (i, down) => sh.held(i, down)
         Text {

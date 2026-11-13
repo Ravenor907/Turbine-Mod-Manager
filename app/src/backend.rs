@@ -1508,7 +1508,7 @@ impl Worker {
         let core = core.join(",");
         // The setup "Go back to a setup that worked" restores.
         let last_good = slot.store.restore_target().map(|s| quote(&s.id)).unwrap_or_else(|| "null".into());
-        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}],\"core\":[{core}],\"lastGood\":{last_good}}}", &mods[..mods.len() - 1]);
+        let mods = format!("{},\"overlaps\":{overlaps},\"links\":{links},\"warns\":{warns},\"kcdRestore\":{restore},\"gameUpdate\":{update},\"heldOff\":[{held}],\"core\":[{core}],\"lastGood\":{last_good}}}", mods.strip_suffix('}').unwrap_or(&mods));
         let summary = crate::labs::mods_lines(&slot.store);
         let rules = with_rules.then(|| rules_json(slot));
         let info = crate::actions::game_info(slot);
@@ -1584,7 +1584,7 @@ fn rules_json(slot: &Slot) -> String {
         turbine_engine::nexus::domain_for(slot.game.store, &slot.game.store_id).map(quote).unwrap_or_else(|| "null".to_string()),
     );
     // Support, anti-cheat, the Nexus game and starter mods (anygame.rs).
-    format!("{}{}}}", &base[..base.len() - 1], crate::anygame::rules_extra(slot))
+    format!("{}{}}}", base.strip_suffix('}').unwrap_or(&base), crate::anygame::rules_extra(slot))
 }
 
 // ---------------------------------------------------------------------------------------------------- Proton
@@ -1607,6 +1607,7 @@ fn wanted_overrides(slot: &Slot) -> Option<(Option<PathBuf>, Vec<(&'static str, 
 fn dll_words(wanted: &[(&str, &str)]) -> String {
     let names: Vec<&str> = wanted.iter().map(|(d, _)| *d).collect();
     match names.len() {
+        0 => String::new(),
         1 => names[0].to_string(),
         _ => format!("{} and {}", names[..names.len() - 1].join(", "), names[names.len() - 1]),
     }

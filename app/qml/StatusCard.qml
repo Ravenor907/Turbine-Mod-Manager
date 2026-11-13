@@ -153,12 +153,12 @@ Rectangle {
                     Text {
                         width: parent.width
                         elide: Text.ElideRight
-                        text: (grp.modelData.name || "Options") + " · " + (grp.modelData.hint || "")
+                        text: (grp.modelData.name || "Options") + (grp.modelData.hint ? " · " + grp.modelData.hint : "")
                         color: ui.c.muted
                         font.family: ui.bodyFont; font.pixelSize: ui.fpx(13)
                     }
                     Repeater {
-                        model: grp.modelData.options
+                        model: grp.modelData.options || []
                         Rectangle {
                             required property int index
                             required property var modelData
@@ -171,7 +171,7 @@ Rectangle {
                                 x: ui.px(10); width: parent.width - ui.px(20)
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
-                                text: (modelData.selected ? "✓ " : "") + modelData.name
+                                text: (modelData.selected ? "✓ " : "") + (modelData.name || "")
                                 color: ui.c.text
                                 font.family: ui.bodyFont; font.pixelSize: ui.fpx(14); font.bold: modelData.selected
                             }
@@ -210,6 +210,8 @@ Rectangle {
             color: b.strong ? card.ui.c.onAccent : card.ui.c.text
             font.family: card.ui.bodyFont; font.pixelSize: card.ui.fpx(14); font.bold: true
         }
+        Accessible.role: Accessible.Button
+        Accessible.name: label
         TapHandler { onTapped: b.clicked() }
     }
 }

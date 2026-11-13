@@ -124,6 +124,7 @@ Overlay {
                     }
                     Accessible.role: Accessible.EditableText
                     Accessible.name: fs.fieldLabel + ": " + (fs.text !== "" ? fs.text : "empty")
+                    HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                     TapHandler { onTapped: fs.fieldClicked() }
                 }
                 Repeater {
@@ -172,6 +173,7 @@ Overlay {
                                     }
                                     Accessible.role: Accessible.RadioButton
                                     Accessible.name: secCol.modelData.title + ": " + opt.modelData + (opt.chosen ? ", chosen" : "")
+                                    HoverHandler { onHoveredChanged: fs.ui.hover(opt, hovered) }
                                     TapHandler { onTapped: fs.optionClicked(secCol.index + 1, opt.index) }
                                 }
                             }

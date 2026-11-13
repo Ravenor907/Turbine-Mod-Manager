@@ -39,7 +39,7 @@ Overlay {
                     width: parent.width
                     // A plugin's file name: breaks between words, and inside one only when it has to.
                     wrapMode: Text.Wrap
-                    text: sheet.plugin ? sheet.plugin.name : ""
+                    text: sheet.plugin ? (sheet.plugin.name || "") : ""
                     color: sheet.ui.c.text
                     font.family: sheet.ui.titleFont; font.pixelSize: sheet.ui.fpx(18); font.bold: true
                 }
@@ -79,7 +79,7 @@ Overlay {
                     font.family: sheet.ui.bodyFont; font.pixelSize: sheet.ui.fpx(14); font.bold: true
                 }
                 Text {
-                    visible: sheet.notes.length === 0
+                    visible: (sheet.notes || []).length === 0
                     width: parent.width
                     wrapMode: Text.WordWrap
                     text: "No notes about this plugin."

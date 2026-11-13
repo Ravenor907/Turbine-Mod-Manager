@@ -63,7 +63,7 @@ Overlay {
             Repeater {
                 id: rows
                 // The mods first, Delete all permanently last.
-                model: rs.mods.concat([{ empty: true }])
+                model: (rs.mods || []).concat([{ empty: true }])
                 Rectangle {
                     id: row
                     required property int index
@@ -76,6 +76,9 @@ Overlay {
                     Behavior on color { enabled: rs.ui.motion.on; ColorAnimation { duration: rs.ui.motion.quick; easing.type: rs.ui.motion.ease } }
                     border.color: rs.ui.c.accent
                     border.width: foc ? rs.ui.px(2) : 0
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: rowLabel.text + (rowDetail.visible ? ", " + rowDetail.text : "")
+                    Accessible.focused: foc
                     HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
                     // Mouse areas, not tap handlers: a tap on a row's button must not also reach the row.
                     MouseArea { anchors.fill: parent; onClicked: rs.activated(row.index) }
@@ -85,14 +88,18 @@ Overlay {
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width - rs.ui.px(28) - buttons.width
                         Text {
+                            id: rowLabel
                             width: parent.width
                             wrapMode: Text.WordWrap
-                            text: row.modelData.empty ? "Delete all (" + rs.mods.length + ") permanently" : row.modelData.name
+                            text: row.modelData.empty ? "Delete all (" + (rs.mods || []).length + ") permanently" : (row.modelData.name || "")
                             color: row.modelData.empty ? rs.ui.c.warn : rs.ui.c.text
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(16); font.weight: Font.DemiBold
                         }
                         Text {
+                            id: rowDetail
                             visible: !row.modelData.empty
+                            width: parent.width
+                            elide: Text.ElideRight
                             text: row.modelData.empty ? "" : "removed " + rs.rowWords(row.modelData)
                             color: rs.ui.c.muted
                             font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(13)
@@ -121,9 +128,12 @@ Overlay {
         signal clicked()
         width: rbText.implicitWidth + rs.ui.px(20); height: rs.ui.tpx(40); radius: rs.ui.px(6)
         color: rs.ui.c.raised
+        scale: rbArea.pressed ? rs.ui.motion.pressScale : 1
+        Accessible.role: Accessible.Button
+        Accessible.name: label
         border.color: danger ? rs.ui.c.warn : rs.ui.c.line; border.width: Math.max(1, rs.ui.px(1))
         Text { id: rbText; anchors.centerIn: parent; text: rb.label; color: rb.danger ? rs.ui.c.warn : rs.ui.c.text; font.family: rs.ui.bodyFont; font.pixelSize: rs.ui.fpx(14); font.bold: true }
         HoverHandler { onHoveredChanged: rs.ui.hover(parent, hovered) }
-        MouseArea { anchors.fill: parent; onClicked: rb.clicked() }
+        MouseArea { id: rbArea; anchors.fill: parent; onClicked: rb.clicked() }
     }
 }

@@ -143,7 +143,7 @@ Item {
             width: grid.width
             height: visible ? implicitHeight + gm.ui.px(8) : 0
             spacing: gm.ui.px(4)
-            Text { text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(14); font.weight: Font.DemiBold }
+            Text { width: parent.width; elide: Text.ElideRight; text: gm.recentTitle; color: gm.ui.c.soft; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(14); font.weight: Font.DemiBold }
             ListView {
                 id: recentList
                 width: parent.width
@@ -244,7 +244,7 @@ Item {
                             Text {
                                 width: parent.width
                                 elide: Text.ElideRight
-                                text: cell.modelData.name
+                                text: cell.modelData.name || ""
                                 color: gm.ui.c.text; font.family: gm.ui.bodyFont; font.pixelSize: gm.ui.fpx(15); font.weight: Font.DemiBold
                             }
                             // What it does, in one line.

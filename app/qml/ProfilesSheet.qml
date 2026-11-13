@@ -32,7 +32,7 @@ Overlay {
     signal activated(int index)
     signal closed()
 
-    readonly property int rows: plan ? (plan.error ? 1 : 2) : profiles.length + actions.length
+    readonly property int rows: plan ? (plan.error ? 1 : 2) : (profiles || []).length + (actions || []).length
 
     Scrim { ui: ps.ui }
     SideSheet {
@@ -68,7 +68,7 @@ Overlay {
                     [ps.premium ? "From Nexus Mods: Turbine gets these too (Premium)" : "From Nexus Mods: Turbine lists their pages to open after this", ps.plan.plan.nexus, ps.premium ? "ok" : "warn"],
                     ["Added from files: add them by hand", ps.plan.plan.byHand, "warn"],
                     ["You have these already", ps.plan.plan.installed, ""]
-                ].filter(x => x[1].length > 0)
+                ].map(x => [x[0], x[1] || [], x[2]]).filter(x => x[1].length > 0)
                 Column {
                     required property var modelData
                     width: parent.width
@@ -81,16 +81,19 @@ Overlay {
                 id: rowRepeater
                 model: ps.plan ? [{ label: ps.plan.error ? "Close" : "Get them and make the loadout", detail: ps.plan.error ? "" : "Gets what Turbine can, then switches to it" },
                                   { label: "Cancel", detail: "" }].slice(ps.plan.error ? 1 : 0)
-                         : ps.profiles.map(p => ({ label: p.name, detail: (p.mods === 0 ? "No mods yet" : p.on + " of " + p.mods + " mods on") + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
-                           .concat(ps.actions)
+                         : (ps.profiles || []).map(p => ({ label: p.name, detail: (p.mods === 0 ? "No mods yet" : p.on + " of " + p.mods + " mods on") + (p.name === ps.active ? " · In use" : ""), current: p.name === ps.active }))
+                           .concat(ps.actions || [])
                 Rectangle {
                     id: row
                     required property int index
                     required property var modelData
                     readonly property bool foc: ps.focusIndex === index
-                    readonly property bool firstAction: !ps.plan && index === ps.profiles.length
+                    readonly property bool firstAction: !ps.plan && index === (ps.profiles || []).length
                     width: parent.width
-                    height: ps.ui.px(modelData.detail ? 58 : 46) + (firstAction ? ps.ui.px(8) : 0)
+                    height: Math.max(ps.ui.px(modelData.detail ? 58 : 46), ps.ui.tpx(44), rowText.implicitHeight + ps.ui.px(12)) + (firstAction ? ps.ui.px(8) : 0)
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: (modelData.label || "") + (modelData.detail ? ", " + modelData.detail : "")
+                    Accessible.focused: foc
                     color: "transparent"
                     Rectangle {
                         y: row.firstAction ? ps.ui.px(8) : 0
@@ -104,18 +107,18 @@ Overlay {
                             x: 0; width: ps.ui.px(4); height: parent.height; radius: ps.ui.px(2); color: ps.ui.c.accent
                         }
                         Column {
+                            id: rowText
                             x: ps.ui.px(14)
                             width: parent.width - ps.ui.px(60)
                             anchors.verticalCenter: parent.verticalCenter
                             spacing: ps.ui.px(2)
-                            Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.label; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(16); font.bold: true }
+                            Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.label || ""; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(16); font.bold: true }
                             Text { visible: !!row.modelData.detail; width: parent.width; elide: Text.ElideRight; text: row.modelData.detail || ""; color: ps.ui.c.soft; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(14) }
                         }
-                        Rectangle {
-                            visible: row.foc
+                        KeyCap {
+                            ui: ps.ui; k: "a"
+                            visible: row.foc && ps.ui.capsShown
                             anchors.right: parent.right; anchors.rightMargin: ps.ui.px(12); anchors.verticalCenter: parent.verticalCenter
-                            width: ps.ui.px(24); height: width; radius: width / 2; color: ps.ui.c.raised; border.color: ps.ui.c.accentLo
-                            Text { anchors.centerIn: parent; text: "A"; color: ps.ui.c.text; font.family: ps.ui.bodyFont; font.pixelSize: ps.ui.fpx(13); font.bold: true }
                         }
                     }
                     HoverHandler { onHoveredChanged: ps.ui.hover(parent, hovered) }

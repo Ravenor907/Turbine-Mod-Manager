@@ -7,15 +7,23 @@
 <meta name="description" content="Turbine is a controller-first mod manager for Steam and Heroic games on SteamOS handhelds, in Game Mode and Desktop Mode. Nexus Mods and Thunderstore built in.">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0a08">
+<link rel="canonical" href="https://ravenor907.github.io/Turbine-Mod-Manager/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Turbine Mod Manager">
+<meta property="og:url" content="https://ravenor907.github.io/Turbine-Mod-Manager/">
 <meta property="og:title" content="Turbine Mod Manager">
 <meta property="og:description" content="A controller-first mod manager for Steam and Heroic games on SteamOS handhelds.">
 <meta property="og:image" content="https://ravenor907.github.io/Turbine-Mod-Manager/img/banner.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="413">
+<meta property="og:image:alt" content="Turbine Mod Manager">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" href="img/favicon.png">
 <link rel="apple-touch-icon" href="img/icon.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<a class="skip" href="#main">Skip to the page</a>
+<a class="skip" href="#main">Skip to the main part</a>
 
 <!-- Icons, drawn here so the page loads nothing else. -->
 <svg class="sprite" aria-hidden="true" focusable="false">
@@ -24,11 +32,13 @@
   <symbol id="i-order" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 5l1.5-1v4M3.5 12.2a1.3 1.3 0 1 1 2 1.1L3.5 15H6"/><path d="M3.6 17h2l-1 1.2a1 1 0 1 1-1 1.6"/></symbol>
   <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 21c-3.9 0-6.5-2.6-6.5-6 0-3.3 2.4-5.2 3.7-8.2.7 1.6 1.6 2.5 2.6 3 .2-2.6 1.4-5 3.2-6.8.4 3.2 4.5 6.2 4.5 11.4 0 4-2.9 6.6-7.5 6.6z"/><path d="M12 21c-1.7 0-2.8-1.2-2.8-2.8 0-1.8 1.6-2.7 2.3-4.4.9 1.2 3.3 2.4 3.3 4.4 0 1.6-1.1 2.8-2.8 2.8z"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z"/><path d="M9.2 12.6a3.3 3.3 0 1 0 1-3.6M9 7.8V10h2.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8 12.3l2.8 2.8L16.2 9.5"/></symbol>
+  <symbol id="i-chain" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
   <symbol id="i-pad" viewBox="0 0 24 24"><path d="M7.5 7h9a4.5 4.5 0 0 1 4.4 3.6l.9 4.8a2.7 2.7 0 0 1-4.7 2.3L15 15.5H9l-2.1 2.2a2.7 2.7 0 0 1-4.7-2.3l.9-4.8A4.5 4.5 0 0 1 7.5 7z"/><path d="M8 9.5v4M6 11.5h4"/><circle cx="15.5" cy="10.5" r=".6"/><circle cx="17.5" cy="12.5" r=".6"/></symbol>
 </svg>
 
 <header class="hero">
-  <h1 class="banner"><img src="img/banner.png" width="1280" height="413" alt="Turbine Mod Manager"></h1>
+  <h1 class="banner"><img src="img/banner.png" width="1280" height="413" alt="Turbine Mod Manager" fetchpriority="high"></h1>
   <div class="wrap hero-text">
     <p class="tagline">A controller-first mod manager for your Steam and Heroic games.</p>
     <p class="platform">For SteamOS handhelds, in Game Mode and Desktop Mode. Installed as a Flatpak. Built and tested
@@ -60,6 +70,8 @@
       <p><b>Any Steam or Heroic game</b> (Epic, GOG), on internal storage or an SD card.</p></li>
     <li><svg class="icon" aria-hidden="true"><use href="#i-get"/></svg>
       <p><b>Get mods in the app</b> from Nexus Mods and Thunderstore, or add zip, 7z and rar files.</p></li>
+    <li><svg class="icon" aria-hidden="true"><use href="#i-chain"/></svg>
+      <p><b>What a mod needs, lined up:</b> Get them all fetches the other mods it needs, kept under Dependencies in My mods.</p></li>
     <li><svg class="icon" aria-hidden="true"><use href="#i-order"/></svg>
       <p><b>Knows the big games:</b> Skyrim load order, Cyberpunk frameworks, SKSE, SMAPI and BepInEx.</p></li>
     <li><svg class="icon" aria-hidden="true"><use href="#i-flame"/></svg>
@@ -68,6 +80,8 @@
       <p><b>Safe to try:</b> replaced game files and your saves are backed up. Play without mods or go back with one press.</p></li>
     <li><svg class="icon" aria-hidden="true"><use href="#i-pad"/></svg>
       <p><b>Controller first,</b> with touch, keyboard and mouse. Optional Steam menu plugin (Decky).</p></li>
+    <li><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg>
+      <p><b>Checks before you play:</b> a mod that is on but missing what it needs is named before the game starts.</p></li>
   </ul>
   <div class="shots">
     <figure>
@@ -102,15 +116,15 @@
       minutes.</li>
     <li><b>Add to Steam:</b> in the app launcher, right-click Turbine Mod Manager and choose Add to Steam.</li>
     <li><b>Start it in Game Mode:</b> Return to Gaming Mode, then find Turbine in your Library under Non-Steam. A
-      four-card tour shows the buttons, then you pick a game.</li>
+      five-card tour shows the buttons, then you pick a game.</li>
     <li><b>Your first Nexus mod:</b> Nexus opens inside Turbine. Sign in (free), press Slow download, and the mod is
-      added and turned on.</li>
+      added and turned on. If it needs other mods, Turbine lists them: press Get them all.</li>
     <li><b>FromSoftware games only, once per game:</b> Turbine shows these steps when you first press Play. Restart
       Steam once so it finds Turbine's tool, then in the game's Properties, Compatibility, turn on "Force the use of a
       specific Steam Play compatibility tool" and pick "Turbine (mods)".</li>
   </ol>
   <p class="small">Prefer a terminal? <code>flatpak install --user ~/Downloads/TurbineModManager.flatpak</code></p>
-  <p class="small">Updates: Turbine checks for a new version when it starts and installs it only when you say so.</p>
+  <p class="small">Updates: Turbine checks for a new version when it starts and installs it only when you say yes.</p>
   <h3 class="sub" id="decky">Steam menu plugin (optional)</h3>
   <p>Mods on or off and Play from Quick Access. In Decky, open the gear, then Developer, then <b>Install Plugin From
     URL</b>, and paste:</p>
@@ -131,23 +145,27 @@
 
 <section id="controls" class="wrap">
   <h2>Controls</h2>
-  <div class="table-wrap">
+  <div class="table-wrap" tabindex="0" role="region" aria-label="Controls table">
     <table class="keys">
       <thead>
         <tr><th scope="col">Do</th><th scope="col">Controller</th><th scope="col">Keyboard</th><th scope="col">Mouse</th></tr>
       </thead>
       <tbody>
-        <tr><th scope="row">Select</th><td>A</td><td>Enter</td><td>Click</td></tr>
+        <tr><th scope="row">Move</th><td>Stick or D-pad</td><td>W A S D or arrows</td><td>Point</td></tr>
+        <tr><th scope="row">Select</th><td>A</td><td>Enter or Space</td><td>Click (double-click opens a mod)</td></tr>
         <tr><th scope="row">Back</th><td>B</td><td>Esc</td><td>Back side button</td></tr>
         <tr><th scope="row">Options</th><td>X</td><td>R</td><td>Right-click</td></tr>
-        <tr><th scope="row">Find</th><td>Y</td><td>F</td><td></td></tr>
-        <tr><th scope="row">Pages</th><td>LB / RB</td><td>Q / E</td><td>Page names</td></tr>
+        <tr><th scope="row">Find and sort</th><td>Y</td><td>F</td><td></td></tr>
+        <tr><th scope="row">Pages</th><td>LB / RB</td><td>Q / E</td><td>Page names, forward side button</td></tr>
         <tr><th scope="row">Quick wheel</th><td>View</td><td>Hold Tab</td><td></td></tr>
-        <tr><th scope="row">Play</th><td>Hold Start</td><td>Hold Space</td><td>Click Play</td></tr>
+        <tr><th scope="row">Settings</th><td>Start</td><td>Esc on a game's first page</td><td></td></tr>
+        <tr><th scope="row">Play options</th><td>Hold Start 3 seconds</td><td>Hold Space 3 seconds</td><td></td></tr>
+        <tr><th scope="row">Help</th><td></td><td>F1</td><td></td></tr>
       </tbody>
     </table>
   </div>
-  <p class="small">Touch works for everything: tap to do, long-press for options.</p>
+  <p class="small">Play with mods: select Play in the bottom bar. Play options choose with or without mods, or
+    Seamless Co-op. Touch works too: tap to pick, hold for options.</p>
 </section>
 
 <section id="faq" class="wrap">
@@ -159,8 +177,10 @@
   </details>
   <details>
     <summary>Cyberpunk: RED4ext or Cyber Engine Tweaks shows error 998</summary>
-    <p>Install the Visual C++ 2022 runtime into the game. In Desktop Mode, install Protontricks from Discover, then open Konsole and run:</p>
-    <pre><code>flatpak run com.github.Matoking.protontricks 1091500 --force vcrun2022</code></pre>
+    <p>The game's Proton setup is missing Microsoft's Visual C++ runtime. Turbine spots this in <b>Before you
+      play</b>: press <b>Install the Visual C++ runtime</b> (one press, about 25 MB from Microsoft).</p>
+    <p class="small">By hand instead: install Protontricks from Discover in Desktop Mode, then run this in Konsole:</p>
+    <pre tabindex="0"><code>flatpak run com.github.Matoking.protontricks 1091500 --force vcrun2022</code></pre>
   </details>
   <details>
     <summary>Something isn't working</summary>

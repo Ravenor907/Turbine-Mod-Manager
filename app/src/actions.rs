@@ -990,7 +990,7 @@ impl qobject::Turbine {
                 // answer that comes back after a newer question.
                 let echo = format!("\"qcat\":{},\"qsort\":{},\"qsrc\":{}", quote(&category), quote(&sort), quote(&source));
                 let j = match r {
-                    Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},{}", quote(&info.id), quote(&text), offset > 0, &j[1..]),
+                    Ok(j) => format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},{}", quote(&info.id), quote(&text), offset > 0, j.strip_prefix('{').unwrap_or(j.as_str())),
                     Err(e) if source == "nexus" => {
                         crate::log::line("net", &format!("Nexus browse without a key failed: {e}. Using Open on Nexus instead."));
                         format!("{{\"game\":{},\"query\":{},\"append\":{},{echo},\"fallback\":true,\"error\":{},\"items\":[]}}", quote(&info.id), quote(&text), offset > 0, quote(&e))

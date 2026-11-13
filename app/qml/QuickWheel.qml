@@ -79,7 +79,7 @@ Overlay {
             id: canvas
             anchors.fill: parent
             property int sel: qw.focusIndex
-            property var okList: qw.slots.map(s => !!s.ok)
+            property var okList: (qw.slots || []).map(s => !!(s && s.ok))
             // The picked wedge's fill fades in: a cover in the plain wedge's look is drawn once over it and fades
             // away (an opacity, so nothing is painted again while it fades).
             onSelChanged: { requestPaint(); selCover.cover() }
@@ -168,7 +168,7 @@ Overlay {
             anchors.centerIn: parent
             width: pie.inner * 2 - qw.ui.px(8); height: width; radius: width / 2
             color: qw.ui.c.panel
-            readonly property var s: qw.focusIndex >= 0 ? qw.slots[qw.focusIndex] : null
+            readonly property var s: qw.focusIndex >= 0 ? ((qw.slots || [])[qw.focusIndex] || null) : null
             border.color: s && !s.ok ? qw.ui.c.line : qw.ui.c.accent; border.width: Math.max(1, qw.ui.px(2))
             Column {
                 anchors.centerIn: parent
@@ -176,7 +176,7 @@ Overlay {
                 spacing: qw.ui.px(2)
                 Text {
                     width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
-                    text: middle.s ? middle.s.label : "Close"
+                    text: middle.s ? (middle.s.label || "") : "Close"
                     color: middle.s && !middle.s.ok ? qw.ui.c.soft : qw.ui.c.accentText; font.family: qw.ui.bodyFont; font.pixelSize: qw.ui.fpx(middle.s ? 16 : 19); font.bold: true
                 }
                 Text {

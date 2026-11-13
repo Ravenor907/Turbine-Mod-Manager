@@ -22,6 +22,9 @@ Rectangle {
     readonly property real capSlot: ui.capsShown && (capRoom || cap !== "") ? ui.px(20) + ui.px(8) : 0
     // Its width when nothing squeezes it.
     readonly property real want: abText.implicitWidth + ui.px(40) + capSlot
+    Accessible.role: Accessible.Button
+    Accessible.name: label
+    Accessible.focused: focused
     implicitWidth: want
     implicitHeight: ui.tpx(44)
     radius: ui.radiusSmall

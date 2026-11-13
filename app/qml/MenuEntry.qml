@@ -19,6 +19,9 @@ Rectangle {
     signal clicked()
     signal held(bool down)                // a finger or the pointer pressed down on it (true) and let go (false)
 
+    Accessible.role: Accessible.MenuItem
+    Accessible.name: label + (available ? "" : ", not available") + (detail !== "" ? ", " + detail : "")
+    Accessible.focused: focused
     implicitHeight: Math.max(ui.px(48), entryText.implicitHeight + ui.px(14))
     radius: ui.px(6)
     color: "transparent"

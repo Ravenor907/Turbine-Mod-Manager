@@ -156,7 +156,13 @@ pub(crate) fn launch_me3(w: &Worker, slot: &Slot, coop: ac::Coop) -> bool {
     );
     let (prog, rest) = if crate::system::in_flatpak() { (&args[0], &args[1..]) } else { (&args[2], &args[3..]) };
     match std::process::Command::new(prog).args(rest).stdin(std::process::Stdio::null()).spawn() {
-        Ok(_) => true,
+        Ok(mut child) => {
+            // Waited for on its own thread, so the launcher never stays behind as a dead entry in the process list.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            true
+        }
         Err(e) => {
             w.say(format!("Couldn't start Mod Engine 3: {}", crate::log::plain(&e.to_string())), "error");
             false
@@ -702,13 +708,17 @@ impl qobject::Turbine {
                 let compat = prefix.parent().map(Path::to_path_buf).unwrap_or_else(|| prefix.clone());
                 let args = vcrun::install_args(&compat, &root, &runtime, &proton, &exe);
                 crate::log::line("vcrun", &format!("Running: {}", args.join(" ")));
-                let out = std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()).output();
+                let out = crate::system::output_limited(std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()), crate::system::INSTALL_WAIT);
                 let _ = std::fs::remove_file(&exe);
                 let code = match out {
                     Ok(o) => {
                         let tail = String::from_utf8_lossy(&o.stderr).lines().rev().take(8).collect::<Vec<_>>().join(" | ");
                         crate::log::line("vcrun", &format!("Installer finished with {:?}: {tail}", o.status.code()));
                         o.status.code().unwrap_or(-1)
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                        crate::log::line("vcrun", "The installer was still running after 10 minutes: not waiting for it any longer");
+                        return fail("The Visual C++ runtime was still installing after 10 minutes, so Turbine stopped waiting for it. Try again.".into());
                     }
                     Err(e) => return fail(format!("Proton couldn't be started ({e}).")),
                 };

@@ -33,7 +33,7 @@ body {
 
 a { color: var(--brass); text-underline-offset: 3px; }
 a:hover { color: var(--brass-hi); }
-a:focus-visible, summary:focus-visible, .button:focus-visible {
+a:focus-visible, summary:focus-visible, .button:focus-visible, .table-wrap:focus-visible, pre:focus-visible {
   outline: 3px solid var(--brass-hi);
   outline-offset: 3px;
   border-radius: 6px;
@@ -41,6 +41,7 @@ a:focus-visible, summary:focus-visible, .button:focus-visible {
 
 .skip { position: absolute; left: -999px; top: 8px; }
 .skip:focus { left: 8px; background: var(--panel); padding: 8px 12px; z-index: 10; }
+img { max-width: 100%; }
 
 h1, h2, h3 { line-height: 1.25; margin: 0 0 .6em; }
 h2 {
@@ -128,10 +129,10 @@ pre code { border: 0; padding: 0; background: none; }
   backdrop-filter: blur(6px);
 }
 .toc .wrap { display: flex; gap: 4px 22px; flex-wrap: wrap; justify-content: center; padding-top: 10px; padding-bottom: 10px; }
-.toc a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: .95rem; padding: 4px 0; }
+.toc a { color: var(--muted); text-decoration: none; font-weight: 600; font-size: .95rem; padding: 8px 2px; }
 .toc a:hover { color: var(--brass-hi); }
 
-main > section.wrap { padding-top: clamp(52px, 7vw, 88px); scroll-margin-top: 30px; }
+main > section.wrap { padding-top: clamp(52px, 7vw, 88px); scroll-margin-top: 36px; }
 main > section.wrap:last-child { padding-bottom: 80px; }
 
 /* Features: one line each */
@@ -269,6 +270,7 @@ details > summary::-webkit-details-marker { display: none; }
 details > summary::before { content: "+"; display: inline-block; width: 1.3em; color: var(--brass); font-weight: 800; }
 details[open] > summary::before { content: "\2212"; }
 details > p, details > pre { margin: 0 18px 14px; }
+details > summary:hover { color: var(--brass-hi); }
 
 /* Footer */
 footer { border-top: 2px solid var(--brass-lo); background: #080706; padding: 30px 0 40px; }

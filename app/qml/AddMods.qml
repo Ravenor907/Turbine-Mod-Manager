@@ -80,8 +80,11 @@ Overlay {
                 width: otherText.implicitWidth + root.ui.px(24); height: root.ui.tpx(40); radius: root.ui.px(6)
                 color: root.ui.c.raised; border.color: root.ui.c.line; border.width: Math.max(1, root.ui.px(1))
                 Text { id: otherText; anchors.centerIn: parent; text: root.otherLabel; color: root.ui.c.text; font.family: root.ui.bodyFont; font.pixelSize: root.ui.fpx(14); font.bold: true }
+                Accessible.role: Accessible.Button
+                Accessible.name: root.otherLabel
+                scale: otherTap.pressed ? root.ui.motion.pressScale : 1
                 HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
-                TapHandler { onTapped: root.otherClicked() }
+                TapHandler { id: otherTap; onTapped: root.otherClicked() }
             }
             Item { width: 1; height: root.ui.px(7) }
             Rectangle { width: parent.width; height: Math.max(1, root.ui.px(1)); color: root.ui.c.line }
@@ -116,7 +119,9 @@ Overlay {
                 color: root.ui.c.card
 
                 Rectangle {
-                    visible: fileRow.focused
+                    opacity: fileRow.focused ? 1 : 0
+                    visible: opacity > 0
+                    Behavior on opacity { enabled: root.ui.motion.on; NumberAnimation { duration: root.ui.motion.quick; easing.type: root.ui.motion.ease } }
                     anchors.fill: parent
                     radius: fileRow.radius
                     border.width: Math.max(1, root.ui.px(1.5))
@@ -127,6 +132,9 @@ Overlay {
                         GradientStop { position: 1; color: Qt.tint(root.ui.c.card, Qt.rgba(root.ui.c.focusFill.r, root.ui.c.focusFill.g, root.ui.c.focusFill.b, 0.5)) }
                     }
                 }
+                Accessible.role: Accessible.ListItem
+                Accessible.name: root.niceName(modelData.name || "") + (modelData.size ? ", " + modelData.size : "") + (modelData.age ? ", " + modelData.age : "") + (note !== "" ? ", " + note : "") + ", " + (index + 1) + " of " + root.count
+                Accessible.focused: focused
                 HoverHandler { onHoveredChanged: root.ui.hover(parent, hovered) }
                 TapHandler { onTapped: root.activated(fileRow.index) }
 
@@ -166,7 +174,7 @@ Overlay {
                     anchors.rightMargin: root.ui.px(12)
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: root.ui.px(6)
-                    KeyCap { ui: root.ui; k: "a"; anchors.verticalCenter: parent.verticalCenter }
+                    KeyCap { ui: root.ui; k: "a"; visible: root.ui.capsShown; anchors.verticalCenter: parent.verticalCenter }
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         text: root.actionLabel || ""

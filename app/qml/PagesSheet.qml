@@ -70,29 +70,28 @@ Overlay {
                     required property var modelData
                     readonly property bool foc: pg.focusIndex === index
                     width: col.width
-                    height: pg.ui.px(row.modelData.note ? 62 : 50)
+                    height: Math.max(pg.ui.px(row.modelData.note ? 62 : 50), pg.ui.tpx(44), rowText.implicitHeight + pg.ui.px(12))
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: (modelData.name || "") + ", Open on Nexus"
+                    Accessible.focused: foc
                     radius: pg.ui.px(6)
                     color: foc ? pg.ui.c.focusFill : pg.ui.c.card
                     Behavior on color { enabled: pg.ui.motion.on; ColorAnimation { duration: pg.ui.motion.quick; easing.type: pg.ui.motion.ease } }
                     border.color: pg.ui.c.accent
                     border.width: foc ? pg.ui.px(2) : 0
                     Column {
+                        id: rowText
                         x: pg.ui.px(14)
                         width: parent.width - pg.ui.px(180)
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: pg.ui.px(2)
-                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(16); font.bold: true }
+                        Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.name || ""; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(16); font.bold: true }
                         Text { visible: !!row.modelData.note; width: parent.width; elide: Text.ElideRight; text: row.modelData.note || ""; color: pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(13) }
                     }
                     Row {
                         anchors.right: parent.right; anchors.rightMargin: pg.ui.px(12); anchors.verticalCenter: parent.verticalCenter
                         spacing: pg.ui.px(6)
-                        Rectangle {
-                            visible: row.foc
-                            width: pg.ui.px(24); height: width; radius: width / 2; color: pg.ui.c.raised; border.color: pg.ui.c.accentLo
-                            anchors.verticalCenter: parent.verticalCenter
-                            Text { anchors.centerIn: parent; text: "A"; color: pg.ui.c.text; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(13); font.bold: true }
-                        }
+                        KeyCap { ui: pg.ui; k: "a"; visible: row.foc && pg.ui.capsShown; anchors.verticalCenter: parent.verticalCenter }
                         Text { text: "Open on Nexus"; color: row.foc ? pg.ui.c.accentText : pg.ui.c.soft; font.family: pg.ui.bodyFont; font.pixelSize: pg.ui.fpx(15); font.bold: row.foc; anchors.verticalCenter: parent.verticalCenter }
                     }
                     HoverHandler { onHoveredChanged: pg.ui.hover(parent, hovered) }

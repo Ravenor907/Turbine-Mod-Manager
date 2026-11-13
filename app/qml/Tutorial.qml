@@ -264,6 +264,9 @@ Overlay {
                 height: tut.ui.tpx(44)
                 visible: tut.card > 0
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "Back"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20) }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Back"
+                HoverHandler { onHoveredChanged: tut.ui.hover(parent, hovered) }
                 TapHandler { onTapped: tut.back() }
             }
             Row {
@@ -275,6 +278,9 @@ Overlay {
                     Text { anchors.centerIn: parent; text: "A"; color: tut.ui.c.onAccent; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.bold: true }
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: tut.card < tut.count - 1 ? "Next" : "Pick a game to start"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.weight: Font.DemiBold }
+                Accessible.role: Accessible.Button
+                Accessible.name: tut.card < tut.count - 1 ? "Next" : "Pick a game to start"
+                HoverHandler { onHoveredChanged: tut.ui.hover(parent, hovered) }
                 TapHandler { onTapped: tut.next() }
             }
             Row {
@@ -287,6 +293,9 @@ Overlay {
                     Text { anchors.centerIn: parent; text: "B"; color: tut.ui.c.text; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20); font.bold: true }
                 }
                 Text { anchors.verticalCenter: parent.verticalCenter; text: "Skip"; color: tut.ui.c.soft; font.family: tut.ui.bodyFont; font.pixelSize: tut.ui.fpx(20) }
+                Accessible.role: Accessible.Button
+                Accessible.name: "Skip"
+                HoverHandler { onHoveredChanged: tut.ui.hover(parent, hovered) }
                 TapHandler { onTapped: tut.skip() }
             }
         }

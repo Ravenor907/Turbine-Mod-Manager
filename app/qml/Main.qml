@@ -1581,9 +1581,9 @@ Window {
         getText = f.text; getSortIndex = f.sort; getCategory = f.cat
         if (tab !== 1) tab = 1
         zone = "main"; getArea = "grid"; getIndex = 0
-        restoreFocus = { area: "grid", index: 0 }
         note("action", "Find pop-up: \"" + f.text + "\", " + (sortNamesFor(srcNow)[f.sort] || "") + ", " + (f.cat || "All") + (changed ? "" : " (no change)"))
         if (!changed) return
+        restoreFocus = { area: "grid", index: 0 }
         // Stepping through chips doesn't fire a search per chip; words and Done search at once.
         browseLoading = true
         if (close) { findBrowse.stop(); browseNow() } else findBrowse.restart()
@@ -1705,7 +1705,9 @@ Window {
         // rail, the Nexus page).
         if (browserOpen) { browserFrom = null; closeBrowser("back") }
         sheet = ""; page = "game"; zone = "main"; tab = 0; findText = ""; listShow = "all"; modPage = false; history = []
-        const i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
+        let i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id)
+        // In Dependencies while it is closed: it opens, so the ring has the mod's row to land on.
+        if (i < 0 && !depsOpen && listView.depAll.indexOf(id) >= 0) { depsOpen = true; i = listItems.findIndex(x => x.kind === "mod" && x.m.id === id) }
         if (i >= 0) modIndex = i
     }
     // Add from Downloads: this game's files (Downloads and its Game Mods folder), or every file with Y.
@@ -1822,7 +1824,7 @@ Window {
         function onBridgeJsonChanged() {
             if (shot.on) return
             const was = app.bridge.connected || 0
-            app.bridge = app.parse(Turbine.bridgeJson, { running: false })
+            app.bridge = app.parse(Turbine.bridgeJson, { running: false }) || { running: false }
             if (app.bridge.connected > was && app.openState !== "")
                 app.note("browser", "The browser helper " + (app.bridge.helper || "") + " connected " + (Date.now() - app.openAt) + " ms after Open")
             // The helper was paired on another port: the pairing page again, once.
@@ -1841,7 +1843,6 @@ Window {
             if (pressed) { app.lastInput = "pad"; app.pressStamp = Turbine.pressAt(); app.pressFresh = true }
             pressed ? app.press(button) : app.release(button)
         }
-        // 0.3
         function onBrowseJsonChanged() {
             const v = app.parse(Turbine.browseJson, null)
             if (!v || !app.game || v.game !== app.game.id) return
@@ -2034,10 +2035,16 @@ Window {
         disarm()
         barsHidden = false
         if (!game || sameGameReorder) return
+        // Requirements being got for another game stop here (its list is kept: My mods there has the row to go on).
+        if (reqRunning && (!reqQ || reqQ.game !== game.id)) { reqRunning = false; reqNextTimer.stop(); pendingGet = false }
         if (memoGame !== "" && memoGame !== game.id) saveFocus(memoGame)
         memoGame = game.id
         if (!shot.on) seen.lastGame = game.id
         moving = false
+        // Select several and a load order move belong to the game they started in.
+        selecting = false; ticked = {}; orderMoving = false
+        // Dependencies opened in one game starts closed in the next.
+        depsOpen = false
         landFocus = true
         modsLoaded = false
         modIndex = 0
@@ -2674,7 +2681,7 @@ Window {
     // An installed mod that is this Nexus mod (its links entry names it as a provider for another mod, or its id).
     function linksMapHas(m, modId) { return nexusModOf(m) === String(modId) }
     function reqAdvance(why) {
-        if (!reqQ) return
+        if (!reqQ) { reqRunning = false; return }
         const done = parse(Turbine.reqQueueAdvance(), null)
         seenRev++
         note("action", "Requirements: " + (done ? done.name : "") + " " + why)
@@ -2690,6 +2697,7 @@ Window {
         if (!reqRunning) return
         reqRunning = false
         reqNextTimer.stop()
+        pendingGet = false
         if (browserOpen) closeBrowser("back")
         note("action", "Requirements: stopped at " + (reqQ ? (reqQ.index + 1) + " of " + reqQ.items.length : "the end"))
         toast.info("Stopped. My mods keeps a row to go on where you left off.")
@@ -2770,6 +2778,8 @@ Window {
         startHold.stop(); startHeld = 0
         repeater.stop(); repeatButton = ""
         aHeld = false; clickHeld = false
+        // The keyboard's holds too (Tab for the wheel, Space for Play): their release may never be seen.
+        tabHold.stop(); tabDown = false; tabWheel = false; spaceDown = false
         if (was) note("pad", "Holds stopped (" + why + ")")
     }
     // The danger holds stop whenever the sheet or the page changes.
@@ -2777,6 +2787,8 @@ Window {
     // (onPageChanged and onTabChanged, near the top, call it too.)
     onModPageChanged: {
         stopDangerHolds(); pageSettings = false
+        // The page closed before it was read: nothing waits to press its button (the next page opened is not got by itself).
+        if (!modPage) { pendingGet = false; pendingFiles = false }
         // A mod's page comes in from the right over Get mods; going back, the cards come in from the left.
         if (modPage) modIn.play(px(mo.shift), 0)
         else if (tab === 1 && turnFrom !== 1) gridBack.play(-px(mo.shift), 0)
@@ -4456,7 +4468,7 @@ Window {
             menuIndex = b === "right" || b === "up" ? 0 : 1
         } else if (sheet === "pick") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
-            else if (b === "down") menuIndex = Math.min(pickItems.length - 1, menuIndex + 1)
+            else if (b === "down") menuIndex = Math.max(0, Math.min(pickItems.length - 1, menuIndex + 1))
             else if ((b === "left" || b === "right") && pickItems[menuIndex] && pickItems[menuIndex].step) {
                 // A row with a value (the Nexus menu's Zoom): Left and Right change it, the menu stays.
                 const i = menuIndex
@@ -4468,29 +4480,29 @@ Window {
             else if (b === "b" || b === "x") { if (pickBLabel === "Not now") nxmAskNo(); sheet = pickBack }
         } else if (sheet === "modmenu") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
-            else if (b === "down") menuIndex = Math.min(modMenuItems.length - 1, menuIndex + 1)
+            else if (b === "down") menuIndex = Math.max(0, Math.min(modMenuItems.length - 1, menuIndex + 1))
             else if (b === "a") modMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
         } else if (sheet === "gamemenu") {
             if (b === "up") { stopReset(); menuIndex = Math.max(0, menuIndex - 1) }
-            else if (b === "down") { stopReset(); menuIndex = Math.min(gameMenuItems.length - 1, menuIndex + 1) }
+            else if (b === "down") { stopReset(); menuIndex = Math.max(0, Math.min(gameMenuItems.length - 1, menuIndex + 1)) }
             else if (b === "a") gameMenuRun(menuIndex)
             else if (b === "b" || b === "view" || b === "x") { stopReset(); sheet = "" }
         } else if (sheet === "add") {
             if (b === "up") addIndex = Math.max(0, addIndex - 1)
-            else if (b === "down") addIndex = Math.min(addList.length - 1, addIndex + 1)
+            else if (b === "down") addIndex = Math.max(0, Math.min(addList.length - 1, addIndex + 1))
             else if (b === "a") addChosen()
             // Y: Find: its first row chooses this game's files or every mod file.
             else if (b === "y") openAddFind()
             else if (b === "b") sheet = ""
         } else if (sheet === "pages") {
             if (b === "up") pagesIndex = Math.max(0, pagesIndex - 1)
-            else if (b === "down") pagesIndex = Math.min(pagesList.length - 1, pagesIndex + 1)
+            else if (b === "down") pagesIndex = Math.max(0, Math.min(pagesList.length - 1, pagesIndex + 1))
             else if (b === "a") openPage(pagesIndex)
             else if (b === "b") sheet = ""
         } else if (sheet === "versions") {
             if (b === "up") versionIndex = Math.max(0, versionIndex - 1)
-            else if (b === "down") versionIndex = Math.min(otherVersions.length - 1, versionIndex + 1)
+            else if (b === "down") versionIndex = Math.max(0, Math.min(otherVersions.length - 1, versionIndex + 1))
             else if (b === "a") installVersion(versionIndex)
             else if (b === "b" || b === "x") { sheet = ""; if (history.length > 0 && history[history.length - 1].kind === "files") history = history.slice(0, -1) }
         } else if (sheet === "code") {
@@ -4501,7 +4513,7 @@ Window {
             else if (b === "b" || b === "x") sheet = ""
         } else if (sheet === "pickgame") {
             if (b === "up") pickIndex = Math.max(0, pickIndex - 1)
-            else if (b === "down") pickIndex = Math.min(games.length - 1, pickIndex + 1)
+            else if (b === "down") pickIndex = Math.max(0, Math.min(games.length - 1, pickIndex + 1))
             else if (b === "a") pickGame(pickIndex)
             else if (b === "b") { infoIndex = 0; sheet = "found" }
         } else if (sheet === "removed") {
@@ -4512,19 +4524,19 @@ Window {
             else if (b === "b") sheet = ""
         } else if (sheet === "cardmenu") {
             if (b === "up") menuIndex = Math.max(0, menuIndex - 1)
-            else if (b === "down") menuIndex = Math.min(cardMenuItems.length - 1, menuIndex + 1)
+            else if (b === "down") menuIndex = Math.max(0, Math.min(cardMenuItems.length - 1, menuIndex + 1))
             else if (b === "a") cardMenuRun(menuIndex)
             else if (b === "b" || b === "x") sheet = ""
         } else if (sheet === "fomod") fomodView.handleButton(b)
         else if (sheet === "profiles") {
             if (b === "up") profIndex = Math.max(0, profIndex - 1)
-            else if (b === "down") profIndex = Math.min(profilesView.rows - 1, profIndex + 1)
+            else if (b === "down") profIndex = Math.max(0, Math.min(profilesView.rows - 1, profIndex + 1))
             else if (b === "a") profileRun(profIndex)
-            else if (b === "x" && !importData && profIndex < profileList.length) profileMenu(profileList[profIndex].name)
+            else if (b === "x" && !importData && profileList[profIndex]) profileMenu(profileList[profIndex].name)
             else if (b === "b" || b === "view") { if (importData) { importData = null; profIndex = 0 } else sheet = "" }
         } else if (sheet === "shares") {
             if (b === "up") shareIndex = Math.max(0, shareIndex - 1)
-            else if (b === "down") shareIndex = Math.min(shares.length - 1, shareIndex + 1)
+            else if (b === "down") shareIndex = Math.max(0, Math.min(shares.length - 1, shareIndex + 1))
             else if (b === "a" && shares[shareIndex]) { Turbine.profileImportFile(shares[shareIndex].path); sheet = "profiles" }
             else if (b === "b") sheet = sharesBack
         }
@@ -4589,7 +4601,7 @@ Window {
         else if (page === "settings") o.start = bind("Close", startTap)
         // Nexus inside Turbine: A clicks at the pointer (or works the Downloads row), B back a page or close.
         if (page === "browser") {
-            // B: back a page (held: close), or close on the first page.
+            // B: back a page, or close on the first page.
             o.b = bind(browserTab === 1 ? "Page" : nexusView && nexusView.canGoBack ? "Back" : "Close", browserBack)
             o.lb = bind("", () => { browserTab = 0 })
             o.rb = bind("", () => { browserTab = 1 })
@@ -4718,7 +4730,7 @@ Window {
             // Y: the pop-up with Find, Show, Sort and Select several.
             if (mods.length > 0) o.y = bind("Find", openFindPop)
             o.lt = bind("", () => { modIndex = Math.max(0, modIndex - pageJump) })
-            o.rt = bind("", () => { modIndex = Math.min(listItems.length - 1, modIndex + pageJump) })
+            o.rt = bind("", () => { modIndex = Math.max(0, Math.min(listItems.length - 1, modIndex + pageJump)) })
             const it = focusedItem
             if (it && it.kind === "mod") {
                 o.a = bind(it.m.enabled ? "Turn off" : "Turn on", () => toggle(it.m))
@@ -4842,7 +4854,7 @@ Window {
                 toast.info("Left and Right change the highlighted setting. Press again to change it.")
             }
             // Left and Right change values; Left never leaves Settings (B does).
-            else if (sec === "Look" && (b === "left" || b === "right")) lookRows[setRow].step(b === "left" ? -1 : 1)
+            else if (sec === "Look" && (b === "left" || b === "right")) { if (lookRows[setRow]) lookRows[setRow].step(b === "left" ? -1 : 1) }
             else if (kind === "item" && b === "left") labsChip = Math.max(0, labsChip - 1)
             else if (kind === "item" && b === "right") labsChip = Math.min(2, labsChip + 1)
             else if ((kind === "choice" || kind === "toggle") && (b === "left" || b === "right")) rowStep(r, b === "left" ? -1 : 1)
@@ -4929,7 +4941,7 @@ Window {
     function settingsA() {
         const r = sec === "Look" || sec === "About" ? null : rowsNow[setRow]
         const kind = r ? r.kind : ""
-        if (sec === "Look") { const lr = lookRows[setRow]; if (lr.a) lr.a(); else lr.step(1) }
+        if (sec === "Look") { const lr = lookRows[setRow]; if (lr && lr.a) lr.a(); else if (lr) lr.step(1) }
         else if (sec === "About") labsTap()
         else if (kind === "item") labsChoose(r, ["works", "problem", ""][labsChip])
         else if (kind === "choice" || kind === "toggle") rowStep(r, 1)
@@ -5274,6 +5286,7 @@ Window {
     function getBack() {
         if (sheet !== "") return
         if (modPage) {
+            pendingGet = false; pendingFiles = false
             // Other files' step is never a place to go back to.
             const h = history.filter(x => x.kind !== "files")
             const top = h.pop()
@@ -5450,6 +5463,9 @@ Window {
     property int pageIndex: 0
     function openDetails(item, fromHistory) {
         note("action", "Mod page: " + item.name)
+        // A Get waiting on the page before this one (not read yet) never presses this page's button; callers that
+        // want it set it after this call.
+        pendingGet = false
         if (!fromHistory) {
             if (!modPage) pushResults()
         }
@@ -5546,6 +5562,7 @@ Window {
             const i = getItems.findIndex(x => detailsItem && String(x.id) === String(detailsItem.id))
             const j = i + (b === "lb" ? -1 : 1)
             if (i >= 0 && j >= 0 && j < getItems.length) {
+                pendingFiles = false
                 history = history.slice(0, -1)
                 getIndex = j
                 const h = history.slice()
@@ -6507,6 +6524,9 @@ Window {
         if (what === "mods-on" || what === "mods-off") { Turbine.quickMods(id, what === "mods-on"); return }
         if (!shot.on) { app.raise(); app.requestActivate() }
         if (i !== current) current = i
+        // From anywhere, as goToMod: the Nexus page and the quick wheel close first.
+        if (browserOpen) { browserFrom = null; closeBrowser("back") }
+        if (wheelOpen) closeWheel()
         page = "game"; zone = "main"; modPage = false
         if (sheet !== "fomod") sheet = ""
         if (what === "open") return

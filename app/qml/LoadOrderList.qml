@@ -54,12 +54,7 @@ Item {
                     id: sortRow
                     anchors.centerIn: parent
                     spacing: lo.ui.px(8)
-                    Rectangle {
-                        visible: parent.parent.foc
-                        width: lo.ui.px(24); height: width; radius: width / 2; color: lo.ui.c.raised; border.color: lo.ui.c.accentLo
-                        anchors.verticalCenter: parent.verticalCenter
-                        Text { anchors.centerIn: parent; text: "A"; color: lo.ui.c.text; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.fpx(13); font.bold: true }
-                    }
+                    KeyCap { ui: lo.ui; k: "a"; visible: parent.parent.foc && lo.ui.capsShown; anchors.verticalCenter: parent.verticalCenter }
                     Text { text: "Sort automatically"; color: lo.ui.c.text; font.family: lo.ui.bodyFont; font.pixelSize: lo.ui.fpx(15); font.bold: true; anchors.verticalCenter: parent.verticalCenter }
                 }
                 HoverHandler { onHoveredChanged: lo.ui.hover(parent, hovered) }

@@ -20,10 +20,57 @@ pub fn host(program: &str) -> Command {
     }
 }
 
+/// How long a quick question to the host (pgrep, ps, test, grep) may take before Turbine stops waiting for it.
+pub const HOST_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Waits for a started program, at most `limit`: one that takes longer is stopped and None is the answer, so a
+/// program that hangs can't hold up whoever asked.
+pub fn wait_limited(child: &mut std::process::Child, limit: std::time::Duration) -> Option<std::process::ExitStatus> {
+    let until = std::time::Instant::now() + limit;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) if std::time::Instant::now() < until => std::thread::sleep(std::time::Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+/// Reads everything a program writes, on its own thread (a full pipe would stop the program).
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        buf
+    })
+}
+
+/// Command::output with a time limit: what the program wrote and how it ended, or an error of the kind TimedOut
+/// when it was still running after `limit` (Turbine stops waiting for it then).
+pub fn output_limited(cmd: &mut Command, limit: std::time::Duration) -> std::io::Result<std::process::Output> {
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    match wait_limited(&mut child, limit) {
+        Some(status) => Ok(std::process::Output { status, stdout: out.join().unwrap_or_default(), stderr: err.join().unwrap_or_default() }),
+        None => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "it took too long")),
+    }
+}
+
+/// How long an installer run on the host (Turbine's own update, the Visual C++ runtime) may take.
+pub const INSTALL_WAIT: std::time::Duration = std::time::Duration::from_secs(600);
+
 /// Runs a yes-or-no command quietly: exit code 0 is yes, 1 (or any code in `no`) is no. None when it couldn't run or
 /// said something else.
 fn answer(cmd: &mut Command, no: &[i32]) -> Option<bool> {
-    let status = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().ok()?;
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().ok()?;
+    let status = wait_limited(&mut child, HOST_WAIT)?;
     match status.code()? {
         0 => Some(true),
         c if c == 1 || no.contains(&c) => Some(false),
@@ -130,7 +177,7 @@ const NXM_TYPE: &str = "x-scheme-handler/nxm";
 
 /// xdg-mime on the host (the Flatpak can't change the host's defaults by itself), with fixed arguments.
 fn xdg_mime(args: &[&str]) -> Result<String, String> {
-    let out = host("xdg-mime").args(args).stdin(Stdio::null()).output().map_err(|e| format!("xdg-mime couldn't start: {e}"))?;
+    let out = output_limited(host("xdg-mime").args(args).stdin(Stdio::null()), HOST_WAIT).map_err(|e| format!("xdg-mime couldn't start: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(if err.is_empty() { "xdg-mime stopped with an error".into() } else { err });

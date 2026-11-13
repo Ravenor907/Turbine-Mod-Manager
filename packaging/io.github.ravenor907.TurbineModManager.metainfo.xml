@@ -2,17 +2,28 @@
 <component type="desktop-application">
   <id>io.github.ravenor907.TurbineModManager</id>
   <name>Turbine Mod Manager</name>
-  <summary>Mod manager for SteamOS handhelds</summary>
+  <summary>Mods for Steam and Heroic games on SteamOS handhelds</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <developer id="io.github.ravenor907">
     <name>Ravenor907</name>
   </developer>
   <description>
-    <p>A controller-first mod manager for Steam and Heroic games on SteamOS handhelds.</p>
+    <p>A controller-first mod manager for your Steam and Heroic games on SteamOS handhelds, in Game Mode and Desktop Mode.</p>
+    <ul>
+      <li>Get mods inside the app from Nexus Mods and Thunderstore, or add your own zip, 7z and rar files</li>
+      <li>When a mod needs other mods, Get them all fetches the whole list</li>
+      <li>Knows the big games: Skyrim load order, Cyberpunk frameworks, SKSE, SMAPI and BepInEx</li>
+      <li>FromSoftware games run mods offline through me3, with the game folder left untouched</li>
+      <li>Replaced game files and your saves are backed up; play without mods or go back with one press</li>
+      <li>Works with a controller, touch, keyboard and mouse</li>
+    </ul>
+    <p>Turbine never adds mods to a game that needs its anti-cheat online.</p>
   </description>
   <launchable type="desktop-id">io.github.ravenor907.TurbineModManager.desktop</launchable>
-  <url type="homepage">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
+  <url type="homepage">https://ravenor907.github.io/Turbine-Mod-Manager/</url>
+  <url type="bugtracker">https://github.com/Ravenor907/Turbine-Mod-Manager/issues</url>
+  <url type="vcs-browser">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.65" date="2026-11-12" type="development">

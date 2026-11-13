@@ -35,11 +35,19 @@ pub fn run(req: Result<Request, String>) -> i32 {
     if std::env::args().any(|a| a == "--from-tile") {
         from_tile(parsed.as_ref(), ok);
     }
-    if json_out {
-        println!("{answer}");
+    // Written without println!: that one stops the program when the reader has already gone (the plugin gave up
+    // waiting), and the exit code below would be lost.
+    let line = if json_out {
+        answer
     } else {
         let words = parsed.as_ref().and_then(|v| v.str_at("words")).unwrap_or("").to_string();
-        println!("{}", if words.is_empty() { answer } else { words });
+        if words.is_empty() { answer } else { words }
+    };
+    {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "{line}");
+        let _ = out.flush();
     }
     if ok {
         0
@@ -172,7 +180,7 @@ fn open_turbine(action: Action, game: &Game, open: bool, folder: &std::path::Pat
     if open {
         return match crate::single::send_request(&line) {
             Ok(()) => q::answer_json(true, "", &format!(",\"sent\":true,\"turbineUrl\":{}", quote(turbine_url))),
-            Err(e) => q::answer_json(false, &format!("Turbine is open but didn't answer ({e}). Switch to it with the Steam button."), &format!(",\"turbineUrl\":{}", quote(turbine_url))),
+            Err(e) => q::answer_json(false, &format!("Turbine is open but didn't answer ({}). Switch to it with the Steam button.", crate::log::plain(&e.to_string())), &format!(",\"turbineUrl\":{}", quote(turbine_url))),
         };
     }
     let now = crate::now_secs();
@@ -195,7 +203,7 @@ fn forward(action: Action, game: &Game, turbine_url: &str) -> String {
             "Turbine is open, so it does this there. If it asks something, switch to Turbine.",
             &format!(",\"sent\":true,\"turbineUrl\":{}", quote(turbine_url)),
         ),
-        Err(e) => q::answer_json(false, &format!("Turbine is open but didn't answer ({e}). Switch to it with the Steam button."), &format!(",\"turbineUrl\":{}", quote(turbine_url))),
+        Err(e) => q::answer_json(false, &format!("Turbine is open but didn't answer ({}). Switch to it with the Steam button.", crate::log::plain(&e.to_string())), &format!(",\"turbineUrl\":{}", quote(turbine_url))),
     }
 }
 

@@ -582,8 +582,8 @@ Item {
                     spacing: nb.ui.px(6)
                     Row {
                         spacing: nb.ui.px(10)
-                        Text { text: row.modelData.name; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold; elide: Text.ElideRight; width: Math.min(implicitWidth, dlList.width * 0.5) }
-                        Text { text: row.modelData.game || "Other"; color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14) }
+                        Text { text: row.modelData.name || ""; color: nb.ui.c.text; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(16); font.weight: Font.DemiBold; elide: Text.ElideRight; width: Math.min(implicitWidth, dlList.width * 0.5) }
+                        Text { text: row.modelData.game || "Other"; color: nb.ui.c.muted; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(14); elide: Text.ElideRight; width: Math.min(implicitWidth, dlList.width * 0.4) }
                     }
                     Rectangle {
                         width: parent.width; height: nb.ui.px(6); radius: height / 2
@@ -594,7 +594,7 @@ Item {
                             color: row.modelData.state === "interrupted" || row.modelData.state === "cancelled" ? nb.ui.c.warn : nb.ui.c.accent
                         }
                     }
-                    Text { text: row.modelData.words; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
+                    Text { width: parent.width; elide: Text.ElideRight; text: row.modelData.words || ""; color: nb.ui.c.soft; font.family: nb.ui.bodyFont; font.pixelSize: nb.ui.fpx(13) }
                 }
                 HoverHandler { onHoveredChanged: nb.ui.hover(row, hovered) }
                 TapHandler { onTapped: nb.downloadClicked(row.index) }

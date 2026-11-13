@@ -174,7 +174,7 @@ fn trim_crash_log() {
         return;
     }
     if let Ok(all) = fs::read(&path) {
-        let keep = &all[all.len() - (CRASH_CAP as usize / 2)..];
+        let keep = &all[all.len().saturating_sub(CRASH_CAP as usize / 2)..];
         let start = keep.iter().position(|b| *b == b'\n').map(|i| i + 1).unwrap_or(0);
         let _ = fs::write(&path, &keep[start..]);
     }

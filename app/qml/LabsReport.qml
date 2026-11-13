@@ -92,8 +92,9 @@ Overlay {
             const i = order.indexOf(focusAt)
             focusAt = order[Math.min(order.length - 1, i + 1)]
         } else if (b === "left" || b === "right") {
-            if (focusAt === 2) focusAt = 3
-            else if (focusAt === 3) focusAt = 2
+            // Save report and Not now: Left and Right stop at the ends, as on every button row.
+            if (focusAt === 2 && b === "right") focusAt = 3
+            else if (focusAt === 3 && b === "left") focusAt = 2
         } else if (b === "a") activate()
         else if (b === "start") sendClicked()
         else if (b === "b") closeClicked()

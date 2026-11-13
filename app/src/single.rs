@@ -150,7 +150,10 @@ fn read_link(stream: UnixStream) -> Option<String> {
     if taken {
         Some(line)
     } else {
-        crate::log::line("nxm", &format!("Dropped a line from the socket that isn't a Nexus download link ({} bytes)", line.len()));
+        // A second launch first connects only to see whether a Turbine answers: that empty line isn't worth a note.
+        if !line.is_empty() {
+            crate::log::line("nxm", &format!("Dropped a line from the socket that isn't a Nexus download link ({} bytes)", line.len()));
+        }
         None
     }
 }

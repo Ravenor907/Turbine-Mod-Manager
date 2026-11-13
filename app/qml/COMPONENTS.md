@@ -119,7 +119,7 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
 - **ScrollFade**: scroll cues for any list, grid or sheet: fades where there is more and a chevron for more below. It
   puts itself on its `view`; `color` (what the view sits on), `size`, `chevron`, `chevronBelow` (the chevron under the
   view, for a dialog's body).
-- **ActionButton**: one button look: `primary` (accent fill) or neutral, `focused` (the ring), `dim`, and `cap` (the
+- **ActionButton**: one button look (its `label` is its accessible name): `primary` (accent fill) or neutral, `focused` (the ring), `dim`, and `cap` (the
   key that presses it, drawn inside; `capRoom` keeps room for one); signals `clicked()`, `held(down)`; `want`.
 - **SheetButtons**: the button row of every sheet with buttons (ActionButtons; A's cap on the highlighted one, B's
   on the cancel one). `labels`, `focusIndex`, `mainIndex`, `cancelIndex`; `cancelHidden` (no room for the cancel
@@ -127,7 +127,8 @@ pad and the last input; `k`, `off`), **Hint** (keys and their words; `k`, `label
 - **MenuEntry**: one row of GameMenu and ModMenu. `label`, `detail`, `icon` (a name from the kit's `icons`, or SVG
   path data; the row's words choose first, `kit.iconFor`), `available`, `danger`, `more`, `focused`, `dangerColor`,
   `iconShown`; signals `clicked()`, `held(down)`.
-- **KeyCap**: a controller button as a small cap. `k` ("a", "lb").
+- **KeyCap**: a controller button as a small cap. `k` ("a", "lb"). The "A" beside a highlighted row in every sheet
+  (never a circle drawn by hand); the sheet hides it when the kit's `capsShown` is false (after the mouse).
 - **Motion**: every duration, curve, distance and scale (tools/qml-check.js fails the build on a duration or curve
   written elsewhere). `level` ("full", "reduced", "off"); read `on`, `moves`, the times `quick`, `standard`,
   `gentle` (fades) and `moveQuick`, `moveStandard`, `moveGentle` (travel, 0 unless Full), the curves `ease`, `glide`,
@@ -219,7 +220,7 @@ All are Overlays that fill their parent and show with `visible`; Main.qml handle
 - **AskText**: a line of text (search, names, codes, the key). `shown`, `title`, `note`, `placeholder`, `maxLength`,
   `secret`, `doneLabel`, `focusIndex`; signals `accepted(text)`, `cancelled()`, `edited(text)`, `fieldTapped()`;
   `open(...)`, `accept()`, `cancel()`, `clear()`.
-- **AddMods**: Add from Downloads (and Open a loadout file). `title`, `subtitle`, `files` ({name, size, age}),
+- **AddMods**: Add from Downloads (and Open a loadout file). `title`, `subtitle`, `files` ({name, size, age, note}),
   `focusIndex`, `actionLabel`, `emptyText`, `otherLabel`, `bottomInset`; signals `activated(i)`, `otherClicked()`,
   `closed()`.
 - **GamePicker**: "Which game is it for?". `fileName`, `games`, `focusIndex`; signals `activated(i)`, `closed()`.

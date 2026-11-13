@@ -68,7 +68,7 @@ pub(crate) fn start(found: &[Game], game_mode: bool, job: Job) -> Result<&'stati
         for l in &lines {
             crate::log::line("steam-setup", l);
         }
-        job.save(&data).map_err(|e| e.to_string())?;
+        job.save(&data).map_err(|e| crate::log::plain(&e.to_string()))?;
         let _ = std::fs::write(sr::result_file(&data), "done \n");
         return Ok("done");
     }
@@ -442,9 +442,15 @@ impl qobject::Turbine {
 /// be told (no Steam, or no answer): then a change that is in the file counts as held.
 fn steam_started() -> Option<std::time::SystemTime> {
     let host = |args: &[&str]| {
-        crate::system::host(args[0])
-            .args(&args[1..])
-            .stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        use std::io::Read as _;
+        let mut child = crate::system::host(args[0]).args(&args[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+        // Its answer is a few bytes, so it is read once the program has ended (or not at all when it hangs).
+        if !crate::system::wait_limited(&mut child, crate::system::HOST_WAIT)?.success() {
+            return None;
+        }
+        let mut text = String::new();
+        child.stdout.take()?.read_to_string(&mut text).ok()?;
+        Some(text.trim().to_string())
     };
     let pid = host(&["pgrep", "-o", "-x", "steam"])?;
     if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {

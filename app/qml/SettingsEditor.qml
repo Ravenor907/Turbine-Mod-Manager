@@ -269,6 +269,9 @@ Overlay {
                         width: Math.max(se.ui.tpx(64), actionText.implicitWidth + se.ui.px(24)); height: se.ui.tpx(34); radius: se.ui.px(6)
                         color: se.ui.c.raised; border.color: se.ui.c.accent
                         Text { id: actionText; anchors.centerIn: parent; text: row.modelData.kind === "action" ? row.modelData.label : ""; color: se.ui.c.text; font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: actionText.text
+                        HoverHandler { onHoveredChanged: se.ui.hover(parent, hovered) }
                         TapHandler { onTapped: { se.focusIndex = row.index; se.activate(row.modelData) } }
                     }
                     // Toggle: one pill, On or Off.
@@ -280,6 +283,10 @@ Overlay {
                         Behavior on color { enabled: se.ui.motion.on; ColorAnimation { duration: se.ui.motion.quick; easing.type: se.ui.motion.ease } }
                         border.color: se.ui.c.line
                         Text { anchors.centerIn: parent; text: parent.on ? "On" : "Off"; color: parent.on ? se.ui.c.onAccent : se.ui.c.soft; font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(14); font.bold: true }
+                        Accessible.role: Accessible.CheckBox
+                        Accessible.name: on ? "On" : "Off"
+                        Accessible.checked: on
+                        HoverHandler { onHoveredChanged: se.ui.hover(parent, hovered) }
                         TapHandler { onTapped: { se.focusIndex = row.index; se.change(row.modelData, 1) } }
                     }
                     // Number and list: - value + (a slider under the value when the range is known).
@@ -289,6 +296,9 @@ Overlay {
                         color: se.ui.c.raised; border.color: se.ui.c.line
                         anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: row.f && row.f.kind === "list" ? "<" : "−"; color: se.ui.c.text; font.pixelSize: se.ui.fpx(20); font.bold: true }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: row.f && row.f.kind === "list" ? "Previous" : "Less"
+                        HoverHandler { onHoveredChanged: se.ui.hover(parent, hovered) }
                         TapHandler { onTapped: { se.focusIndex = row.index; se.change(row.modelData, -1) } }
                     }
                     Column {
@@ -312,6 +322,7 @@ Overlay {
                                 color: row.val === "" ? se.ui.c.muted : se.ui.c.text
                                 font.family: se.ui.bodyFont; font.pixelSize: se.ui.fpx(15)
                             }
+                            HoverHandler { onHoveredChanged: se.ui.hover(parent, hovered) }
                             TapHandler { onTapped: { se.focusIndex = row.index; se.activate(row.modelData) } }
                         }
                         Rectangle {
@@ -331,6 +342,9 @@ Overlay {
                         color: se.ui.c.raised; border.color: se.ui.c.line
                         anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: row.f && row.f.kind === "list" ? ">" : "+"; color: se.ui.c.text; font.pixelSize: se.ui.fpx(20); font.bold: true }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: row.f && row.f.kind === "list" ? "Next" : "More"
+                        HoverHandler { onHoveredChanged: se.ui.hover(parent, hovered) }
                         TapHandler { onTapped: { se.focusIndex = row.index; se.change(row.modelData, 1) } }
                     }
                 }

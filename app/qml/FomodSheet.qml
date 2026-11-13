@@ -25,9 +25,9 @@ Overlay {
     signal stop()
 
     readonly property var step: info && info.data ? info.data.step : null
-    readonly property var groups: step ? step.groups : []
+    readonly property var groups: (step && step.groups) || []
     readonly property var group: groups.length > 0 ? groups[Math.min(page, groups.length - 1)] : null
-    readonly property var options: group ? group.options : []
+    readonly property var options: (group && group.options) || []
     readonly property bool lastPage: !step || (page >= groups.length - 1 && step.isLast)
     readonly property int rows: options.length + 1
     readonly property var focused: focusIndex < options.length ? options[focusIndex] : null
@@ -56,8 +56,8 @@ Overlay {
         focusIndex = i
         if (i >= options.length) { goOn(); return }
         const o = options[i]
-        if (!o.canChange) return
-        const pickOne = group.kind === "exactlyOne"
+        if (!o || !o.canChange) return
+        const pickOne = !!group && group.kind === "exactlyOne"
         if (!(pickOne && o.selected)) choose(page, i)
         if (pickOne) goOn()
     }
@@ -148,9 +148,10 @@ Overlay {
                 height: parent.height
                 spacing: fs.ui.px(6)
                 Row {
+                    width: parent.width
                     spacing: fs.ui.px(10)
-                    Text { text: fs.group ? fs.group.name : (fs.step ? fs.step.name : ""); color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(19); font.bold: true }
-                    Text { text: fs.group ? fs.group.hint : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); topPadding: fs.ui.px(4) }
+                    Text { width: Math.min(implicitWidth, parent.width * 0.6); elide: Text.ElideRight; text: (fs.group ? fs.group.name : (fs.step ? fs.step.name : "")) || ""; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(19); font.bold: true }
+                    Text { width: Math.min(implicitWidth, parent.width * 0.4 - parent.spacing); elide: Text.ElideRight; text: fs.group ? (fs.group.hint || "") : ""; color: fs.ui.c.soft; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(15); topPadding: fs.ui.px(4) }
                 }
                 ListView {
                     id: optList
@@ -214,11 +215,10 @@ Overlay {
                             color: fs.ui.c.onAccent
                             font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(16); font.bold: true
                         }
-                        Rectangle {
-                            visible: opt.foc && !opt.isNext
+                        KeyCap {
+                            ui: fs.ui; k: "a"
+                            visible: opt.foc && !opt.isNext && fs.ui.capsShown
                             anchors.right: parent.right; anchors.rightMargin: fs.ui.px(14); anchors.verticalCenter: parent.verticalCenter
-                            width: fs.ui.px(26); height: width; radius: width / 2; color: fs.ui.c.raised; border.color: fs.ui.c.accentLo
-                            Text { anchors.centerIn: parent; text: "A"; color: fs.ui.c.text; font.family: fs.ui.bodyFont; font.pixelSize: fs.ui.fpx(13); font.bold: true }
                         }
                         HoverHandler { onHoveredChanged: fs.ui.hover(parent, hovered) }
                         TapHandler { onTapped: fs.activate(opt.index) }

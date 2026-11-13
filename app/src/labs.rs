@@ -68,7 +68,7 @@ pub fn system() -> String {
 pub fn cpu_ms() -> f64 {
     let Ok(stat) = fs::read_to_string("/proc/self/stat") else { return 0.0 };
     // Fields after the command name (which sits in parentheses and may hold spaces).
-    let Some(rest) = stat.rfind(')').map(|i| &stat[i + 2..]) else { return 0.0 };
+    let Some(rest) = stat.rfind(')').and_then(|i| stat.get(i + 2..)) else { return 0.0 };
     let f: Vec<&str> = rest.split_whitespace().collect();
     // utime and stime are fields 14 and 15 of the whole line, so 11 and 12 here; clock ticks are 100 a second on Linux.
     let ticks = |i: usize| f.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);

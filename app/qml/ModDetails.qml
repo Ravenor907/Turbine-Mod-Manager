@@ -246,7 +246,7 @@ Item {
                         width: parent.width - tag.width - md.ui.px(30)
                         anchors.verticalCenter: parent.verticalCenter
                         elide: Text.ElideRight
-                        text: nr.modelData.r.name
+                        text: (nr.modelData.r && nr.modelData.r.name) || ""
                         color: md.ui.c.text; font.family: md.ui.bodyFont; font.pixelSize: md.ui.fpx(15); font.weight: Font.DemiBold
                     }
                     Rectangle {

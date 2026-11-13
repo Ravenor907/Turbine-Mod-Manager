@@ -798,7 +798,7 @@ impl Net {
             quote(&have.and_then(|f| files.file(f)).map(|f| f.version.clone()).unwrap_or_default()),
             quote(if !files_note.is_empty() { files_note.as_str() } else if premium { "" } else { "A opens that file's page on Nexus. Press Slow download there and Turbine adds it automatically." })
         );
-        Ok(format!("{}{}}}", &out[..out.len() - 1], detail_json))
+        Ok(format!("{}{}}}", out.strip_suffix('}').unwrap_or(&out), detail_json))
     }
 
     /// Downloads the requirements Turbine can fetch for a Premium account (the Download steps), each handed to
@@ -1240,7 +1240,7 @@ impl Net {
         self.no_downloads()?;
         let dir = self.cache.join("update");
         let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make the update folder ({e})."))?;
+        fs::create_dir_all(&dir).map_err(|e| format!("Couldn't make the update folder ({}).", crate::log::plain(&e.to_string())))?;
         let client = Client { temp_dir: dir.clone(), ..self.client.clone() };
         let label = format!("Turbine {}", release.version);
         let mut cb = |got: u64, total: Option<u64>| {
@@ -1249,16 +1249,19 @@ impl Net {
         };
         let d = selfupdate::download(&client, release, Some(&mut cb)).map_err(err)?;
         let bundle = dir.join(selfupdate::ASSET);
-        fs::rename(&d.path, &bundle).map_err(|e| format!("Couldn't keep the update ({e})."))?;
+        fs::rename(&d.path, &bundle).map_err(|e| format!("Couldn't keep the update ({}).", crate::log::plain(&e.to_string())))?;
         // Into the same installation as the running Turbine (system or per user).
         let info = fs::read_to_string("/.flatpak-info").unwrap_or_default();
         let args = selfupdate::install_args_to(&bundle, selfupdate::install_scope(&info));
         crate::log::line("update", &format!("Installing: {}", args.join(" ")));
-        let out = std::process::Command::new(&args[0])
-            .args(&args[1..])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map_err(|e| format!("The installer couldn't start ({e})."))?;
+        let out = crate::system::output_limited(std::process::Command::new(&args[0]).args(&args[1..]).stdin(std::process::Stdio::null()), crate::system::INSTALL_WAIT).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                crate::log::line("update", "The installer was still running after 10 minutes: not waiting for it any longer");
+                "The update was still installing after 10 minutes, so Turbine stopped waiting for it. Restart Turbine and check for updates again.".to_string()
+            } else {
+                format!("The installer couldn't start ({e}).")
+            }
+        })?;
         let _ = fs::remove_file(&bundle);
         if !out.status.success() {
             let msg = String::from_utf8_lossy(&out.stderr);

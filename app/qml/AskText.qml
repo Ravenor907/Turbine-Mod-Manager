@@ -53,7 +53,7 @@ Overlay {
             x: ask.ui.px(18); y: ask.ui.px(18)
             width: parent.width - ask.ui.px(36)
             spacing: ask.ui.px(10)
-            Text { text: ask.title; color: ask.ui.c.text; font.family: ask.ui.titleFont; font.pixelSize: ask.ui.fpx(18); font.bold: true }
+            Text { width: parent.width; wrapMode: Text.WordWrap; text: ask.title; color: ask.ui.c.text; font.family: ask.ui.titleFont; font.pixelSize: ask.ui.fpx(18); font.bold: true }
             Text {
                 visible: ask.note !== ""
                 width: parent.width
