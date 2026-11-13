@@ -26,6 +26,21 @@
   <url type="vcs-browser">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.66" date="2026-11-13" type="development">
+      <description>
+        <p>A polish release: many small fixes, nothing new to learn:</p>
+        <ul>
+          <li>A waiting Get no longer presses a button on the next mod page; Stop really stops a requirements run</li>
+          <li>Switching games ends Select several, a Move and a requirements run, and Dependencies starts closed</li>
+          <li>A failed install frees the mod page, and a slow answer for another mod is ignored</li>
+          <li>Cyberpunk: a Visual C++ runtime you set up by hand counts as installed</li>
+          <li>Turbine no longer waits forever on Steam or the system: questions give up after a few seconds, installers after 10 minutes</li>
+          <li>Plain words for errors in Turbine, the Steam menu panel and the browser helper</li>
+          <li>Rows fit their text at every interface size; long names are cut cleanly; sheet buttons show hover and press</li>
+          <li>The Launch Options kept for Undo are saved safely</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.65" date="2026-11-12" type="development">
       <description>
         <p>A cleaner, calmer Turbine on every screen:</p>

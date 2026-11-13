@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Turbine browser helper",
   "short_name": "Turbine",
-  "version": "0.65",
+  "version": "0.66",
   "description": "Sends mods you download from Nexus Mods to Turbine Mod Manager, shows install progress and choices on the page, and brings your Nexus sign-in (and, if you choose, your API key) to Turbine when you ask.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxQKPlbbW/nICrHrBt0f3ybNFtxQhV4xAyud25W6sovMUygRTQtNAqQeJWsrV2ANE21EnH66pEb+B3qqlx5VmF9ADOJZgC0HPfzYoKXZxGJNwSbiHoHX6O3+eD8H0trJzgoC3bF+QZAHKwzd5mw3M/b+YIPkczxtRwHBSpan4aspPGXBoaAvzfuYsAKcbv+511WCOtCrddGWemI/o7LNTfkndYUORuMSQGoC11ziWtWN2NkLcNtC4MTnZiS9HTS8NyYSHYSrvOgfaD6V9j+iBIIUyr5bGgBNmzXK2ec+dL5SjrXlNVhPG2E4WS0OCw1QZMgQ5hjRNN7dlH5yeFhAfcwIDAQAB",
   "minimum_chrome_version": "116",
