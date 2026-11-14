@@ -6,6 +6,7 @@
 //! Mod authors write these files by hand, so it is forgiving where that is safe: an '&' that doesn't start a known
 //! entity is kept as it is, and a missing closing tag at the very end closes the open elements.
 
+use std::collections::HashSet;
 use std::fmt;
 
 /// Largest file accepted, in bytes (after decoding).
@@ -268,6 +269,9 @@ impl Parser<'_> {
         self.i += 1; // '<'
         let name = self.name()?;
         let mut el = Element { name, attrs: Vec::new(), children: Vec::new() };
+        // Names already given on this tag: the first of each wins, with or without a value. A set, so a tag with a
+        // huge number of attributes stays quick.
+        let mut seen: HashSet<String> = HashSet::new();
         loop {
             self.skip_ws();
             if self.i >= self.s.len() {
@@ -285,7 +289,9 @@ impl Parser<'_> {
             self.skip_ws();
             if self.i >= self.s.len() || self.s[self.i] != b'=' {
                 // An attribute without a value (not valid XML, but harmless): keep it empty.
-                el.attrs.push((key, String::new()));
+                if seen.insert(key.clone()) {
+                    el.attrs.push((key, String::new()));
+                }
                 continue;
             }
             self.i += 1;
@@ -310,7 +316,7 @@ impl Parser<'_> {
             let value = unescape(raw);
             // Attribute values: line breaks and tabs read as spaces, as XML says.
             let value: String = value.chars().map(|c| if matches!(c, '\n' | '\r' | '\t') { ' ' } else { c }).collect();
-            if !el.attrs.iter().any(|(k, _)| *k == key) {
+            if seen.insert(key.clone()) {
                 el.attrs.push((key, value));
             }
         }

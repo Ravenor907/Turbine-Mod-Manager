@@ -77,3 +77,23 @@ fn decodes_utf8_utf16_and_windows_1252() {
     assert!(decode(&[0xFF, 0xFE, 0x3C]).is_err());
     assert_eq!(xml::parse_bytes(&le).unwrap().text(), "ü");
 }
+
+#[test]
+fn repeated_attributes_keep_the_first_and_stay_quick() {
+    // With or without a value, the first of each name wins.
+    let r = parse("<a b c=\"1\" b=\"2\" c d='x' d/>").unwrap();
+    assert_eq!(r.attrs, vec![("b".into(), String::new()), ("c".into(), "1".into()), ("d".into(), "x".into())]);
+    // A tag with a huge number of attributes, many of them repeated, used to take minutes (each one was checked
+    // against all before it). Now it takes well under a second; the bound is loose for a busy machine.
+    let mut s = String::from("<config ");
+    s.push_str(&"b ".repeat(400_000));
+    s.push_str(&"c=\"\" ".repeat(100_000));
+    for i in 0..20_000 {
+        s.push_str(&format!("k{i}='v' "));
+    }
+    s.push_str("/>");
+    let t = std::time::Instant::now();
+    let r = parse(&s).unwrap();
+    assert_eq!(r.attrs.len(), 20_002);
+    assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
+}
