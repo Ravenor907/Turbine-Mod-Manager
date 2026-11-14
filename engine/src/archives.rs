@@ -74,6 +74,37 @@ pub trait Tar {
     fn list(&self, archive: &Path) -> Result<String, String>;
     /// Runs `bsdtar -xf <archive> -C <into> --no-same-owner --no-same-permissions`; `into` exists and is empty.
     fn extract(&self, archive: &Path, into: &Path) -> Result<(), String>;
+    /// `extract`, stopped as soon as more than `budget` bytes are in `into`. The listing's sizes can be wrong or
+    /// unknown (rar can leave them out), so the real output is what counts. Readers that can't be watched while they
+    /// run just extract; what they wrote is checked against the budget afterwards.
+    fn extract_within(&self, archive: &Path, into: &Path, budget: u64) -> Result<(), String> {
+        let _ = budget;
+        self.extract(archive, into)
+    }
+}
+
+/// The error when an archive unpacks to more than it may.
+const TOO_MUCH: &str = "the archive unpacked to far more than it should, so it wasn't added";
+
+/// Bytes in the files under `dir` (their full length, holes included), stopping early once over `stop`.
+fn size_under(dir: &Path, stop: u64) -> u64 {
+    let mut total = 0u64;
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let Ok(rd) = fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let Ok(m) = e.path().symlink_metadata() else { continue };
+            if m.is_dir() {
+                todo.push(e.path());
+            } else {
+                total = total.saturating_add(m.len());
+                if total > stop {
+                    return total;
+                }
+            }
+        }
+    }
+    total
 }
 
 /// bsdtar from the Flatpak runtime (found on PATH), with a fixed, clean environment.
@@ -119,15 +150,62 @@ impl Tar for Bsdtar {
     }
 
     fn extract(&self, archive: &Path, into: &Path) -> Result<(), String> {
-        self.run(vec![
-            "-xf".into(),
-            archive.into(),
-            "-C".into(),
-            into.into(),
-            "--no-same-owner".into(),
-            "--no-same-permissions".into(),
-        ])
-        .map(|_| ())
+        self.extract_within(archive, into, u64::MAX)
+    }
+
+    fn extract_within(&self, archive: &Path, into: &Path, budget: u64) -> Result<(), String> {
+        let mut child = Command::new(&self.program)
+            .args(["-xf".as_ref(), archive.as_os_str(), "-C".as_ref(), into.as_os_str()])
+            .args(["--no-same-owner", "--no-same-permissions"])
+            .env_clear()
+            .env("PATH", std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()))
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| {
+                if e.kind() == io::ErrorKind::NotFound {
+                    "the program that opens 7z and rar files (bsdtar) isn't available".to_string()
+                } else {
+                    format!("the program that opens 7z and rar files couldn't start ({e})")
+                }
+            })?;
+        // Read on the side so a chatty bsdtar never blocks on a full pipe.
+        let err_reader = child.stderr.take().map(|mut s| {
+            std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = (&mut s).take(64 << 10).read_to_end(&mut buf);
+                let _ = io::copy(&mut s, &mut io::sink());
+                buf
+            })
+        });
+        // The folder is measured a few times a second; a 1 GB/s disk writes a few hundred MB between looks, which the
+        // free space margin covers.
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(st)) => break st,
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!("the program that opens 7z and rar files stopped ({e})"));
+                }
+            }
+            if size_under(into, budget) > budget {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(TOO_MUCH.into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        };
+        let err = err_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+        if !status.success() {
+            let err = String::from_utf8_lossy(&err);
+            let line = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("it stopped with an error").trim();
+            return Err(format!("the archive couldn't be read ({})", line.trim_start_matches("bsdtar: ")));
+        }
+        Ok(())
     }
 }
 
@@ -304,6 +382,23 @@ pub fn unpack(archive: &Path, dest: &Path, limits: &Limits) -> Result<Vec<String
     unpack_with(archive, dest, limits, &Bsdtar::default())
 }
 
+/// Unpacks an archive found inside another one that was unpacked into `outer` (an installer carrying its files in
+/// an archive of its own). Both share one allowance: what `outer` already holds counts against the total, so an
+/// archive inside an archive can't unpack twice the limit. `tar`: the 7z/rar reader, None for bsdtar.
+pub fn unpack_inside(archive: &Path, dest: &Path, outer: &Path, tar: Option<&(dyn Tar + Send)>) -> Result<Vec<String>, String> {
+    let limits = limits_inside(outer, &Limits::default());
+    match tar {
+        Some(t) => unpack_with(archive, dest, &limits, t),
+        None => unpack_with(archive, dest, &limits, &Bsdtar::default()),
+    }
+}
+
+/// `limits` less what is already unpacked in `outer`.
+pub fn limits_inside(outer: &Path, limits: &Limits) -> Limits {
+    let used = size_under(outer, limits.total);
+    Limits { total: limits.total.saturating_sub(used), ratio: limits.ratio }
+}
+
 /// `unpack` with the 7z/rar reader given (tests use a stand-in).
 pub fn unpack_with(archive: &Path, dest: &Path, limits: &Limits, tar: &dyn Tar) -> Result<Vec<String>, String> {
     let format = detect(archive)
@@ -323,17 +418,27 @@ pub fn unpack_with(archive: &Path, dest: &Path, limits: &Limits, tar: &dyn Tar) 
     let listing = tar.list(archive)?;
     let entries = parse_listing(&listing)?;
     let expected = check_listing(&entries, limits)?;
+    // check_listing has made sure this sum fits.
+    let listed: u64 = entries.iter().map(|e| e.size).sum();
+    let packed = fs::metadata(archive).map_err(|e| format!("couldn't read the file ({e})"))?.len();
+    if !zip::ratio_ok(listed, packed) {
+        return Err("the archive unpacks to far more than it should, so it wasn't opened".into());
+    }
 
     let parent = dest.parent().ok_or("there's no folder to unpack into")?;
     fs::create_dir_all(parent).map_err(|e| format!("couldn't make a folder ({e})"))?;
+    zip::check_room(parent, listed)?;
+    // What bsdtar may really write: the listing's sizes can be wrong or missing, so the same limits hold the output
+    // itself (the total, the drive's free space, and the ratio to the archive file).
+    let budget = zip::room_for(parent, limits).min(packed.saturating_mul(zip::ARCHIVE_RATIO).max(zip::ARCHIVE_RATIO_FROM));
     let tmp = parent.join(format!(".{}.unpacking", dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).map_err(|e| format!("couldn't make a folder ({e})"))?;
     let result = (|| -> Result<Vec<String>, String> {
-        tar.extract(archive, &tmp)?;
+        tar.extract_within(archive, &tmp, budget)?;
         let (files, total) = walk_plain(&tmp)?;
-        if total > limits.total {
-            return Err("the archive unpacked to far more than it should, so it wasn't added".into());
+        if total > budget {
+            return Err(TOO_MUCH.into());
         }
         let want: HashSet<String> = expected.iter().map(|f| f.to_lowercase()).collect();
         if let Some(extra) = files.iter().find(|f| !want.contains(&f.to_lowercase())) {

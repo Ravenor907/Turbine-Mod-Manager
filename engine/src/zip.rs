@@ -17,6 +17,8 @@ pub enum ZipError {
     TooBig(String),
     Inflate(String, InflateError),
     Checksum(String),
+    /// The drive can't hold what the archive unpacks to: (bytes needed, bytes free).
+    NoRoom(u64, u64),
 }
 
 impl std::fmt::Display for ZipError {
@@ -30,6 +32,7 @@ impl std::fmt::Display for ZipError {
             ZipError::TooBig(p) => write!(f, "{p} unpacks to far more than it should, so the zip wasn't opened"),
             ZipError::Inflate(p, e) => write!(f, "{p}: {e}"),
             ZipError::Checksum(p) => write!(f, "{p} doesn't match its checksum, so the download is probably damaged"),
+            ZipError::NoRoom(need, free) => f.write_str(&no_room_text(*need, *free)),
         }
     }
 }
@@ -57,15 +60,88 @@ pub struct Entry {
 }
 
 pub struct Limits {
-    /// Most bytes all files together may unpack to.
+    /// Most bytes all files together may unpack to. Never more than the drive has free, either (see `room_for`).
     pub total: u64,
-    /// Most a single file may grow compared to its compressed size, once it is larger than 64 MiB.
+    /// Most a single file may grow compared to its compressed size, once it is larger than `ENTRY_RATIO_FROM`.
     pub ratio: u64,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Limits { total: 200 << 30, ratio: 400 }
+    }
+}
+
+/// Files up to this size may compress as well as they like. Real mods ship blank or flat textures (a 4K DXT5 mask
+/// is 16 MiB and packs to a few KiB, over 1000 to 1), so small files can't be held to a ratio one by one; together
+/// they are held by `ARCHIVE_RATIO`.
+pub const ENTRY_RATIO_FROM: u64 = 32 << 20;
+
+/// Most the whole archive may grow compared to the archive file, once it unpacks to more than `ARCHIVE_RATIO_FROM`.
+/// Real mods, texture packs included, come out at 1.5 to 20 times their download (a 7z holding many copies of the
+/// same textures reaches about 30). Zip's own method tops out near 1030 to 1, which is what bombs use.
+pub const ARCHIVE_RATIO: u64 = 100;
+
+/// Archives unpacking to less than this aren't held to `ARCHIVE_RATIO` (a small mod of mostly blank files is fine).
+pub const ARCHIVE_RATIO_FROM: u64 = 1 << 30;
+
+/// Space kept free on the drive after unpacking, so the game, Steam and saves on the same drive can still write.
+pub const ROOM_MARGIN: u64 = 256 << 20;
+
+/// Is `total` bytes unpacked from an archive file of `packed` bytes a believable mod?
+pub fn ratio_ok(total: u64, packed: u64) -> bool {
+    total <= ARCHIVE_RATIO_FROM || total / packed.max(1) <= ARCHIVE_RATIO
+}
+
+fn size_text(bytes: u64) -> String {
+    let gb = bytes as f64 / (1u64 << 30) as f64;
+    if gb >= 1.0 {
+        format!("{gb:.1} GB")
+    } else {
+        format!("{} MB", bytes.div_ceil(1 << 20))
+    }
+}
+
+fn no_room_text(need: u64, free: u64) -> String {
+    format!(
+        "it needs {} of space to unpack but the drive has only {} free, so it wasn't opened",
+        size_text(need.saturating_add(ROOM_MARGIN)),
+        size_text(free)
+    )
+}
+
+thread_local! {
+    static PRETEND_FREE: std::cell::Cell<Option<Option<u64>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Makes this thread see `free` bytes as the drive's free space (None: unknown), for tests. Not used by the app.
+#[doc(hidden)]
+pub fn pretend_free_space(free: Option<u64>) {
+    PRETEND_FREE.with(|c| c.set(Some(free)));
+}
+
+/// Free bytes on the drive holding `path`, None when it can't be read.
+pub fn free_space(path: &Path) -> Option<u64> {
+    match PRETEND_FREE.with(|c| c.get()) {
+        Some(f) => f,
+        None => crate::saves::free_bytes(path),
+    }
+}
+
+/// Most bytes that may be unpacked into `path`: the total limit, and never so much that the drive is left with
+/// less than `ROOM_MARGIN`. When the free space can't be read, only the total limit counts.
+pub fn room_for(path: &Path, limits: &Limits) -> u64 {
+    match free_space(path) {
+        Some(free) => limits.total.min(free.saturating_sub(ROOM_MARGIN)),
+        None => limits.total,
+    }
+}
+
+/// Refuses `need` bytes when the drive holding `path` can't take them and still keep the margin free.
+pub fn check_room(path: &Path, need: u64) -> Result<(), String> {
+    match free_space(path) {
+        Some(free) if need.saturating_add(ROOM_MARGIN) > free => Err(no_room_text(need, free)),
+        _ => Ok(()),
     }
 }
 
@@ -264,7 +340,7 @@ impl Zip {
     /// Unpacks one file into `sink` a chunk at a time, checking its size and CRC-32 on the way. Memory use stays at a
     /// few hundred KiB whatever the file's size. On an error, part of the file may already be in `sink`.
     pub fn unpack(&mut self, e: &Entry, limits: &Limits, sink: &mut dyn Write) -> Result<(), ZipError> {
-        if e.size > (64 << 20) && e.size / e.compressed.max(1) > limits.ratio {
+        if e.size > ENTRY_RATIO_FROM && e.size / e.compressed.max(1) > limits.ratio {
             return Err(ZipError::TooBig(e.name.clone()));
         }
         self.file.seek(SeekFrom::Start(e.data_offset))?;
@@ -306,7 +382,11 @@ impl Zip {
     /// Files are streamed to disk, so memory use doesn't grow with their size.
     pub fn extract_all(&mut self, dest: &Path, limits: &Limits) -> Result<Vec<PathBuf>, ZipError> {
         let total = self.entries.iter().filter(|e| !e.is_dir).try_fold(0u64, |sum, e| sum.checked_add(e.size));
-        if total.map(|t| t > limits.total).unwrap_or(true) {
+        let Some(total) = total.filter(|&t| t <= limits.total) else {
+            return Err(ZipError::TooBig("The archive".into()));
+        };
+        // Each file's size is held exact while unpacking, so the declared total is what reaches the disk.
+        if !ratio_ok(total, self.file.metadata()?.len()) {
             return Err(ZipError::TooBig("The archive".into()));
         }
         if fs::symlink_metadata(dest).is_ok() {
@@ -314,6 +394,11 @@ impl Zip {
         }
         let parent = dest.parent().ok_or(ZipError::Damaged("destination"))?;
         fs::create_dir_all(parent)?;
+        if let Some(free) = free_space(parent)
+            && total.saturating_add(ROOM_MARGIN) > free
+        {
+            return Err(ZipError::NoRoom(total, free));
+        }
         let tmp = parent.join(format!(
             ".{}.unpacking",
             dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
