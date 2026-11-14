@@ -263,19 +263,28 @@ pub fn write_launch_options(file: &Path, app_id: &str, value: &str, steam_runnin
         return Err("Close Steam first: Steam writes its settings back over any change while it runs".into());
     }
     let out = set_launch_options_in(&text, app_id, value)?;
+    let keep = |e: std::io::Error| format!("Couldn't keep a copy of Steam's settings first ({e})");
     let orig = original_file(file);
-    if !orig.exists() {
-        fs::write(&orig, &before).map_err(|e| format!("Couldn't keep a copy of Steam's settings first ({e})"))?;
+    // The copy kept for good is written whole; one left broken (a power cut while it was written by an older
+    // Turbine) is put right from this file, which still reads as Steam's settings. A good one is never replaced.
+    if !fs::read(&orig).is_ok_and(|b| settings_whole(&b)) {
+        crate::write_atomic_with(&orig, &before, Some(file)).map_err(keep)?;
     }
-    fs::write(backup_file(file), &before).map_err(|e| format!("Couldn't keep a copy of Steam's settings first ({e})"))?;
-    let tmp = file.with_file_name("localconfig.vdf.turbine-tmp");
-    fs::write(&tmp, out.as_bytes()).map_err(|e| e.to_string())?;
-    if fs::read(file).ok().as_deref() != Some(&before[..]) {
-        let _ = fs::remove_file(&tmp);
+    crate::write_atomic_with(&backup_file(file), &before, Some(file)).map_err(keep)?;
+    let unchanged = || fs::read(file).ok().as_deref() == Some(&before[..]);
+    if !crate::write_atomic_if(file, out.as_bytes(), Some(file), unchanged).map_err(|e| e.to_string())? {
         return Err("Steam's settings changed meanwhile (is Steam running?): nothing written".into());
     }
-    fs::rename(&tmp, file).map_err(|e| e.to_string())?;
     Ok(was)
+}
+
+/// Does this read as a whole localconfig.vdf (every brace closed, Steam's top key there)?
+pub fn settings_whole(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else { return false };
+    match (Lexer { t: text, pos: 0 }.body(0)) {
+        Ok((nodes, _)) => find(&nodes, APPS[0]).is_some_and(|n| matches!(n.val, Val::Obj(..))),
+        Err(_) => false,
+    }
 }
 
 // ---- Changes waiting for Steam to start again ----

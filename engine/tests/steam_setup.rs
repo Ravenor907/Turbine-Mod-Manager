@@ -65,6 +65,60 @@ fn writes_only_while_steam_is_closed_with_a_backup() {
     let _ = fs::remove_dir_all(&d);
 }
 
+/// The copy of Steam's file kept for good is never left half written: one broken by a power cut (an older Turbine
+/// wrote it in place) is put right from Steam's file on the next change, a whole one is never replaced, and no
+/// temp file is left beside them.
+#[test]
+fn a_broken_original_is_put_right_and_a_good_one_kept() {
+    use turbine_engine::shortcuts;
+    let d = std::env::temp_dir().join(format!("turbine-steamsetup-orig-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&d);
+    let cfg = d.join("userdata/42/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let local = cfg.join("localconfig.vdf");
+    let orig = steam_setup::original_file(&local);
+    fs::write(&local, CONFIG).unwrap();
+    for broken in [&CONFIG.as_bytes()[..CONFIG.len() / 2], b"", b"\xff\xfe"] {
+        fs::write(&orig, broken).unwrap();
+        assert!(!steam_setup::settings_whole(broken));
+        steam_setup::write_launch_options(&local, "489830", "%command% -a", false).unwrap();
+        let now = fs::read_to_string(&local).unwrap();
+        // Put right from the file as it was just before this change.
+        assert!(steam_setup::settings_whole(&fs::read(&orig).unwrap()));
+        assert_ne!(fs::read_to_string(&orig).unwrap(), now);
+        steam_setup::write_launch_options(&local, "489830", "%command% -b", false).unwrap();
+        assert_ne!(fs::read_to_string(&orig).unwrap(), fs::read_to_string(&local).unwrap());
+        fs::write(&local, CONFIG).unwrap();
+    }
+    // A whole original stays, even after many changes.
+    fs::write(&orig, CONFIG).unwrap();
+    steam_setup::write_launch_options(&local, "489830", "%command% -c", false).unwrap();
+    steam_setup::write_launch_options(&local, "489830", "%command% -d", false).unwrap();
+    assert_eq!(fs::read_to_string(&orig).unwrap(), CONFIG);
+
+    let sc = cfg.join("shortcuts.vdf");
+    let sorig = shortcuts::original_file(&sc);
+    let tile = |id: &str| (shortcuts::coop_tile(id, id, "io.github.ravenor907.TurbineModManager"), shortcuts::coop_marker(id));
+    let (t1, m1) = tile("steam:1");
+    shortcuts::add_shortcut(&sc, &t1, &m1, false).unwrap();
+    let one = fs::read(&sc).unwrap();
+    fs::write(&sorig, &one[..one.len() / 2]).unwrap();
+    let (t2, m2) = tile("steam:2");
+    shortcuts::add_shortcut(&sc, &t2, &m2, false).unwrap();
+    assert_eq!(fs::read(&sorig).unwrap(), one, "a broken original is put right");
+    let (t3, m3) = tile("steam:3");
+    shortcuts::add_shortcut(&sc, &t3, &m3, false).unwrap();
+    assert_eq!(fs::read(&sorig).unwrap(), one, "a whole one is kept");
+    let mut names: Vec<String> = fs::read_dir(&cfg).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        ["localconfig.vdf", "localconfig.vdf.turbine-backup", "localconfig.vdf.turbine-original", "shortcuts.vdf", "shortcuts.vdf.turbine-backup", "shortcuts.vdf.turbine-original"],
+        "no temp files left"
+    );
+    let _ = fs::remove_dir_all(&d);
+}
+
 /// Steam writes its own copy back when it closes: each change is checked after Steam starts again, and one that
 /// didn't hold is answered to be made again.
 #[test]

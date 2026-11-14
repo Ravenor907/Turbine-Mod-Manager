@@ -321,10 +321,7 @@ fn load(file: &Path) -> Result<(Option<Vec<u8>>, vdf::BinDoc), String> {
     match std::fs::read(file) {
         Ok(b) if b.len() > 16 << 20 => Err("Steam's list of non-Steam games is too big to be one".into()),
         Ok(b) => {
-            let doc = vdf::parse_binary_doc(&b).map_err(|e| format!("Steam's list of non-Steam games can't be read ({e})"))?;
-            if !doc.items.iter().any(|i| i.key_is("shortcuts") && matches!(i.value, vdf::BinValue::Obj(..))) {
-                return Err("Steam's list of non-Steam games has no list in it".into());
-            }
+            let doc = load_bytes(&b)?;
             Ok((Some(b), doc))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -332,6 +329,15 @@ fn load(file: &Path) -> Result<(Option<Vec<u8>>, vdf::BinDoc), String> {
         }
         Err(e) => Err(format!("Steam's list of non-Steam games can't be read ({e})")),
     }
+}
+
+/// A whole shortcuts.vdf, read.
+fn load_bytes(b: &[u8]) -> Result<vdf::BinDoc, String> {
+    let doc = vdf::parse_binary_doc(b).map_err(|e| format!("Steam's list of non-Steam games can't be read ({e})"))?;
+    if !doc.items.iter().any(|i| i.key_is("shortcuts") && matches!(i.value, vdf::BinValue::Obj(..))) {
+        return Err("Steam's list of non-Steam games has no list in it".into());
+    }
+    Ok(doc)
 }
 
 fn list_mut(doc: &mut vdf::BinDoc) -> &mut Vec<vdf::BinItem> {
@@ -344,20 +350,20 @@ fn save(file: &Path, before: Option<&[u8]>, doc: &vdf::BinDoc) -> Result<(), Str
     let dir = file.parent().ok_or("no folder")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     if let Some(b) = before {
+        let keep = |e: std::io::Error| format!("Couldn't keep a copy of Steam's list first ({e})");
         let orig = original_file(file);
-        if !orig.exists() {
-            std::fs::write(&orig, b).map_err(|e| format!("Couldn't keep a copy of Steam's list first ({e})"))?;
+        // The copy kept for good is written whole; one left broken (a power cut while an older Turbine wrote it) is
+        // put right from this file, which was just read as a whole list. A good one is never replaced.
+        if !std::fs::read(&orig).is_ok_and(|o| load_bytes(&o).is_ok()) {
+            crate::write_atomic_with(&orig, b, Some(file)).map_err(keep)?;
         }
-        std::fs::write(backup_file(file), b).map_err(|e| format!("Couldn't keep a copy of Steam's list first ({e})"))?;
+        crate::write_atomic_with(&backup_file(file), b, Some(file)).map_err(keep)?;
     }
-    let tmp = file.with_file_name("shortcuts.vdf.turbine-tmp");
-    std::fs::write(&tmp, vdf::write_binary_doc(doc)).map_err(|e| e.to_string())?;
-    let now = std::fs::read(file).ok();
-    if now.as_deref() != before {
-        let _ = std::fs::remove_file(&tmp);
+    let unchanged = || std::fs::read(file).ok().as_deref() == before;
+    if !crate::write_atomic_if(file, &vdf::write_binary_doc(doc), Some(file), unchanged).map_err(|e| e.to_string())? {
         return Err("Steam's list of non-Steam games changed meanwhile (is Steam running?): nothing written".into());
     }
-    std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// Adds the shortcut unless one with the same marker (Turbine's tile) or the same appid is there. Only while Steam

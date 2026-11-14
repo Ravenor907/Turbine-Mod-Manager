@@ -69,6 +69,12 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 
 /// `write_atomic`, and the new file takes the permissions of `perms_from` when that file is there.
 pub(crate) fn write_atomic_with(path: &Path, bytes: &[u8], perms_from: Option<&Path>) -> io::Result<()> {
+    write_atomic_if(path, bytes, perms_from, || true).map(|_| ())
+}
+
+/// `write_atomic_with`, but the new file only takes the old one's place if `still_ok` (asked once the new file is
+/// safely on disk, just before the swap) says so. Answers false, and leaves the old file as it was, when it doesn't.
+pub(crate) fn write_atomic_if(path: &Path, bytes: &[u8], perms_from: Option<&Path>, still_ok: impl FnOnce() -> bool) -> io::Result<bool> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p)?;
     }
@@ -82,6 +88,10 @@ pub(crate) fn write_atomic_with(path: &Path, bytes: &[u8], perms_from: Option<&P
         }
         f.sync_all()?;
     }
+    if !still_ok() {
+        let _ = fs::remove_file(&tmp);
+        return Ok(false);
+    }
     if let Err(e) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
@@ -89,7 +99,7 @@ pub(crate) fn write_atomic_with(path: &Path, bytes: &[u8], perms_from: Option<&P
     if let Some(p) = path.parent() && let Ok(d) = File::open(p) {
         let _ = d.sync_all();
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Every installed Steam and Heroic game under this home folder, sorted by name.
