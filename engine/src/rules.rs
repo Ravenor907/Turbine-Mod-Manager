@@ -521,11 +521,17 @@ pub fn mod_folders(files: &[String]) -> Vec<String> {
     for f in files {
         let clean = f.replace('\\', "/");
         let mut parts = clean.trim_start_matches('/').split('/');
-        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) && top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| o.eq_ignore_ascii_case(folder)) {
+        if let (Some(top), Some(folder), Some(_)) = (parts.next(), parts.next(), parts.next()) && top.eq_ignore_ascii_case("mods") && !out.iter().any(|o| same_name(o, folder)) {
             out.push(folder.to_string());
         }
     }
     out
+}
+
+/// Two file or folder names that are the same ignoring case, for every letter (Ä and ä, Д and д), the way deploy
+/// matches names everywhere else.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b) || (!(a.is_ascii() && b.is_ascii()) && a.to_lowercase() == b.to_lowercase())
 }
 
 /// Finds a path under `base`, matching each part of `rel` ignoring case (games under Proton don't care about case,
@@ -541,7 +547,7 @@ pub fn find_ci(base: &Path, rel: &str) -> Option<PathBuf> {
         let found = std::fs::read_dir(&cur)
             .ok()?
             .flatten()
-            .find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(part))?;
+            .find(|e| same_name(&e.file_name().to_string_lossy(), part))?;
         cur = found.path();
     }
     Some(cur)
@@ -894,7 +900,7 @@ fn map_smapi(entries: &[Entry], mods_root: &str, name: &str) -> Result<Vec<(Stri
     folders.sort_by_key(|f| f.len());
     let mut mods: Vec<Vec<String>> = Vec::new();
     for f in folders {
-        if !mods.iter().any(|m| f.len() >= m.len() && f[..m.len()].iter().zip(m).all(|(a, b)| a.eq_ignore_ascii_case(b))) {
+        if !mods.iter().any(|m| f.len() >= m.len() && f[..m.len()].iter().zip(m).all(|(a, b)| same_name(a, b))) {
             mods.push(f);
         }
     }
@@ -904,7 +910,7 @@ fn map_smapi(entries: &[Entry], mods_root: &str, name: &str) -> Result<Vec<(Stri
     let mut out = Vec::new();
     for e in entries {
         let owner = mods.iter().find(|m| {
-            e.parts.len() > m.len() && e.parts[..m.len()].iter().zip(m.iter()).all(|(a, b)| a.eq_ignore_ascii_case(b))
+            e.parts.len() > m.len() && e.parts[..m.len()].iter().zip(m.iter()).all(|(a, b)| same_name(a, b))
         });
         let Some(m) = owner else { continue }; // readme next to the mod folders
         let folder = m.last().cloned().unwrap_or_else(|| name.to_string());

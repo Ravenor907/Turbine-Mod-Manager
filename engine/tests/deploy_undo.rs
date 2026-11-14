@@ -181,6 +181,33 @@ fn a_stopped_deploy_whose_mod_is_gone_never_claims_a_game_file() {
     assert_eq!(read(&w.g("Data/settings_cache.dat")), "GAME MADE THIS");
 }
 
+/// A mod that may not replace the game's files is kept off them whatever letters their names use.
+#[test]
+fn a_mod_that_may_not_replace_game_files_skips_them_in_any_letters() {
+    use turbine_engine::deploy::{apply_guarded, Wanted};
+    let w = world("unicode-case");
+    write(&w.g("Data/Ärger.esp"), "GAME");
+    write(&w.g("Data/Plain.esp"), "GAME");
+    write(&w.g("Данные/Мод.esp"), "GAME");
+    let wanted: Vec<Wanted> = [w.stage("A", "data/ärger.esp", "MOD"), w.stage("A", "data/plain.esp", "MOD"), w.stage("A", "данные/мод.esp", "MOD")]
+        .into_iter()
+        .map(|(rel, source)| Wanted { rel, source, may_replace: false })
+        .collect();
+    let r = apply_guarded(&w.paths, &wanted, None).unwrap();
+    assert_eq!(r.skipped_existing.len(), 3, "{r:?}");
+    assert_eq!(read(&w.g("Data/Ärger.esp")), "GAME");
+    assert_eq!(read(&w.g("Данные/Мод.esp")), "GAME");
+    assert!(files_under(&w.paths.backups).is_empty());
+}
+
+#[test]
+fn finding_a_game_file_ignores_case_in_any_letters() {
+    let w = world("find-ci");
+    write(&w.g("Данные/Ärger.esp"), "GAME");
+    assert_eq!(turbine_engine::rules::find_ci(&w.paths.game, "данные/äRGER.ESP"), Some(w.g("Данные/Ärger.esp")));
+    assert_eq!(turbine_engine::rules::find_ci(&w.paths.game, "данные/other.esp"), None);
+}
+
 /// A folder in the game that can't be written to (an SD card gone read-only, say) holds one of the mod's files.
 fn stuck_world(tag: &str) -> (World, Vec<(String, PathBuf)>) {
     let w = world(tag);

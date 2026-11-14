@@ -1295,7 +1295,7 @@ fn game_has(game: &Path, rel: &str) -> bool {
             continue;
         }
         let Ok(rd) = fs::read_dir(&cur) else { return false };
-        match rd.flatten().find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case(part)) {
+        match rd.flatten().find(|e| crate::rules::same_name(&e.file_name().to_string_lossy(), part)) {
             Some(e) => cur = e.path(),
             None => return false,
         }
