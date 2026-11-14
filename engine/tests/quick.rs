@@ -205,6 +205,30 @@ fn mods_off_then_on_brings_back_exactly_those() {
     assert_eq!(on, vec![c.as_str()]);
 }
 
+/// The Mods off list is written whole (no temp file left beside it), and one that can't be read is told apart
+/// from none, so Mods on can say so instead of quietly turning nothing on.
+#[test]
+fn a_damaged_mods_off_list_is_known() {
+    let t = TempDir::new("quick-held-damaged");
+    let root = t.path("store");
+    assert!(!quick::held_damaged(&root), "no list is not a damaged one");
+    quick::write_held(&root, &["a".into(), "b \"c\"".into()], 7).unwrap();
+    assert_eq!(quick::read_held(&root), vec!["a".to_string(), "b \"c\"".to_string()]);
+    assert!(!quick::held_damaged(&root));
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1, "only the list itself");
+    quick::write_held(&root, &[], 8).unwrap();
+    assert!(!quick::held_damaged(&root), "an empty list is whole");
+    for bad in [&b"{\"on\":[\"a\""[..], b"", b"\xff", b"{\"on\":\"a\"}", b"[]"] {
+        fs::write(quick::held_path(&root), bad).unwrap();
+        assert!(quick::held_damaged(&root), "{bad:?}");
+        assert!(quick::read_held(&root).is_empty());
+    }
+    quick::write_request(&root, Action::ModsOn, "steam:1", 5).unwrap();
+    assert!(quick::take_request(&root, 6).is_some());
+    let names: Vec<String> = fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert_eq!(names, vec![quick::HELD_FILE.to_string()]);
+}
+
 #[test]
 fn status_says_what_the_panel_shows() {
     let t = TempDir::new("quick-status");

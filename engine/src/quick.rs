@@ -257,10 +257,7 @@ pub const REQUEST_MAX_AGE: u64 = 120;
 
 /// Keeps a request for the next Turbine that starts (in Turbine's data folder).
 pub fn write_request(dir: &Path, action: Action, game_id: &str, now: u64) -> io::Result<()> {
-    fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{REQUEST_FILE}.tmp"));
-    fs::write(&tmp, format!("{now}\n{}\n", socket_line(action, game_id)))?;
-    fs::rename(tmp, dir.join(REQUEST_FILE))
+    crate::write_atomic(&dir.join(REQUEST_FILE), format!("{now}\n{}\n", socket_line(action, game_id)).as_bytes())
 }
 
 /// The waiting request's socket line, taken (the file goes either way). None when there is none or it is too old.
@@ -291,12 +288,19 @@ pub fn read_held(store_root: &Path) -> Vec<String> {
     v.get("on").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(String::from)).collect()
 }
 
-pub fn write_held(store_root: &Path, ids: &[String], now: u64) -> io::Result<()> {
+/// Is there a Mods off list that can't be read (damaged, or not Turbine's)? Mods on then has nothing to go by.
+pub fn held_damaged(store_root: &Path) -> bool {
     let path = held_path(store_root);
-    let tmp = store_root.join(format!("{HELD_FILE}.tmp"));
+    if !path.exists() {
+        return false;
+    }
+    let Ok(text) = fs::read_to_string(path) else { return true };
+    !json::parse(&text).is_ok_and(|v| v.get("on").is_some_and(|on| matches!(on, Json::Arr(_))))
+}
+
+pub fn write_held(store_root: &Path, ids: &[String], now: u64) -> io::Result<()> {
     let list: Vec<String> = ids.iter().map(|i| quote(i)).collect();
-    fs::write(&tmp, format!("{{\"on\":[{}],\"at\":{now}}}\n", list.join(",")))?;
-    fs::rename(tmp, path)
+    crate::write_atomic(&held_path(store_root), format!("{{\"on\":[{}],\"at\":{now}}}\n", list.join(",")).as_bytes())
 }
 
 // ------------------------------------------------------------------------------------------------ the last launch

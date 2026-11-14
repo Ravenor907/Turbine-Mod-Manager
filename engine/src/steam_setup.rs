@@ -403,7 +403,6 @@ fn save_pending(data: &Path, list: &[Written]) -> std::io::Result<()> {
             _ => Ok(()),
         };
     }
-    fs::create_dir_all(f.parent().unwrap_or(data))?;
     let items: Vec<String> = list
         .iter()
         .map(|(c, w)| {
@@ -411,9 +410,7 @@ fn save_pending(data: &Path, list: &[Written]) -> std::io::Result<()> {
             format!("{},\"written\":{}}}", &j[..j.len() - 1], crate::json::quote(w))
         })
         .collect();
-    let tmp = f.with_extension("tmp");
-    fs::write(&tmp, format!("{{\"changes\":[{}]}}\n", items.join(",")))?;
-    fs::rename(tmp, f)
+    crate::write_atomic(&f, format!("{{\"changes\":[{}]}}\n", items.join(",")).as_bytes())
 }
 
 /// Notes a change just made (a later one for the same tile or game replaces an earlier one).

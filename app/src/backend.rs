@@ -3394,8 +3394,13 @@ pub(crate) fn mods_job(game: Game, on: bool) -> Job {
             w.say(format!("Close {} first, then turn its mods {word}.", game.name), "warn");
             return;
         }
-        let changed = w.slot(&game).and_then(|s| (if on { s.store.release_held() } else { s.store.hold_all_off() }).map_err(|e| e.to_string()));
+        let mut damaged = false;
+        let changed = w.slot(&game).and_then(|s| {
+            damaged = on && turbine_engine::quick::held_damaged(s.store.root());
+            (if on { s.store.release_held() } else { s.store.hold_all_off() }).map_err(|e| e.to_string())
+        });
         match changed {
+            Ok(0) if damaged => w.say(format!("Turbine's note of which mods Mods off turned off for {} is damaged, so none came back on. Turn them on in Turbine.", game.name), "warn"),
             Ok(0) if on => w.say(format!("Nothing to turn back on for {}. Choose its mods in Turbine.", game.name), "warn"),
             Ok(0) => w.say(format!("No mods were on for {}.", game.name), "ok"),
             Ok(n) => {
