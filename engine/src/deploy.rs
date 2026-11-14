@@ -1200,18 +1200,28 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     let lines: Vec<String> = plan.ops.iter().map(op_json).collect();
     let dirs: Vec<String> = plan.new_dirs.iter().map(|d| quote(d)).collect();
     write_atomic(&paths.plan, format!("{{\"ops\":[\n{}\n],\n\"new_dirs\":[{}]}}\n", lines.join(",\n"), dirs.join(",")).as_bytes())?;
+    // One file that can't change never stops the rest: every other step still happens, and the files that failed
+    // stay on record so the next try finishes them.
+    let mut failed: Vec<(String, io::Error)> = Vec::new();
+    let mut stuck: HashSet<String> = HashSet::new();
     for (i, op) in plan.ops.iter().enumerate() {
         if stop_after == Some(i) {
             return Err(io::Error::other("stopped on purpose (test)"));
         }
-        let step = match op {
-            Op::Remove { placed, again } => do_remove(paths, placed, *again, &mut record, &mut report).map(|()| report.removed += 1),
-            Op::Add { rel, source, copy, backup } => do_add(paths, rel, source, *copy, backup, &mut record, &mut report).map(|()| report.added += 1),
-        };
-        if let Err(e) = step {
-            // Keep what's done on record; the plan stays for the next start to finish.
-            let _ = record.save(&paths.record);
-            return Err(e);
+        match op {
+            Op::Remove { placed, again } => match do_remove(paths, placed, *again, &mut record, &mut report) {
+                Ok(()) => report.removed += 1,
+                Err(e) => {
+                    stuck.insert(placed.rel.to_lowercase());
+                    failed.push((placed.rel.clone(), e));
+                }
+            },
+            // Its place is still taken by the file that couldn't come out.
+            Op::Add { rel, .. } if stuck.contains(&rel.to_lowercase()) => {}
+            Op::Add { rel, source, copy, backup } => match do_add(paths, rel, source, *copy, backup, &mut record, &mut report) {
+                Ok(()) => report.added += 1,
+                Err(e) => failed.push((rel.clone(), e)),
+            },
         }
         // Saving every so often keeps recovery short without slowing big deploys.
         if i % 200 == 199 {
@@ -1220,8 +1230,30 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
     }
     tidy_dirs(paths, &mut record);
     record.save(&paths.record)?;
+    if !failed.is_empty() {
+        // The plan stays for the next start to finish (an add that failed halfway may have a game file to put back).
+        return Err(stuck_error(&failed));
+    }
     fs::remove_file(&paths.plan)?;
     Ok(report)
+}
+
+/// The error for files that couldn't be changed, naming them, after everything else was done.
+fn stuck_error(failed: &[(String, io::Error)]) -> io::Error {
+    let why = |e: &io::Error| if e.raw_os_error().is_some() { e.kind().to_string() } else { e.to_string() };
+    let mut names: Vec<String> = failed.iter().take(5).map(|(rel, e)| format!("{rel} ({})", why(e))).collect();
+    if failed.len() > 5 {
+        names.push(format!("and {} more", failed.len() - 5));
+    }
+    let kind = failed.first().map(|(_, e)| e.kind()).unwrap_or(io::ErrorKind::Other);
+    plain(
+        kind,
+        format!(
+            "Turbine couldn't change {} in the game's folder: {}. Everything else was done; try again to finish. If the game is on an SD card, check it isn't full or read-only.",
+            if failed.len() == 1 { "this file" } else { "these files" },
+            names.join(", ")
+        ),
+    )
 }
 
 /// Is there a file or folder at `rel` in the game (matched ignoring case, no links followed on the way)?
@@ -1307,16 +1339,21 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                     continue;
                 }
                 if is_ours(&placed, &target) {
-                    // Not removed yet: finish it.
-                    do_remove(paths, &placed, true, &mut record, &mut report)?;
-                    report.removed += 1;
-                } else if still_recorded {
-                    // Already removed; put the game's file back if that step didn't happen.
-                    if !exists(&target) && let Some(b) = &placed.backup {
-                        restore_backup(paths, &placed.rel, b)?;
+                    // Not removed yet: finish it. If it can't go now, it stays on record for the next deploy.
+                    if do_remove(paths, &placed, true, &mut record, &mut report).is_ok() {
+                        report.removed += 1;
                     }
-                    record.files.retain(|p| p.rel != placed.rel);
-                    report.removed += 1;
+                } else if still_recorded {
+                    // Already removed; put the game's file back if that step didn't happen (kept on record when
+                    // that fails, so the next deploy tries again).
+                    let back = match &placed.backup {
+                        Some(b) if !exists(&target) => restore_backup(paths, &placed.rel, b).is_ok(),
+                        _ => true,
+                    };
+                    if back {
+                        record.files.retain(|p| p.rel != placed.rel);
+                        report.removed += 1;
+                    }
                 }
             }
             Op::Add { rel, source, copy: _, backup } => {
@@ -1334,7 +1371,8 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                     Err(_) => {
                         // Never finished: undo the half that happened (the game file moved to backups).
                         if let Some(b) = &backup {
-                            restore_backup(paths, &rel, b)?;
+                            // When this fails the game's file stays in the backup folder; Reset puts it back.
+                            let _ = restore_backup(paths, &rel, b);
                         }
                         continue;
                     }
@@ -1433,7 +1471,8 @@ fn leftover_backups(paths: &Paths) -> Vec<(String, PathBuf)> {
 /// The way back when anything went wrong: takes out every file Turbine knows it placed, puts every game file in the
 /// backup folder back where its place is free, and starts a fresh, empty record. Works with a damaged record (it uses
 /// the saved copy, or nothing) and with set-aside entries (only files that still match what was written down go).
-/// Files it can't be sure of are left alone and listed.
+/// Files it can't be sure of are left alone and listed. A file that can't be changed (a read-only folder) doesn't stop
+/// the rest: it stays on record and the error names it, so the next Reset finishes the job.
 pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
     check_game(paths)?;
     let _lock = lock(paths)?;
@@ -1464,10 +1503,16 @@ pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
         }
     };
     report.bad_entries = bad;
+    // A file that can't change is named at the end; every other file still goes back. What failed stays on record
+    // (or set aside) so the next Reset finishes it.
+    let mut failed: Vec<(String, io::Error)> = Vec::new();
     for p in record.files.clone() {
-        do_remove(paths, &p, false, &mut record, &mut report)?;
-        report.removed += 1;
+        match do_remove(paths, &p, false, &mut record, &mut report) {
+            Ok(()) => report.removed += 1,
+            Err(e) => failed.push((p.rel.clone(), e)),
+        }
     }
+    let mut still_aside = Vec::new();
     for q in std::mem::take(&mut record.quarantine) {
         let Some(Loose { rel, backup, ino, size, mtime }) = loose_entry(paths, &q) else { continue };
         if check_dirs(&paths.game, &rel, None).is_err() {
@@ -1478,25 +1523,42 @@ pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
             let same_ino = ino.is_some_and(|i| i == m.ino());
             let same_stamp = size == Some(m.len()) && mtime == Some(mtime_of(&m));
             if m.is_file() && (same_ino || same_stamp) {
-                fs::remove_file(&target)?;
+                if let Err(e) = fs::remove_file(&target) {
+                    failed.push((rel.clone(), e));
+                    still_aside.push(q);
+                    continue;
+                }
                 report.removed += 1;
             } else {
                 report.changed_by_others.push(rel.clone());
             }
         }
-        if let Some(b) = backup {
-            restore_backup(paths, &rel, &b)?;
+        if let Some(b) = backup
+            && let Err(e) = restore_backup(paths, &rel, &b)
+        {
+            failed.push((rel.clone(), e));
         }
     }
     for (rel, b) in leftover_backups(paths) {
+        let known = failed.iter().any(|(f, _)| *f == rel);
         if check_dirs(&paths.game, &rel, None).is_err() || exists(&paths.game.join(&rel)) {
-            report.left_in_backups.push(rel);
+            if !known {
+                report.left_in_backups.push(rel);
+            }
             continue;
         }
-        restore_backup(paths, &rel, &b)?;
+        if let Err(e) = restore_backup(paths, &rel, &b)
+            && !known
+        {
+            failed.push((rel, e));
+        }
     }
     tidy_dirs(paths, &mut record);
-    let fresh = Record { files: Vec::new(), dirs: record.dirs, quarantine: Vec::new() };
+    // Only entries whose file couldn't change stay; everything else starts fresh.
+    let fresh = Record { files: std::mem::take(&mut record.files), dirs: record.dirs, quarantine: still_aside };
     fresh.save(&paths.record)?;
+    if !failed.is_empty() {
+        return Err(stuck_error(&failed));
+    }
     Ok(report)
 }

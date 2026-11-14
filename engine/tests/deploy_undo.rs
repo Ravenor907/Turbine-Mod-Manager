@@ -2,6 +2,7 @@
 //! player edited, a file that can't be removed, a game writing into a mod's file, a stopped deploy whose mod is gone.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use turbine_engine::deploy::{apply, reset_from_backups, Paths};
 
@@ -126,4 +127,63 @@ fn replaced_settings_file_edited_then_another_mod_takes_its_place() {
     apply(&w.paths, &[], None).unwrap();
     assert_eq!(read(&w.g("Engine.ini")), "ORIGINAL");
     assert!(files_under(&w.paths.backups).is_empty());
+}
+
+/// A folder in the game that can't be written to (an SD card gone read-only, say) holds one of the mod's files.
+fn stuck_world(tag: &str) -> (World, Vec<(String, PathBuf)>) {
+    let w = world(tag);
+    fs::create_dir_all(w.g("Aaa")).unwrap();
+    write(&w.g("Data/x.esp"), "ORIGINAL X");
+    let files = vec![w.stage("A", "Aaa/new.dll", "A dll"), w.stage("A", "Data/x.esp", "A x"), w.stage("A", "Zzz/z.txt", "A z")];
+    apply(&w.paths, &files, None).unwrap();
+    fs::set_permissions(w.g("Aaa"), fs::Permissions::from_mode(0o555)).unwrap();
+    (w, files)
+}
+
+fn unstick(w: &World) {
+    fs::set_permissions(w.g("Aaa"), fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn one_file_that_cannot_go_does_not_stop_play_without_mods() {
+    let (w, _) = stuck_world("stuck-off");
+    let msg = apply(&w.paths, &[], None).unwrap_err().to_string();
+    assert!(msg.contains("Aaa/new.dll") && !msg.contains("x.esp"), "{msg}");
+    // Everything else went back.
+    assert_eq!(read(&w.g("Data/x.esp")), "ORIGINAL X");
+    assert!(!w.g("Zzz").exists());
+    // The next try, once the folder can be written to, finishes the rest.
+    unstick(&w);
+    apply(&w.paths, &[], None).unwrap();
+    assert!(!w.g("Aaa/new.dll").exists());
+    assert!(files_under(&w.paths.backups).is_empty());
+    assert!(!w.paths.plan.exists());
+}
+
+#[test]
+fn one_file_that_cannot_go_does_not_stop_reset() {
+    let (w, _) = stuck_world("stuck-reset");
+    let msg = reset_from_backups(&w.paths).unwrap_err().to_string();
+    assert!(msg.contains("Aaa/new.dll"), "{msg}");
+    assert_eq!(read(&w.g("Data/x.esp")), "ORIGINAL X");
+    assert!(!w.g("Zzz").exists());
+    unstick(&w);
+    let r = reset_from_backups(&w.paths).unwrap();
+    assert_eq!(r.removed, 1, "{r:?}");
+    assert!(!w.g("Aaa/new.dll").exists());
+}
+
+#[test]
+fn one_file_that_cannot_go_while_switching_mods() {
+    let (w, files) = stuck_world("stuck-switch");
+    // The mod's dll goes, its other files stay, and another mod's file goes in.
+    let b = w.stage("B", "Data/b.esp", "B");
+    let msg = apply(&w.paths, &[files[1].clone(), files[2].clone(), b], None).unwrap_err().to_string();
+    assert!(msg.contains("Aaa/new.dll"), "{msg}");
+    assert_eq!(read(&w.g("Data/b.esp")), "B");
+    unstick(&w);
+    // The stopped plan is finished first, then everything goes back.
+    apply(&w.paths, &[], None).unwrap();
+    assert!(!w.g("Aaa/new.dll").exists() && !w.g("Data/b.esp").exists());
+    assert_eq!(read(&w.g("Data/x.esp")), "ORIGINAL X");
 }
