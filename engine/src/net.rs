@@ -238,13 +238,13 @@ impl Response {
 }
 
 /// The arguments curl gets for a request (pure, so it can be checked in tests). The URL comes last, after "--", so
-/// nothing in it can be read as an option.
+/// nothing in it can be read as an option. A request with headers of its own (an API key) is never sent on by curl
+/// to wherever a redirect points: `Client::send` follows those itself and checks every hop.
 pub fn curl_args(req: &Request, user_agent: &str, out: &Path, header_file: &Path) -> Vec<String> {
     let mut a: Vec<String> = [
         "--silent",
         "--show-error",
         "--fail",
-        "--location",
         "--proto",
         "=https",
         "--proto-redir",
@@ -257,6 +257,9 @@ pub fn curl_args(req: &Request, user_agent: &str, out: &Path, header_file: &Path
     .iter()
     .map(|s| s.to_string())
     .collect();
+    if req.headers.is_empty() {
+        a.insert(3, "--location".into());
+    }
     a.push("--max-filesize".into());
     a.push(req.max_bytes.to_string());
     a.push("--connect-timeout".into());
@@ -288,6 +291,29 @@ pub fn curl_args(req: &Request, user_agent: &str, out: &Path, header_file: &Path
     a.push("--".into());
     a.push(req.url.clone());
     a
+}
+
+/// Where a redirect's Location points, as a full URL, from the URL that answered with it (pure).
+pub fn redirect_target(from: &str, location: &str) -> String {
+    let loc = location.trim();
+    if loc.contains("://") {
+        return loc.to_string();
+    }
+    let (scheme, rest) = from.split_once("://").unwrap_or(("https", from));
+    if let Some(r) = loc.strip_prefix("//") {
+        return format!("{scheme}://{r}");
+    }
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let origin = format!("{scheme}://{}", &rest[..auth_end]);
+    if loc.starts_with('/') {
+        return format!("{origin}{loc}");
+    }
+    let path = rest[auth_end..].split(['?', '#']).next().unwrap_or("");
+    if loc.starts_with('?') {
+        return format!("{origin}{path}{loc}");
+    }
+    let dir = path.rfind('/').map(|i| &path[..=i]).unwrap_or("/");
+    format!("{origin}{dir}{loc}")
 }
 
 /// Reads the headers curl saved: only the last answer's block counts (earlier ones are redirects).
@@ -408,8 +434,40 @@ impl Client {
     }
 
     /// Sends a request and saves the answer to a temp file. `progress` is called a few times a second with the bytes
-    /// received so far; returning false stops the transfer.
+    /// received so far; returning false stops the transfer. Redirects of a request with headers of its own (an API
+    /// key) are followed here, one hop at a time: every hop must be an allowed host, and the headers only go on to
+    /// the host the request was made to.
     pub fn send(&self, req: &Request, mut progress: Option<Progress>) -> Result<Response, NetError> {
+        let first_host = https_host(&req.url);
+        let mut hop = req.clone();
+        for _ in 0..=8 {
+            let by_hand = !hop.headers.is_empty();
+            let p: Option<Progress> = match progress.as_mut() {
+                Some(p) => Some(&mut **p),
+                None => None,
+            };
+            let resp = self.send_once(&hop, p, by_hand)?;
+            if !(by_hand && (300..400).contains(&resp.status)) {
+                return Ok(resp);
+            }
+            let Some(loc) = resp.header("location") else { return Err(NetError::Http(resp.status)) };
+            let next = redirect_target(&hop.url, loc);
+            if !allowed_url(&next) {
+                return Err(NetError::NotAllowed(https_host(&next).unwrap_or(next)));
+            }
+            if https_host(&next) != first_host {
+                hop.headers.clear();
+            }
+            if matches!(resp.status, 301..=303) {
+                hop.body = Body::None;
+            }
+            hop.url = next;
+        }
+        Err(NetError::Failed("The site redirected too many times.".into()))
+    }
+
+    /// One curl run. With `redirect_back`, a redirect comes back as an answer (its body already deleted) for `send`.
+    fn send_once(&self, req: &Request, mut progress: Option<Progress>, redirect_back: bool) -> Result<Response, NetError> {
         if !allowed_url(&req.url) {
             return Err(NetError::NotAllowed(https_host(&req.url).unwrap_or_else(|| req.url.clone())));
         }
@@ -490,6 +548,10 @@ impl Client {
         let (hstatus, headers) = parse_headers(&fs::read_to_string(&hdr).unwrap_or_default());
         let status = if status == 0 { hstatus } else { status };
         cleanup(false);
+        if redirect_back && exit == 0 && (300..400).contains(&status) {
+            let _ = fs::remove_file(&out);
+            return Ok(Response { status, headers, effective_url, body: out });
+        }
         if let Err(e) = classify(exit, status, req.max_bytes) {
             let page = fs::read(&out).map(|b| b.into_iter().take(512).collect::<Vec<u8>>()).unwrap_or_default();
             let _ = fs::remove_file(&out);

@@ -20,9 +20,11 @@ struct Fake {
 
 const FAKE_CURL: &str = r#"#!/bin/sh
 SERVED='@SERVED@'
-out=; hdr=; url=; data=
+out=; hdr=; url=; data=; sent=; follow=no
 while [ $# -gt 0 ]; do
   case "$1" in
+    --header) sent="$sent[$2]"; shift;;
+    --location) follow=yes;;
     --output) out=$2; shift;;
     --dump-header) hdr=$2; shift;;
     --data-binary) data=$2; shift;;
@@ -31,6 +33,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s\n' "$url" >> "$SERVED/requests.log"
+printf '%s follow=%s %s\n' "$url" "$follow" "$sent" >> "$SERVED/headers.log"
 if [ -n "$data" ]; then cp "${data#@}" "$SERVED/last_post"; fi
 key=$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')
 eff=$url
@@ -69,6 +72,9 @@ impl Fake {
     }
     fn requests(&self) -> Vec<String> {
         fs::read_to_string(self.dir.join("served/requests.log")).unwrap_or_default().lines().map(str::to_string).collect()
+    }
+    fn sent_headers(&self) -> Vec<String> {
+        fs::read_to_string(self.dir.join("served/headers.log")).unwrap_or_default().lines().map(str::to_string).collect()
     }
     fn temp_files(&self) -> usize {
         fs::read_dir(self.dir.join("tmp")).map(|r| r.count()).unwrap_or(0)
@@ -134,7 +140,9 @@ fn curl_gets_fixed_safe_arguments() {
     let a = net::curl_args(&req, "TurbineModManager/0.3", Path::new("/t/out"), Path::new("/t/hdr"));
     let has = |pair: [&str; 2]| a.windows(2).any(|w| w[0] == pair[0] && w[1] == pair[1]);
     assert!(a.contains(&"--fail".to_string()));
-    assert!(a.contains(&"--location".to_string()));
+    assert!(!a.contains(&"--location".to_string()), "curl never takes a request's own headers on to a redirect");
+    let plain = net::curl_args(&Request::get("https://thunderstore.io/x"), "UA", Path::new("/o"), Path::new("/h"));
+    assert!(plain.contains(&"--location".to_string()), "a request with no headers of its own follows redirects in curl");
     assert!(has(["--proto", "=https"]));
     assert!(has(["--proto-redir", "=https"]));
     assert!(has(["--max-filesize", "1234"]));
@@ -458,4 +466,107 @@ fn a_blocked_or_down_site_is_never_the_keys_fault() {
     assert!(!site_down(&NetError::NotFound, &h(&[("cf-mitigated", "challenge")]), b""));
     assert!(!site_down(&NetError::Http(429), &[], b""));
     assert_eq!(NetError::Down.to_string(), "The site isn't answering right now. Try again in a few minutes.");
+}
+
+#[test]
+fn a_key_never_follows_a_redirect_to_another_host() {
+    let f = Fake::new("redir");
+    let key = ("apikey", "SECRET");
+    // Same host: the key goes on with it.
+    let a = "https://api.nexusmods.com/v1/a.json";
+    f.serve(a, b"");
+    f.extra(a, "status", "301");
+    f.extra(a, "headers", "Location: /v1/b.json\r\n");
+    f.serve("https://api.nexusmods.com/v1/b.json", b"{}");
+    assert_eq!(f.client.get_text(a, &[key]).unwrap(), "{}");
+    // Another allowed host: it is fetched, without the key.
+    let c = "https://api.nexusmods.com/v1/c.json";
+    f.serve(c, b"");
+    f.extra(c, "status", "302");
+    f.extra(c, "headers", "Location: https://cf-files.nexusmods.com/d.json\r\n");
+    f.serve("https://cf-files.nexusmods.com/d.json", b"{\"d\":1}");
+    assert_eq!(f.client.get_text(c, &[key]).unwrap(), "{\"d\":1}");
+    // A host that isn't allowed is never asked.
+    let e = "https://api.nexusmods.com/v1/e.json";
+    f.serve(e, b"");
+    f.extra(e, "status", "307");
+    f.extra(e, "headers", "location: https://evil.example/steal\r\n");
+    assert_eq!(f.client.get_text(e, &[key]), Err(NetError::NotAllowed("evil.example".into())));
+    let log = f.sent_headers();
+    assert_eq!(log.len(), 5, "{log:?}");
+    assert!(log.iter().all(|l| l.contains("follow=no") || !l.contains("SECRET")), "{log:?}");
+    assert!(log[1].starts_with("https://api.nexusmods.com/v1/b.json follow=no") && log[1].contains("apikey: SECRET"));
+    assert!(log[3].starts_with("https://cf-files.nexusmods.com/d.json follow=yes") && !log[3].contains("SECRET"));
+    assert!(!f.requests().iter().any(|u| u.contains("evil")));
+    assert_eq!(f.temp_files(), 0);
+    // Redirects that never end stop.
+    let g = "https://api.nexusmods.com/v1/g.json";
+    f.serve(g, b"");
+    f.extra(g, "status", "302");
+    f.extra(g, "headers", "Location: g.json\r\n");
+    assert_eq!(f.client.get_text(g, &[key]), Err(NetError::Failed("The site redirected too many times.".into())));
+}
+
+#[test]
+fn redirect_targets() {
+    let t = net::redirect_target;
+    assert_eq!(t("https://a.com/x/y?q=1", "https://b.com/z"), "https://b.com/z");
+    assert_eq!(t("https://a.com/x/y?q=1", "//b.com/z"), "https://b.com/z");
+    assert_eq!(t("https://a.com/x/y?q=1", "/z"), "https://a.com/z");
+    assert_eq!(t("https://a.com/x/y?q=1", "z"), "https://a.com/x/z");
+    assert_eq!(t("https://a.com/x/y?q=1", "?r=2"), "https://a.com/x/y?r=2");
+    assert_eq!(t("https://a.com", "z"), "https://a.com/z");
+    assert!(!net::allowed_url(&t("https://api.nexusmods.com/x", "http://api.nexusmods.com/y")));
+}
+
+/// Real curl, given Turbine's arguments for a request with a key, against a server on 127.0.0.1 that redirects to
+/// one on 127.0.0.2: the second server never hears the key. (Plain HTTP here, the only change to the arguments.)
+#[test]
+fn real_curl_keeps_the_key_on_its_host() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    if std::process::Command::new("curl").arg("--version").output().is_err() {
+        return;
+    }
+    let Ok(other) = TcpListener::bind("127.0.0.2:0") else { return };
+    let other_port = other.local_addr().unwrap().port();
+    let heard = Arc::new(Mutex::new(String::new()));
+    let h2 = heard.clone();
+    std::thread::spawn(move || {
+        for mut s in other.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            h2.lock().unwrap().push_str(&String::from_utf8_lossy(&buf[..n]));
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+        }
+    });
+    let first = TcpListener::bind("127.0.0.1:0").unwrap();
+    let first_port = first.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut s in first.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.2:{other_port}/steal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
+        }
+    });
+    let d = scratch("realcurl");
+    let run = |req: &Request| {
+        let mut a = net::curl_args(req, "UA", &d.join("out"), &d.join("hdr"));
+        for x in a.iter_mut() {
+            if x == "=https" {
+                *x = "=http".into();
+            }
+        }
+        *a.last_mut().unwrap() = format!("http://127.0.0.1:{first_port}/v1/x");
+        std::process::Command::new("curl").args(&a).output().unwrap()
+    };
+    let out = run(&Request::get("https://api.nexusmods.com/v1/x").header("apikey", "SECRET"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("302"), "{out:?}");
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!heard.lock().unwrap().contains("SECRET"), "the key reached the other host");
+    // Without a key, curl follows (a download sent on to its CDN).
+    let out = run(&Request::get("https://api.nexusmods.com/v1/x"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("200"), "{out:?}");
+    assert!(heard.lock().unwrap().contains("GET /steal"));
 }
