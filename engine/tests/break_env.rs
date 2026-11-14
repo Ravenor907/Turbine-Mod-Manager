@@ -405,7 +405,7 @@ fn world_on(tag: &str, game_base: &Path, stage_base: &Path, book_base: &Path) ->
     write(&game.join("readme.txt"), "vanilla readme");
     let staged = s.0.clone();
     write(&staged.join("A/Data/Skyrim.esm"), "A esm");
-    write(&staged.join("A/Data/ModA.esp"), "A plugin");
+    write(&staged.join("A/Data/ModA.bsa"), "A plugin");
     write(&staged.join("A/Data/New/Deep/a.txt"), "A deep");
     write(&o.0.join("victim.txt"), "outside victim");
     write(&o.0.join("secret.txt"), "outside secret");
@@ -462,7 +462,7 @@ fn cross_device_staging_and_backups() {
         assert_eq!(r.added, 3);
         assert_eq!(fs::read_to_string(w.paths.game.join("Data/Skyrim.esm")).unwrap(), "A esm");
         assert_eq!(fs::read_to_string(w.paths.game.join("Data/New/Deep/a.txt")).unwrap(), "A deep");
-        // ModA.esp would be a link; the replaced Skyrim.esm and the settings-like a.txt are copies anyway.
+        // ModA.bsa would be a link; the replaced Skyrim.esm and the settings-like a.txt are copies anyway.
         assert_eq!(r.copied_not_linked, 1, "{r:?}");
         let rec = Record::load(&w.paths.record).unwrap();
         assert!(rec.files.iter().all(|p| p.copy), "every file must be a copy across drives: {rec:?}");
@@ -631,7 +631,7 @@ fn stop_then_staged_source_gone_strands_game_file() {
     let w = world("strand");
     let before = snapshot(&w.paths.game);
     let wanted = mod_files(&w, "A");
-    // Ops are sorted: Data/ModA.esp, Data/New/Deep/a.txt, Data/Skyrim.esm. Stop after the two new files are placed.
+    // Ops are sorted: Data/ModA.bsa, Data/New/Deep/a.txt, Data/Skyrim.esm. Stop after the two new files are placed.
     assert!(apply(&w.paths, &wanted, Some(2)).is_err());
     fs::remove_dir_all(w.staged.join("A")).unwrap();
     // And a game file replaced, then a stop.

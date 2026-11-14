@@ -5,9 +5,9 @@
 //!   removes files it placed. Files a player or the game made are never touched.
 //! - A game file a mod replaces is moved to a backup folder first, and put back when the mod goes. Backup names are
 //!   never reused within a plan and a move never lands on a path that already exists.
-//! - Mods are hard-linked where a real link works. A mod file that replaces a game file, and any settings-like file
-//!   (.cfg, .ini, .json, .toml, .yaml, .yml, .xml, .txt, or anything in a folder named config) is copied instead, so
-//!   the game writing to it can never change the mod's own copy. A settings copy the player changed is kept when the
+//! - Big files games only read (packed archives, textures, meshes, sound, video; see `link_safe`) are hard-linked
+//!   where a real link works. Everything else, and a mod file that replaces a game file, is copied, so the game
+//!   writing to it can never change the mod's own copy. A linked file written into anyway still counts as Turbine's. A settings copy the player changed is kept when the
 //!   mod goes and put back the next time it goes in; when it had replaced the game's own file, that file comes back.
 //! - Only plain relative paths are used, and nothing is ever written through a linked folder inside the game. A mod
 //!   file never replaces a game folder.
@@ -163,6 +163,20 @@ pub fn config_like(rel: &str) -> bool {
     dirs.contains(&"config") || matches!(ext, "cfg" | "ini" | "json" | "toml" | "yaml" | "yml" | "xml" | "txt")
 }
 
+/// Big files games only read (packed archives, textures, meshes, sound, video) are hard linked, so a large mod doesn't
+/// take its space twice. Everything else is copied: games, loaders and tools write to all kinds of files in place
+/// (.ltx, .lua, .dat, .db, .esp cleaned by a tool), and through a link that would change the mod's own copy.
+pub fn link_safe(rel: &str, size: u64) -> bool {
+    let l = rel.to_lowercase();
+    let ext = l.rsplit('/').next().and_then(|n| n.rsplit_once('.')).map(|(_, e)| e).unwrap_or("");
+    let asset = matches!(
+        ext,
+        "bsa" | "ba2" | "archive" | "pak" | "ucas" | "utoc" | "big" | "vpk" | "rpf" | "forge" | "pck" | "wem" | "bnk" | "dds" | "nif" | "tri" | "hkx" | "png" | "jpg" | "jpeg" | "tga" | "bmp" | "wav" | "ogg" | "xwm" | "fuz" | "mp3" | "flac" | "bik" | "bk2" | "mp4" | "webm" | "usm"
+    );
+    // A very big file is linked whatever it is: copying it would cost more than the small risk.
+    !config_like(rel) && (asset || size >= 256 << 20)
+}
+
 /// Is the file at `target` still the one Turbine placed?
 fn is_ours(p: &Placed, target: &Path) -> bool {
     match fs::symlink_metadata(target) {
@@ -171,11 +185,17 @@ fn is_ours(p: &Placed, target: &Path) -> bool {
             if p.copy {
                 same
             } else {
-                same && m.ino() == p.ino
+                (same && m.ino() == p.ino) || written_through(p, &m)
             }
         }
         _ => false,
     }
+}
+
+/// A linked file something wrote into in place: still the very file of the mod's own folder (same inode, more than one
+/// name), only changed. Taking it out of the game loses nothing, but the mod's own copy changed with it.
+fn written_through(p: &Placed, m: &fs::Metadata) -> bool {
+    !p.copy && m.ino() == p.ino && m.nlink() > 1 && fs::metadata(&p.source).is_ok_and(|s| s.ino() == m.ino() && s.dev() == m.dev())
 }
 
 /// Checks every folder between the game folder and `rel`'s file. Ok(true): all there as real folders. Ok(false):
@@ -871,7 +891,8 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
             None => meta.is_some(),
         };
         let backup = replaces_game_file.then(|| names.take(&paths.backups, &actual));
-        let mut copy = replaces_game_file || config_like(&actual);
+        let src_size = fs::metadata(src).map(|m| m.len()).unwrap_or(0);
+        let mut copy = replaces_game_file || !link_safe(&actual, src_size);
         if !copy {
             let linkable = match fs::metadata(src) {
                 Ok(m) => match can_link.get(&(m.dev(), game_dev)) {

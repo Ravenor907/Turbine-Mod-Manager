@@ -136,11 +136,13 @@ fn deploys_switches_and_restores_exactly() {
     let r = apply(&w.paths, &wanted(&w, &["A", "B"]), None).unwrap();
     assert_eq!(r.added, 7 - 1); // A's mesh is overridden by B's, so 6 files land
     expect_ab(&w.paths.game);
-    // Turbine's mod files are links to the staged copies, except the one replacing a game file (a copy).
+    // Mod assets (textures, meshes, archives) are links to the staged copies, except one replacing a game file; the
+    // rest are copies.
     let rec = Record::load(&w.paths.record).unwrap();
     let sky = rec.files.iter().find(|p| p.rel == "Data/Textures/sky.dds").unwrap();
     assert!(sky.copy && sky.backup.is_some());
-    assert!(!rec.files.iter().find(|p| p.rel == "Data/ModA.esp").unwrap().copy);
+    assert!(!rec.files.iter().find(|p| p.rel.to_lowercase() == "data/meshes/a.nif").unwrap().copy);
+    assert!(rec.files.iter().find(|p| p.rel == "Data/ModA.esp").unwrap().copy, "a plugin can be cleaned in place by a tool");
 
     let r = apply(&w.paths, &wanted(&w, &["A"]), None).unwrap();
     assert_eq!((r.removed, r.added), (3, 1));

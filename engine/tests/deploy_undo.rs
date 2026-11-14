@@ -129,6 +129,43 @@ fn replaced_settings_file_edited_then_another_mod_takes_its_place() {
     assert!(files_under(&w.paths.backups).is_empty());
 }
 
+/// The game writes into a mod's file in place (a cache, a script, a plugin a tool cleans): the mod's own copy stays as
+/// it came. What the game wrote is its own now: left alone when the mod goes, and said so.
+#[test]
+fn a_game_writing_into_a_mod_file_never_changes_the_mods_copy() {
+    let w = world("inplace");
+    let files = vec![w.stage("A", "Data/cache.dat", "MOD DATA"), w.stage("A", "gamedata/scripts/a.ltx", "MOD LTX"), w.stage("A", "Data/A.esp", "MOD ESP")];
+    apply(&w.paths, &files, None).unwrap();
+    for (rel, _) in &files {
+        let mut f = fs::OpenOptions::new().write(true).truncate(true).open(w.g(rel)).unwrap();
+        std::io::Write::write_all(&mut f, b"GAME WROTE THIS").unwrap();
+    }
+    assert_eq!(read(&files[0].1), "MOD DATA");
+    assert_eq!(read(&files[1].1), "MOD LTX");
+    assert_eq!(read(&files[2].1), "MOD ESP");
+    let r = apply(&w.paths, &[], None).unwrap();
+    assert_eq!(r.changed_by_others.len(), 3, "{r:?}");
+    assert_eq!(read(&files[0].1), "MOD DATA");
+    assert!(files_under(&w.paths.backups).is_empty());
+}
+
+/// Packed archives and textures are still linked (a Deck's drive is small), and one written into anyway is still
+/// known as the mod's file: it comes out with the mod and is never taken for a game file.
+#[test]
+fn a_linked_archive_written_into_is_still_the_mods_file() {
+    use std::os::unix::fs::MetadataExt;
+    let w = world("linked");
+    let a = w.stage("A", "Data/A.bsa", "MOD ARCHIVE");
+    apply(&w.paths, std::slice::from_ref(&a), None).unwrap();
+    assert_eq!(fs::metadata(w.g("Data/A.bsa")).unwrap().ino(), fs::metadata(&a.1).unwrap().ino(), "archives are linked");
+    edit(&w.g("Data/A.bsa"), "WRITTEN THROUGH");
+    let r = apply(&w.paths, std::slice::from_ref(&a), None).unwrap();
+    assert!(r.put_back.is_empty() && r.added == 0, "{r:?}");
+    apply(&w.paths, &[], None).unwrap();
+    assert!(!w.g("Data/A.bsa").exists());
+    assert!(files_under(&w.paths.backups).is_empty());
+}
+
 /// A folder in the game that can't be written to (an SD card gone read-only, say) holds one of the mod's files.
 fn stuck_world(tag: &str) -> (World, Vec<(String, PathBuf)>) {
     let w = world(tag);
