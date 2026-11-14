@@ -182,3 +182,39 @@ fn launch_options_survive_an_odd_byte() {
     fs::write(&f, bytes).unwrap();
     assert_eq!(turbine_engine::steam::launch_options(&home.0, "489830").as_deref(), Some("%command% -x"));
 }
+
+/// A Heroic entry whose folder is a system folder, the home folder's settings or a folder that holds others' is
+/// never taken as a game's folder (mods would go straight into it). Real installs, on the internal drive or a card,
+/// still count.
+#[test]
+fn system_and_home_level_folders_are_never_a_game_folder() {
+    use turbine_engine::heroic::safe_install_path;
+    let home = Path::new("/home/deck");
+    for bad in [
+        "/", "/usr", "/usr/bin", "/usr/share/games/x", "/etc", "/etc/x", "/bin", "/lib64", "/var", "/var/lib/flatpak",
+        "/home", "/home/deck", "/home/other", "/var/home/other", "/home/deck/.config", "/home/deck/.config/heroic",
+        "/home/deck/.local", "/home/deck/.local/share", "/home/deck/.local/share/Steam", "/home/deck/.steam/steam",
+        "/home/deck/.local/share/Steam/steamapps/common", "/home/deck/.ssh/x", "/home/deck/Games", "/home/deck/Games/Heroic",
+        "/run", "/run/media", "/mnt", "/media", "/tmp", "/opt", "/proc/1", "/sys/x", "/dev/x", "/root/x", "games",
+    ] {
+        assert!(!safe_install_path(Path::new(bad), home), "{bad}");
+    }
+    for ok in [
+        "/home/deck/Games/Heroic/Cyberpunk 2077", "/home/deck/Games/Other/Tiny Game",
+        "/home/deck/.local/share/Steam/steamapps/common/ELDEN RING", "/home/deck/.config-not/x",
+        "/run/media/deck/SD Card/Heroic/Hades", "/run/media/mmcblk0p1/Games/Hades", "/mnt/games/Hades", "/opt/Hades",
+        "/var/home/deck/Games/x", "/var/mnt/data/Heroic/x", "/tmp/x/Game",
+    ] {
+        assert!(safe_install_path(Path::new(ok), home), "{ok}");
+    }
+    // Through the scan: a sideloaded entry pointing at the home folder's settings is skipped with a reason.
+    let h = fake_home();
+    let lib = h.0.join(".var/app/com.heroicgameslauncher.hgl/config/heroic/sideload_apps/library.json");
+    let cfg = h.0.join(".config");
+    fs::create_dir_all(&cfg).unwrap();
+    write(&lib, &format!(r#"{{"games": [{{"app_name": "x9", "title": "Odd", "folder_name": "{}", "is_installed": true, "install": {{"platform": "Windows"}}}}]}}"#, cfg.display()));
+    let scan = scan_games(&h.0);
+    assert!(!scan.games.iter().any(|g| g.name == "Odd"));
+    assert!(scan.problems.iter().any(|p| p.starts_with("Skipped Odd:")), "{:?}", scan.problems);
+    assert!(scan.games.iter().any(|g| g.name == "Cyberpunk 2077"), "real Heroic installs still count");
+}

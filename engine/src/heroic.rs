@@ -49,20 +49,48 @@ fn runtime_from_platform(platform: Option<&str>, install_dir: &Path) -> Runtime 
 }
 
 /// Is `dir` usable as a game's folder? It must be a full path, and never the root of the drive, the home folder or a
-/// folder above it (Turbine would put mod files straight into it).
+/// folder above it, a system folder (/usr, /etc and the like), the settings in the home folder (~/.config) or a
+/// folder that holds others' (~/.local/share/Steam itself, /run/media): Turbine would put mod files straight into it.
+/// A game's own folder under them (~/.local/share/Steam/steamapps/common/<game>, /run/media/<card>/...) is fine.
 pub fn safe_install_path(dir: &Path, home: &Path) -> bool {
-    if !dir.is_absolute() || dir.parent().is_none() {
-        return false;
-    }
-    let too_high = |d: &Path, h: &Path| h.starts_with(d);
-    if too_high(dir, home) {
+    if !dir.is_absolute() || dir.parent().is_none() || too_broad(dir, home) {
         return false;
     }
     match (fs::canonicalize(dir), fs::canonicalize(home)) {
-        (Ok(d), Ok(h)) => d.parent().is_some() && !too_high(&d, &h),
-        (Ok(d), Err(_)) => d.parent().is_some(),
+        (Ok(d), Ok(h)) => d.parent().is_some() && !too_broad(&d, &h) && !too_broad(&d, home),
+        (Ok(d), Err(_)) => d.parent().is_some() && !too_broad(&d, home),
         _ => true,
     }
+}
+
+/// Folders in the home folder that are never a game's, with everything in them.
+const HOME_SETTINGS: &[&str] = &[".config", ".ssh", ".gnupg", ".pki", ".mozilla"];
+/// Folders in the home folder that hold other things (games among them), never a game's folder themselves.
+const HOME_HOLDERS: &[&str] = &[
+    ".local", ".local/share", ".local/bin", ".local/state", ".local/share/Steam", ".local/share/Steam/steamapps",
+    ".local/share/Steam/steamapps/common", ".local/share/applications", ".steam", ".steam/steam", ".steam/root", ".var",
+    ".var/app", ".cache", "Desktop", "Documents", "Downloads", "Games", "Games/Heroic",
+];
+/// System folders, with everything in them.
+const SYSTEM: &[&str] = &[
+    "/usr", "/etc", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/proc", "/sys", "/dev", "/root", "/var/lib",
+    "/var/log", "/var/cache", "/var/spool", "/var/tmp", "/var/db",
+];
+/// Folders that hold drives, homes and the like, never a game's folder themselves.
+const HOLDERS: &[&str] = &["/home", "/var", "/var/home", "/var/mnt", "/run", "/run/media", "/run/user", "/mnt", "/media", "/tmp", "/opt", "/srv"];
+
+fn too_broad(d: &Path, home: &Path) -> bool {
+    if home.starts_with(d) {
+        return true;
+    }
+    if let Ok(rel) = d.strip_prefix(home) {
+        return HOME_SETTINGS.iter().any(|s| rel.starts_with(s)) || HOME_HOLDERS.iter().any(|s| rel == Path::new(s));
+    }
+    if SYSTEM.iter().any(|s| d.starts_with(s)) || HOLDERS.iter().any(|s| d == Path::new(s)) {
+        return true;
+    }
+    // Someone's home folder.
+    ["/home", "/var/home"].iter().any(|h| d.parent() == Some(Path::new(h)))
 }
 
 #[allow(clippy::too_many_arguments)]
