@@ -4,7 +4,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use turbine_engine::deploy::{apply, reset_from_backups, Paths};
+use turbine_engine::deploy::{apply, recover, reset_from_backups, Paths, Record};
 
 fn write(p: &Path, text: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -164,6 +164,21 @@ fn a_linked_archive_written_into_is_still_the_mods_file() {
     apply(&w.paths, &[], None).unwrap();
     assert!(!w.g("Data/A.bsa").exists());
     assert!(files_under(&w.paths.backups).is_empty());
+}
+
+/// A deploy stopped (power out) before its file went in; the mod's own file is gone since and the game made a file of
+/// the same name. Finishing the stopped deploy never claims that file, so turning mods off never deletes it.
+#[test]
+fn a_stopped_deploy_whose_mod_is_gone_never_claims_a_game_file() {
+    let w = world("recover-gone");
+    let a = w.stage("A", "Data/settings_cache.dat", "A");
+    assert!(apply(&w.paths, std::slice::from_ref(&a), Some(0)).is_err());
+    fs::remove_file(&a.1).unwrap();
+    write(&w.g("Data/settings_cache.dat"), "GAME MADE THIS");
+    recover(&w.paths).unwrap();
+    assert!(Record::load(&w.paths.record).unwrap().files.is_empty());
+    apply(&w.paths, &[], None).unwrap();
+    assert_eq!(read(&w.g("Data/settings_cache.dat")), "GAME MADE THIS");
 }
 
 /// A folder in the game that can't be written to (an SD card gone read-only, say) holds one of the mod's files.

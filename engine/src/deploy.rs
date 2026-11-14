@@ -115,7 +115,9 @@ pub struct Wanted {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
-    Add { rel: String, source: PathBuf, copy: bool, backup: Option<PathBuf> },
+    /// `stamp`: size and time of the file this step copies or links (0, 0 when not known), so a stopped deploy can
+    /// tell its own file from one the game made even when the mod's file is gone since.
+    Add { rel: String, source: PathBuf, copy: bool, backup: Option<PathBuf>, stamp: (u64, i64) },
     /// `again`: the same file goes back in right after (it went missing or was replaced).
     Remove { placed: Placed, again: bool },
 }
@@ -542,12 +544,14 @@ fn load_record(paths: &Paths, report: &mut Report) -> io::Result<Record> {
 
 fn op_json(op: &Op) -> String {
     match op {
-        Op::Add { rel, source, copy, backup } => format!(
-            "{{\"op\":\"add\",\"rel\":{},\"source\":{},\"copy\":{},\"backup\":{}}}",
+        Op::Add { rel, source, copy, backup, stamp } => format!(
+            "{{\"op\":\"add\",\"rel\":{},\"source\":{},\"copy\":{},\"backup\":{},\"srcSize\":\"{}\",\"srcMtime\":\"{}\"}}",
             quote(rel),
             quote(&source.to_string_lossy()),
             copy,
-            backup.as_ref().map(|b| quote(&b.to_string_lossy())).unwrap_or_else(|| "null".into())
+            backup.as_ref().map(|b| quote(&b.to_string_lossy())).unwrap_or_else(|| "null".into()),
+            stamp.0,
+            stamp.1
         ),
         Op::Remove { placed, again } => format!("{{\"op\":\"remove\",\"again\":{again},\"placed\":{}}}", placed_json(placed)),
     }
@@ -575,7 +579,8 @@ fn op_from(v: &Json, paths: &Paths) -> Result<Op, String> {
             if let Some(b) = &backup && !backup_ok(paths, b) {
                 return Err(format!("its backup {} is outside Turbine's backup folder", b.display()));
             }
-            Ok(Op::Add { rel: rel.to_string(), source, copy, backup })
+            let stamp = (opt_u64(v.get("srcSize")).ok_or("its source size can't be read")?, opt_i64(v.get("srcMtime")).ok_or("its source time can't be read")?);
+            Ok(Op::Add { rel: rel.to_string(), source, copy, backup, stamp })
         }
         Some("remove") => {
             let placed = placed_from(v.get("placed").ok_or("nothing to remove")?, Some(paths))?;
@@ -913,7 +918,10 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
                 copied_not_linked += 1;
             }
         }
-        ops.push(Op::Add { rel: actual, source: src.clone(), copy, backup });
+        // What `place` will put there: the player's kept version of a settings file, else the mod's file.
+        let from = changes_path(paths, src).filter(|p| is_file(p)).unwrap_or_else(|| src.clone());
+        let stamp = fs::metadata(&from).map(|m| (m.len(), mtime_of(&m))).unwrap_or((0, 0));
+        ops.push(Op::Add { rel: actual, source: src.clone(), copy, backup, stamp });
     }
     // Folders the adds will create, so a stopped deploy knows exactly which folders are Turbine's.
     let mut new_dirs: Vec<String> = Vec::new();
@@ -1239,7 +1247,7 @@ pub fn apply_guarded(paths: &Paths, wanted: &[Wanted], stop_after: Option<usize>
             },
             // Its place is still taken by the file that couldn't come out.
             Op::Add { rel, .. } if stuck.contains(&rel.to_lowercase()) => {}
-            Op::Add { rel, source, copy, backup } => match do_add(paths, rel, source, *copy, backup, &mut record, &mut report) {
+            Op::Add { rel, source, copy, backup, .. } => match do_add(paths, rel, source, *copy, backup, &mut record, &mut report) {
                 Ok(()) => report.added += 1,
                 Err(e) => failed.push((rel.clone(), e)),
             },
@@ -1377,7 +1385,7 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                     }
                 }
             }
-            Op::Add { rel, source, copy: _, backup } => {
+            Op::Add { rel, source, copy: _, backup, stamp } => {
                 if record.files.iter().any(|p| p.rel == rel) {
                     continue;
                 }
@@ -1407,8 +1415,12 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                 let matches = |s: &fs::Metadata| t.ino() == s.ino() || (t.len() == s.len() && t.mtime() == s.mtime() && t.mtime_nsec() == s.mtime_nsec());
                 let placed_here = match &src_meta {
                     Some(s) => matches(s) || saved_meta.as_ref().is_some_and(matches),
-                    // The staged file is gone (the mod was removed since): what's at the target can only be Turbine's.
-                    None => true,
+                    // The staged file is gone (the mod was removed since, or its drive is out): only the size and time
+                    // written in the plan can say the file there is the one Turbine placed (a copy keeps its file's
+                    // time; a card's drive may round it to 2 seconds). Without a match it may be the game's own:
+                    // left alone, never claimed (a game file this step moved aside stays in the backup folder, where
+                    // Reset finds it).
+                    None => stamp != (0, 0) && t.len() == stamp.0 && (mtime_of(&t) - stamp.1).abs() <= 2_000_000_000,
                 };
                 if placed_here {
                     let linked = src_meta.as_ref().is_some_and(|s| s.ino() == t.ino());
