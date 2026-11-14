@@ -7,6 +7,7 @@
 //! - `mods/<id>/...`      each mod's files, laid out relative to the game folder
 //! - `removed/<id>/...`   mods in Recently removed (kept 7 days)
 //! - `state.json`         order, on/off, names, Recently removed, setups, last build (written atomically)
+//! - `state.json.prev`    its second copy, read when state.json is damaged (damaged ones kept as state.damaged*.json)
 //! - `deploy/`            the deploy record, plan and backups of game files mods replace
 //! - `tmp/`               archives being unpacked and installers waiting for choices (cleared on open)
 //!
@@ -616,8 +617,9 @@ pub fn conflicts_in(game: &Game, store_root: &Path, files: &[String], from: &str
 }
 
 /// Where a mod's files wait in a store (its id's folder under mods/).
+/// An ID that isn't a plain folder name gets a hidden name that is never a mod's (and is cleared on open).
 pub fn staged_dir(store_root: &Path, id: &str) -> PathBuf {
-    store_root.join("mods").join(id)
+    store_root.join("mods").join(if safe_id(id) { id } else { ".not-a-mod" })
 }
 
 /// Folders Turbine created in the game (from the store's record), lowercased.
@@ -689,6 +691,10 @@ pub struct Store {
     /// The one file the player allowed as an older Seamless Co-op over a newer one, while it is being added
     /// (`import_archive_allowing_older`).
     older_seamless_ok: Option<PathBuf>,
+    /// What opening found and fixed that the player should hear about.
+    note: Option<String>,
+    /// state.json was damaged with no usable copy, and the list was made again from the folders.
+    rebuilt: bool,
 }
 
 /// A staged folder's files by folder, with its inode and modification time when read.
@@ -915,11 +921,166 @@ fn walk_files(base: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-fn remove_dir(p: &Path) -> io::Result<()> {
-    match fs::remove_dir_all(p) {
+/// Is `id` usable as a mod ID: one plain folder name (not empty, no "/", "\\" or NUL, not "." or "..", not hidden)?
+/// IDs read back from state.json are checked with this before any folder is made from them.
+pub fn safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 255 && !id.starts_with('.') && !id.contains(['/', '\\', '\0'])
+}
+
+/// True when `p` is inside `root` (never `root` itself), through plain names only, and no folder on the way is a link:
+/// a removal there can't reach anything outside the store.
+fn inside(root: &Path, p: &Path) -> bool {
+    let Ok(rest) = p.strip_prefix(root) else { return false };
+    let parts: Vec<_> = rest.components().collect();
+    if parts.is_empty() || !parts.iter().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return false;
+    }
+    let mut at = root.to_path_buf();
+    for c in &parts[..parts.len() - 1] {
+        at.push(c);
+        if fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_symlink()) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Deletes a folder (or file) of the store at `root`, and refuses anything that is not inside it.
+fn remove_dir_in(root: &Path, p: &Path) -> io::Result<()> {
+    if !inside(root, p) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("Turbine didn't delete {} because it isn't inside its own folder for this game.", p.display()),
+        ));
+    }
+    let gone = match fs::symlink_metadata(p) {
+        Ok(m) if !m.is_dir() => fs::remove_file(p),
+        _ => fs::remove_dir_all(p),
+    };
+    match gone {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }
+}
+
+// ---- Files kept with a second copy: state.json here, profiles.json and seen.json too ----
+
+/// How many damaged copies of one file are kept (the oldest go first).
+pub const KEEP_DAMAGED: usize = 5;
+
+/// The second copy of a kept file ("state.json.prev").
+pub fn prev_copy(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!("{name}.prev"))
+}
+
+/// Writes a kept file, then its second copy, each whole or not at all.
+pub(crate) fn write_kept(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic(path, bytes)?;
+    write_atomic(&prev_copy(path), bytes)
+}
+
+/// What reading a kept file found.
+#[derive(Default)]
+pub(crate) struct KeptRead {
+    /// The file's contents; None when neither copy could be used (or there is none yet).
+    pub json: Option<Json>,
+    /// The contents came from the second copy.
+    pub from_copy: bool,
+    /// The damaged copies set aside, by their new names.
+    pub damaged: Vec<PathBuf>,
+}
+
+/// Ok(None): no such file. Err: there is something, but it is not a readable file of the right shape.
+fn read_json(path: &Path, ok: &dyn Fn(&Json) -> bool) -> Result<Option<Json>, ()> {
+    match fs::read(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+        Ok(b) => String::from_utf8(b).ok().and_then(|t| json::parse(&t).ok()).filter(|v| ok(v)).map(Some).ok_or(()),
+    }
+}
+
+/// Reads a kept file. A damaged one (cut short, not text, the wrong shape, unreadable, a folder) is set aside under
+/// a name of its own and the second copy is used instead. Fails only when a damaged file can't be set aside.
+pub(crate) fn read_kept(path: &Path, ok: &dyn Fn(&Json) -> bool) -> io::Result<KeptRead> {
+    let mut out = KeptRead::default();
+    match read_json(path, ok) {
+        Ok(Some(v)) => {
+            out.json = Some(v);
+            return Ok(out);
+        }
+        Ok(None) => {}
+        Err(()) => out.damaged.push(set_aside(path, false)?),
+    }
+    let prev = prev_copy(path);
+    match read_json(&prev, ok) {
+        Ok(Some(v)) => {
+            out.json = Some(v);
+            out.from_copy = true;
+        }
+        Ok(None) => {}
+        Err(()) => out.damaged.push(set_aside(&prev, false)?),
+    }
+    Ok(out)
+}
+
+/// Moves (or with `copy`, copies) a damaged file to "<name>.damaged.json", or "<name>.damaged-<n>.json" when that is
+/// taken: an earlier damaged copy is never written over. Only the newest `KEEP_DAMAGED` are kept.
+pub(crate) fn set_aside(path: &Path, copy: bool) -> io::Result<PathBuf> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = name.strip_suffix(".prev").unwrap_or(&name);
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "json"));
+    let plain = format!("{stem}.damaged.{ext}");
+    let head = format!("{stem}.damaged-");
+    let tail = format!(".{ext}");
+    let number = |n: &str| -> Option<u64> {
+        if n == plain {
+            return Some(1);
+        }
+        n.strip_prefix(&head)?.strip_suffix(&tail)?.parse().ok()
+    };
+    let mut kept: Vec<(u64, PathBuf)> = fs::read_dir(dir)
+        .map(|rd| rd.flatten().filter_map(|e| Some((number(&e.file_name().to_string_lossy())?, e.path()))).collect())
+        .unwrap_or_default();
+    let next = kept.iter().map(|(n, _)| *n).max().unwrap_or(0) + 1;
+    let dest = if next == 1 { dir.join(&plain) } else { dir.join(format!("{head}{next}{tail}")) };
+    if copy {
+        fs::copy(path, &dest)?;
+    } else {
+        fs::rename(path, &dest)?;
+    }
+    kept.push((next, dest.clone()));
+    kept.sort();
+    let extra = kept.len().saturating_sub(KEEP_DAMAGED);
+    for (_, old) in kept.into_iter().take(extra) {
+        let _ = remove_dir_in(dir, &old);
+    }
+    Ok(dest)
+}
+
+/// The file name alone, for messages.
+fn file_name_of(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Is this state.json's shape one this Turbine reads (a newer layout, or lists where objects belong, is not)?
+fn state_shape_ok(v: &Json) -> bool {
+    if !matches!(v, Json::Obj(_)) {
+        return false;
+    }
+    let arr = |j: &Json| matches!(j, Json::Arr(_));
+    let obj = |j: &Json| matches!(j, Json::Obj(_));
+    v.get("version").is_none_or(|x| matches!(x, Json::Num(n) if *n <= 1.0))
+        && ["mods", "removed", "setups", "replaceOk"].iter().all(|k| v.get(k).is_none_or(arr))
+        && ["sources", "choices", "placements"].iter().all(|k| v.get(k).is_none_or(obj))
+        && v.get("lastBuild").is_none_or(|x| matches!(x, Json::Str(_) | Json::Null))
+}
+
+/// A store's state.json (or its second copy) is in this folder.
+fn has_state(root: &Path) -> bool {
+    let path = root.join("state.json");
+    fs::symlink_metadata(&path).is_ok() || fs::symlink_metadata(prev_copy(&path)).is_ok()
 }
 
 fn num(v: Option<&Json>) -> u64 {
@@ -932,7 +1093,7 @@ fn num(v: Option<&Json>) -> u64 {
 
 fn mod_from(v: &Json) -> Option<Mod> {
     Some(Mod {
-        id: v.str_at("id")?.to_string(),
+        id: v.str_at("id").filter(|id| safe_id(id))?.to_string(),
         name: v.str_at("name").unwrap_or("Mod").to_string(),
         enabled: v.get("enabled").and_then(Json::as_bool).unwrap_or(false),
         version: v.str_at("version").map(String::from),
@@ -1044,11 +1205,13 @@ impl Store {
         let on_library = choose_root(&key, &game.library, true, data_home);
         let in_data = choose_root(&key, &game.library, false, data_home);
         // A store already in the data folder stays there: its record lists the files it placed in the game.
-        if in_data.join("state.json").exists() && !on_library.join("state.json").exists() {
+        if has_state(&in_data) && !has_state(&on_library) {
             return in_data;
         }
         // Card out: keep the library's place (opening it then says the drive is missing) rather than splitting the store.
-        if !game.library.is_dir() || writable(&on_library) {
+        // A store already on the library stays there too when it can only be read (opening it then says so): a new
+        // empty one elsewhere would hide the player's mods.
+        if !game.library.is_dir() || has_state(&on_library) || writable(&on_library) {
             on_library
         } else {
             in_data
@@ -1062,6 +1225,17 @@ impl Store {
                 io::ErrorKind::NotFound,
                 format!("The drive with {} isn't there. If it's on an SD card, put the card back in.", game.name),
             ));
+        }
+        if has_state(root) && !writable(root) {
+            let words = if root.starts_with(&game.library) {
+                format!(
+                    "The drive with {}'s mods can only be read right now, so Turbine can't change them. If it's an SD card, take it out and put it back in, or restart. If that keeps happening, the card may be failing.",
+                    game.name
+                )
+            } else {
+                format!("Turbine's folder for {}'s mods can only be read right now, so Turbine can't change them ({}).", game.name, root.display())
+            };
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, words));
         }
         for d in ["mods", "removed", "deploy"] {
             fs::create_dir_all(root.join(d))?;
@@ -1079,7 +1253,7 @@ impl Store {
                 }
             }
         }
-        remove_dir(&root.join("tmp"))?;
+        remove_dir_in(root, &root.join("tmp"))?;
         let mut s = Store {
             root: root.to_path_buf(),
             game: game.clone(),
@@ -1101,6 +1275,8 @@ impl Store {
             merged_in_place: std::sync::Mutex::new(Vec::new()),
             settings_notes: std::sync::Mutex::new(Vec::new()),
             older_seamless_ok: None,
+            note: None,
+            rebuilt: false,
         };
         let mut dirty = s.load()?;
         dirty |= s.tidy()?;
@@ -1148,7 +1324,7 @@ impl Store {
     }
 
     fn removed_dir(&self, id: &str) -> PathBuf {
-        self.root.join("removed").join(id)
+        self.root.join("removed").join(if safe_id(id) { id } else { ".not-a-mod" })
     }
 
     /// The deploy bookkeeping for this game. A game me3 starts deploys into its Turbine-owned me3 profile
@@ -1223,20 +1399,31 @@ impl Store {
     /// Reads state.json. Returns true when it needed rewriting (missing or unreadable).
     fn load(&mut self) -> io::Result<bool> {
         let path = self.state_path();
-        let text = match fs::read_to_string(&path) {
-            Ok(t) => t,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(e) => return Err(e),
-        };
-        let v = match json::parse(&text) {
-            Ok(v) => v,
-            Err(_) => {
-                // Keep the damaged file for a look later; the mods themselves are picked up again from their folders.
-                fs::rename(&path, self.root.join("state.damaged.json"))?;
-                return Ok(true);
+        let read = read_kept(&path, &state_shape_ok)?;
+        let kept_as = read.damaged.first().map(|p| file_name_of(p)).unwrap_or_default();
+        let Some(v) = read.json else {
+            if read.damaged.is_empty() {
+                return Ok(false);
             }
+            // Both copies damaged: the damaged files stay for a look later, and the mods themselves (and those in
+            // Recently removed) are picked up again from their folders.
+            self.rebuilt = true;
+            self.note = Some(format!(
+                "Turbine's list of {}'s mods was damaged, and so was its saved copy. Your mods were found again, but they are all off and their order is lost: turn on the ones you want. The damaged list is kept as {kept_as}.",
+                self.game.name
+            ));
+            return Ok(true);
         };
+        let mut dirty = false;
+        if read.from_copy {
+            self.note = Some(format!("Turbine's list of {}'s mods was damaged or missing, so it went back to its saved copy.", self.game.name));
+            dirty = true;
+        }
+        let mut dropped = 0;
         for m in v.get("mods").map(Json::as_array).unwrap_or(&[]) {
+            if m.get("id").is_some() && mod_from(m).is_none() {
+                dropped += 1;
+            }
             if let Some(item) = mod_from(m) {
                 if self.mods.iter().any(|x| x.id == item.id) {
                     continue;
@@ -1246,6 +1433,9 @@ impl Store {
             }
         }
         for r in v.get("removed").map(Json::as_array).unwrap_or(&[]) {
+            if r.get("id").is_some() && mod_from(r).is_none() {
+                dropped += 1;
+            }
             if let Some(item) = mod_from(r) {
                 let removed = Removed { item, removed_at: num(r.get("removedAt")) };
                 self.removed_extra.push(RemovedEntry {
@@ -1300,7 +1490,26 @@ impl Store {
         self.replace_ok = v.get("replaceOk").map(Json::as_array).unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(String::from)).collect();
         self.last_build = v.str_at("lastBuild").map(String::from);
         self.sync_lists();
-        Ok(false)
+        if dropped > 0 {
+            // Entries whose ID isn't a plain folder name are left out (nothing is ever made or deleted from them);
+            // the file as it was is kept beside the list.
+            let from = if read.from_copy { prev_copy(&path) } else { path.clone() };
+            let kept = set_aside(&from, true)?;
+            self.note.get_or_insert_with(|| {
+                format!(
+                    "Turbine's list of {}'s mods had {dropped} entries it couldn't use, so it left them out. The list as it was is kept as {}.",
+                    self.game.name,
+                    file_name_of(&kept)
+                )
+            });
+            dirty = true;
+        }
+        Ok(dirty)
+    }
+
+    /// What opening the store found and fixed that the player should hear about (a damaged mod list), if anything.
+    pub fn opened_note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 
     /// Every mod shows a clean name: the page's title when Turbine knows it, else the cleaned file name (and the
@@ -1334,19 +1543,39 @@ impl Store {
         let mut keep = Vec::new();
         for r in std::mem::take(&mut self.removed_extra) {
             if now.saturating_sub(r.removed.removed_at) >= KEEP_REMOVED_SECS {
-                remove_dir(&self.removed_dir(&r.removed.item.id))?;
+                remove_dir_in(&self.root, &self.removed_dir(&r.removed.item.id))?;
                 changed = true;
             } else {
                 keep.push(r);
             }
         }
         self.removed_extra = keep;
-        // Leftovers: folders in removed/ nothing points to, and half-made folders.
+        // Leftovers: folders in removed/ nothing points to, and half-made folders. After a damaged list was made
+        // again, they are mods the player can still put back: they go back into Recently removed instead.
         if let Ok(rd) = fs::read_dir(self.root.join("removed")) {
-            for e in rd.flatten() {
+            let mut entries: Vec<_> = rd.flatten().collect();
+            entries.sort_by_key(|e| e.file_name());
+            for e in entries {
                 let name = e.file_name().to_string_lossy().into_owned();
-                if !self.removed_extra.iter().any(|r| r.removed.item.id == name) {
-                    remove_dir(&e.path())?;
+                let known = self.removed_extra.iter().any(|r| r.removed.item.id == name);
+                if self.rebuilt && !known && safe_id(&name) && e.path().is_dir() {
+                    let item = Mod {
+                        id: name.clone(),
+                        name: name.replace('-', " "),
+                        enabled: false,
+                        version: None,
+                        source: "Zip file".into(),
+                        files: walk_files(&e.path()).len(),
+                        needs_loader: false,
+                        added: now,
+                    };
+                    let position = self.mods.len();
+                    self.removed_extra.push(RemovedEntry { removed: Removed { item, removed_at: now }, position, archive: String::new() });
+                    changed = true;
+                    continue;
+                }
+                if !known {
+                    remove_dir_in(&self.root, &e.path())?;
                 }
             }
         }
@@ -1355,7 +1584,7 @@ impl Store {
             names.sort();
             for name in names {
                 if name.starts_with('.') {
-                    remove_dir(&self.mod_dir(&name))?;
+                    remove_dir_in(&self.root, &self.mod_dir(&name))?;
                     continue;
                 }
                 if self.mods.iter().any(|m| m.id == name) {
@@ -1454,7 +1683,7 @@ impl Store {
             replace_ok.join(","),
             opt(&self.last_build)
         );
-        write_atomic(&self.state_path(), text.as_bytes())
+        write_kept(&self.state_path(), text.as_bytes())
     }
 
     /// Every mod's files in the game (game-relative), in Turbine's order, then the Recently removed ones (turned off),
@@ -1626,7 +1855,7 @@ impl Store {
                 // Basic support: lay the installer's output out as an archive of its own, then place it like
                 // any other mod (placement, the refused table and the overwrite question all apply).
                 let out = unpacked.with_extension("output");
-                let _ = remove_dir(&out);
+                let _ = remove_dir_in(&self.root, &out);
                 let laid = (|| -> io::Result<()> {
                     for (from, to) in &map {
                         let src = unpacked.join(zip::safe_relative(from).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?);
@@ -1643,10 +1872,10 @@ impl Store {
                     Ok(())
                 })();
                 if let Err(e) = laid {
-                    let _ = remove_dir(&out);
+                    let _ = remove_dir_in(&self.root, &out);
                     return Err(fail(format!("couldn't read or write a file ({e})")));
                 }
-                remove_dir(&unpacked).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
+                remove_dir_in(&self.root, &unpacked).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
                 fs::rename(&out, &unpacked).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
                 let files: Vec<String> = walk_files(&unpacked).into_iter().map(|(rel, _)| rel).collect();
                 return self.place_or_ask(&unpacked.clone(), &files, &target, &unpacked, notes, Some(choices)).unwrap_or_else(|| Err(fail("its files have nowhere to go".into())));
@@ -1658,14 +1887,14 @@ impl Store {
             Ok(Import::Added(out))
         })();
         if !matches!(result, Ok(Import::NeedsPlace(_))) {
-            let _ = remove_dir(&unpacked);
+            let _ = remove_dir_in(&self.root, &unpacked);
         }
         result
     }
 
     /// Drops an installer the player backed out of.
     pub fn cancel_install(&mut self, pending: Pending) {
-        let _ = remove_dir(&pending.unpacked);
+        let _ = remove_dir_in(&self.root, &pending.unpacked);
     }
 
     /// Game files a placement would land on that Turbine didn't place (the game's own), and files it may never
@@ -1721,13 +1950,13 @@ impl Store {
             self.keep_choices(&out.item.id, pending.choices.clone());
             Ok(out)
         })();
-        let _ = remove_dir(&pending.unpacked);
+        let _ = remove_dir_in(&self.root, &pending.unpacked);
         result
     }
 
     /// Drops a mod the player backed out of on "Where do these files go?".
     pub fn cancel_place(&mut self, pending: PendingPlace) {
-        let _ = remove_dir(&pending.unpacked);
+        let _ = remove_dir_in(&self.root, &pending.unpacked);
     }
 
     /// Where a Basic game's mod went, if it is one.
@@ -1748,7 +1977,7 @@ impl Store {
         let tmp = self.root.join("tmp");
         fs::create_dir_all(&tmp)?;
         let staged = tmp.join(format!("{id}.moving"));
-        remove_dir(&staged)?;
+        remove_dir_in(&self.root, &staged)?;
         fs::create_dir_all(&staged)?;
         let old: Vec<String> = info.to.split('/').filter(|p| !p.is_empty()).map(str::to_lowercase).collect();
         let moved = (|| -> io::Result<()> {
@@ -1772,14 +2001,14 @@ impl Store {
             Ok(())
         })();
         if let Err(e) = moved {
-            remove_dir(&staged)?;
+            remove_dir_in(&self.root, &staged)?;
             return Err(e);
         }
         let old_dir = tmp.join(format!("{id}.old"));
-        remove_dir(&old_dir)?;
+        remove_dir_in(&self.root, &old_dir)?;
         fs::rename(&dir, &old_dir)?;
         fs::rename(&staged, &dir)?;
-        remove_dir(&old_dir)?;
+        remove_dir_in(&self.root, &old_dir)?;
         info.to = to.to_string();
         info.rule = "you".into();
         info.skipped.clear();
@@ -1929,7 +2158,7 @@ impl Store {
         fs::create_dir_all(&tmp).map_err(|e| fail(format!("couldn't read or write a file ({e})")))?;
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let unpacked = tmp.join(format!("{}-{stamp}.unpacked", target.id));
-        let _ = remove_dir(&unpacked);
+        let _ = remove_dir_in(&self.root, &unpacked);
         let result = (|| -> Result<Import, String> {
             let mut files = self.unpack(archive, &unpacked).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
             if files.is_empty() {
@@ -1996,7 +2225,7 @@ impl Store {
         // An installer waiting for choices (or a mod waiting for where it goes) keeps its files; everything else is
         // cleaned up.
         if !matches!(result, Ok(Import::NeedsChoices(_)) | Ok(Import::NeedsPlace(_))) {
-            let _ = remove_dir(&unpacked);
+            let _ = remove_dir_in(&self.root, &unpacked);
         }
         result
     }
@@ -2090,7 +2319,7 @@ impl Store {
         let id = target.id.clone();
         let tmp = self.root.join("tmp");
         let staged = tmp.join(format!("{id}.staged"));
-        let _ = remove_dir(&staged);
+        let _ = remove_dir_in(&self.root, &staged);
         let result = (|| -> Result<(Vec<String>, usize), String> {
             fs::create_dir_all(&staged).map_err(io_fail)?;
             let mut game_files = Vec::new();
@@ -2159,7 +2388,7 @@ impl Store {
         let (game_files, count) = match result {
             Ok(r) => r,
             Err(e) => {
-                let _ = remove_dir(&staged);
+                let _ = remove_dir_in(&self.root, &staged);
                 return Err(e);
             }
         };
@@ -2170,16 +2399,16 @@ impl Store {
         let swap = (|| -> io::Result<()> {
             if dir.exists() {
                 let old = tmp.join(format!("{id}.old"));
-                remove_dir(&old)?;
+                remove_dir_in(&self.root, &old)?;
                 fs::rename(&dir, &old)?;
                 fs::rename(&staged, &dir)?;
-                remove_dir(&old)
+                remove_dir_in(&self.root, &old)
             } else {
                 fs::rename(&staged, &dir)
             }
         })();
         if let Err(e) = swap {
-            let _ = remove_dir(&staged);
+            let _ = remove_dir_in(&self.root, &staged);
             return Err(io_fail(e));
         }
 
@@ -2303,7 +2532,7 @@ impl Store {
     pub fn remove(&mut self, id: &str) -> io::Result<()> {
         let i = self.index_of(id)?;
         let dest = self.removed_dir(id);
-        remove_dir(&dest)?;
+        remove_dir_in(&self.root, &dest)?;
         let src = self.mod_dir(id);
         if src.exists() {
             fs::rename(&src, &dest)?;
@@ -2324,7 +2553,7 @@ impl Store {
         let src = self.removed_dir(id);
         let dest = self.mod_dir(id);
         if src.exists() {
-            remove_dir(&dest)?;
+            remove_dir_in(&self.root, &dest)?;
             fs::rename(&src, &dest)?;
         }
         let entry = self.removed_extra.remove(r);
@@ -2338,7 +2567,7 @@ impl Store {
     /// them when it was removed). It can't be put back afterwards.
     pub fn purge_removed(&mut self, id: &str) -> io::Result<()> {
         let r = self.removed_extra.iter().position(|r| r.removed.item.id == id).ok_or_else(|| not_found(id))?;
-        remove_dir(&self.removed_dir(id))?;
+        remove_dir_in(&self.root, &self.removed_dir(id))?;
         self.removed_extra.remove(r);
         self.save()
     }
@@ -2350,7 +2579,7 @@ impl Store {
         let ids: Vec<String> = self.removed_extra.iter().map(|r| r.removed.item.id.clone()).collect();
         let mut done = 0;
         for id in &ids {
-            remove_dir(&self.removed_dir(id))?;
+            remove_dir_in(&self.root, &self.removed_dir(id))?;
             self.removed_extra.retain(|r| r.removed.item.id != *id);
             self.save()?;
             done += 1;

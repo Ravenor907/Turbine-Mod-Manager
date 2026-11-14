@@ -425,7 +425,9 @@ fn damaged_state_keeps_the_mods() {
     s.import_zip(&w.zip("Keep Me.zip", &[("k.esp", "k")])).unwrap();
     let root = s.root().to_path_buf();
     drop(s);
+    // Both the list and its saved copy damaged (one alone comes back from the other: tests/saved_state.rs).
     fs::write(root.join("state.json"), "{\"mods\":[").unwrap();
+    fs::write(root.join("state.json.prev"), "{\"mods\":[").unwrap();
     let s = w.open();
     assert_eq!(ids(&s), ["keep-me"]);
     assert!(!s.mods()[0].enabled, "picked up again, off until the player turns it on");

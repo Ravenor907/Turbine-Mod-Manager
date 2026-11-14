@@ -1442,6 +1442,10 @@ impl Worker {
         if !self.slots.contains_key(&key) {
             let rules = GameRules::for_game(game);
             let store = Store::open(game, &self.data_home).map_err(|e| format!("Couldn't open {}'s mods: {e}", game.name))?;
+            // A damaged mod list that was put back from its saved copy (or made again) is told once.
+            if let Some(note) = store.opened_note() {
+                self.say(note, "warn");
+            }
             let slot = Slot { game: game.clone(), rules, store };
             // An online-only anti-cheat game: mod files already in its folder come out at once (Turbine refuses mods for it).
             crate::anticheat::refused_cleanup(self, &slot);

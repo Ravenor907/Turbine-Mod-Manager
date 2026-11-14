@@ -11,7 +11,7 @@
 use crate::deploy::Report;
 use crate::json::{self, quote, Json};
 use crate::nexus;
-use crate::store::{folder_safe, SourceInfo, Store};
+use crate::store::{folder_safe, read_kept, write_kept, SourceInfo, Store};
 use crate::write_atomic;
 use std::fs;
 use std::io;
@@ -35,6 +35,14 @@ pub struct Profiles {
     list: Vec<Profile>,
 }
 
+/// Is this profiles.json's shape one this Turbine reads?
+fn profiles_shape_ok(v: &Json) -> bool {
+    matches!(v, Json::Obj(_))
+        && v.get("version").is_none_or(|x| matches!(x, Json::Num(n) if *n <= 1.0))
+        && v.get("profiles").is_none_or(|x| matches!(x, Json::Arr(_)))
+        && v.get("active").is_none_or(|x| matches!(x, Json::Str(_)))
+}
+
 fn clean_profile_name(name: &str) -> Result<String, String> {
     let n: String = name.chars().filter(|c| !c.is_control()).collect();
     let n = n.trim().to_string();
@@ -49,10 +57,20 @@ fn clean_profile_name(name: &str) -> Result<String, String> {
 
 impl Profiles {
     /// Reads a game's profiles. The first time, there is one, "Default", holding the current setup.
+    /// A damaged profiles.json is set aside and its saved copy (profiles.json.prev) used. When neither can be used,
+    /// this fails once (rather than start over with only "Default" without a word); the damaged files are kept.
     pub fn open(store: &Store) -> io::Result<Profiles> {
         let path = store.root().join("profiles.json");
         let mut p = Profiles { path, active: DEFAULT_PROFILE.into(), list: Vec::new() };
-        if let Ok(text) = fs::read_to_string(&p.path) && let Ok(v) = json::parse(&text) {
+        let read = read_kept(&p.path, &profiles_shape_ok)?;
+        if read.json.is_none() && let Some(kept) = read.damaged.first() {
+            let kept = kept.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("the list of loadouts was damaged, and so was its saved copy. It is kept as {kept}. Open Loadouts again to start a new list"),
+            ));
+        }
+        if let Some(v) = read.json {
             for item in v.get("profiles").map(Json::as_array).unwrap_or(&[]) {
                 let Some(name) = item.str_at("name") else { continue };
                 if p.list.iter().any(|x| x.name.eq_ignore_ascii_case(name)) {
@@ -89,7 +107,7 @@ impl Profiles {
                 format!("{{\"name\":{},\"order\":[{}]}}", quote(&p.name), order.join(","))
             })
             .collect();
-        write_atomic(&self.path, format!("{{\"version\":1,\"active\":{},\"profiles\":[\n{}\n]}}\n", quote(&self.active), items.join(",\n")).as_bytes())
+        write_kept(&self.path, format!("{{\"version\":1,\"active\":{},\"profiles\":[\n{}\n]}}\n", quote(&self.active), items.join(",\n")).as_bytes())
     }
 
     pub fn names(&self) -> Vec<String> {

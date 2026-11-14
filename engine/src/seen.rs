@@ -62,7 +62,10 @@ fn keep_last(v: &mut Vec<String>) {
 
 impl Seen {
     pub fn parse(text: &str) -> Seen {
-        let Ok(j) = json::parse(text) else { return Seen::default() };
+        json::parse(text).map(|j| Seen::from_json(&j)).unwrap_or_default()
+    }
+
+    fn from_json(j: &Json) -> Seen {
         Seen {
             adopted: j.get("adopted").is_some_and(Json::truthy),
             launch_done: texts(j.get("launchDone")),
@@ -87,14 +90,16 @@ impl Seen {
         )
     }
 
-    /// The saved state; empty when there is none yet or it can't be read.
+    /// The saved state; empty when there is none yet. A damaged file is set aside and its saved copy
+    /// (seen.json.prev) read instead.
     pub fn load(path: &Path) -> Seen {
-        std::fs::read_to_string(path).map(|t| Seen::parse(&t)).unwrap_or_default()
+        let Ok(read) = crate::store::read_kept(path, &|j| matches!(j, Json::Obj(_))) else { return Seen::default() };
+        read.json.map(|j| Seen::from_json(&j)).unwrap_or_default()
     }
 
-    /// Writes the state whole or not at all.
+    /// Writes the state, then its saved copy, each whole or not at all.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        crate::write_atomic(path, self.to_json().as_bytes())
+        crate::store::write_kept(path, self.to_json().as_bytes())
     }
 
     /// Reads in the values the interface kept itself before (each one JSON text, as it saved them): {"launchDone",
