@@ -8,7 +8,7 @@
 //! - Mods are hard-linked where a real link works. A mod file that replaces a game file, and any settings-like file
 //!   (.cfg, .ini, .json, .toml, .yaml, .yml, .xml, .txt, or anything in a folder named config) is copied instead, so
 //!   the game writing to it can never change the mod's own copy. A settings copy the player changed is kept when the
-//!   mod goes and put back the next time it goes in.
+//!   mod goes and put back the next time it goes in; when it had replaced the game's own file, that file comes back.
 //! - Only plain relative paths are used, and nothing is ever written through a linked folder inside the game. A mod
 //!   file never replaces a game folder.
 //! - Before any change, the whole plan is written to disk. If Turbine stops halfway (crash, power loss), the next start
@@ -815,8 +815,9 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
         match chosen.get(&key) {
             Some((_, src)) if *src == p.source => {
                 let target = paths.game.join(&p.rel);
-                // A settings file the player or the loader changed: their edit, left as it is.
-                let edited_settings = p.copy && p.backup.is_none() && config_like(&p.rel) && is_file(&target);
+                // A settings file the player or the loader changed: their edit, left as it is. This holds for one
+                // that replaced the game's own file too: the game's file stays safe in the backup folder.
+                let edited_settings = p.copy && config_like(&p.rel) && is_file(&target);
                 if is_ours(p, &target) || edited_settings {
                     kept += 1;
                 } else {
@@ -864,7 +865,8 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
             // Turbine's own settings copy that was changed in place is not a file of the game's: its removal
             // (planned before this add) moves it aside, so there is nothing here to back up. Counting it as the
             // game's would give the new copy a backup name, and it would stop being treated as a settings file.
-            Some(p) if p.copy && p.backup.is_none() && config_like(&p.rel) && going.contains(&lk) && changes_path(paths, &p.source).is_some() => false,
+            // When it had replaced a game file, that removal puts the game's file back first, so it is backed up again.
+            Some(p) if p.copy && config_like(&p.rel) && going.contains(&lk) && changes_path(paths, &p.source).is_some() => p.backup.as_ref().is_some_and(|b| exists(b)),
             Some(p) => meta.is_some() || p.backup.as_ref().is_some_and(|b| exists(b)),
             None => meta.is_some(),
         };
@@ -1040,13 +1042,17 @@ fn do_remove(paths: &Paths, p: &Placed, again: bool, record: &mut Record, report
             restore_backup(paths, &p.rel, b)?;
         }
     } else if exists(&target) {
-        let settings = p.copy && p.backup.is_none() && config_like(&p.rel) && is_file(&target);
+        let settings = p.copy && config_like(&p.rel) && is_file(&target);
         match changes_path(paths, &p.source).filter(|_| settings) {
             Some(keep) => {
-                // The player (or the game) changed this mod's settings file: keep their version for next time.
+                // The player (or the game) changed this mod's settings file: keep their version for next time. When
+                // it had replaced the game's own file, that file goes back now: it must never be left in backups.
                 let _ = remove_if_file(&keep);
                 move_file(&target, &keep)?;
                 report.player_changes_saved.push(p.rel.clone());
+                if let Some(b) = &p.backup {
+                    restore_backup(paths, &p.rel, b)?;
+                }
             }
             // Something else changed it (often a game update). Leave it; the old backup is no longer the game's file.
             None if !again => report.changed_by_others.push(p.rel.clone()),
