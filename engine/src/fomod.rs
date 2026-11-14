@@ -22,6 +22,19 @@ use crate::json::quote;
 use crate::xml::{self, Element};
 use std::collections::{HashMap, HashSet};
 
+/// Most steps an installer may have. The biggest real installers have a few dozen.
+pub const MAX_STEPS: usize = 1_000;
+/// Most groups and most options, each counted over all steps. Real installers have up to a few thousand options.
+pub const MAX_OPTIONS: usize = 20_000;
+/// Most (file, place) pairs an install may work out, before later files replace earlier ones at the same place.
+/// The biggest real mods have tens of thousands of files; a hostile installer could ask for every file in the
+/// archive once per folder entry (billions of pairs).
+pub const MAX_PLACED: usize = 500_000;
+
+fn too_many() -> String {
+    format!("its installer lists far too many files (over {MAX_PLACED})")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupKind {
     ExactlyOne,
@@ -358,6 +371,14 @@ pub fn parse(bytes: &[u8]) -> Result<Config, String> {
             })
             .collect();
         sort_named(&mut steps, order_of(Some(steps_el)), |s| s.name.clone());
+        let groups: usize = steps.iter().map(|s| s.groups.len()).sum();
+        let options: usize = steps.iter().flat_map(|s| &s.groups).map(|g| g.plugins.len()).sum();
+        if steps.len() > MAX_STEPS || groups > MAX_OPTIONS || options > MAX_OPTIONS {
+            return Err(format!(
+                "its installer has too many steps or options to show ({} steps, {options} options; the most is {MAX_STEPS} steps and {MAX_OPTIONS} options)",
+                steps.len()
+            ));
+        }
         cfg.steps = steps;
     }
     if let Some(c) = root.child("conditionalFileInstalls") && let Some(patterns) = c.child("patterns") {
@@ -510,6 +531,9 @@ pub struct Session {
     sel: Vec<Vec<Vec<bool>>>,
     ready: Vec<bool>,
     history: Vec<usize>,
+    /// The flags set by the steps in `history`, kept up to date as the player moves, so showing a step or picking
+    /// an option doesn't go through every earlier step again.
+    before: HashMap<String, String>,
     current: Option<usize>,
     /// Earlier choices ("step/group/option") to start from instead of the defaults.
     preferred: Option<HashSet<String>>,
@@ -577,10 +601,11 @@ impl Session {
             sel,
             ready,
             history: Vec::new(),
+            before: HashMap::new(),
             current: None,
             preferred: None,
         };
-        s.current = s.next_visible(0);
+        s.current = s.next_visible_with(0, &HashMap::new());
         if let Some(c) = s.current {
             s.enter(c);
         }
@@ -634,40 +659,54 @@ impl Session {
         p
     }
 
+    /// Adds the flags set by step si's chosen options to `flags`.
+    fn add_flags(&self, si: usize, flags: &mut HashMap<String, String>) {
+        for (gi, g) in self.config.steps[si].groups.iter().enumerate() {
+            for (pi, p) in g.plugins.iter().enumerate() {
+                if self.sel[si][gi][pi] {
+                    for (k, v) in &p.flags {
+                        flags.insert(k.clone(), v.clone());
+                    }
+                }
+            }
+        }
+    }
+
     /// Flags set by the chosen options of these steps, in order.
     fn flags_of(&self, steps: &[usize]) -> HashMap<String, String> {
         let mut flags = HashMap::new();
         for &si in steps {
-            for (gi, g) in self.config.steps[si].groups.iter().enumerate() {
-                for (pi, p) in g.plugins.iter().enumerate() {
-                    if self.sel[si][gi][pi] {
-                        for (k, v) in &p.flags {
-                            flags.insert(k.clone(), v.clone());
-                        }
-                    }
-                }
-            }
+            self.add_flags(si, &mut flags);
         }
         flags
     }
 
     /// Flags before the current step.
-    fn flags_before(&self) -> HashMap<String, String> {
-        self.flags_of(&self.history)
+    fn flags_before(&self) -> &HashMap<String, String> {
+        &self.before
     }
 
-    /// The first visible step at or after `from`, with the flags of the path so far (including the current step).
-    fn next_visible(&self, from: usize) -> Option<usize> {
-        let flags = self.flags_of(&self.path());
+    /// The flags of the whole path so far, the current step's choices included.
+    fn path_flags(&self) -> HashMap<String, String> {
+        let mut flags = self.before.clone();
+        if let Some(si) = self.current {
+            self.add_flags(si, &mut flags);
+        }
+        flags
+    }
+
+    /// The first visible step at or after `from`, with these flags.
+    fn next_visible_with(&self, from: usize, flags: &HashMap<String, String>) -> Option<usize> {
         (from..self.config.steps.len())
-            .find(|&i| self.config.steps[i].visible.as_ref().is_none_or(|c| met(c, &flags, &self.env)))
+            .find(|&i| self.config.steps[i].visible.as_ref().is_none_or(|c| met(c, flags, &self.env)))
     }
 
-    /// The steps still to come after step si, with the choices as they are now.
-    fn steps_after(&self, si: usize) -> usize {
+    /// The steps still to come after step si, with the choices as they are now. The flags are worked out once for
+    /// all of them (they used to be worked out again for every later step, which froze on a big installer).
+    fn steps_after(&self, si: usize, flags: &HashMap<String, String>) -> usize {
         let mut n = 0;
         let mut at = si + 1;
-        while let Some(i) = self.next_visible(at) {
+        while let Some(i) = self.next_visible_with(at, flags) {
             n += 1;
             at = i + 1;
         }
@@ -680,10 +719,15 @@ impl Session {
 
     /// Sets up a step's choices when it is shown: defaults the first time (or earlier choices), then the rules.
     fn enter(&mut self, si: usize) {
-        let flags = self.flags_before();
+        let flags = std::mem::take(&mut self.before);
+        self.enter_with(si, &flags);
+        self.before = flags;
+    }
+
+    fn enter_with(&mut self, si: usize, flags: &HashMap<String, String>) {
         let step = self.config.steps[si].clone();
         for (gi, g) in step.groups.iter().enumerate() {
-            let kinds: Vec<PluginType> = (0..g.plugins.len()).map(|pi| self.kind_of(si, gi, pi, &flags)).collect();
+            let kinds: Vec<PluginType> = (0..g.plugins.len()).map(|pi| self.kind_of(si, gi, pi, flags)).collect();
             let row = &mut self.sel[si][gi];
             if !self.ready[si] {
                 let preferred: Vec<bool> = match &self.preferred {
@@ -748,7 +792,7 @@ impl Session {
                     .iter()
                     .enumerate()
                     .map(|(pi, p)| {
-                        let kind = self.kind_of(si, gi, pi, &flags);
+                        let kind = self.kind_of(si, gi, pi, flags);
                         let can_change = g.kind != GroupKind::All && !matches!(kind, PluginType::Required | PluginType::NotUsable);
                         OptionView {
                             name: p.name.clone(),
@@ -762,13 +806,14 @@ impl Session {
                     .collect(),
             })
             .collect();
+        let path_flags = self.path_flags();
         Some(StepView {
             index: si,
             name: step.name.clone(),
             number: self.history.len() + 1,
-            total: self.history.len() + 1 + self.steps_after(si),
+            total: self.history.len() + 1 + self.steps_after(si, &path_flags),
             groups,
-            is_last: self.next_visible(si + 1).is_none(),
+            is_last: self.next_visible_with(si + 1, &path_flags).is_none(),
             can_go_back: !self.history.is_empty(),
         })
     }
@@ -779,7 +824,7 @@ impl Session {
         if option >= g.plugins.len() {
             return Err("That option isn't in this group.".into());
         }
-        let kind = self.kind_of(si, group, option, &self.flags_before());
+        let kind = self.kind_of(si, group, option, self.flags_before());
         Ok((si, kind, g.kind))
     }
 
@@ -793,7 +838,7 @@ impl Session {
             let flags = self.flags_before();
             // Never take away a required option to pick another.
             for (pi, on) in self.sel[si][group].iter().enumerate() {
-                if *on && pi != option && self.kind_of(si, group, pi, &flags) == PluginType::Required {
+                if *on && pi != option && self.kind_of(si, group, pi, flags) == PluginType::Required {
                     return Err("Another option in this group is required, so this one can't be picked.".into());
                 }
             }
@@ -861,9 +906,17 @@ impl Session {
     pub fn next(&mut self) -> Result<bool, String> {
         self.check_current()?;
         let Some(si) = self.current else { return Ok(false) };
-        let Some(n) = self.next_visible(si + 1) else { return Ok(false) };
+        // The current step's flags join the ones before it; they are what decides the next step, too.
+        let mut flags = std::mem::take(&mut self.before);
+        self.add_flags(si, &mut flags);
+        let Some(n) = self.next_visible_with(si + 1, &flags) else {
+            // Staying here: back to the flags before this step.
+            self.before = self.flags_of(&self.history);
+            return Ok(false);
+        };
         self.history.push(si);
         self.current = Some(n);
+        self.before = flags;
         self.enter(n);
         Ok(true)
     }
@@ -873,6 +926,7 @@ impl Session {
         match self.history.pop() {
             Some(prev) => {
                 self.current = Some(prev);
+                self.before = self.flags_of(&self.history);
                 self.enter(prev);
                 true
             }
@@ -906,7 +960,6 @@ impl Session {
     pub fn finish(&self) -> Result<Finish, String> {
         self.check_current()?;
         let path = self.path();
-        let flags = self.flags_of(&path);
         // (phase, priority, sequence, item)
         let mut items: Vec<(u8, i64, usize, InstallItem)> = Vec::new();
         let mut seq = 0usize;
@@ -917,15 +970,14 @@ impl Session {
         for it in &self.config.required {
             push(0, it, &mut items);
         }
+        // The flags before each step, built up step by step along the path (not again from the start for each).
+        let mut flags = HashMap::new();
         for &si in &path {
-            let before = {
-                let pos = path.iter().position(|&x| x == si).unwrap_or(0);
-                self.flags_of(&path[..pos])
-            };
+            let before = &flags;
             for (gi, g) in self.config.steps[si].groups.iter().enumerate() {
                 for (pi, p) in g.plugins.iter().enumerate() {
                     let chosen = self.sel[si][gi][pi];
-                    let usable = p.kind.resolve(&before, &self.env) != PluginType::NotUsable;
+                    let usable = p.kind.resolve(before, &self.env) != PluginType::NotUsable;
                     for it in &p.files {
                         if chosen || it.always || (it.if_usable && usable) {
                             push(1, it, &mut items);
@@ -933,6 +985,7 @@ impl Session {
                     }
                 }
             }
+            self.add_flags(si, &mut flags);
         }
         for (cond, list) in &self.config.conditional {
             if met(cond, &flags, &self.env) {
@@ -946,8 +999,9 @@ impl Session {
         let mut out: Vec<(String, String)> = Vec::new();
         let mut at: HashMap<String, usize> = HashMap::new();
         let mut missing = Vec::new();
+        let mut left = MAX_PLACED;
         for (_, _, _, it) in &items {
-            for (src, dest) in self.expand(it, &mut missing)? {
+            for (src, dest) in self.expand(it, &mut missing, &mut left)? {
                 let key = dest.to_lowercase();
                 match at.get(&key) {
                     Some(&i) => out[i] = (src, dest),
@@ -973,7 +1027,8 @@ impl Session {
     }
 
     /// One `file` or `folder` entry as (archive path, destination) pairs.
-    fn expand(&self, it: &InstallItem, missing: &mut Vec<String>) -> Result<Vec<(String, String)>, String> {
+    /// `left`: how many more pairs the whole install may have (see `MAX_PLACED`).
+    fn expand(&self, it: &InstallItem, missing: &mut Vec<String>, left: &mut usize) -> Result<Vec<(String, String)>, String> {
         let bad = |p: &str| format!("its installer points outside the mod ({p})");
         let src = clean_path(&it.source).ok_or_else(|| bad(&it.source))?;
         let dest = match &it.destination {
@@ -986,6 +1041,10 @@ impl Session {
                 missing.push(it.source.clone());
                 return Ok(Vec::new());
             };
+            if *left == 0 {
+                return Err(too_many());
+            }
+            *left -= 1;
             let file_name = real.rsplit('/').next().unwrap_or(&real).to_string();
             let to = if dest.is_empty() || dest_is_folder { join(&dest, &file_name) } else { dest };
             return Ok(vec![(real, to)]);
@@ -995,11 +1054,17 @@ impl Session {
         let mut found = Vec::new();
         for base in [join(&self.root, &src), src.clone()] {
             let prefix = if base.is_empty() { String::new() } else { format!("{}/", base.to_lowercase()) };
-            for (lc, real) in &self.sorted {
-                if lc.starts_with(&prefix) && !(src.is_empty() && lc.starts_with(&fomod_dir)) {
+            // The paths are sorted, so those under the folder sit together, starting where the prefix would go.
+            let first = self.sorted.partition_point(|(lc, _)| lc.as_str() < prefix.as_str());
+            for (lc, real) in self.sorted[first..].iter().take_while(|(lc, _)| lc.starts_with(&prefix)) {
+                if !(src.is_empty() && lc.starts_with(&fomod_dir)) {
                     // The lowercase form of a name can be longer or shorter than the name (some letters outside
                     // English), so the part below the folder is found letter by letter, never by length.
                     let Some(below) = below_folder(real, &prefix) else { continue };
+                    if *left == 0 {
+                        return Err(too_many());
+                    }
+                    *left -= 1;
                     found.push((real.clone(), join(&dest, below)));
                 }
             }

@@ -325,6 +325,81 @@ fn select_all_and_at_most_one_groups() {
     let _ = FileState::Active;
 }
 
+/// One step setting many flags, then many steps: each step shown used to work out every flag again for every step
+/// still to come, which froze on a big installer. Time bounds are loose; the fixed code takes well under a second.
+#[test]
+fn many_steps_and_flags_stay_quick() {
+    let mut xml = String::from("<config><moduleName>m</moduleName><installSteps order=\"Explicit\"><installStep name=\"a\"><optionalFileGroups><group name=\"g\" type=\"SelectAll\"><plugins><plugin name=\"p\"><conditionFlags>");
+    for i in 0..5_000 {
+        xml.push_str(&format!("<flag name=\"f{i}\">v</flag>"));
+    }
+    xml.push_str("</conditionFlags></plugin></plugins></group></optionalFileGroups></installStep>");
+    for i in 0..999 {
+        xml.push_str(&format!("<installStep name=\"s{i}\"><visible><flagDependency flag=\"f{i}\" value=\"v\"/></visible></installStep>"));
+    }
+    xml.push_str("</installSteps></config>");
+    let t = std::time::Instant::now();
+    let mut s = Session::new(fomod::parse(xml.as_bytes()).unwrap(), Env::default(), &[], "");
+    let mut shown = 1;
+    loop {
+        let st = s.current().unwrap();
+        assert_eq!((st.number, st.total), (shown, 1000));
+        assert!(s.to_json().contains("\"total\":1000"));
+        if !s.next().unwrap() {
+            break;
+        }
+        shown += 1;
+    }
+    assert_eq!(shown, 1000);
+    assert!(s.back() && s.next().unwrap() && !s.next().unwrap());
+    assert_eq!(s.finish().unwrap().flags.len(), 5_000);
+    assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
+}
+
+/// Folder entries are found from a sorted index, not by going through every archive file for each.
+#[test]
+fn many_folder_entries_stay_quick() {
+    let n = 50_000;
+    let mut xml = String::from("<config><requiredInstallFiles>");
+    for i in 0..n {
+        xml.push_str(&format!("<folder source=\"d{i}\" destination=\"o\"/>"));
+    }
+    xml.push_str("</requiredInstallFiles></config>");
+    let files: Vec<String> = (0..n).map(|i| format!("D{i}/f{i}.esp")).collect();
+    let t = std::time::Instant::now();
+    let s = Session::new(fomod::parse(xml.as_bytes()).unwrap(), Env::default(), &files, "");
+    let done = s.finish().unwrap();
+    assert_eq!(done.files.len(), n);
+    assert!(done.missing.is_empty());
+    assert!(t.elapsed().as_secs() < 20, "{:?}", t.elapsed());
+}
+
+/// Every folder entry asking for the whole archive at a new place would make billions of pairs: refused instead.
+#[test]
+fn an_installer_that_places_too_many_files_is_refused() {
+    let mut xml = String::from("<config><requiredInstallFiles>");
+    for i in 0..2_000 {
+        xml.push_str(&format!("<folder source=\"\" destination=\"d{i}\"/>"));
+    }
+    xml.push_str("</requiredInstallFiles></config>");
+    let files: Vec<String> = (0..300).map(|i| format!("data/f{i}.txt")).collect();
+    let s = Session::new(fomod::parse(xml.as_bytes()).unwrap(), Env::default(), &files, "");
+    let err = s.finish().unwrap_err();
+    assert!(err.contains("too many files"), "{err}");
+    // Under the limit it still works.
+    let xml = "<config><requiredInstallFiles><folder source=\"\" destination=\"a\"/><folder source=\"\" destination=\"b\"/></requiredInstallFiles></config>";
+    let s = Session::new(fomod::parse(xml.as_bytes()).unwrap(), Env::default(), &files, "");
+    assert_eq!(s.finish().unwrap().files.len(), 600);
+}
+
+#[test]
+fn an_installer_with_too_many_steps_is_refused() {
+    let xml = format!("<config><installSteps>{}</installSteps></config>", "<installStep/>".repeat(fomod::MAX_STEPS + 1));
+    assert!(fomod::parse(xml.as_bytes()).unwrap_err().contains("too many steps"));
+    let xml = format!("<config><installSteps>{}</installSteps></config>", "<installStep/>".repeat(fomod::MAX_STEPS));
+    assert_eq!(fomod::parse(xml.as_bytes()).unwrap().steps.len(), fomod::MAX_STEPS);
+}
+
 /// A folder whose name changes length when lowercased (a letter outside English) must not stop the installer,
 /// and the files below it keep their full names.
 #[test]
