@@ -2173,7 +2173,7 @@ impl Store {
             if let Some(inner) = self.rules.inner_archive(&files) {
                 let inner_path = unpacked.join(zip::safe_relative(&inner).map_err(|e| fail(e.to_string()))?);
                 let inner_dir = unpacked.join(".inner");
-                files = self.unpack(&inner_path, &inner_dir)
+                files = archives::unpack_inside(&inner_path, &inner_dir, &unpacked, self.tar.as_deref())
                     .map_err(|e| fail(format!("the files inside its installer can't be opened ({})", e.trim_end_matches('.'))))?;
                 work = inner_dir;
                 let map = self.rules.map_inner(&files).map_err(|e| fail(e.trim_end_matches('.').to_string()))?;
