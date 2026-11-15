@@ -26,6 +26,23 @@
   <url type="vcs-browser">https://github.com/Ravenor907/Turbine-Mod-Manager</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.67" date="2026-11-14" type="development">
+      <description>
+        <p>A safety release: Turbine was tested against damaged files and hostile mods, and what broke is fixed:</p>
+        <ul>
+          <li>A damaged mod list or loadout list comes back from its last good copy, and Recently removed survives</li>
+          <li>A game's own settings file always comes back when its mod is turned off; your edits are kept on the side</li>
+          <li>One file that can't be changed no longer stops Play without mods or Reset game files, and the error names it</li>
+          <li>Reset game files still works when Turbine's list of placed files is lost</li>
+          <li>A mod archive that would fill the drive is refused, before or while it unpacks</li>
+          <li>FOMOD installers with a great many steps or options no longer freeze</li>
+          <li>A game writing into a mod's file can't change Turbine's own copy of the mod</li>
+          <li>A read-only SD card is named instead of showing an empty mod list</li>
+          <li>Your Nexus key is only ever sent to Nexus; Steam's own files are saved safely</li>
+          <li>Heroic entries that point at system folders are skipped</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.66" date="2026-11-13" type="development">
       <description>
         <p>A polish release: many small fixes, nothing new to learn:</p>
