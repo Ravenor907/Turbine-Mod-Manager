@@ -1337,9 +1337,10 @@ Item {
                 () => { K(Qt.Key_Z, Qt.ControlModifier); const on = app.mods.filter(x => x.enabled).length
                         say(m.g === "Ctrl+Z" && on === m.wasOn && m.wasOn > 0, "the toast says " + m.g + " Undo; Ctrl+Z: " + on + " of " + m.wasOn + " back on") },
                 // The mouse: hover, click, right-click, Back, Ctrl with the wheel.
-                // A real mouse comes to the row from somewhere else (it may already rest on that spot from an earlier check).
-                () => { const it = modList.itemAtIndex(1); if (!it) return false
-                        m.hv = app.hoverSeen; const p = at(it, 0.4); Turbine.selftestMouse(0, p.x + 40, p.y + 6, 0, 0, 0) },
+                // A real mouse comes to the row from another row. It may already rest on this row from an earlier check, and
+                // a move inside the same row changes no hover, so the mouse would not be seen.
+                () => { const it = modList.itemAtIndex(1), other = modList.itemAtIndex(0); if (!it || !other) return false
+                        m.hv = app.hoverSeen; const p = at(other, 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
                 () => { const p = at(modList.itemAtIndex(1), 0.4); Turbine.selftestMouse(0, p.x, p.y, 0, 0, 0) },
                 () => { if (app.lastInput !== "mouse") app.note("check", "Key check note: hovers seen " + (app.hoverSeen - m.hv) + ", the last " + app.hoverSeenAfterKey + " ms after a key, pointer shown " + Turbine.pointerShown)
                         say(app.lastInput === "mouse" && !!app.hoverItem && hints() === "Click, Esc, Right-click, F, Q, E", "the mouse over a row: last input " + app.lastInput + ", " + (app.hoverItem ? "the row is outlined" : "nothing outlined") + ", hints " + hints())
