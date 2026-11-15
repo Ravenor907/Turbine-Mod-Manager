@@ -200,6 +200,72 @@ fn bsdtar_is_stopped_while_it_writes_too_much() {
     assert_eq!(others(&t.0, "Mod.7z").into_iter().filter(|n| n != "fake-bsdtar").collect::<Vec<_>>(), Vec::<String>::new());
 }
 
+/// A stand-in bsdtar whose unpacking step is `write` (sh, with the folder to write into as "$4").
+fn writing_tar(t: &TempDir, write: &str) -> archives::Bsdtar {
+    use std::os::unix::fs::PermissionsExt;
+    let script = t.write("fake-bsdtar", format!("#!/bin/sh\ncase \"$1\" in\n-xf) {write} ;;\nesac\n").as_bytes());
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    archives::Bsdtar { program: script }
+}
+
+fn bytes_in(dir: &Path) -> u64 {
+    fs::read_dir(dir).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum()
+}
+
+#[test]
+fn one_file_bsdtar_writes_can_never_pass_the_budget() {
+    use archives::Tar;
+    if !Path::new("/bin/sh").exists() || !cfg!(all(target_os = "linux", target_pointer_width = "64")) {
+        return;
+    }
+    // One file written as fast as the drive takes it, 256 MiB if nothing stops it: the system's own cap ends it one
+    // byte past the budget at most, however long it is between two looks.
+    let t = TempDir::new("cap");
+    let tar = writing_tar(&t, "head -c 268435456 /dev/zero > \"$4/big.bin\"; exec sleep 30");
+    fs::create_dir(t.path("into")).unwrap();
+    let budget = 4 << 20;
+    let started = Instant::now();
+    let err = tar.extract_within(Path::new("Mod.7z"), &t.path("into"), budget).unwrap_err();
+    assert!(err.contains("far more"), "{err}");
+    assert!(bytes_in(&t.path("into")) <= budget + 1, "{} bytes written", bytes_in(&t.path("into")));
+    assert!(started.elapsed() < Duration::from_secs(25));
+}
+
+#[test]
+fn many_files_bsdtar_writes_pass_the_budget_by_little() {
+    use archives::Tar;
+    if !Path::new("/bin/sh").exists() {
+        return;
+    }
+    // 256 files of 1 MiB, each under the cap on one file: near the budget the folder is looked at often enough that
+    // only a few more land (four looks a second would let most of them through).
+    let t = TempDir::new("many");
+    let tar = writing_tar(&t, "i=0; while [ $i -lt 256 ]; do head -c 1048576 /dev/zero > \"$4/f$i.bin\"; i=$((i+1)); done; exec sleep 30");
+    fs::create_dir(t.path("into")).unwrap();
+    let budget = 8 << 20;
+    let err = tar.extract_within(Path::new("Mod.7z"), &t.path("into"), budget).unwrap_err();
+    assert!(err.contains("far more"), "{err}");
+    let wrote = bytes_in(&t.path("into"));
+    assert!(wrote <= budget + (32 << 20), "{} MiB written with a budget of 8", wrote >> 20);
+}
+
+#[test]
+fn bsdtar_far_under_the_budget_is_left_to_finish() {
+    use archives::Tar;
+    if !Path::new("/bin/sh").exists() {
+        return;
+    }
+    let t = TempDir::new("calm");
+    let tar = writing_tar(&t, "head -c 1048576 /dev/zero > \"$4/a.bin\"");
+    fs::create_dir(t.path("into")).unwrap();
+    tar.extract_within(Path::new("Mod.7z"), &t.path("into"), 8 << 30).unwrap();
+    assert_eq!(bytes_in(&t.path("into")), 1 << 20);
+    // No budget at all (plain extract) works as before.
+    fs::create_dir(t.path("into2")).unwrap();
+    tar.extract(Path::new("Mod.7z"), &t.path("into2")).unwrap();
+    assert_eq!(bytes_in(&t.path("into2")), 1 << 20);
+}
+
 #[test]
 fn an_archive_inside_an_archive_shares_the_allowance() {
     let t = TempDir::new("inner");

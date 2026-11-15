@@ -19,8 +19,10 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::{self, Read};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
@@ -107,6 +109,44 @@ fn size_under(dir: &Path, stop: u64) -> u64 {
     total
 }
 
+/// The fastest a drive is expected to take what bsdtar writes (bytes a second). Twice the rate seen counts when that
+/// is more.
+const WATCH_RATE: u64 = 2 << 30;
+/// The shortest and longest waits between two looks at the folder being unpacked into.
+const WATCH_SHORTEST: Duration = Duration::from_millis(2);
+const WATCH_LONGEST: Duration = Duration::from_millis(250);
+/// The signal a program gets when it writes a file past the size it may (Linux).
+const SIGXFSZ: i32 = 25;
+
+/// Has the system itself stop the program once any one file it writes passes `budget` bytes: a cap that holds
+/// however fast the drive is. Many files together are held by the watching in `extract_within`.
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+fn cap_file_size(cmd: &mut Command, budget: u64) {
+    use std::ffi::c_int;
+    use std::os::unix::process::CommandExt;
+    unsafe extern "C" {
+        // The C library's setrlimit. On 64-bit Linux struct rlimit is two 64-bit numbers: the limit now and the most
+        // it may be raised to.
+        fn setrlimit(resource: c_int, rlim: *const [u64; 2]) -> c_int;
+    }
+    const RLIMIT_FSIZE: c_int = 1;
+    // One byte over the budget may be written, so going over still shows when the folder is measured.
+    let Some(cap) = budget.checked_add(1).filter(|c| *c < u64::MAX) else { return };
+    let lim = [cap, cap];
+    // SAFETY: the closure runs in the new process before the program starts and only calls setrlimit (allowed there)
+    // with a pointer to two u64 it owns. A cap that can't be set (a lower one is already in place) is fine: the
+    // lower one holds.
+    unsafe {
+        cmd.pre_exec(move || {
+            setrlimit(RLIMIT_FSIZE, &lim);
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+fn cap_file_size(_cmd: &mut Command, _budget: u64) {}
+
 /// bsdtar from the Flatpak runtime (found on PATH), with a fixed, clean environment.
 pub struct Bsdtar {
     pub program: PathBuf,
@@ -154,23 +194,23 @@ impl Tar for Bsdtar {
     }
 
     fn extract_within(&self, archive: &Path, into: &Path, budget: u64) -> Result<(), String> {
-        let mut child = Command::new(&self.program)
-            .args(["-xf".as_ref(), archive.as_os_str(), "-C".as_ref(), into.as_os_str()])
+        let mut cmd = Command::new(&self.program);
+        cmd.args(["-xf".as_ref(), archive.as_os_str(), "-C".as_ref(), into.as_os_str()])
             .args(["--no-same-owner", "--no-same-permissions"])
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into()))
             .env("LC_ALL", "C.UTF-8")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| {
-                if e.kind() == io::ErrorKind::NotFound {
-                    "the program that opens 7z and rar files (bsdtar) isn't available".to_string()
-                } else {
-                    format!("the program that opens 7z and rar files couldn't start ({e})")
-                }
-            })?;
+            .stderr(Stdio::piped());
+        cap_file_size(&mut cmd, budget);
+        let mut child = cmd.spawn().map_err(|e| {
+            if e.kind() == io::ErrorKind::NotFound {
+                "the program that opens 7z and rar files (bsdtar) isn't available".to_string()
+            } else {
+                format!("the program that opens 7z and rar files couldn't start ({e})")
+            }
+        })?;
         // Read on the side so a chatty bsdtar never blocks on a full pipe.
         let err_reader = child.stderr.take().map(|mut s| {
             std::thread::spawn(move || {
@@ -180,8 +220,11 @@ impl Tar for Bsdtar {
                 buf
             })
         });
-        // The folder is measured a few times a second; a 1 GB/s disk writes a few hundred MB between looks, which the
-        // free space margin covers.
+        // The folder is measured more often the closer it is to the budget: after each look the next one comes in half
+        // the time the output would need to reach the budget at the fastest rate expected, so the most that lands over
+        // the budget is what a few milliseconds of writing hold. Looking never takes more than a quarter of the time (a
+        // folder of very many files is slow to measure), and far from the budget it is four looks a second.
+        let mut seen = (Instant::now(), 0u64);
         let status = loop {
             match child.try_wait() {
                 Ok(Some(st)) => break st,
@@ -192,14 +235,26 @@ impl Tar for Bsdtar {
                     return Err(format!("the program that opens 7z and rar files stopped ({e})"));
                 }
             }
-            if size_under(into, budget) > budget {
+            let began = Instant::now();
+            let size = size_under(into, budget);
+            if size > budget {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(TOO_MUCH.into());
             }
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            let took = began.elapsed();
+            let since = began.duration_since(seen.0).as_micros().max(1) as u64;
+            let rate = (size.saturating_sub(seen.1).saturating_mul(1_000_000) / since).saturating_mul(2).max(WATCH_RATE);
+            seen = (began, size);
+            // Microseconds until half of what is left would be written at that rate.
+            let micros = ((budget - size) / 2).min(u64::MAX / 1_000_000) * 1_000_000 / rate;
+            std::thread::sleep(Duration::from_micros(micros).clamp(WATCH_SHORTEST, WATCH_LONGEST).max(took * 3));
         };
         let err = err_reader.and_then(|h| h.join().ok()).unwrap_or_default();
+        // Stopped by the system's own cap on one file's size (see `cap_file_size`), or failed on it.
+        if !status.success() && (status.signal() == Some(SIGXFSZ) || size_under(into, budget) > budget) {
+            return Err(TOO_MUCH.into());
+        }
         if !status.success() {
             let err = String::from_utf8_lossy(&err);
             let line = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("it stopped with an error").trim();
