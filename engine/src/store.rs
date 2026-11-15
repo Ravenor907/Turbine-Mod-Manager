@@ -3163,12 +3163,37 @@ impl Store {
         &self.game
     }
 
+    /// Every file any mod in this store could have put in the game (turned on or off, Recently removed too, and
+    /// Turbine's edited copies of settings files): path inside the game folder, the file. Reset uses it to know a
+    /// mod's file when the record of what was placed is lost. `package`: paths as a me3 package folder has them.
+    fn all_staged(&self, package: bool) -> Vec<(String, PathBuf)> {
+        let mut out = Vec::new();
+        for base in [self.root.join("mods"), self.root.join("removed")] {
+            let Ok(rd) = fs::read_dir(&base) else { continue };
+            let mut dirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| fs::symlink_metadata(p).is_ok_and(|m| m.is_dir())).collect();
+            dirs.sort();
+            for dir in dirs {
+                let id = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                for (rel, file) in walk_files(&dir) {
+                    let to = if package { crate::anticheat::package_rel(&rel) } else { rel.clone() };
+                    let edited = crate::settings::edited_path(&self.root, &id, &rel);
+                    if safe_id(&id) && fs::symlink_metadata(&edited).is_ok_and(|m| m.is_file()) {
+                        out.push((to.clone(), edited));
+                    }
+                    out.push((to, file));
+                }
+            }
+        }
+        out
+    }
+
     /// The way back when something went wrong: takes out every mod file Turbine knows it placed and puts the game's
     /// own files back from the backup folder (see `deploy::reset_from_backups`). Mods stay listed, all turned off.
     pub fn reset_game(&mut self) -> io::Result<Report> {
-        let report = deploy::reset_from_backups(&self.deploy_paths())?;
-        if self.rules.me3_game().is_some() && self.game_folder_paths().record.exists() {
-            deploy::reset_from_backups(&self.game_folder_paths())?;
+        let me3 = self.rules.me3_game().is_some();
+        let report = deploy::reset_with_staged(&self.deploy_paths(), &self.all_staged(me3))?;
+        if me3 && self.game_folder_paths().record.exists() {
+            deploy::reset_with_staged(&self.game_folder_paths(), &self.all_staged(false))?;
         }
         for m in &mut self.mods {
             m.enabled = false;

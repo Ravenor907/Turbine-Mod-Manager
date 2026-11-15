@@ -4,7 +4,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use turbine_engine::deploy::{apply, recover, reset_from_backups, Paths, Record};
+use turbine_engine::deploy::{apply, recover, reset_from_backups, reset_with_staged, Paths, Record};
 
 fn write(p: &Path, text: &str) {
     fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -332,4 +332,67 @@ fn one_file_that_cannot_go_while_switching_mods() {
     apply(&w.paths, &[], None).unwrap();
     assert!(!w.g("Aaa/new.dll").exists() && !w.g("Data/b.esp").exists());
     assert_eq!(read(&w.g("Data/x.esp")), "ORIGINAL X");
+}
+
+/// The record and its second copy are both gone. Reset tells the mods' files by their own copies.
+#[test]
+fn reset_without_any_record_uses_the_mods_own_files() {
+    let w = world("no-record");
+    write(&w.g("Data/x.esp"), "ORIGINAL X");
+    write(&w.g("Data/same.esp"), "SAME BYTES");
+    write(&w.g("Data/Big.bsa"), "ORIGINAL ARCHIVE");
+    let files = vec![
+        w.stage("A", "data/x.esp", "A x"),
+        // A mod file that is the same as the game's own: the game's comes back and stays.
+        w.stage("A", "Data/same.esp", "SAME BYTES"),
+        w.stage("A", "Data/Big.bsa", "A archive"),
+        w.stage("A", "Data/Textures/a.dds", "A texture"),
+        w.stage("A", "Mods/A/a.dll", "A dll"),
+    ];
+    // Another mod has a file for the same path; the one in the game is the first mod's.
+    let other = w.stage("B", "Data/x.esp", "B x");
+    apply(&w.paths, &files, None).unwrap();
+    assert_eq!(read(&w.g("Data/x.esp")), "A x");
+    fs::remove_file(&w.paths.record).unwrap();
+    fs::remove_file(w.root.join("rec/record.json.prev")).unwrap();
+    // A file with a mod file's name but not its bytes, and one no mod has: neither is Turbine's to take.
+    write(&w.g("Mods/A/b.dll"), "not the mod's");
+    let lookalike = w.stage("B", "Mods/A/b.dll", "B dll");
+    write(&w.g("Data/save.dat"), "GAME MADE");
+
+    let mut staged = files.clone();
+    staged.push(other);
+    staged.push(lookalike);
+    let r = reset_with_staged(&w.paths, &staged).unwrap();
+    assert!(r.left_in_backups.is_empty() && r.moved_aside.is_empty() && r.changed_by_others.is_empty(), "{r:?}");
+    assert_eq!(r.removed, 5, "{r:?}");
+    let mut left: Vec<(String, String)> = files_under(&w.paths.game).iter().map(|p| (p.strip_prefix(&w.paths.game).unwrap().to_string_lossy().into_owned(), read(p))).collect();
+    left.sort();
+    let want = [("Data/Big.bsa", "ORIGINAL ARCHIVE"), ("Data/same.esp", "SAME BYTES"), ("Data/save.dat", "GAME MADE"), ("Data/x.esp", "ORIGINAL X"), ("Mods/A/b.dll", "not the mod's")];
+    assert_eq!(left, want.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>());
+    assert!(!w.g("Data/Textures").exists(), "a folder left empty goes");
+    assert!(files_under(&w.paths.backups).is_empty());
+    // The mods' own files are all still there.
+    assert_eq!(read(&files[0].1), "A x");
+    assert_eq!(read(&files[3].1), "A texture");
+    // Again changes nothing.
+    let r = reset_with_staged(&w.paths, &staged).unwrap();
+    assert_eq!(r.removed, 0, "{r:?}");
+    assert_eq!(read(&w.g("Data/same.esp")), "SAME BYTES");
+}
+
+/// With a record, a place where something else made a file anew over a mod's file keeps that file on Reset (the
+/// game's older file waits in the backup folder and is said so), mods' files known or not.
+#[test]
+fn reset_with_a_record_leaves_a_file_made_anew() {
+    let w = world("anew-backup");
+    write(&w.g("Data/x.esp"), "ORIGINAL X");
+    let a = w.stage("A", "Data/x.esp", "A x");
+    apply(&w.paths, std::slice::from_ref(&a), None).unwrap();
+    fs::remove_file(w.g("Data/x.esp")).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write(&w.g("Data/x.esp"), "GAME UPDATE");
+    let r = reset_with_staged(&w.paths, &[a]).unwrap();
+    assert_eq!(r.left_in_backups, vec!["Data/x.esp".to_string()], "{r:?}");
+    assert_eq!(read(&w.g("Data/x.esp")), "GAME UPDATE");
 }

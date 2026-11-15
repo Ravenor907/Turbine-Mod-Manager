@@ -982,8 +982,8 @@ fn bad_record_entry_is_quarantined_and_reset_handles_it() {
     assert!(Record::load(&w.paths.record).unwrap().quarantine.is_empty());
 }
 
-/// Both copies of the record are gone to garbage: Reset still puts back every game file whose place is free and
-/// lists the ones it can't be sure of.
+/// Both copies of the record are gone to garbage: Reset still puts back every game file. With nothing to tell a
+/// mod's file by, the file in a game file's place is kept on the side, not deleted.
 #[test]
 fn reset_works_with_no_usable_record() {
     let w = world("reset-norec");
@@ -993,12 +993,13 @@ fn reset_works_with_no_usable_record() {
     assert!(apply(&w.paths, &[], None).is_err());
     assert!(apply(&w.paths, &[], None).is_err(), "still refused: nothing to go on");
     let r = reset_from_backups(&w.paths).unwrap();
-    assert_eq!(r.left_in_backups, vec!["Data/Skyrim.esm".to_string()], "{r:?}");
-    // The player deletes the mod's copy; the next Reset puts the game's own file back.
-    fs::remove_file(w.paths.game.join("Data/Skyrim.esm")).unwrap();
-    let r = reset_from_backups(&w.paths).unwrap();
     assert!(r.left_in_backups.is_empty(), "{r:?}");
+    assert_eq!(r.moved_aside, vec!["Data/Skyrim.esm".to_string()], "{r:?}");
     assert_eq!(fs::read_to_string(w.paths.game.join("Data/Skyrim.esm")).unwrap(), "vanilla esm");
+    let kept = w.paths.record.parent().unwrap().join("player-changes/reset-1/Data/Skyrim.esm");
+    assert_eq!(fs::read_to_string(kept).unwrap(), "A esm");
+    let r = reset_from_backups(&w.paths).unwrap();
+    assert!(r.left_in_backups.is_empty() && r.moved_aside.is_empty(), "{r:?}");
     apply(&w.paths, &[], None).unwrap();
 }
 

@@ -1535,12 +1535,86 @@ fn leftover_backups(paths: &Paths) -> Vec<(String, PathBuf)> {
     out
 }
 
+/// Are these two plain files the same, byte for byte (size first, then what is in them)? Two names of one file are.
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    use std::io::Read;
+    let (Ok(ma), Ok(mb)) = (fs::symlink_metadata(a), fs::symlink_metadata(b)) else { return false };
+    if !ma.is_file() || !mb.is_file() || ma.len() != mb.len() {
+        return false;
+    }
+    if ma.dev() == mb.dev() && ma.ino() == mb.ino() {
+        return true;
+    }
+    let (Ok(mut fa), Ok(mut fb)) = (File::open(a), File::open(b)) else { return false };
+    // Reads until the buffer is full or the file ends.
+    fn fill(f: &mut File, buf: &mut [u8]) -> io::Result<usize> {
+        let mut n = 0;
+        while n < buf.len() {
+            match f.read(&mut buf[n..])? {
+                0 => break,
+                k => n += k,
+            }
+        }
+        Ok(n)
+    }
+    let (mut ba, mut bb) = (vec![0u8; 1 << 16], vec![0u8; 1 << 16]);
+    loop {
+        match (fill(&mut fa, &mut ba), fill(&mut fb, &mut bb)) {
+            (Ok(0), Ok(0)) => return true,
+            (Ok(x), Ok(y)) if x == y && ba[..x] == bb[..y] => {}
+            _ => return false,
+        }
+    }
+}
+
+/// The path `rel` has in the game's folder with the casing used there, when a plain file is there and no folder on
+/// the way is a link.
+fn file_in_game(game: &Path, rel: &str) -> Option<String> {
+    let mut cur = game.to_path_buf();
+    let mut out = String::new();
+    for part in rel.split('/') {
+        if !fs::symlink_metadata(&cur).ok()?.is_dir() {
+            return None;
+        }
+        let name = if exists(&cur.join(part)) {
+            part.to_string()
+        } else {
+            fs::read_dir(&cur).ok()?.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).find(|n| crate::rules::same_name(n, part))?
+        };
+        cur.push(&name);
+        if !out.is_empty() {
+            out.push('/');
+        }
+        out.push_str(&name);
+    }
+    is_file(&cur).then_some(out)
+}
+
+/// A free place in the kept folder (next to the settings copies) for a file found where a game file belongs.
+fn kept_place(paths: &Paths, rel: &str) -> Option<PathBuf> {
+    let base = paths.record.parent()?.join("player-changes");
+    (1u32..10_000).map(|n| base.join(format!("reset-{n}")).join(rel)).find(|c| !exists(c))
+}
+
 /// The way back when anything went wrong: takes out every file Turbine knows it placed, puts every game file in the
 /// backup folder back where its place is free, and starts a fresh, empty record. Works with a damaged record (it uses
 /// the saved copy, or nothing) and with set-aside entries (only files that still match what was written down go).
 /// Files it can't be sure of are left alone and listed. A file that can't be changed (a read-only folder) doesn't stop
 /// the rest: it stays on record and the error names it, so the next Reset finishes the job.
 pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
+    reset_with_staged(paths, &[])
+}
+
+/// `reset_from_backups` that also knows the mods' own files (`staged`: path inside the game folder, the file a mod
+/// would put there; a path may come more than once), so it still works when the record and its second copy are both
+/// lost:
+/// - A game file waiting in the backup folder always goes back. When a file is in its place, that file is removed if
+///   it is the same, byte for byte, as a mod's file for that path, and otherwise moved to the kept folder
+///   (player-changes, next to the record). Only a place where the record itself shows something else made a file
+///   anew is left as it is.
+/// - With no record at all, a file in the game that is the same, byte for byte, as a mod's file for its path is taken
+///   out (folders left empty by that go too). Every other file is left alone.
+pub fn reset_with_staged(paths: &Paths, staged: &[(String, PathBuf)]) -> io::Result<Report> {
     check_game(paths)?;
     let _lock = lock(paths)?;
     let mut report = Report::default();
@@ -1559,6 +1633,8 @@ pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
         parse_record(&text, Some(paths), bad).ok()
     };
     let mut bad = Vec::new();
+    // True when neither the record nor its second copy can be read (or neither is there).
+    let mut lost = false;
     let mut record = match read(&paths.record, &mut bad) {
         Some(r) => r,
         None => {
@@ -1566,7 +1642,10 @@ pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
             if exists(&paths.record) {
                 fs::rename(&paths.record, with_suffix(&paths.record, ".damaged"))?;
             }
-            read(&prev_path(&paths.record), &mut bad).unwrap_or_default()
+            read(&prev_path(&paths.record), &mut bad).unwrap_or_else(|| {
+                lost = true;
+                Record::default()
+            })
         }
     };
     report.bad_entries = bad;
@@ -1606,18 +1685,83 @@ pub fn reset_from_backups(paths: &Paths) -> io::Result<Report> {
             failed.push((rel.clone(), e));
         }
     }
+    let mut mod_files: HashMap<String, Vec<&Path>> = HashMap::new();
+    for (rel, src) in staged {
+        mod_files.entry(rel.to_lowercase()).or_default().push(src);
+    }
+    // Places the record shows something else made a file anew (a game update): what is there is the game's.
+    let not_ours: HashSet<String> = report.changed_by_others.iter().map(|r| r.to_lowercase()).collect();
+    // Paths that have (or had) a game file in the backup folder: what is there after this is the game's own.
+    let mut backed: HashSet<String> = HashSet::new();
     for (rel, b) in leftover_backups(paths) {
         let known = failed.iter().any(|(f, _)| *f == rel);
-        if check_dirs(&paths.game, &rel, None).is_err() || exists(&paths.game.join(&rel)) {
+        let key = rel.to_lowercase();
+        let second = !backed.insert(key.clone());
+        let target = paths.game.join(&rel);
+        if check_dirs(&paths.game, &rel, None).is_err() {
             if !known {
                 report.left_in_backups.push(rel);
             }
             continue;
         }
+        if exists(&target) {
+            // Something is where the game's file belongs. The game's file wins; what is there is a mod's file (it
+            // goes) or is kept on the side.
+            let is_mod_file = mod_files.get(&key).is_some_and(|srcs| srcs.iter().any(|s| same_bytes(&target, s)));
+            let keep = if is_mod_file { None } else { kept_place(paths, &rel) };
+            if known || second || not_ours.contains(&key) || !is_file(&target) || (!is_mod_file && keep.is_none()) {
+                if !known {
+                    report.left_in_backups.push(rel);
+                }
+                continue;
+            }
+            let out = match &keep {
+                Some(k) => move_file(&target, k),
+                None => fs::remove_file(&target),
+            };
+            if let Err(e) = out {
+                failed.push((rel, e));
+                continue;
+            }
+            match keep {
+                Some(_) => report.moved_aside.push(rel.clone()),
+                None => report.removed += 1,
+            }
+        }
         if let Err(e) = restore_backup(paths, &rel, &b)
             && !known
         {
             failed.push((rel, e));
+        }
+    }
+    if lost {
+        // No record: a file that is a mod's own file, byte for byte, at the path that mod puts it is a mod file.
+        let mut gone: HashSet<String> = HashSet::new();
+        for (rel, src) in staged {
+            let key = rel.to_lowercase();
+            if !safe_rel(rel) || backed.contains(&key) || gone.contains(&key) {
+                continue;
+            }
+            let Some(actual) = file_in_game(&paths.game, rel) else { continue };
+            let target = paths.game.join(&actual);
+            if !same_bytes(&target, src) {
+                continue;
+            }
+            match fs::remove_file(&target) {
+                Ok(()) => {
+                    report.removed += 1;
+                    gone.insert(key);
+                    // Folders this left empty were made for the mod's files.
+                    let mut dir = target.parent();
+                    while let Some(d) = dir.filter(|d| *d != paths.game && d.starts_with(&paths.game)) {
+                        if fs::remove_dir(d).is_err() {
+                            break;
+                        }
+                        dir = d.parent();
+                    }
+                }
+                Err(e) => failed.push((actual, e)),
+            }
         }
     }
     tidy_dirs(paths, &mut record);

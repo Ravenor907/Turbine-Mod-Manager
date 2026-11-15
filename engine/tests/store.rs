@@ -605,3 +605,72 @@ fn downloads_follow_the_desktops_downloads_folder() {
     assert_eq!(turbine_engine::watch::default_folders(&d.join("nobody")).len(), 1);
     let _ = fs::remove_dir_all(&d);
 }
+
+/// Both copies of the list of placed files are lost: Reset game files still takes every mod file out and puts every
+/// game file back, by looking at the mods' own files.
+#[test]
+fn reset_works_when_the_list_of_placed_files_is_lost() {
+    let w = world("reset-lost");
+    let mut s = w.open();
+    let original = snapshot(&w.game.install_dir);
+    s.import_zip(&w.zip("Alpha.zip", &[("shared.esp", "alpha"), ("textures/sky.dds", "alpha sky"), ("Skyrim.esm", "alpha esm")])).unwrap();
+    s.import_zip(&w.zip("Beta.zip", &[("shared.esp", "beta"), ("New/Deep/beta.esp", "beta only"), ("meshes/b.nif", "beta mesh")])).unwrap();
+    // A mod that is turned off again after it went in, and one in Recently removed: their files count too.
+    s.import_zip(&w.zip("Gamma.zip", &[("gamma.esp", "gamma")])).unwrap();
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/textures/sky.dds").as_deref(), Some("alpha sky"));
+    let deploy = s.root().join("deploy");
+    let record = fs::read(deploy.join("record.json")).unwrap();
+    fs::remove_file(deploy.join("record.json")).unwrap();
+    fs::remove_file(deploy.join("record.json.prev")).unwrap();
+    // The game made a file of its own since; it stays.
+    write(&w.game.install_dir.join("Data/made-by-game.dat"), "game");
+
+    let r = s.reset_game().unwrap();
+    assert!(r.left_in_backups.is_empty() && r.moved_aside.is_empty(), "{r:?}");
+    assert_eq!(r.removed, 6, "{r:?}");
+    let mut now = snapshot(&w.game.install_dir);
+    assert_eq!(now.remove("Data/made-by-game.dat").as_deref(), Some("game"));
+    assert_eq!(now, original, "every game file is back as it was and no mod file is left");
+    assert!(snapshot(&deploy.join("backups")).values().all(|v| v == "<dir>"), "no game file stays in backups");
+    assert!(s.mods().iter().all(|m| !m.enabled));
+    // The mods' own files are untouched, and they go in again as before.
+    for id in ["alpha", "beta", "gamma"] {
+        s.set_enabled(id, true).unwrap();
+    }
+    s.apply().unwrap();
+    assert_eq!(w.read("Data/shared.esp").as_deref(), Some("beta"));
+    assert_eq!(w.read("Data/Skyrim.esm").as_deref(), Some("alpha esm"));
+
+    // With the list there, a file it doesn't name is never taken out, even one the same as a mod's file.
+    s.reset_game().unwrap();
+    write(&w.game.install_dir.join("Data/gamma.esp"), "gamma");
+    fs::write(deploy.join("record.json.prev"), &record).unwrap();
+    s.reset_game().unwrap();
+    assert_eq!(w.read("Data/gamma.esp").as_deref(), Some("gamma"));
+}
+
+/// The list is lost and a file where a game file belongs is no mod's file as it came (the player edited it): the
+/// game's file still comes back, and the edited one is kept on the side. A changed file with no game file behind it
+/// can't be told from the game's own, so it stays.
+#[test]
+fn reset_without_the_list_puts_the_games_file_back_over_a_changed_one() {
+    let w = world("reset-lost-edit");
+    let mut s = w.open();
+    let original = snapshot(&w.game.install_dir);
+    s.import_zip(&w.zip("Alpha.zip", &[("Skyrim.esm", "alpha esm"), ("alpha.esp", "alpha"), ("notes.dat", "alpha notes")])).unwrap();
+    s.apply().unwrap();
+    fs::write(w.game.install_dir.join("Data/Skyrim.esm"), "alpha esm, then changed").unwrap();
+    fs::write(w.game.install_dir.join("Data/notes.dat"), "changed notes").unwrap();
+    let deploy = s.root().join("deploy");
+    fs::write(deploy.join("record.json"), "{ not a record").unwrap();
+    fs::write(deploy.join("record.json.prev"), "").unwrap();
+
+    let r = s.reset_game().unwrap();
+    assert_eq!(r.moved_aside, vec!["Data/Skyrim.esm".to_string()], "{r:?}");
+    assert!(r.left_in_backups.is_empty(), "{r:?}");
+    let mut now = snapshot(&w.game.install_dir);
+    assert_eq!(now.remove("Data/notes.dat").as_deref(), Some("changed notes"));
+    assert_eq!(now, original);
+    assert!(snapshot(&deploy.join("player-changes")).values().any(|v| v == "alpha esm, then changed"), "the changed file is kept");
+}
