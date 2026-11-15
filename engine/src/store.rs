@@ -2985,6 +2985,7 @@ impl Store {
             *b = a;
         }
         before(first.changed_by_others, &mut report.changed_by_others);
+        before(first.moved_aside, &mut report.moved_aside);
         before(first.put_back, &mut report.put_back);
         before(first.player_changes_saved, &mut report.player_changes_saved);
         before(first.player_changes_restored, &mut report.player_changes_restored);

@@ -162,20 +162,20 @@ fn never_touches_files_it_did_not_place() {
     let w = world("others");
     let original = snapshot(&w.paths.game);
     apply(&w.paths, &wanted(&w, &["A", "B"]), None).unwrap();
-    // A loader writes its own config inside a folder Turbine made, and a game update rewrites a replaced file.
+    // A loader writes its own config inside a folder Turbine made, and something rewrites a file a mod replaced.
     write(&w.paths.game.join("Data/New/config.ini"), "made by the game");
-    fs::write(w.paths.game.join("Data/Textures/sky.dds"), "updated by Steam").unwrap();
+    fs::write(w.paths.game.join("Data/Textures/sky.dds"), "written over the mod's file").unwrap();
     let r = apply(&w.paths, &[], None).unwrap();
-    assert_eq!(r.changed_by_others, vec!["Data/Textures/sky.dds".to_string()]);
+    assert!(r.changed_by_others.is_empty(), "{r:?}");
+    assert_eq!(r.moved_aside, vec!["Data/Textures/sky.dds".to_string()]);
     assert_eq!(fs::read_to_string(w.paths.game.join("Data/New/config.ini")).unwrap(), "made by the game");
-    assert_eq!(fs::read_to_string(w.paths.game.join("Data/Textures/sky.dds")).unwrap(), "updated by Steam");
-    // Everything else is back as it was.
+    // The game's own file is back, with everything else, and the file that was written over is kept on the side.
     let now = snapshot(&w.paths.game);
     for (k, v) in &original {
-        if k != "Data/Textures/sky.dds" {
-            assert_eq!(now.get(k), Some(v), "{k}");
-        }
+        assert_eq!(now.get(k), Some(v), "{k}");
     }
+    let kept = w.paths.record.parent().unwrap().join("player-changes");
+    assert!(snapshot(&kept).values().any(|v| v == "written over the mod's file"), "{:?}", snapshot(&kept));
 }
 
 #[test]

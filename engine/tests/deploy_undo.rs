@@ -130,23 +130,90 @@ fn replaced_settings_file_edited_then_another_mod_takes_its_place() {
 }
 
 /// The game writes into a mod's file in place (a cache, a script, a plugin a tool cleans): the mod's own copy stays as
-/// it came. What the game wrote is its own now: left alone when the mod goes, and said so.
+/// it came. When the mod goes, what was written leaves the game's folder too and is kept on the side.
 #[test]
 fn a_game_writing_into_a_mod_file_never_changes_the_mods_copy() {
-    let w = world("inplace");
-    let files = vec![w.stage("A", "Data/cache.dat", "MOD DATA"), w.stage("A", "gamedata/scripts/a.ltx", "MOD LTX"), w.stage("A", "Data/A.esp", "MOD ESP")];
-    apply(&w.paths, &files, None).unwrap();
-    for (rel, _) in &files {
-        let mut f = fs::OpenOptions::new().write(true).truncate(true).open(w.g(rel)).unwrap();
-        std::io::Write::write_all(&mut f, b"GAME WROTE THIS").unwrap();
+    for reset in [false, true] {
+        let w = world(if reset { "inplace-reset" } else { "inplace" });
+        write(&w.g("Data/A.esp"), "ORIGINAL ESP");
+        write(&w.g("Data/own.dat"), "GAME'S OWN");
+        let files = vec![w.stage("A", "Data/cache.dat", "MOD DATA"), w.stage("A", "gamedata/scripts/a.ltx", "MOD LTX"), w.stage("A", "Data/A.esp", "MOD ESP")];
+        apply(&w.paths, &files, None).unwrap();
+        for (rel, _) in &files {
+            let mut f = fs::OpenOptions::new().write(true).truncate(true).open(w.g(rel)).unwrap();
+            std::io::Write::write_all(&mut f, format!("GAME WROTE {rel}").as_bytes()).unwrap();
+        }
+        // A file the game made by itself next to them, which no record lists.
+        write(&w.g("Data/made.dat"), "GAME MADE");
+        assert_eq!(read(&files[0].1), "MOD DATA");
+        assert_eq!(read(&files[1].1), "MOD LTX");
+        assert_eq!(read(&files[2].1), "MOD ESP");
+        let r = if reset { reset_from_backups(&w.paths).unwrap() } else { apply(&w.paths, &[], None).unwrap() };
+        assert_eq!(r.moved_aside.len(), 3, "{r:?}");
+        assert!(r.changed_by_others.is_empty() && r.left_in_backups.is_empty(), "{r:?}");
+        // The game's folder is as it was before the mod, plus what the game made by itself.
+        let mut left: Vec<String> = files_under(&w.paths.game).iter().map(|p| p.strip_prefix(&w.paths.game).unwrap().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, vec!["Data/A.esp", "Data/made.dat", "Data/own.dat"]);
+        assert_eq!(read(&w.g("Data/A.esp")), "ORIGINAL ESP");
+        assert_eq!(read(&w.g("Data/own.dat")), "GAME'S OWN");
+        assert_eq!(read(&w.g("Data/made.dat")), "GAME MADE");
+        assert!(!w.g("gamedata").exists(), "folders Turbine made go when empty");
+        assert!(files_under(&w.paths.backups).is_empty());
+        // Nothing is lost: what the game wrote is kept, and the mod's own files are as they came.
+        let mut kept: Vec<String> = files_under(&w.root.join("rec/player-changes")).iter().map(|p| read(p)).collect();
+        kept.sort();
+        assert_eq!(kept, vec!["GAME WROTE Data/A.esp", "GAME WROTE Data/cache.dat", "GAME WROTE gamedata/scripts/a.ltx"]);
+        assert_eq!(read(&files[0].1), "MOD DATA");
+        // Mod on again: the mod's own files go in, not the kept ones.
+        let r = apply(&w.paths, &files, None).unwrap();
+        assert!(r.player_changes_restored.is_empty(), "{r:?}");
+        assert_eq!(read(&w.g("Data/cache.dat")), "MOD DATA");
+        assert_eq!(read(&w.g("Data/A.esp")), "MOD ESP");
+        apply(&w.paths, &[], None).unwrap();
+        assert_eq!(read(&w.g("Data/A.esp")), "ORIGINAL ESP");
     }
-    assert_eq!(read(&files[0].1), "MOD DATA");
-    assert_eq!(read(&files[1].1), "MOD LTX");
-    assert_eq!(read(&files[2].1), "MOD ESP");
+}
+
+/// A file the record doesn't list is never touched, whatever it looks like: here one with a mod file's name, in the
+/// game's folder after the record forgot it.
+#[test]
+fn a_file_the_record_does_not_list_is_never_moved() {
+    let w = world("unlisted");
+    let a = w.stage("A", "Data/cache.dat", "MOD DATA");
+    let b = w.stage("A", "Data/b.dat", "MOD B");
+    apply(&w.paths, &[a, b], None).unwrap();
+    // The record loses Data/cache.dat (as if Turbine had never placed it).
+    let mut rec = Record::load(&w.paths.record).unwrap();
+    rec.files.retain(|p| p.rel != "Data/cache.dat");
+    rec.save(&w.paths.record).unwrap();
+    edit(&w.g("Data/cache.dat"), "CHANGED");
+    edit(&w.g("Data/b.dat"), "CHANGED B");
     let r = apply(&w.paths, &[], None).unwrap();
-    assert_eq!(r.changed_by_others.len(), 3, "{r:?}");
-    assert_eq!(read(&files[0].1), "MOD DATA");
-    assert!(files_under(&w.paths.backups).is_empty());
+    assert_eq!(r.moved_aside, vec!["Data/b.dat".to_string()]);
+    assert_eq!(read(&w.g("Data/cache.dat")), "CHANGED");
+    assert!(!w.g("Data/b.dat").exists());
+    let r = reset_from_backups(&w.paths).unwrap();
+    assert!(r.moved_aside.is_empty(), "{r:?}");
+    assert_eq!(read(&w.g("Data/cache.dat")), "CHANGED");
+}
+
+/// Something makes a file of its own where a mod's file was (a game update does): that file is not Turbine's and
+/// stays, when the mod goes and on Reset.
+#[test]
+fn a_file_made_anew_where_a_mod_file_was_is_left_alone() {
+    for reset in [false, true] {
+        let w = world(if reset { "anew-reset" } else { "anew" });
+        let a = w.stage("A", "Data/new.bin", "MOD");
+        apply(&w.paths, &[a], None).unwrap();
+        fs::remove_file(w.g("Data/new.bin")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&w.g("Data/new.bin"), "GAME UPDATE");
+        let r = if reset { reset_from_backups(&w.paths).unwrap() } else { apply(&w.paths, &[], None).unwrap() };
+        assert_eq!(r.changed_by_others, vec!["Data/new.bin".to_string()], "{r:?}");
+        assert!(r.moved_aside.is_empty(), "{r:?}");
+        assert_eq!(read(&w.g("Data/new.bin")), "GAME UPDATE");
+    }
 }
 
 /// Packed archives and textures are still linked (a Deck's drive is small), and one written into anyway is still

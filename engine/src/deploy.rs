@@ -9,6 +9,8 @@
 //!   where a real link works. Everything else, and a mod file that replaces a game file, is copied, so the game
 //!   writing to it can never change the mod's own copy. A linked file written into anyway still counts as Turbine's. A settings copy the player changed is kept when the
 //!   mod goes and put back the next time it goes in; when it had replaced the game's own file, that file comes back.
+//!   Any other placed file that was written into since is moved out to the same kept folder when its mod goes (and the
+//!   game's own file comes back), so the game's folder is as it was; it is not put back in by itself.
 //! - Only plain relative paths are used, and nothing is ever written through a linked folder inside the game. A mod
 //!   file never replaces a game folder.
 //! - Before any change, the whole plan is written to disk. If Turbine stops halfway (crash, power loss), the next start
@@ -43,6 +45,9 @@ pub struct Placed {
     pub src_ino: u64,
     pub src_size: u64,
     pub src_mtime: i64,
+    /// When the placed file was made, as the drive has it (0 when not known). A file made anew at the same place is
+    /// told from the placed one by it, even when the drive gives it the same inode again.
+    pub born: i64,
 }
 
 /// Everything Turbine has placed in one game folder.
@@ -70,8 +75,12 @@ pub struct Report {
     pub added: usize,
     pub removed: usize,
     pub kept: usize,
-    /// Files Turbine placed that something else changed since; they were left alone and dropped from the record.
+    /// Places where Turbine put a file and something else has put one of its own since (a game update); they were
+    /// left alone and dropped from the record.
     pub changed_by_others: Vec<String>,
+    /// Files Turbine placed (not settings) that were written into since: moved out of the game's folder into the
+    /// player-changes folder next to the record, and the game's own file put back where there was one.
+    pub moved_aside: Vec<String>,
     /// True when a stopped deploy was found and finished first.
     pub recovered: bool,
     /// Files that were meant to be hard links but had to be copied (the staging folder and the game are on different
@@ -128,6 +137,17 @@ fn plain(kind: io::ErrorKind, msg: impl Into<String>) -> io::Error {
 
 fn mtime_of(m: &fs::Metadata) -> i64 {
     m.mtime() * 1_000_000_000 + m.mtime_nsec()
+}
+
+/// When the file was made (nanoseconds), 0 when the drive doesn't say.
+fn born_of(m: &fs::Metadata) -> i64 {
+    m.created().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as i64).unwrap_or(0)
+}
+
+/// Is this still the very file Turbine placed (whatever was written into it since), not one made anew in its place?
+fn same_file(p: &Placed, m: &fs::Metadata) -> bool {
+    let born = born_of(m);
+    m.is_file() && m.ino() == p.ino && (p.born == 0 || born == 0 || born == p.born)
 }
 
 fn exists(p: &Path) -> bool {
@@ -318,7 +338,7 @@ fn to_text(v: &Json) -> String {
 
 fn placed_json(p: &Placed) -> String {
     format!(
-        "{{\"rel\":{},\"source\":{},\"copy\":{},\"ino\":\"{}\",\"size\":\"{}\",\"mtime\":\"{}\",\"backup\":{},\"srcIno\":\"{}\",\"srcSize\":\"{}\",\"srcMtime\":\"{}\"}}",
+        "{{\"rel\":{},\"source\":{},\"copy\":{},\"ino\":\"{}\",\"size\":\"{}\",\"mtime\":\"{}\",\"backup\":{},\"srcIno\":\"{}\",\"srcSize\":\"{}\",\"srcMtime\":\"{}\",\"born\":\"{}\"}}",
         quote(&p.rel),
         quote(&p.source.to_string_lossy()),
         p.copy,
@@ -328,7 +348,8 @@ fn placed_json(p: &Placed) -> String {
         p.backup.as_ref().map(|b| quote(&b.to_string_lossy())).unwrap_or_else(|| "null".into()),
         p.src_ino,
         p.src_size,
-        p.src_mtime
+        p.src_mtime,
+        p.born
     )
 }
 
@@ -394,7 +415,8 @@ fn placed_from(v: &Json, backups: Option<&Paths>) -> Result<Placed, String> {
     let src_ino = opt_u64(v.get("srcIno")).ok_or("its source inode can't be read")?;
     let src_size = opt_u64(v.get("srcSize")).ok_or("its source size can't be read")?;
     let src_mtime = opt_i64(v.get("srcMtime")).ok_or("its source time can't be read")?;
-    Ok(Placed { rel: rel.to_string(), source, copy, ino, size, mtime, backup, src_ino, src_size, src_mtime })
+    let born = opt_i64(v.get("born")).ok_or("its making time can't be read")?;
+    Ok(Placed { rel: rel.to_string(), source, copy, ino, size, mtime, backup, src_ino, src_size, src_mtime, born })
 }
 
 fn describe(v: &Json, why: &str) -> String {
@@ -919,7 +941,7 @@ fn plan(paths: &Paths, record: &Record, wanted: &[(String, PathBuf)]) -> io::Res
             }
         }
         // What `place` will put there: the player's kept version of a settings file, else the mod's file.
-        let from = changes_path(paths, src).filter(|p| is_file(p)).unwrap_or_else(|| src.clone());
+        let from = changes_path(paths, src).filter(|p| config_like(&actual) && is_file(p)).unwrap_or_else(|| src.clone());
         let stamp = fs::metadata(&from).map(|m| (m.len(), mtime_of(&m))).unwrap_or((0, 0));
         ops.push(Op::Add { rel: actual, source: src.clone(), copy, backup, stamp });
     }
@@ -994,8 +1016,8 @@ fn missing_source(rel: &str, source: &Path, e: io::Error) -> io::Error {
 
 fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, report: &mut Report) -> io::Result<Placed> {
     let src_meta = fs::metadata(source).map_err(|e| missing_source(rel, source, e))?;
-    // The player's own version of this settings file, kept from last time.
-    let saved = changes_path(paths, source).filter(|p| is_file(p));
+    // The player's own version of this settings file, kept from last time (other kept files stay out).
+    let saved = changes_path(paths, source).filter(|p| config_like(rel) && is_file(p));
     let from = saved.as_deref().unwrap_or(source);
     let mut use_copy = copy || saved.is_some();
     if !use_copy && fs::hard_link(source, target).is_err() {
@@ -1043,6 +1065,7 @@ fn place(paths: &Paths, rel: &str, source: &Path, copy: bool, target: &Path, rep
         src_ino: src_meta.ino(),
         src_size: src_meta.len(),
         src_mtime: mtime_of(&src_meta),
+        born: born_of(&m),
     })
 }
 
@@ -1072,18 +1095,28 @@ fn do_remove(paths: &Paths, p: &Placed, again: bool, record: &mut Record, report
         }
     } else if exists(&target) {
         let settings = p.copy && config_like(&p.rel) && is_file(&target);
-        match changes_path(paths, &p.source).filter(|_| settings) {
+        // Still the file Turbine placed, only written into since (a cache the game rewrote, a plugin a tool cleaned).
+        let written_into = !again && fs::symlink_metadata(&target).is_ok_and(|m| same_file(p, &m));
+        match changes_path(paths, &p.source).filter(|_| settings || written_into) {
             Some(keep) => {
                 // The player (or the game) changed this mod's settings file: keep their version for next time. When
                 // it had replaced the game's own file, that file goes back now: it must never be left in backups.
+                // Any other placed file that was written into leaves the game's folder the same way, so the folder is
+                // as it was before the mod. It is kept beside the settings copies but not put back in by itself (a
+                // newer version of the mod would be covered by it).
                 let _ = remove_if_file(&keep);
                 move_file(&target, &keep)?;
-                report.player_changes_saved.push(p.rel.clone());
+                if settings {
+                    report.player_changes_saved.push(p.rel.clone());
+                } else {
+                    report.moved_aside.push(p.rel.clone());
+                }
                 if let Some(b) = &p.backup {
                     restore_backup(paths, &p.rel, b)?;
                 }
             }
-            // Something else changed it (often a game update). Leave it; the old backup is no longer the game's file.
+            // Something else put a file of its own here (often a game update). Leave it; the old backup is no longer
+            // the game's file.
             None if !again => report.changed_by_others.push(p.rel.clone()),
             None => {}
         }
@@ -1411,7 +1444,7 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                     continue;
                 }
                 let src_meta = fs::metadata(&source).ok();
-                let saved_meta = changes_path(paths, &source).and_then(|p| fs::metadata(p).ok());
+                let saved_meta = changes_path(paths, &source).filter(|_| config_like(&rel)).and_then(|p| fs::metadata(p).ok());
                 let matches = |s: &fs::Metadata| t.ino() == s.ino() || (t.len() == s.len() && t.mtime() == s.mtime() && t.mtime_nsec() == s.mtime_nsec());
                 let placed_here = match &src_meta {
                     Some(s) => matches(s) || saved_meta.as_ref().is_some_and(matches),
@@ -1435,6 +1468,7 @@ fn recover_locked(paths: &Paths) -> io::Result<Option<Report>> {
                         src_ino: src_meta.as_ref().map(|s| s.ino()).unwrap_or(0),
                         src_size: src_meta.as_ref().map(|s| s.len()).unwrap_or(0),
                         src_mtime: src_meta.as_ref().map(mtime_of).unwrap_or(0),
+                        born: born_of(&t),
                     });
                     report.added += 1;
                 }

@@ -1847,6 +1847,10 @@ fn applied_words(report: &turbine_engine::deploy::Report, game: &Game) -> String
         let n = report.changed_by_others.len();
         add(format!("{} changed by something else {} left alone", count(n, "mod file", "mod files"), if n == 1 { "was" } else { "were" }));
     }
+    if !report.moved_aside.is_empty() {
+        let n = report.moved_aside.len();
+        add(format!("{} changed by something else {} taken out and kept", count(n, "mod file", "mod files"), if n == 1 { "was" } else { "were" }));
+    }
     let kept = report.player_changes_saved.len() + report.player_changes_restored.len();
     if kept > 0 {
         add(format!("Kept your changes to {}", count(kept, "settings file", "settings files")));
@@ -2629,6 +2633,10 @@ impl qobject::Turbine {
                     Ok(r) => {
                         w.note(&game, &r);
                         let mut words = String::from("Game files reset. Your mods are still here, turned off");
+                        if !r.moved_aside.is_empty() {
+                            let n = r.moved_aside.len();
+                            words.push_str(&format!(". {} changed by something else {} taken out and kept", count(n, "mod file", "mod files"), if n == 1 { "was" } else { "were" }));
+                        }
                         if !r.left_in_backups.is_empty() {
                             words.push_str(&format!(
                                 ". {} stay in the backup folder; something else is in their place",
